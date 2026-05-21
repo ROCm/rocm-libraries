@@ -133,8 +133,10 @@ def _build_minimal_kwa(kernel):
 def _emit_tail_loop_asm(*, fp4: bool, no_tail_loop: bool, pgr: int) -> str:
     """Drive `KernelWriter._emitTailLoopScaffoldSubtile` and return the
     flat asm string. The scaffold runs for all PGR values; PGR>0 layers
-    the entry-gate branches (c=0 reset / small-counter realign /
-    +1 DU SRD advance) on top of the PGR=0 baseline.
+    a single `origCounter < PGR` entry-gate branch (covering both the
+    upstream-skipped c=0 case and the small-counter c=1 case) plus a
+    +1 DU SRD advance for the large-counter case on top of the PGR=0
+    baseline.
     """
     kernel = _create_kernel(256, 256, fp4=fp4,
                             depthU=256 if fp4 else 64,
@@ -515,11 +517,10 @@ class TestTailEmitContent_PGR0:
 class TestTailEmitContent_PGR2:
     """PGR=2 (scheduler-managed prefetch) tail-emit assertions.
 
-    The PGR>0 path reuses the PGR=0 scaffold and layers three mutually-
-    exclusive entry-gate branches on top, keyed off origCounter:
-      - c == 0:                reset (zero accD, undo preLoop GR_INC).
-      - 0 < origCounter < PGR: small-counter LWA realign.
-      - origCounter >= PGR:    +1 DU SRD advance.
+    The PGR>0 path reuses the PGR=0 scaffold and layers a single
+    `origCounter < PGR` entry-gate branch (covering both c=0 and
+    small-counter cases — both handled upstream in preLoop) plus a
+    +1 DU SRD advance for the large-counter case (origCounter >= PGR).
     The assertions below pin the structural presence of each gate;
     they avoid coupling to alloc-order-dependent sgpr/imm operands.
     """
@@ -550,47 +551,58 @@ class TestTailEmitContent_PGR2:
             + fp4_pgr2_asm[:2500]
         )
 
-    def test_emits_c0_reset_compare_and_branch(self, fp4_pgr2_asm):
-        """For origCounter==0, the tail scaffold's c=0 compare branches
-        directly into the tail body (PGRTailEntry<L>), skipping the
-        small-counter realign and large-counter SRD-advance paths.
+    def test_emits_lt_pgr_compare_and_branch(self, fp4_pgr2_asm):
+        """A single `origCounter < PGR` compare routes BOTH the c=0
+        (upstream-skipped) and the small-counter (PGR=2 origCounter==1)
+        cases directly into the tail body (PGRTailEntry<L>), skipping
+        the large-counter SRD-advance path.
 
-        Background: with the upstream SkipSubtileMainLoop<L> gate in
-        kernelBodySubtile (added per reviewer comment), origCounter==0
-        skips the entire preLoop / mainloop / NGLL / NLL block. SRDs
-        stay at K=0, LWA/LRA stay at buf 0, accD stays at zero — so the
-        tail body just needs to run as-is, no undo needed. The legacy
-        PGRTailC0Reset<L> block (which used to live here) is gone.
+        Background: with the upstream `SkipSubtileMainLoop<L>` gate
+        (kernelBodySubtile) and the preloop `GRPtrIncOp` /
+        `GRLDSwapOp` split (LogicalScheduler.build_preloop, PGR=2
+        branch), neither c=0 nor c=1 requires any in-tail SRD/LWA
+        fix-up. The pre-refactor shape (separate `s_cmp_eq_u32 == 0`
+        + `s_cmp_lt_u32 < PGR` with a `PGRTailSmallCounterRealign<L>`
+        XOR-back block) was collapsed into one compare per nakajee
+        PR #7636 review on the small-counter case.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail, (
             "Tail section not extractable.\n"
             "Full asm head:\n" + fp4_pgr2_asm[:2500]
         )
-        # Match on the literal `, 0` immediate of the c=0 cmp.
-        assert re.search(r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail), (
-            "Tail must emit `s_cmp_eq_u32 ..., 0` for the c=0 gate"
+        # Single `< PGR` compare; the literal `, 2` immediate pins
+        # the PGR=2 case (rather than the unrelated `... , 0` of an
+        # unrolled c=0 compare).
+        assert re.search(
+            r"s_cmp_lt_u32[^\n]*\b2\b[^\n]*origCounter < PGR", tail
+        ), (
+            "Tail must emit a single `s_cmp_lt_u32 ..., 2` for the "
+            "combined c=0 + small-counter gate. Tail head:\n"
+            + tail[:1500]
+        )
+        # The dedicated c=0 compare (`s_cmp_eq_u32 ..., 0 ... "
+        # origCounter == 0"`) is gone — only the `< PGR` compare
+        # remains.
+        assert not re.search(
+            r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail
+        ), (
+            "Tail must NOT emit the legacy dedicated c=0 compare "
+            "(folded into the `< PGR` compare)."
         )
         assert re.search(
             r"s_cbranch_scc1[^\n]*PGRTailEntry", tail
         ), (
-            "Tail must conditionally branch to PGRTailEntry<L> on the "
-            "c=0 compare hit (the legacy PGRTailC0Reset<L> block has "
-            "been replaced by an upstream skip gate)"
+            "Tail must conditionally branch to PGRTailEntry<L> on "
+            "the `< PGR` compare hit."
         )
-        # The c=0 path must NOT branch to SkipTailLoopL or
-        # PGRTailC0Reset (legacy): pin by checking the c=0 cmp's
-        # matching branch points at PGRTailEntry.
         assert "PGRTailC0Reset" not in tail, (
-            "Tail must no longer reference the legacy PGRTailC0Reset "
-            "block (handled upstream by SkipSubtileMainLoop<L>)"
+            "Tail must not reference the legacy PGRTailC0Reset block."
         )
-        c0_cmp_pos = tail.find("origCounter == 0")
-        if c0_cmp_pos >= 0:
-            after_c0 = tail[c0_cmp_pos:c0_cmp_pos + 400]
-            assert "SkipTailLoop" not in after_c0, (
-                "c=0 path must not branch to SkipTailLoopL"
-            )
+        assert "PGRTailSmallCounterRealign" not in tail, (
+            "Tail must not reference the legacy "
+            "PGRTailSmallCounterRealign block."
+        )
 
     def test_omits_c0_reset_label(self, fp4_pgr2_asm):
         """The tail must NOT define a PGRTailC0Reset<L> label any more.
@@ -666,21 +678,38 @@ class TestTailEmitContent_PGR2:
             r"s_add_u32[^\n]*sgprSrdMXSB[^\n]*advance SrdMXSB by 1 DU", tail
         ), "MX FP4 tail must advance SrdMXSB"
 
-    def test_emits_small_counter_lwa_realign(self, fp4_pgr2_asm):
-        """Small-counter (PGR=2 origCounter==1) path must XOR LWA back
-        to match the LR buffer; preLoop's lone gr_inc left it out of
-        sync with LR (NGLL never ran for counter<=1).
+    def test_omits_small_counter_lwa_realign(self, fp4_pgr2_asm):
+        """The tail must NOT XOR LWA back for the small-counter
+        (PGR=2 origCounter==1) case.
+
+        Per nakajee PR #7636 review: the small-counter realign
+        moves from the tail into preLoop. `build_preloop`'s PGR=2
+        path now splits the n→n+1 GR_INC into `GRPtrIncOp` (always
+        fires) + `GRLDSwapOp` (under the `SkipOp(LE 1, NLL)`
+        guard), so for origCounter==1 the LDS swap is skipped and
+        LWA stays aligned with the LR buffer NLL drains from —
+        no in-tail XOR-back needed.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
-        assert re.search(
+        assert not re.search(
             r"s_xor_b32[^\n]*LocalWriteBaseAddrA[^\n]*SwapA",
             tail
-        ), "Tail must XOR LocalWriteBaseAddrA with SwapA"
-        assert re.search(
+        ), (
+            "Tail must NOT emit `s_xor_b32 LocalWriteBaseAddrA ..., "
+            "SwapA` any more (preLoop split keeps LWA aligned)."
+        )
+        assert not re.search(
             r"s_xor_b32[^\n]*LocalWriteBaseAddrB[^\n]*SwapB",
             tail
-        ), "Tail must XOR LocalWriteBaseAddrB with SwapB"
+        ), (
+            "Tail must NOT emit `s_xor_b32 LocalWriteBaseAddrB ..., "
+            "SwapB` any more (preLoop split keeps LWA aligned)."
+        )
+        assert "PGRTailSmallCounterRealign" not in tail, (
+            "Tail must not define `PGRTailSmallCounterRealignL` "
+            "any more (folded into the single `< PGR` branch)."
+        )
 
     def test_omits_old_srd_rewind_in_main_tail_body(self, fp4_pgr2_asm):
         """No unconditional SRD rewind in the main tail body. Any
@@ -746,12 +775,16 @@ class TestTailEmitContent_PGR2:
 class TestTailEmitContent_PGR1:
     """PGR=1 (single-buffer prefetch) tail-emit assertions.
 
-    PGR=1 has no NGLL block and no preLoop `gr_inc`, so the LDS double-
-    buffers never get out of sync (LWA and LR both stay at buf 0 until a
-    mainloop iter flips both). The small-counter realign branch is
-    therefore inert for PGR=1 (`origCounter < 1` only means `==0`, which
-    already returned via skip-tail). The SRD-advance branch DOES still
-    fire (mainloop runs `counter-1` iters, leaving SRD at `(N-1)*DU`).
+    PGR=1 has no NGLL block and no preLoop GR_INC (and thus no
+    `GRPtrIncOp` / `GRLDSwapOp` split either), so the LDS double-
+    buffers never get out of sync (LWA and LR both stay at buf 0 until
+    a mainloop iter flips both). The combined `< PGR` compare for
+    PGR=1 resolves to `< 1`, which is only true for origCounter==0 —
+    the upstream `SkipSubtileMainLoop<L>` gate already short-circuits
+    that case, so the compare's branch is inert at runtime; it is
+    still emitted for structural symmetry with PGR=2. The SRD-advance
+    branch DOES still fire for origCounter >= 1 (mainloop runs
+    `counter-1` iters, leaving SRD at `(N-1)*DU`).
     """
 
     @pytest.fixture
@@ -767,22 +800,38 @@ class TestTailEmitContent_PGR1:
             bf16_pgr1_asm
         )
 
-    def test_emits_c0_reset_compare_and_branch(self, bf16_pgr1_asm):
-        """PGR=1 also routes c=0 through the tail-entry gate. With the
-        upstream SkipSubtileMainLoop<L> gate, the preLoop/mainloop/NLL
-        block is skipped for origCounter==0; SRDs stay at K=0, LWA/LRA
-        at buf 0, accD at zero, so the c=0 path branches directly to
-        the tail body (PGRTailEntry<L>) — no in-tail reset needed.
+    def test_emits_lt_pgr_compare_and_branch(self, bf16_pgr1_asm):
+        """PGR=1 also folds c=0 into a single `origCounter < PGR`
+        compare. For PGR=1 the `< 1` compare is equivalent to
+        `== 0` at runtime (the upstream `SkipSubtileMainLoop<L>` gate
+        already filters origCounter==0 anyway), but the compare is
+        still emitted for structural symmetry with PGR=2.
         """
         tail = _extract_tail_section(bf16_pgr1_asm)
         assert tail
-        assert re.search(r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail)
+        assert re.search(
+            r"s_cmp_lt_u32[^\n]*\b1\b[^\n]*origCounter < PGR", tail
+        ), (
+            "PGR=1 tail must emit `s_cmp_lt_u32 ..., 1 ... origCounter "
+            "< PGR` (combined c=0 + small-counter gate)."
+        )
+        # No dedicated `== 0` compare any more.
+        assert not re.search(
+            r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail
+        ), (
+            "PGR=1 tail must NOT emit the legacy dedicated c=0 "
+            "compare (folded into the `< PGR` compare)."
+        )
         assert re.search(
             r"s_cbranch_scc1[^\n]*PGRTailEntry", tail
         )
         assert "PGRTailC0Reset" not in tail, (
             "PGR=1 tail must not reference the legacy PGRTailC0Reset "
             "block (handled upstream by SkipSubtileMainLoop<L>)"
+        )
+        assert "PGRTailSmallCounterRealign" not in tail, (
+            "PGR=1 tail must not define the legacy "
+            "PGRTailSmallCounterRealignL label."
         )
 
     def test_emits_srd_advance_AB(self, bf16_pgr1_asm):
@@ -814,11 +863,13 @@ class TestTailEmitContent_PGR1:
             tail
         )
 
-    def test_emits_small_counter_compare(self, bf16_pgr1_asm):
-        """The compare against PGR is still emitted; for PGR=1 it
-        resolves to `< 1` and is inert at runtime (origCounter==0
-        already branched away via the c=0 reset path above). Emitted
-        for structural symmetry with PGR=2.
+    def test_emits_lt_pgr_compare_immediate(self, bf16_pgr1_asm):
+        """Pin the immediate of the `< PGR` compare to `1` (the
+        PGR=1 case). For PGR=1 the compare resolves to `< 1` and
+        catches the upstream-filtered origCounter==0 case as a
+        no-op fast-path (the upstream `SkipSubtileMainLoop<L>` gate
+        already short-circuits origCounter==0 before reaching the
+        tail). Emitted for structural symmetry with PGR=2.
         """
         tail = _extract_tail_section(bf16_pgr1_asm)
         assert tail

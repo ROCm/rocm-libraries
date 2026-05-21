@@ -1258,7 +1258,14 @@ class TestEmit:
 class TestBuildPreloop:
 
     def test_256x256_fp4(self):
-        """Preloop contains GR(n), LR, GR(n+1). No GR(n+2) or gr_inc."""
+        """Preloop contains GR(n), LR, GR(n+1). No GR(n+2) or lr_inc.
+
+        The n→n+1 GR_INC is split into `gr_ptr_inc` (always fires;
+        SRD advance) + `gr_lds_swap` (under the `SkipOp(LE 1, NLL)`
+        guard; LDS double-buffer toggle) so the small-counter case
+        can stay in preLoop instead of needing a tail-time XOR-back
+        realign (per nakajee PR #7636 review).
+        """
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -1275,9 +1282,53 @@ class TestBuildPreloop:
         assert 'lr' in all_ops
         assert 'gr' in all_ops
 
-        # Preloop has gr_inc for the n→n+1 transition but not lr_inc
-        # (LR data is loaded fresh, not from a previous MT iteration)
+        # Preloop now has the split gr_ptr_inc + gr_lds_swap pair
+        # (replacing the legacy compound `gr_inc`) and no lr_inc
+        # (LR data is loaded fresh, not from a previous MT iteration).
+        assert 'gr_ptr_inc' in all_ops, (
+            "Preloop must emit `gr_ptr_inc` for the n→n+1 SRD advance"
+        )
+        assert 'gr_lds_swap' in all_ops, (
+            "Preloop must emit `gr_lds_swap` for the LDS-buffer "
+            "toggle (placed after `SkipOp(LE 1, NLL)`)"
+        )
+        assert 'gr_inc' not in all_ops, (
+            "Preloop must NOT emit the legacy compound `gr_inc` "
+            "(was split into `gr_ptr_inc` + `gr_lds_swap`)"
+        )
         assert 'lr_inc' not in all_ops
+
+        # Critical correctness invariant for the small-counter
+        # (PGR=2 origCounter==1) case: `gr_lds_swap` must come
+        # AFTER `skip(LE:1:NLL)` so that the LDS toggle is bypassed
+        # when origCounter <= 1 — leaving LWA aligned with the LR
+        # buffer NLL drains from and removing the need for any
+        # tail-time XOR-back realign.
+        first_skip_le1_idx = None
+        first_gr_lds_swap_idx = None
+        for partition in preloop:
+            for group in partition:
+                for em in group:
+                    if (em.opType == 'skip'
+                            and getattr(em.source, 'compare', '') == 'LE'
+                            and getattr(em.source, 'value', None) == 1):
+                        if first_skip_le1_idx is None:
+                            first_skip_le1_idx = em.moduleId
+                    if em.opType == 'gr_lds_swap' \
+                            and first_gr_lds_swap_idx is None:
+                        first_gr_lds_swap_idx = em.moduleId
+        assert first_skip_le1_idx is not None, (
+            "Preloop must contain a `skip(LE:1:NLL)` op"
+        )
+        assert first_gr_lds_swap_idx is not None, (
+            "Preloop must contain at least one `gr_lds_swap` op"
+        )
+        assert first_skip_le1_idx < first_gr_lds_swap_idx, (
+            f"`gr_lds_swap` (module {first_gr_lds_swap_idx}) must "
+            f"come AFTER `skip(LE:1:NLL)` (module "
+            f"{first_skip_le1_idx}) so the LDS toggle is bypassed "
+            f"for origCounter <= 1 (small-counter case)."
+        )
 
 
 class TestBuildNGLL:

@@ -4379,23 +4379,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1))
 
-      # PGR>0 tail-entry gating. Two paths keyed off origCounter; the
-      # `origCounter == 0` case is handled upstream by the
-      # `SkipSubtileMainLoop<L>` gate in `kernelBodySubtile` (skips the
-      # entire scheduler-emitted preLoop / mainloop / NGLL / NLL block,
-      # so SRDs/LWAs stay at setupNewTile's defaults and accD stays at
-      # `initVgprTilesToZero`'s zero -- no in-tail reset needed):
+      # PGR>0 tail-entry gating. A single `origCounter < PGR` compare
+      # routes both the c=0 (upstream-skipped) and small-counter
+      # (PGR=2 origCounter==1) cases into the tail body without
+      # touching SRD/LWA; the only fix-up that's still actually
+      # needed in the tail is the +1 DU SRD advance for the
+      # large-counter case (origCounter >= PGR).
       #
-      #   0 < origCounter < PGR (PGR=2 origCounter==1 only):
-      #     SkipOp(LE 1, NLL) in the scheduler's build_preloop jumped
-      #     past GR(MT 1) into NLL, so LR (at buf 0) drained the first
-      #     prefetch correctly, but preLoop's GR_INC had already flipped
-      #     LWA to buf 1. Re-XOR LWA back so the tail's DTL write lands
-      #     in the same LDS buf the tail's LR reads from. SRD is already
-      #     at K_aligned == DU.
+      #   origCounter == 0:
+      #     `SkipSubtileMainLoop<L>` upstream skipped
+      #     preLoop / mainloop / NGLL / NLL entirely. SRDs at K=0,
+      #     LWAs at buf 0, accD at 0 -- branch to the tail body
+      #     as-is.
+      #   0 < origCounter < PGR  (PGR=2 origCounter==1 only):
+      #     `SkipOp(LE 1, NLL)` in `build_preloop` jumped past
+      #     `GRLDSwapOp` + GR(MT 1) into NLL, so the LDS swap never
+      #     fired and LWA stays aligned with the LR buffer NLL
+      #     drained from. preLoop's `GRPtrIncOp` did advance SRD by
+      #     one DU so the tail starts at K = DU == K_aligned. No
+      #     in-tail realign needed.
       #   origCounter >= PGR:
-      #     NLL/NGLL drained K=[0, origCounter*DU) cleanly; last GR_INC
-      #     left SRD one DU short of K_aligned. Advance SRD by 1 DU.
+      #     NLL/NGLL drained K=[0, origCounter*DU) cleanly; the last
+      #     mainloop / preloop GR_INC left SRD one DU short of
+      #     K_aligned. Advance SRD by 1 DU here.
+      #
+      # The pre-refactor split-branch shape (separate
+      # `s_cmp_eq_u32 == 0` + `s_cmp_lt_u32 < PGR` with a
+      # `PGRTailSmallCounterRealign<L>` XOR-back block) was
+      # collapsed into a single compare per nakajee PR #7636
+      # review on the small-counter case.
       if kernel["PrefetchGlobalRead"] > 0:
         unrollIdx = self.states.unrollIdx
         loopChar = self.states.indexChars[
@@ -4418,33 +4430,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
           tailAdvanceTiles.append(self.states.mxsa.tileInfo)
         if kernel["ProblemType"].get("MXBlockB", 0) > 0:
           tailAdvanceTiles.append(self.states.mxsb.tileInfo)
-        realignTcs = ['A', 'B']
-        if kernel["ProblemType"].get("MXBlockA", 0) > 0:
-          realignTcs.append('MXSA')
-        if kernel["ProblemType"].get("MXBlockB", 0) > 0:
-          realignTcs.append('MXSB')
 
-        smallCounterLabel = Label(
-          "PGRTailSmallCounterRealign%s" % loopChar, "")
         tailEntryLabel = Label("PGRTailEntry%s" % loopChar, "")
 
-        # origCounter == 0 reaches here via the SkipSubtileMainLoop<L>
-        # gate (preLoop/mainloop/NGLL/NLL were skipped). SRDs at K=0,
-        # LWAs at buf 0, accD at 0 -- branch straight to the tail body.
-        module.add(SCmpEQU32(
-          src0=sgpr(savedOrigCounterSgpr), src1=0,
-          comment="origCounter == 0 (mainLoop was skipped)?"))
-        module.add(SCBranchSCC1(
-          labelName=tailEntryLabel.getLabelName(),
-          comment="skip realign/advance; tail body runs from setupNewTile defaults"))
-
+        # origCounter < PGR (covers both the upstream-skipped c=0
+        # case and the small-counter c=1 case for PGR=2): no
+        # in-tail SRD/LWA fix-up needed -- preLoop already left
+        # both in the right state.
         module.add(SCmpLtU32(
           src0=sgpr(savedOrigCounterSgpr),
           src1=pgr,
-          comment="0 < origCounter < PGR?"))
+          comment="origCounter < PGR? (c=0 + small-counter case)"))
         module.add(SCBranchSCC1(
-          labelName=smallCounterLabel.getLabelName(),
-          comment="branch to small-counter realign"))
+          labelName=tailEntryLabel.getLabelName(),
+          comment="skip SRD advance; tail starts from preLoop's state"))
 
         # Large-counter path (origCounter >= PGR): advance SRD by 1 DU
         # to undo the per-iter GR_INC's off-by-one at loop exit.
@@ -4457,19 +4456,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(SAddCU32(
             dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc), src1=0,
             comment="%s: carry" % tc))
-        module.add(SBranch(labelName=tailEntryLabel.getLabelName()))
-
-        # Small-counter realign (PGR=2 origCounter==1 only): XOR LWA<tc>
-        # back so it points at the LDS buffer LR reads from. MXSA/MXSB
-        # have their own Swap{MXSA,MXSB} sgprs (see
-        # SubtileScaleEmit.emitScaleGRLDSSwap).
-        module.add(smallCounterLabel)
-        for tc in realignTcs:
-          module.add(SXorB32(
-            dst=sgpr("LocalWriteBaseAddr%s" % tc),
-            src0=sgpr("LocalWriteBaseAddr%s" % tc),
-            src1=sgpr("Swap%s" % tc),
-            comment="XOR LWA%s back to match LR buffer" % tc))
 
         module.add(tailEntryLabel)
 

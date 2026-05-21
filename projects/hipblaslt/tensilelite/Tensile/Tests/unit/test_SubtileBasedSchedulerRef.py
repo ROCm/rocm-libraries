@@ -1156,10 +1156,10 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-7]
       [ 2] gr         GR SA (MT n, subIterK [0,1]) ids [0-7]
       [ 3] gr         GR SB (MT n, subIterK [0,1]) ids [0-7]
-      [ 4] gr_inc     gr_inc(A)
-      [ 5] gr_inc     gr_inc(B)
-      [ 6] gr_inc     gr_inc(SA)
-      [ 7] gr_inc     gr_inc(SB)
+      [ 4] gr_ptr_inc gr_ptr_inc(A)
+      [ 5] gr_ptr_inc gr_ptr_inc(B)
+      [ 6] gr_ptr_inc gr_ptr_inc(SA)
+      [ 7] gr_ptr_inc gr_ptr_inc(SB)
       [ 8] wait_gr    wait_gr(0)
       [ 9] sync       sync
       [10] lr         LR A  (MT n, subIterK [0]) [0-7]
@@ -1167,11 +1167,15 @@ MAINLOOP:
       [12] lr         LR SA (MT n, subIterK [0,1]) [0-7]
       [13] lr         LR SB (MT n, subIterK [0,1]) [0-7]
       [14] skip       skip(LE:1:NLL)
-      [15] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
-      [16] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
-      [17] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
-      [18] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
-      [19] skip       skip(LE:2:NGLL)
+      [15] gr_lds_swap gr_lds_swap(A)
+      [16] gr_lds_swap gr_lds_swap(B)
+      [17] gr_lds_swap gr_lds_swap(SA)
+      [18] gr_lds_swap gr_lds_swap(SB)
+      [19] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
+      [20] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
+      [21] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
+      [22] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
+      [23] skip       skip(LE:2:NGLL)
 """
 
 
@@ -1228,16 +1232,18 @@ MAINLOOP:
     subIterK=0:
       [ 0] gr         GR A (MT n, subIterK [0,1]) ids [0-9]
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-9]
-      [ 2] gr_inc     gr_inc(A)
-      [ 3] gr_inc     gr_inc(B)
+      [ 2] gr_ptr_inc gr_ptr_inc(A)
+      [ 3] gr_ptr_inc gr_ptr_inc(B)
       [ 4] wait_gr    wait_gr(0)
       [ 5] sync       sync
       [ 6] lr         LR A  (MT n, subIterK [0]) [0-9]
       [ 7] lr         LR B  (MT n, subIterK [0]) [0-1]
       [ 8] skip       skip(LE:1:NLL)
-      [ 9] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [11] skip       skip(LE:2:NGLL)
+      [ 9] gr_lds_swap gr_lds_swap(A)
+      [10] gr_lds_swap gr_lds_swap(B)
+      [11] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [13] skip       skip(LE:2:NGLL)
 """
 
 EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL = """\
@@ -1246,20 +1252,22 @@ MAINLOOP:
     subIterK=0:
       [ 0] gr         GR A (MT n, subIterK [0,1]) ids [0-9]
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-9]
-      [ 2] gr_inc     gr_inc(A)
-      [ 3] gr_inc     gr_inc(B)
+      [ 2] gr_ptr_inc gr_ptr_inc(A)
+      [ 3] gr_ptr_inc gr_ptr_inc(B)
       [ 4] wait_gr    wait_gr(0)
       [ 5] sync       sync
       [ 6] lr         LR A  (MT n, subIterK [0]) [0-9]
       [ 7] lr         LR B  (MT n, subIterK [0]) [0-1]
       [ 8] skip       skip(LE:1:NLL)
-      [ 9] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
-      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
-      [13] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
-      [14] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
-      [15] skip       skip(LE:2:NGLL)
+      [ 9] gr_lds_swap gr_lds_swap(A)
+      [10] gr_lds_swap gr_lds_swap(B)
+      [11] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [13] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
+      [14] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
+      [15] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
+      [16] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
+      [17] skip       skip(LE:2:NGLL)
 """
 
 
