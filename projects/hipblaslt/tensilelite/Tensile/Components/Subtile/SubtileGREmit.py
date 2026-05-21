@@ -24,7 +24,7 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SXorB32,
+    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
     TensorLoadToLds,
@@ -935,6 +935,9 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
       module = Module()
       module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
       module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
+      # Update descriptor LDS addr to match
+      group0 = "tdm%sGroup0" % tc
+      module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
       return module
     return ti_.emitGRLDSBufferSwap(writer, kernel)
   else:
@@ -953,5 +956,9 @@ def globalReadPtrUpdates(tc, writer, kernel):
     module.addComment0("TDM addr update: %s += %u" % (tc, inc))
     module.add(SAddU32(dst=sgpr("Address%s" % tc), src0=sgpr("Address%s" % tc), src1=inc))
     module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
+    # Update descriptor global addr to match
+    group0 = "tdm%sGroup0" % tc
+    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
+    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
     return module
   return ti_.emitGRPtrUpdate(writer, kernel)

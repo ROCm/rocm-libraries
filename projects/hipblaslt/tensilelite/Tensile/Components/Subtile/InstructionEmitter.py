@@ -9,8 +9,6 @@ instructions by dispatching each opType to its emit method.
 
 from __future__ import annotations
 
-from functools import reduce
-from operator import mul
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
 from Tensile.Components.Subtile.SubtileGREmit import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
@@ -24,7 +22,6 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCBranchSCC1
 from rocisa.instruction import SWaitTensorcnt
-from rocisa.instruction import SMovB32, SMovB64, SOrB32
 from rocisa.container import vgpr, sgpr, DSModifiers
 from rocisa.code import Label
 
@@ -169,15 +166,6 @@ class InstructionEmitter:
         tensor = placement.tensor
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
-            # Update TDM descriptor before each tensor_load_to_lds
-            if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
-                group0 = f"tdm{tensor}Group0"
-                module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tensor}", 2),
-                                   comment=f"update TDM {tensor} global addr"))
-                module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=hex(2 << 30),
-                                  comment="restore type field"))
-                module.add(SMovB32(dst=sgpr(f"{group0}+1"), src=sgpr(f"tdmLdsAddr{tensor}"),
-                                   comment=f"update TDM {tensor} LDS addr"))
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
