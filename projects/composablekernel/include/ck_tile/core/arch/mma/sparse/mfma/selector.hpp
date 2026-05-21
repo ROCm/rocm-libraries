@@ -106,14 +106,16 @@ struct MmaDefaultSelector<ADataType,
                                                                 CDataType,
                                                                 16u,
                                                                 16u,
-                                                                WaveTileK,
+                                                                32u, // TODO: Add iterative K size
+                                                                     // search starting at WaveTileK
                                                                 CompilerTarget>::SelectedOp;
     using CandidateOp32x32 = typename SparseMfmaDefaultSelector<ADataType,
                                                                 BDataType,
                                                                 CDataType,
                                                                 32u,
                                                                 32u,
-                                                                WaveTileK,
+                                                                64u, // TODO: Add iterative K size
+                                                                     // search starting at WaveTileK
                                                                 CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through
@@ -128,11 +130,11 @@ struct MmaDefaultSelector<ADataType,
     // Check if each candidate is supported for the given WaveTile sizes
     // For this case, we require the WaveTile sizes to be multiples of the MFMA shape
     static constexpr bool IsSupported16x16 =
-        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM % CandidateOp16x16::kM == 0u) &&
-        (WaveTileN % CandidateOp16x16::kN == 0u) && (WaveTileK % CandidateOp16x16::kK == 0u);
+        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM == CandidateOp16x16::kM) &&
+        (WaveTileN == CandidateOp16x16::kN) && (WaveTileK % CandidateOp16x16::kK == 0u);
     static constexpr bool IsSupported32x32 =
-        MmaOpTraits<CandidateOp32x32>::IsSupported && (WaveTileM % CandidateOp32x32::kM == 0u) &&
-        (WaveTileN % CandidateOp32x32::kN == 0u) && (WaveTileK % CandidateOp32x32::kK == 0u);
+        MmaOpTraits<CandidateOp32x32>::IsSupported && (WaveTileM == CandidateOp32x32::kM) &&
+        (WaveTileN == CandidateOp32x32::kN) && (WaveTileK % CandidateOp32x32::kK == 0u);
 
     public:
     // Select the largest supported MFMA operation for the given WaveTile shape
@@ -142,8 +144,8 @@ struct MmaDefaultSelector<ADataType,
                            std::conditional_t<IsSupported16x16, CandidateOp16x16, DefaultOp>>;
 
     // TODO: Do not allow M / N composition for now.
-    static_assert(SelectedOp::kM == WaveTileM);
-    static_assert(SelectedOp::kN == WaveTileN);
+    static_assert(!MmaOpTraits<SelectedOp>::IsSupported || SelectedOp::kM == WaveTileM);
+    static_assert(!MmaOpTraits<SelectedOp>::IsSupported || SelectedOp::kN == WaveTileN);
 };
 
 } // namespace ck_tile::core::arch::mma

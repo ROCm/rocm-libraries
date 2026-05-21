@@ -68,7 +68,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     using Base = MmaPipelineBase<sparse::detail::getPipelineFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
-    static_assert(!Base::template hasFlag<MmaPipelineOptionFlag::ABSwap>(),
+    static_assert(!(Base::Flags & MmaPipelineOptionFlag::ABSwap),
                   "Cannot transpose C in sparse intrinsics.");
 
     using MmaOp = MmaOp_; // Expose the selected MmaOp
@@ -93,6 +93,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     using ExternalAFragVecT = typename ExternalAVecCalculator::AVecType;
 
     // Scalar type of A
+    // TODO: Scalar types are dangerous! Do not use.
     using AScalarT = typename ExternalAVecCalculator::AVecTraits::scalar_type;
 
     // Per-fragment sizes
@@ -108,6 +109,33 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     // Variable-length idx type for the whole wave-tile (spans multiple int32_t words if needed)
     static constexpr index_t IdxNumWords = sparse::detail::idx_words_needed<TotalCompressedElems>;
     using IdxType                        = sparse::detail::SparseIdxPack<IdxNumWords>;
+
+    // New definitions
+    // --------------------------------------------------------------------------------------------
+    // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
+    // ensures that we get a tile distribution for the uncompressed A matrix, which is what the
+    // higher level caller will show up with (external).
+    using EncCalc           = TileDistrEncCalc<MmaOp,
+                                               false, // CTranspose
+                                               1,     // SwizzleFactor
+                                               FragsK,
+                                               1, // AttrNumAccessA
+                                               1,
+                                               true>; // UncompressedA
+    using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
+    using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
+    using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
+
+    using AWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(AWarpDstrEncoding{}))>;
+    using BWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(BWarpDstrEncoding{}))>;
+    using CWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(CWarpDstrEncoding{}))>;
+
+    // Full static distributed tensor types including composition. This is the baseline input and
+    // output format for all exec and transform functions.
+    using AWarpTensor = static_distributed_tensor<ADataType, AWarpDstr>;
+    using BWarpTensor = static_distributed_tensor<BDataType, BWarpDstr>;
+    using CWarpTensor = static_distributed_tensor<CDataType, CWarpDstr>;
+    // --------------------------------------------------------------------------------------------
 
     // Per-fragment compressed vector type (for individual MmaOp::exec calls)
     using FragAVecT = typename MmaOp::AVecType;
@@ -126,6 +154,12 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     using BVecType = InternalBVecT[FragsN][FragsK];
     using CVecType = InternalCVecT[FragsM][FragsN];
 
+    // We use these thread_buffer types internally in a number of places, because it allows us to
+    // directly select the ext_vectors for individual MmaOp calls.
+    // using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
+    using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
+    using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
+
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;
     using BTransform = typename MmaTransforms::BTransform;
@@ -140,11 +174,11 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     static_assert(WaveTileN % FragN == 0u, "WaveTileN must be a multiple of FragN");
     static_assert(WaveTileK % FragK == 0u, "WaveTileK must be a multiple of FragK");
 
-    template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
-    CK_TILE_DEVICE static void
-    execImpl(std::tuple<ATransformResult, BTransformResult, CTransformResult>& transformedInputs)
+    // ATransformResult is a big ext_vector plus idx, B and C are static_distributed tensors. Fix
+    // later TOOD.
+    template <typename ATransformResult, typename BTensor, typename CTensor>
+    CK_TILE_DEVICE static void execImpl(ATransformResult& a, BTensor& b_tensor, CTensor& c_tensor)
     {
-        auto& [a, b_frag, c_frag]       = transformedInputs;
         auto& [a_compressed_whole, idx] = a;
 
         // Validate that the ATransform result and per-fragment reinterpretation are correct
@@ -153,7 +187,9 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
         // Reinterpret the full compressed vector as per-fragment arrays
         auto* a_frags = ck_tile::bit_cast<FragAVecT(*)[FragsK]>(&a_compressed_whole);
 
-        // Accumulation loop with per-fragment idx extraction
+        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b_tensor.get_thread_buffer());
+        auto& c_buf = reinterpret_cast<CThreadBufType&>(c_tensor.get_thread_buffer());
+
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
             for(uint32_t bm = 0u; bm < FragsM; ++bm)
@@ -162,10 +198,10 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_frag[bm][bn] = MmaOp::exec(
+                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(
                             a_frags[bm][bk],
-                            b_frag[bn][bk],
-                            c_frag[bm][bn],
+                            b_buf.at(bn * FragsK + bk),
+                            c_buf.at(bm * FragsN + bn),
                             sparse::detail::extract_fragment_idx<InternalAFragSize, FragsK>(
                                 idx, bm, bk));
                     }
@@ -180,10 +216,10 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_frag[bm][bn] = MmaOp::exec(
+                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(
                             a_frags[bm][bk],
-                            b_frag[bn][bk],
-                            c_frag[bm][bn],
+                            b_buf.at(bn * FragsK + bk),
+                            c_buf.at(bm * FragsN + bn),
                             sparse::detail::extract_fragment_idx<InternalAFragSize, FragsK>(
                                 idx, bm, bk));
                     }
@@ -204,9 +240,10 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     static constexpr void checkATransformResult()
     {
         using ExternalAvecRef = std::add_lvalue_reference_t<AVecType>;
-        static_assert(std::is_same_v<ATransformResult,
-                                     decltype(ATransform::exec(std::declval<ExternalAvecRef>()))>,
-                      "ATransformResult must match the return type of ATransform::exec");
+        static_assert(
+            std::is_same_v<ATransformResult,
+                           decltype(ATransform::execOld(std::declval<ExternalAvecRef>()))>,
+            "ATransformResult must match the return type of ATransform::exec");
 
         using CompressedVecType =
             std::remove_reference_t<std::tuple_element_t<0, ATransformResult>>;

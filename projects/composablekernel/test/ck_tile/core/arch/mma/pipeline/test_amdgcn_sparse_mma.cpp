@@ -144,7 +144,9 @@ TEST(SparseMMATrait, SparseSelector)
                                                      CompilerTargetGfx950,
                                                      MmaOpFamily::SPARSE>::SelectedOp;
 
-        static constexpr bool isValid = (i == 16) || (i == 32);
+        static constexpr bool isValid =
+            (i == 16); // We only have a single 16x16 intrinsic added for now. Update this to expect
+                       // 32x32 to also be valid once we have that intrinsic.
         if constexpr(isValid)
         {
             // Selector should pick a sparse MFMA implementation
@@ -169,11 +171,11 @@ struct SparseTransformKernel
     __device__ void operator()(void* a, void* idx) const
     {
         using ResultT =
-            decltype(SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a)));
+            decltype(SparseCompressTransform<CompressionRatio>::execOld(*static_cast<Vec*>(a)));
         using FirstT = std::tuple_element_t<0, ResultT>;
         using IdxT   = std::tuple_element_t<1, ResultT>;
         const auto& [vec, i] =
-            SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a));
+            SparseCompressTransform<CompressionRatio>::execOld(*static_cast<Vec*>(a));
         *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
         __builtin_memcpy(idx, &i, sizeof(IdxT));
     }
@@ -524,28 +526,26 @@ struct SparsePipelineKernel
                                                  AccumPolicy,
                                                  CompilerTarget>;
 
-        using AVecType = typename Pipeline::AVecType;
-        using BVecType = typename Pipeline::BVecType;
-        using CVecType = typename Pipeline::CVecType;
+        using ATensor = typename Pipeline::AWarpTensor;
+        using BTensor = typename Pipeline::BWarpTensor;
+        using CTensor = typename Pipeline::CWarpTensor;
 
         const uint32_t lane = threadIdx.x;
 
-        AVecType a;
-        BVecType b;
-        CVecType c;
-        __builtin_memcpy(&a,
-                         static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(AVecType),
-                         sizeof(AVecType));
-        __builtin_memcpy(&b,
-                         static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BVecType),
-                         sizeof(BVecType));
-        __builtin_memset(&c, 0, sizeof(CVecType));
+        ATensor a;
+        BTensor b;
+        CTensor c;
+        __builtin_memcpy(
+            &a, static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(ATensor), sizeof(ATensor));
+        __builtin_memcpy(
+            &b, static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BTensor), sizeof(BTensor));
+        __builtin_memset(&c, 0, sizeof(CTensor));
 
         if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
         {
             Pipeline::exec(a, b, c);
             __builtin_memcpy(
-                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
+                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CTensor), &c, sizeof(CTensor));
         }
     }
 };
