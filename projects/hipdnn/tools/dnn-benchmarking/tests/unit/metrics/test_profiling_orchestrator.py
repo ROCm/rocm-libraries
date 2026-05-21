@@ -181,6 +181,35 @@ class TestPathSanitization:
         g.write_text("{}")
         assert orch._graph_segment(g) == orch._graph_segment(g)
 
+    def test_subdir_writes_source_file_with_resolved_path(self, tmp_path):
+        """The hash-based segment is opaque on its own. The `.source`
+        file at the graph-dir level maps it back to the original path
+        so `cat conv-7a3f1c/.source` answers "which graph is this?"
+        without recomputing the hash."""
+        g = tmp_path / "subdir" / "conv.json"
+        g.parent.mkdir()
+        g.write_text("{}")
+        sub = orch._subdir(tmp_path / "out", g, "ENGINE", "pmc_basic")
+        source_file = sub.parent.parent / ".source"
+        assert source_file.exists()
+        # Resolved absolute path is what we want — useful when the user
+        # cd's to a profiling output directory and wants the canonical
+        # location to feed to other tools (rocprof-compute analyze etc.)
+        assert source_file.read_text().strip() == str(g.resolve())
+
+    def test_subdir_source_file_idempotent_across_engines_and_sources(self, tmp_path):
+        """Multiple (engine, source) calls for the same graph must write
+        the same `.source` content — otherwise the file would either
+        churn (if write order varied) or hold stale data from a
+        previous engine's write."""
+        g = tmp_path / "g.json"
+        g.write_text("{}")
+        orch._subdir(tmp_path / "out", g, "ENGINE_A", "pmc_basic")
+        orch._subdir(tmp_path / "out", g, "ENGINE_B", "trace_pftrace")
+        orch._subdir(tmp_path / "out", g, "ENGINE_A", "perf")
+        graph_dir = tmp_path / "out" / orch._graph_segment(g)
+        assert (graph_dir / ".source").read_text().strip() == str(g.resolve())
+
     def test_subdir_sanitizes_engine_name(self, tmp_path):
         sub = orch._subdir(
             tmp_path,

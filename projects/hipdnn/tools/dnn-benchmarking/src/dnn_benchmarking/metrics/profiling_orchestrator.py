@@ -72,27 +72,37 @@ def _safe_segment(name: str) -> str:
     return _PATH_SAFE_RE.sub("_", name) or "unnamed"
 
 
+def _graph_anchor(graph_path: Path) -> str:
+    """The canonical string used both for the hash and the ``.source`` file.
+
+    Resolves to an absolute path so it's stable across runs (and useful
+    on its own when read back from ``.source``). Falls back to the
+    string form when ``resolve()`` errors — typically a test path that
+    doesn't exist on disk.
+    """
+    try:
+        return str(graph_path.resolve())
+    except OSError:
+        return str(graph_path)
+
+
 def _graph_segment(graph_path: Path) -> str:
     """``<stem>-<6 hex>`` disambiguator for the per-graph subdir.
 
     Suite mode accepts directories and globs, so two graphs with the same
-    file stem (``models/a/conv.json`` and ``models/b/conv.json``) would
-    otherwise collide on ``<root>/conv/<engine>/<source>/results.db`` and
-    silently overwrite each other. The hash is derived from the resolved
-    absolute path so it's stable across runs from the same CWD and
-    distinguishes two graphs that share a stem.
+    file stem (``a/conv.json`` and ``b/conv.json``) would otherwise
+    collide on ``<root>/conv/<engine>/<source>/results.db`` and silently
+    overwrite each other. The hash is derived from the resolved absolute
+    path so it's stable across runs and distinguishes two graphs that
+    share a stem.
 
     Hash length is 6 hex chars (24 bits) — collision probability across a
     realistic suite (<10⁴ graphs) is negligible, and 6 chars keeps the
-    segment short enough to type when chasing an artifact path.
+    segment short enough to type when chasing an artifact path. The
+    hash is opaque on its own; ``_subdir`` writes a ``.source`` file in
+    the graph dir so users can map it back without re-hashing.
     """
-    try:
-        anchor = str(graph_path.resolve())
-    except OSError:
-        # Graph file might not exist on disk (test paths). Fall back to
-        # the string form — still stable per (CWD, input).
-        anchor = str(graph_path)
-    digest = hashlib.sha1(anchor.encode("utf-8")).hexdigest()[:6]
+    digest = hashlib.sha1(_graph_anchor(graph_path).encode("utf-8")).hexdigest()[:6]
     return f"{_safe_segment(graph_path.stem)}-{digest}"
 
 
@@ -150,13 +160,15 @@ def _subdir(out_dir: Path, graph_path: Path, engine_name: str, source: str) -> P
     don't collide; engine name is sanitised because a future plugin
     could return slashes/spaces.
     """
-    sub = (
-        out_dir
-        / _graph_segment(graph_path)
-        / _safe_segment(engine_name)
-        / _safe_segment(source)
-    )
+    graph_dir = out_dir / _graph_segment(graph_path)
+    sub = graph_dir / _safe_segment(engine_name) / _safe_segment(source)
     sub.mkdir(parents=True, exist_ok=True)
+    # Drop a `.source` file at the graph-segment level so
+    # `cat conv-7a3f1c/.source` answers "which graph is this?" without
+    # the user having to recompute the hash. Idempotent — multiple
+    # (engine, source) calls for the same graph overwrite with
+    # identical content.
+    (graph_dir / ".source").write_text(_graph_anchor(graph_path) + "\n")
     return sub
 
 
