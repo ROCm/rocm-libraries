@@ -93,8 +93,10 @@ struct FmhaBwdWorkspaceManager
     }
     CK_TILE_HOST static size_t GetDqAccOffsetsSize(const int batch)
     {
+        // batch + 1: extra sentinel slot at [batch] holds total dq_acc element
+        // count for DqAccPrezeroKernel.
         const auto dqAccOffsetsElems =
-            (kIsGroupMode && kIsDeterministic) ? static_cast<size_t>(batch) : 0;
+            (kIsGroupMode && kIsDeterministic) ? static_cast<size_t>(batch + 1) : 0;
         return integer_least_multiple(sizeof(long_index_t) * dqAccOffsetsElems, ALIGNMENT);
     }
     CK_TILE_HOST static size_t GetPrefixBatchSize(const int batch)
@@ -225,7 +227,8 @@ struct FmhaBwdWorkspaceManager
             {
                 std::fill_n(batch_states, batch_size, FmhaBwdBatchState{0, 0, 1});
                 std::fill_n(nsplits, batch_size, index_t{1});
-                std::fill_n(offsets, batch_size, long_index_t{0});
+                // batch+1 entries: per-batch starts + sentinel total at [batch]
+                std::fill_n(offsets, batch_size + 1, long_index_t{0});
                 std::fill_n(cu_states_out,
                             num_cus,
                             FmhaBwdGroupPersistentCuState{0, 0, batch_size, 0, 0, 0});
@@ -289,8 +292,14 @@ struct FmhaBwdWorkspaceManager
                         cu_states[c].c_start    = c_start;
                         cu_states[c].w_lo       = pb + head_start * hw + c_start * sq_w;
 
-                        batch_states[b].nsplits =
-                            max(batch_states[b].nsplits, cu_states[c].isplit + 1);
+                        // Only count CUs that do real K-row work (c_start < nc) so that
+                        // nsplits matches the set of slots actually written by atomic_add.
+                        // CUs with c_start >= nc start past the head's K-rows (advance to
+                        // next head); their isplit would otherwise pad nsplits with a slot
+                        // that nobody writes — reduction would read garbage from it.
+                        if(c_start < nc)
+                            batch_states[b].nsplits =
+                                max(batch_states[b].nsplits, cu_states[c].isplit + 1);
                     }
                     else
                     {
@@ -351,6 +360,8 @@ struct FmhaBwdWorkspaceManager
             const long_index_t dq_acc_elems =
                 offsets[i] + static_cast<long_index_t>(nhead_q) * nsplits[i] *
                                  (seqstart_qs[i + 1] - seqstart_qs[i]) * hdim_q;
+            // Sentinel slot consumed by DqAccPrezeroKernel.
+            offsets[batch_size] = dq_acc_elems;
             return sizeof(AccDataType) * dq_acc_elems;
         }
         else // deterministic batch mode (kUsePersistent)
@@ -556,6 +567,53 @@ struct FmhaBwdDQDKDVKernel
     CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
     {
         return WorkspaceManager::template NeedsZeroDqAcc<kUseQrQtrDorPipeline, kHasMask>();
+    }
+    // Group + persistent + deterministic is the only path where NeedsZeroDqAcc()
+    // is false yet dq_acc still has unowned slots (per-head varying active isplit
+    // sets) that must be zeroed beforehand.
+    static constexpr bool kNeedsKernelPrezeroDqAcc =
+        kIsGroupMode && kIsDeterministic && !kUseQrQtrDorPipeline;
+
+    // Flat-zeroes the active dq_acc region before the main kernel.
+    struct DqAccPrezeroKernel
+    {
+        static constexpr index_t kBlockSize  = 256;
+        static constexpr index_t kBlockPerCu = 1;
+        struct Kargs
+        {
+            void* dq_acc_ptr;
+            const long_index_t* total_elem_ptr;
+        };
+        CK_TILE_HOST static dim3 GridSize() { return dim3(get_num_cus()); }
+        CK_TILE_HOST static dim3 BlockSize() { return dim3(kBlockSize); }
+        CK_TILE_DEVICE void operator()(Kargs kargs) const
+        {
+            // Total elements are float32 dq_acc counts; uint4 packs 4 floats.
+            const long_index_t n4 = (*kargs.total_elem_ptr) / 4;
+            uint4* p              = reinterpret_cast<uint4*>(kargs.dq_acc_ptr);
+            // per_block aligned to kBlockSize: keeps every non-tail iteration
+            // full-warp and consecutive writes within one block share HBM rows.
+            const long_index_t n_tiles = ck_tile::integer_divide_ceil(n4, kBlockSize);
+            const long_index_t per_block =
+                ck_tile::integer_divide_ceil(n_tiles, gridDim.x) * kBlockSize;
+            const long_index_t start = blockIdx.x * per_block;
+            const long_index_t end   = ck_tile::min(start + per_block, n4);
+            for(long_index_t off = start + threadIdx.x; off < end; off += kBlockSize)
+                p[off] = uint4{0u, 0u, 0u, 0u};
+        }
+    };
+
+    CK_TILE_HOST static typename DqAccPrezeroKernel::Kargs
+    MakeDqAccPrezeroKargs(void* workspace_ptr, int batch)
+    {
+        auto* ws = static_cast<char*>(workspace_ptr);
+        // Sentinel slot address: end of the batch+1 extended dq_acc_offsets array.
+        const size_t total_elem_off =
+            WorkspaceManager::template GetDqAccOffsetsOffset<kUseQrQtrDorPipeline>(batch) +
+            batch * sizeof(long_index_t);
+        const size_t dq_acc_off =
+            WorkspaceManager::template GetDqAccDataOffset<kUseQrQtrDorPipeline>(batch);
+        return {ws + dq_acc_off, reinterpret_cast<const long_index_t*>(ws + total_elem_off)};
     }
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
@@ -1261,9 +1319,6 @@ struct FmhaBwdDQDKDVKernel
                     index_t w_chunk    = amd_wave_read_first_lane(cs->w_lo);
                     if(ibatch >= kargs.batch)
                         return; // this CU has no work (sentinel: ibatch == batch_size)
-                    if(w_chunk >= w_hi)
-                        return; // empty CU (wl == wh): without this, pre-zero races with the
-                                // real CU that owns the same (ibatch, head_start, isplit) slot.
 
                     // Loop exits when w_chunk reaches w_hi. Inner check guards the rare case
                     // where head_start hits nhead_q and ibatch is bumped past batch before exit.
@@ -1277,31 +1332,7 @@ struct FmhaBwdDQDKDVKernel
 
                         while(head_start < kargs.nhead_q)
                         {
-                            // Pre-zero this CU's (ibatch, head_start, isplit) dq_acc slot before
-                            // any atomic_add (replaces host memset over the workspace upper bound,
-                            // ~20x actual for large sk). Slot ownership unique per CU: host pack
-                            // assigns distinct isplit on entry, ++head_start resets isplit to 0.
-                            // uint4 safe: slot_stride uses unpadded sq, batch_off is 16B-aligned.
-                            {
-                                const index_t sq_unpad = amd_wave_read_first_lane(
-                                    static_cast<index_t>(kargs.seqstart_q_ptr[ibatch + 1] -
-                                                         kargs.seqstart_q_ptr[ibatch]));
-                                const long_index_t slot_stride =
-                                    static_cast<long_index_t>(sq_unpad) *
-                                    amd_wave_read_first_lane(kargs.hdim_q);
-                                AccDataType* slot_ptr =
-                                    reinterpret_cast<AccDataType*>(kargs.dq_acc_ptr) +
-                                    kargs.dq_acc_batch_offset_ptr[ibatch] +
-                                    (static_cast<long_index_t>(head_start) *
-                                         amd_wave_read_first_lane(bs->nsplits) +
-                                     isplit) *
-                                        slot_stride;
-                                uint4* slot_v4        = reinterpret_cast<uint4*>(slot_ptr);
-                                const long_index_t n4 = slot_stride / 4;
-                                for(long_index_t off = threadIdx.x; off < n4; off += kBlockSize)
-                                    slot_v4[off] = uint4{0u, 0u, 0u, 0u};
-                                s_waitcnt_barrier<0>();
-                            }
+                            // dq_acc was flat-zeroed by DqAccPrezeroKernel before launch.
                             while(c_start_0 < amd_wave_read_first_lane(bs->nc) && w_chunk < w_hi)
                             {
                                 run_(kargs,
