@@ -214,20 +214,20 @@ int profile_grouped_conv_fwd_tile(int argc, char* argv[])
             if(data_type == ConvDataType::F32_F32_F32)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_FP32_FWD;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                    do_verification, time_kernel);
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(10, argv), do_verification, time_kernel);
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_FP16_FWD;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                do_verification, time_kernel);
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(10, argv), do_verification, time_kernel);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_BF16_FWD;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                do_verification, time_kernel);
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(10, argv), do_verification, time_kernel);
             }
         }
     }

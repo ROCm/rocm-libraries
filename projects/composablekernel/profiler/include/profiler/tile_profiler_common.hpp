@@ -33,8 +33,7 @@ using DeduceDataType =
 /// Compute reference outputs using the builder reference implementation.
 /// Returns a unique_ptr-like handle to reference outputs (from ckt::alloc_outputs).
 template <auto SIGNATURE>
-auto compute_reference(const ckt::Args<SIGNATURE>& args,
-                       const ckt::Inputs<SIGNATURE>& inputs)
+auto compute_reference(const ckt::Args<SIGNATURE>& args, const ckt::Inputs<SIGNATURE>& inputs)
 {
     auto reference = ckt::alloc_outputs(args);
     using ReferenceInstance =
@@ -60,7 +59,7 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
                         const ckt::Outputs<SIGNATURE>& outputs,
                         const ckt::Outputs<SIGNATURE>& reference)
 {
-    using DataType = DeduceDataType<SIGNATURE>;
+    using DataType        = DeduceDataType<SIGNATURE>;
     const auto conv_param = args.to_ck_tile_conv_param();
 
     std::size_t bytes_num;
@@ -108,8 +107,7 @@ bool validate_and_report(const ckt::Args<SIGNATURE>& args,
 {
     ckt::ValidationReport report;
     ckt::Outputs<SIGNATURE>::reflect(
-        args,
-        [&](std::string_view name, const auto& desc, void* ckt::Outputs<SIGNATURE>::*ptr) {
+        args, [&](std::string_view name, const auto& desc, void* ckt::Outputs<SIGNATURE>::*ptr) {
             report.check(name, desc, outputs.*ptr, reference.*ptr, rtol, atol);
         });
 

@@ -40,7 +40,7 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
     std::string best_op_name;
     int best_split_k                = 0;
     ck::index_t best_instance_index = -1;
-    bool all_instances_valid = true;
+    bool all_instances_valid        = true;
 
     auto reference = ckt::alloc_outputs(args);
     if(do_verification)
@@ -78,14 +78,13 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
     }
 
     // Get backward data kernels matching data type, spatial dims, and layout
-    constexpr const char* dtype_str = get_dtype_string<SIGNATURE>();
+    constexpr const char* dtype_str  = get_dtype_string<SIGNATURE>();
     constexpr const char* layout_str = get_layout_string<SIGNATURE>();
-    constexpr int ndim = SIGNATURE.spatial_dim;
-    auto& registry = ck_tile::dispatcher::GroupedConvRegistry::instance();
+    constexpr int ndim               = SIGNATURE.spatial_dim;
+    auto& registry                   = ck_tile::dispatcher::GroupedConvRegistry::instance();
     auto all_kernels = registry.filter([](const ck_tile::dispatcher::GroupedConvKernelInstance& k) {
         return k.key().op == ck_tile::dispatcher::GroupedConvOp::BackwardData &&
-               k.key().dtype_in == dtype_str &&
-               k.key().ndim_spatial == ndim &&
+               k.key().dtype_in == dtype_str && k.key().ndim_spatial == ndim &&
                k.key().layout == layout_str;
     });
 
@@ -148,10 +147,9 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                 }
                 const char* prefix = do_verification ? "[Valid]" : "[Not Validated]";
                 std::cout << prefix << " Perf: " << std::setw(10) << avg_time << " ms," << " "
-                        << op_name << " (instance " << num_kernel - 1 << "), SplitK "
-                        << k_batch << std::endl;
+                          << op_name << " (instance " << num_kernel - 1 << "), SplitK " << k_batch
+                          << std::endl;
             }
-            
         }
     }
 

@@ -135,7 +135,8 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                             std::cout << "\tNumber of incorrect values: " << error.wrong_elements
                                       << " Is all zero:" << error.is_all_zero()
                                       << " max err: " << error.max_error << std::endl;
-                            run_cpu_validation<SIGNATURE, ConvBuffer::Input>(args_k_batch, outputs, reference.get());
+                            run_cpu_validation<SIGNATURE, ConvBuffer::Input>(
+                                args_k_batch, outputs, reference.get());
                         }
                         all_instances_valid = false;
                     }

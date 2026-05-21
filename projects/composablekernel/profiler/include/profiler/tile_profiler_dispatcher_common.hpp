@@ -65,10 +65,8 @@ inline std::string get_runtime_arch_name()
 /// Convert builder Args to dispatcher GroupedConvProblem.
 /// The `op` parameter selects the convolution direction.
 template <auto SIGNATURE>
-inline ck_tile::dispatcher::GroupedConvProblem
-args_to_problem(const ckt::Args<SIGNATURE>& args,
-                ck_tile::dispatcher::GroupedConvOp op,
-                int split_k = 1)
+inline ck_tile::dispatcher::GroupedConvProblem args_to_problem(
+    const ckt::Args<SIGNATURE>& args, ck_tile::dispatcher::GroupedConvOp op, int split_k = 1)
 {
     const auto conv_param = args.to_ck_tile_conv_param();
     ck_tile::dispatcher::GroupedConvProblem problem;
@@ -84,18 +82,17 @@ args_to_problem(const ckt::Args<SIGNATURE>& args,
 
     if constexpr(ndim == 2)
     {
-        problem.input_spatial  = {1, conv_param.input_spatial_lengths_[0],
-                                  conv_param.input_spatial_lengths_[1]};
-        problem.filter_spatial = {1, conv_param.filter_spatial_lengths_[0],
-                                  conv_param.filter_spatial_lengths_[1]};
-        problem.output_spatial = {1, conv_param.output_spatial_lengths_[0],
-                                  conv_param.output_spatial_lengths_[1]};
-        problem.stride   = {1, conv_param.conv_filter_strides_[0],
-                            conv_param.conv_filter_strides_[1]};
-        problem.padding  = {0, conv_param.input_left_pads_[0],
-                            conv_param.input_left_pads_[1]};
-        problem.dilation = {1, conv_param.conv_filter_dilations_[0],
-                            conv_param.conv_filter_dilations_[1]};
+        problem.input_spatial = {
+            1, conv_param.input_spatial_lengths_[0], conv_param.input_spatial_lengths_[1]};
+        problem.filter_spatial = {
+            1, conv_param.filter_spatial_lengths_[0], conv_param.filter_spatial_lengths_[1]};
+        problem.output_spatial = {
+            1, conv_param.output_spatial_lengths_[0], conv_param.output_spatial_lengths_[1]};
+        problem.stride = {
+            1, conv_param.conv_filter_strides_[0], conv_param.conv_filter_strides_[1]};
+        problem.padding  = {0, conv_param.input_left_pads_[0], conv_param.input_left_pads_[1]};
+        problem.dilation = {
+            1, conv_param.conv_filter_dilations_[0], conv_param.conv_filter_dilations_[1]};
     }
     else if constexpr(ndim == 3)
     {
@@ -108,15 +105,15 @@ args_to_problem(const ckt::Args<SIGNATURE>& args,
         problem.output_spatial = {conv_param.output_spatial_lengths_[0],
                                   conv_param.output_spatial_lengths_[1],
                                   conv_param.output_spatial_lengths_[2]};
-        problem.stride   = {conv_param.conv_filter_strides_[0],
-                            conv_param.conv_filter_strides_[1],
-                            conv_param.conv_filter_strides_[2]};
-        problem.padding  = {conv_param.input_left_pads_[0],
-                            conv_param.input_left_pads_[1],
-                            conv_param.input_left_pads_[2]};
-        problem.dilation = {conv_param.conv_filter_dilations_[0],
-                            conv_param.conv_filter_dilations_[1],
-                            conv_param.conv_filter_dilations_[2]};
+        problem.stride         = {conv_param.conv_filter_strides_[0],
+                                  conv_param.conv_filter_strides_[1],
+                                  conv_param.conv_filter_strides_[2]};
+        problem.padding        = {conv_param.input_left_pads_[0],
+                                  conv_param.input_left_pads_[1],
+                                  conv_param.input_left_pads_[2]};
+        problem.dilation       = {conv_param.conv_filter_dilations_[0],
+                                  conv_param.conv_filter_dilations_[1],
+                                  conv_param.conv_filter_dilations_[2]};
     }
 
     return problem;

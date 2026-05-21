@@ -56,22 +56,20 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     }
 
     // Get forward kernels matching data type, spatial dims, and layout
-    constexpr const char* dtype_str = get_dtype_string<SIGNATURE>();
+    constexpr const char* dtype_str  = get_dtype_string<SIGNATURE>();
     constexpr const char* layout_str = get_layout_string<SIGNATURE>();
-    constexpr int ndim = SIGNATURE.spatial_dim;
-    auto& registry = ck_tile::dispatcher::GroupedConvRegistry::instance();
+    constexpr int ndim               = SIGNATURE.spatial_dim;
+    auto& registry                   = ck_tile::dispatcher::GroupedConvRegistry::instance();
     auto all_kernels = registry.filter([](const ck_tile::dispatcher::GroupedConvKernelInstance& k) {
         return k.key().op == ck_tile::dispatcher::GroupedConvOp::Forward &&
-               k.key().dtype_in == dtype_str &&
-               k.key().ndim_spatial == ndim &&
+               k.key().dtype_in == dtype_str && k.key().ndim_spatial == ndim &&
                k.key().layout == layout_str;
     });
 
     // Set up thread-local buffer context
     setup_dispatch_context(inputs.input, inputs.weight, outputs.output, s_conf);
 
-    auto problem = args_to_problem<SIGNATURE>(
-        args, ck_tile::dispatcher::GroupedConvOp::Forward);
+    auto problem = args_to_problem<SIGNATURE>(args, ck_tile::dispatcher::GroupedConvOp::Forward);
 
     constexpr bool use_instance_string = true;
 
@@ -95,12 +93,12 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
         }
         std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name << std::endl;
 
-        if(do_verification && !validate_and_report<SIGNATURE, ConvBuffer::Output>(
-               args,
-               outputs,
-               reference.get(),
-               ck::profiler::get_rtol<DataType>(),
-               ck::profiler::get_atol<DataType>()))
+        if(do_verification &&
+           !validate_and_report<SIGNATURE, ConvBuffer::Output>(args,
+                                                               outputs,
+                                                               reference.get(),
+                                                               ck::profiler::get_rtol<DataType>(),
+                                                               ck::profiler::get_atol<DataType>()))
         {
             valid = false;
         }
