@@ -16,6 +16,8 @@
 
 namespace ck_dsl_provider {
 
+class CompileServiceBridge;
+
 /// Type alias for engine pointers used during registration.
 using CkDslEnginePtr =
     std::unique_ptr<hipdnn_plugin_sdk::IEngine<::CkDslHandle, CkDslSettings, CkDslContext>>;
@@ -48,6 +50,13 @@ class CkDslContainer {
     hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>&
     getEngineManager();
 
+    /// Access to the per-process Python compile-service bridge. The
+    /// bridge is constructed in the container ctor after the embedded
+    /// interpreter is up; it owns the cached compile_service module
+    /// import and the GIL plumbing used by the JIT path. Throws if the
+    /// container was not fully constructed.
+    CompileServiceBridge& compileServiceBridge();
+
    private:
     struct EngineDefinition {
         int64_t id;
@@ -58,6 +67,7 @@ class CkDslContainer {
 
     std::unique_ptr<hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>>
         _engineManager;
+    std::unique_ptr<CompileServiceBridge> _compileServiceBridge;
 };
 
 }  // namespace ck_dsl_provider
