@@ -691,6 +691,28 @@ class Solution(collections.abc.Mapping):
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
+    # ScaleDepthURatio{A,B}: decouple the per-tensor scale DepthU from the data
+    # DepthU.  Ratio R>=1 means one scale fetch covers R data-DU spans
+    # (i.e. effective scale DepthU = R * data DepthU).  Must be a power of 2.
+    # R>1 currently requires UseSubtileImpl=1 and MXBlock{A,B}>0 (mxfp4/mxfp8
+    # subtile path); the regular and tail-loop paths assume R==1.
+    # Downstream consumers read state["ScaleDepthURatio{A,B}"] (which becomes
+    # kernel["ScaleDepthURatio{A,B}"]) directly.
+    for _tc in ("A", "B"):
+        _ratioKey = f"ScaleDepthURatio{_tc}"
+        _ratio = int(state.get(_ratioKey, 1))
+        state[_ratioKey] = _ratio
+        if _ratio < 1 or (_ratio & (_ratio - 1)) != 0:
+            reject(state, printRejectionReason,
+                   f"{_ratioKey}={_ratio} must be a positive power of 2")
+        if _ratio > 1:
+            if not state["UseSubtileImpl"]:
+                reject(state, printRejectionReason,
+                       f"{_ratioKey}>1 requires UseSubtileImpl=1")
+            if not state["ProblemType"][f"MXBlock{_tc}"]:
+                reject(state, printRejectionReason,
+                       f"{_ratioKey}>1 requires MXBlock{_tc}>0 (MX scaled inputs)")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
@@ -702,12 +724,18 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
 
-      # DepthU should be multiple of 2 * MIK. DepthU=-1 case, set DepthU=2*MIK*LSU
-      duUnit = 2 * state["MatrixInstK"] * state["LocalSplitU"]
+      # DepthU should be multiple of 2 * MIK / R (R = max ScaleDepthURatioA/B).
+      # For R=1 this is the legacy "DU >= 2*MIK" rule. For R>1 (MX subtile R-period
+      # cadence) the scheduler period covers R body iters, so the effective MFMA-K
+      # count per scheduler period is (DU/MIK) * R; we need that >= 2.
+      rA = state.get("ScaleDepthURatioA", 1)
+      rB = state.get("ScaleDepthURatioB", 1)
+      duRatio = max(rA, rB, 1)
+      duUnit = (2 * state["MatrixInstK"] * state["LocalSplitU"]) // duRatio
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
       if state["DepthU"] % duUnit != 0:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 support only DepthU multiple of 2 * MatrixInstK * LocalSplitU")
+        reject(state, printRejectionReason, "UseSubtileImpl=1 support only DepthU multiple of 2 * MatrixInstK * LocalSplitU / max(ScaleDepthURatioA,B)")
 
       for tc in ('A', 'B'):
         dtype = state["ProblemType"][f"DataType{tc}"]
@@ -2312,6 +2340,9 @@ class Solution(collections.abc.Mapping):
 
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
+    # NOTE: K%(R*DepthU)==0 for the MX subtile path is enforced inside
+    # depthUIteration once a concrete DepthU is selected (see _R lift of ASEM
+    # there).  No scale-aware tail loop yet, so ASEM is the gate.
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
@@ -2370,11 +2401,26 @@ class Solution(collections.abc.Mapping):
       state["_DepthU"] = state["DepthU"]# internal
       state["_DepthUA"] = depthUA# internal
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
+        # _DepthUMXS{tc} is the scale K-span (in scale-element units) covered by
+        # a single scale fetch.  With ScaleDepthURatio{tc}=R, one scale fetch
+        # spans R data-DU; the scale LDS region, GRVW, and SRD math all key off
+        # _DepthUMXS{tc} so they widen automatically when R>1.
+        rA = state.get("ScaleDepthURatioA", 1)
+        state["_DepthUMXSA"] = (depthUA * rA) // state["ProblemType"]["MXBlockA"]
       state["_DepthUB"] = depthUB# internal
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
+        rB = state.get("ScaleDepthURatioB", 1)
+        state["_DepthUMXSB"] = (depthUB * rB) // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
+
+      # Decouple-scale-DU: when ScaleDepthURatio>1 the scale cadence is one
+      # fetch per R data-DU body iters.  Require K to be a whole multiple of
+      # R*DepthU (no scale-aware tail loop yet) by lifting ASEM.
+      if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+        _R = max(state.get("ScaleDepthURatioA", 1), state.get("ScaleDepthURatioB", 1))
+        if _R > 1:
+          state["AssertSummationElementMultiple"] = max(
+            state["AssertSummationElementMultiple"], _R * depthU)
 
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'A', printRejectionReason)
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'B', printRejectionReason)

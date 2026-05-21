@@ -416,6 +416,11 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # For UseSubtileImpl=1 MX subtile path: multiplies scale GR/LR DepthU by
+    # this factor so the scale fetch cadence runs at 1/R of the data cadence.
+    # Default 1 (no decoupling).
+    "ScaleDepthURatioA": [1, 2, 4, 8],
+    "ScaleDepthURatioB": [1, 2, 4, 8],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

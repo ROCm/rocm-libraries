@@ -422,6 +422,8 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprSparseMetadata": [False]},
     {"DirectToLds": [0]},
     {"UseSubtileImpl": [False]},
+    {"ScaleDepthURatioA": [1]},
+    {"ScaleDepthURatioB": [1]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
     {"AssertSummationElementMultiple": [1]},
