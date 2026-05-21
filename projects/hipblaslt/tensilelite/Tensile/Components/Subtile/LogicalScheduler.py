@@ -1624,6 +1624,29 @@ class LogicalScheduler:
         last_lr = {}  # tensor -> last LR placement seen
         lr_inc_tensors = set()  # tensors that already received lr_inc
 
+        # Decouple-scale-DU MT256 R=2 PGR=2 partition-handoff fix:
+        #   Under PGR>0 with scaleSchedulingPeriod (R) > 1, scale (SA/SB)
+        #   lr_inc placed as a preOp on the new-MT scale LR causes the LDS
+        #   read-side swap to fire at the partition transition BEFORE the
+        #   trailing scale ds_reads of the period have completed (those
+        #   reads use the still-pre-swap LR base VGPR, while subsequent
+        #   reads end up post-swap; the populate walk interleaves MFMAs +
+        #   data LRs between scale LRs in different partitions, so part
+        #   of the scale read period straddles the swap).  This produces
+        #   wrong-half scale reads at the waveM=0 / partition-1 boundary
+        #   (e.g. column 64 in MT256x256x128 MXFP8 K>=512).
+        #
+        #   Move scale lr_inc to a postOp on the LAST pre-transition LR
+        #   so the swap fires AFTER all R-period-worth of scale ds_reads
+        #   for the current MT, matching the PGR=0 cadence (which already
+        #   uses a postOp on last_lr — passing case 3/3 for R=2 PGR=0).
+        #   Data lr_inc keeps its preOp-on-new-MT position; for data the
+        #   per-body cadence is governed by emit_lr_inc + emit_gr_inc in
+        #   InstructionEmitter (Round 2 patch) and the placement-level
+        #   swap continues to anchor at the MT transition.  R == 1
+        #   bypasses the rewrite below entirely so R=1 schedules remain
+        #   bit-identical to the pre-fix baseline.
+        R = self.config.scaleSchedulingPeriod
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
                 for lr in slot.lrs:
@@ -1632,7 +1655,10 @@ class LogicalScheduler:
                     if tensor not in first_lr:
                         first_lr[tensor] = lr
                     if tensor in last_lr_mt and last_lr_mt[tensor] != mt:
-                        lr.preOps.append(LRIncOp(tensor=tensor))
+                        if R > 1 and tensor in ('SA', 'SB'):
+                            last_lr[tensor].postOps.append(LRIncOp(tensor=tensor))
+                        else:
+                            lr.preOps.append(LRIncOp(tensor=tensor))
                         lr_inc_tensors.add(tensor)
                     last_lr[tensor] = lr
                     last_lr_mt[tensor] = mt

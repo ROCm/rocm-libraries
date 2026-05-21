@@ -2238,24 +2238,29 @@ def test_scheduler_R2_FP8_MT256():
 
 
 def test_data_gr_inc_lr_inc_emit_split_R2():
-    """Data gr_inc / lr_inc emit split for ScaleDepthURatio=2.
+    """Data gr_inc / lr_inc emit contract for ScaleDepthURatio=2.
 
     Verifies the InstructionEmitter contract that fixes the R=2 PGR=2
     correctness bug observed in MT256x256x128 MXFP8 (subtile_mxfp8_mt256
-    K=512/1024).  The data emitters must split into:
+    K=512/1024).  The data emitters fire BOTH the SRD advance AND the
+    LDS half-swap on EVERY body copy (no per-ui gating for data):
 
-      gr_inc(A|B)  →  always emit SRD advance (per body copy);
-                       emit LDS write-side swap ONLY at ui%R == 0.
-      lr_inc(A|B)  →  emit LDS read-side swap ONLY at ui%R == 0;
-                       otherwise emit nothing.
+      gr_inc(A|B)  →  SRD advance + LDS write-side swap (every body copy)
+      lr_inc(A|B)  →  LDS read-side swap (every body copy)
 
-    Both swaps gating to ui%R == 0 is intentional: as preOps on GR/LR
-    placements they fire BEFORE the GR/LR.  Gating to ui%R == 0 means
-    the swap happens at outer-iter boundaries so all R body copies of
-    a given outer iter operate on the SAME LDS half.
+    Rationale: under R>1 each body copy processes a DIFFERENT K-position
+    of the same outer iter (op_sel selects the K byte of the packed scale
+    VGPR), so consecutive body copies must READ from / WRITE to ALTERNATING
+    LDS halves.  Net per outer iter = R toggles = identity; for R=2 the LR
+    pointer goes primary→swap→primary across C0,C1 and the LW pointer goes
+    swap→primary→swap, leaving the outer-iter-end state matching the
+    outer-iter-start state.  An earlier design that gated both swaps to
+    ui%R==0 made body copies 1..R-1 read and write the SAME half within an
+    iter, which (for R=2) caused C1's GR to overwrite C0's prefetched
+    K-position at the same LDS offset and made C1's LR re-fetch stale data.
 
-    For R=1 the gate collapses to "fire every body copy" — bit-identical
-    to the pre-fix behavior.
+    For R=1 the loop has one body copy per outer iter, so "every body copy"
+    = "every outer iter" — bit-identical to legacy.
     """
     from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
     from Tensile.Components.Subtile.LogicalScheduler import (
@@ -2291,13 +2296,13 @@ def test_data_gr_inc_lr_inc_emit_split_R2():
             InstructionEmitter.emit_gr_inc(emitter, grA, ui)
             InstructionEmitter.emit_lr_inc(emitter, lrA, ui)
 
-    # ui=0: SRD-advance fires AND BOTH LDS-write-swap AND LDS-read-swap fire.
-    assert calls_per_ui[0] == ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A'], (
-        f"R=2 ui=0: expected SRD-advance + LDS-write-swap + LDS-read-swap, "
-        f"got {calls_per_ui[0]}")
-    # ui=R-1 (1): SRD-advance fires alone — no LDS swaps.
-    assert calls_per_ui[1] == ['gr_ptr_A'], (
-        f"R=2 ui=R-1: expected SRD-advance only (no LDS swaps), "
+    # Both body copies fire SRD-advance + LDS-write-swap + LDS-read-swap.
+    expected = ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A']
+    assert calls_per_ui[0] == expected, (
+        f"R=2 ui=0: expected {expected}, got {calls_per_ui[0]}")
+    assert calls_per_ui[1] == expected, (
+        f"R=2 ui=1: expected {expected} (same as ui=0; data swaps fire "
+        f"every body copy for correct half-alternating cadence), "
         f"got {calls_per_ui[1]}")
 
     # ── R=1: bit-identical to legacy (both swaps and advance fire every copy) ──

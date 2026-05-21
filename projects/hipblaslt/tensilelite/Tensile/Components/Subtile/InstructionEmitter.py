@@ -228,36 +228,37 @@ class InstructionEmitter:
     def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor.
 
-        Decouple-scale-DU (data path): the LDS read-side swap is conceptually
-        an outer-iter-boundary event, not a per-body-copy event.  With
-        scaleSchedulingPeriod (R) > 1 the unroll factor expands to R body
-        copies per outer iter; the LDS read half must flip exactly ONCE per
-        outer iter so that all R copies in a given outer iter consume the
-        SAME half (the one written by the PGR-prefetched outer iter).
-        lr_inc is a preOp on the LR placement, so it fires immediately
-        BEFORE the LR ds_read.  Firing it at ui%R == 0 means the swap
-        happens between outer iter N's last copy and outer iter N+1's
-        first copy — i.e. AFTER all R copies of outer iter N have consumed
-        the current half (matching the design intent).  ui%R != 0 copies
-        emit nothing.
+        Decouple-scale-DU (data path): under scaleSchedulingPeriod (R) > 1
+        the unroll factor is expanded to R body copies per outer iter, and
+        each body copy processes a DIFFERENT K-position of MFMA work (op_sel
+        selects which K byte of the packed-R-K-positions scale VGPR is used
+        for that copy's MFMA).  For PGR>=2 with PRELOOP-prefetched data,
+        the per-iter cadence is "consume R K-positions from one LDS half,
+        prefetch R K-positions to the OTHER half".  Each body copy alternates
+        which half it reads from, so the LDS read-side swap (v_xor on the
+        sharedVgprLROffset) must fire EVERY body copy (R toggles per outer
+        iter = net identity, with halves alternating per copy).
+        ─ ui=0 reads from one half, ui=R-1 reads from the other ─ and the
+        next outer iter's ui=0 picks up where this iter's ui=R-1 left off.
+        Firing only at ui%R == 0 (the old behavior) caused all R body copies
+        to read from the SAME half, so C1+ MFMAs got stale data from the
+        previous outer iter's prefetch, producing wrong results for K>=512
+        in subtile_mxfp8_mt256 PGR=2.
 
-        For R == 1 the gate (ui%1 == 0) is always true and the output is
-        bit-identical to the pre-R-period emitter (lr_inc fires every body
-        copy, same as today's per-body alternation).
+        For R == 1 the loop has exactly one body copy per outer iter, so
+        "every body copy" reduces to "every outer iter" — bit-identical to
+        legacy R=1 behavior.
 
         Scale lr_inc (SA/SB) ops are gated out of this handler entirely by
         InstructionEmitter.populate via _scale_op_gated_out (at ui%R != R-1
         for scale lr_inc; the asymmetry comes from scale lr/gr_inc being a
         single atomic op rather than the data path's split SRD-advance vs
-        LDS-swap), so the gate below only governs data (A/B) tensors in
+        LDS-swap), so the path below only governs data (A/B) tensors in
         practice.
         """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        R = self.config.scaleSchedulingPeriod
         module = Module()
-        if tensor in ('A', 'B') and R > 1 and (unroll_iter % R) != 0:
-            return []
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
@@ -265,19 +266,25 @@ class InstructionEmitter:
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor.
 
         Decouple-scale-DU (data path): the data SRD must advance on EVERY
-        body copy so the next GR reads the next data-DU of K, but the LDS
-        write-side swap (XOR LocalWriteBaseAddr with Swap) is an outer-iter
-        boundary event — it flips which LDS half the next R-period worth
-        of GRs writes into.  With scaleSchedulingPeriod (R) > 1 the unroll
-        factor expands to R body copies per outer iter; we want the LDS
-        swap to fire exactly once per outer iter at ui%R == 0 (so the next
-        period's R GRs target the OTHER half).  The SRD advance still fires
-        every copy, cumulatively advancing by R*DU per outer iter as
-        required by the data layout.
+        body copy so the next GR reads the next data-DU of K (cumulatively
+        walking R*DU per outer iter under R>1).  The LDS write-side swap
+        (s_xor LocalWriteBaseAddr with Swap) also fires on EVERY body copy:
+        this is the mirror of the read-side cadence in emit_lr_inc — each
+        body copy alternates which LDS half it WRITES to, so consecutive
+        body copies inside one outer iter prefetch their K-positions to
+        DIFFERENT halves without overwriting each other.  Net per outer
+        iter = R toggles = identity, leaving the LW pointer back at its
+        outer-iter-start state for the next iter's first body copy to
+        target the same starting half as before.  Firing the LW swap only
+        at ui%R == 0 (the old behavior) made body copies 1..R-1 inside an
+        outer iter overwrite each other's prefetched K-positions at the
+        same LDS offset — only the LAST copy's data survived, and earlier
+        body copies' data was lost.  This caused wrong MFMA inputs in
+        subsequent iterations and propagated to NGLL/NLL fall-through for
+        K>=512 in subtile_mxfp8_mt256 PGR=2.
 
-        For R == 1 the gate (ui%1 == 0) is always true so we emit both the
-        SRD advance and the LDS swap on every copy — bit-identical to the
-        pre-R-period emitter.
+        For R == 1 the loop is one-body-copy-per-outer-iter, so "every
+        body copy" = "every outer iter" — bit-identical to legacy.
 
         Scale gr_inc (SA/SB) ops are gated out of this handler entirely by
         InstructionEmitter.populate via _scale_op_gated_out at ui%R != 0,
@@ -286,15 +293,13 @@ class InstructionEmitter:
         """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        R = self.config.scaleSchedulingPeriod
         module = Module()
         if tensor in ('SA', 'SB'):
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
             module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-            if R == 1 or (unroll_iter % R) == 0:
-                module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+            module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_skip(self, source):
@@ -323,11 +328,17 @@ class InstructionEmitter:
             - scale lr_inc (LDS read-side swap) fires in the LAST copy
               of the period (ui%R == R-1) so the swap happens AFTER
               all R copies have read the same half (PGR=0 postOp
-              cadence; the residual R=2 PGR=2 K>=512 regression
-              traces to scale lr_inc being a preOp under PGR>0 but
-              that is left as-is per the scope of this fix —
-              touching the scale path globally regresses PGR=2 K=256
-              and PGR=0 cases).
+              cadence).  Under PGR>0 with R>1, LogicalScheduler.insert_gr_lr_inc
+              re-anchors scale lr_inc that the MT-transition walk
+              detected from a preOp on the new-MT scale LR to a postOp
+              on the last pre-transition scale LR (see the
+              "MT256 R=2 PGR=2 partition-handoff fix" comment in
+              LogicalScheduler.py).  The fallback case where a scale
+              tensor has only one LR placement (e.g. MXSA when
+              numPartitionsN=2 leaves no partition-0 LR for the
+              M-side scale) keeps the preOp anchor — empirically,
+              flipping that fallback to a postOp regresses PGR=2
+              K=512/1024 sharply, so the asymmetry is intentional.
             - scale LR (ds_read) is NOT gated: it re-issues the same
               4 B load into a cycled VGPR each copy.  MFMA op_sel
               picks the right K byte per copy (see emit_mfma).
