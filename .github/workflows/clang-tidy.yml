@@ -87,7 +87,7 @@ jobs:
 
           printf '%s\n' "${LIBS[@]}" \
             | jq -rs --argjson common "$COMMON_FILTERS" \
-              '.[] | "\(.name):\n" + ((.path_filters + $common)[] | "  - \"\(.)\"") + "\n"' \
+              '.[] | "\(.name):\n" + ((.path_filters + $common) | map("  - \"\(.)\"") | join("\n")) + "\n"' \
             > path-filters.yml
 
           LIBS_JSON=$(printf '%s\n' "${LIBS[@]}" | jq -sc '.')
