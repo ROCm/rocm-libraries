@@ -649,6 +649,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 10, 10, 2, 2] # MT 320x320 (large symmetric)
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
         - ActivationFuncCall: [0]
@@ -666,5 +667,5 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[160], [160], [1], [8, 1, 128]]
+          - Range: [[400], [400], [1], [1, 1, 128]]
         - BiasTypeArgs: ['b']
