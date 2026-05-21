@@ -903,6 +903,7 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
   regsPerMfma = 16
   numMfma = totalRegs // regsPerMfma
+
   if numMfma > 0:
     tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
     module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
