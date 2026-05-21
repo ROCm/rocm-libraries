@@ -49,11 +49,8 @@ rocblas_axpy_kernel(rocblas_int    n,
     int64_t  tid   = blockIdx.x * NB + threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha)
         {
@@ -65,10 +62,7 @@ rocblas_axpy_kernel(rocblas_int    n,
                 *ty = (*ty) + Tex(alpha) * (*tx);
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //!
@@ -92,11 +86,8 @@ rocblas_saxpy_2_kernel(rocblas_int    n,
     int64_t  tid   = (blockIdx.x * NB + threadIdx.x) * 2;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha)
@@ -119,10 +110,7 @@ rocblas_saxpy_2_kernel(rocblas_int    n,
                 ty[tid] = ty[tid] + Tex(alpha) * tx[tid];
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //!
@@ -157,12 +145,9 @@ rocblas_axpy_kernel_batched(rocblas_int    n,
         int64_t ix = tid * incx;
         int64_t iy = tid * incy;
 
-#if DEVICE_GRID_YZ_16BIT
-        // note non-standard looping for batch so no DEVICE_GRID_SETUP
+        // note non-standard looping for batch
         do
         {
-#endif
-
             for(int i = 0; i < 4; i++)
             {
                 if(batch + i < batch_count)
@@ -180,9 +165,7 @@ rocblas_axpy_kernel_batched(rocblas_int    n,
                 }
             }
 
-#if DEVICE_GRID_YZ_16BIT
         } while((batch += gridDim.z * DIM_Y * 4) < batch_count);
-#endif
     }
 }
 
@@ -206,11 +189,8 @@ rocblas_haxpy_mod_8_kernel(rocblas_int    n_mod_8,
     int64_t  tid   = blockIdx.x * NB + threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha)
@@ -222,10 +202,7 @@ rocblas_haxpy_mod_8_kernel(rocblas_int    n_mod_8,
                 *ty += alpha * (*tx);
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //!
@@ -247,11 +224,8 @@ rocblas_haxpy_mlt_8_kernel(rocblas_int    n_mlt_8,
     int64_t t8id = threadIdx.x + blockIdx.x * NB;
 
     uint32_t batch = blockIdx.z;
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         // Load alpha into both sides of a rocblas_half2 for fma instructions.
         auto alpha_value = load_scalar(alpha_device_host, batch, stride_alpha);
@@ -315,9 +289,7 @@ rocblas_haxpy_mlt_8_kernel(rocblas_int    n_mlt_8,
                 (*ay)[7] = z3[1];
             }
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //!

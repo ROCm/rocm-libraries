@@ -121,11 +121,8 @@ rocblas_rot_kernel(rocblas_int    n,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto c = std::real(load_scalar(c_in, batch, c_stride));
         auto s = load_scalar(s_in, batch, s_stride);
@@ -133,8 +130,5 @@ rocblas_rot_kernel(rocblas_int    n,
         auto y = load_ptr_batch(y_in, batch, offset_y, stride_y);
 
         rocblas_rot_kernel_calc<API_INT, Tex>(n, x, incx, y, incy, c, s);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }

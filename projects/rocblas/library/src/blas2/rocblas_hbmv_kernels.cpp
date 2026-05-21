@@ -187,11 +187,8 @@ rocblas_hbmvn_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
         const auto* x = cond_load_ptr_batch(alpha, xa, batch, shiftx, stridex);
 
@@ -199,10 +196,7 @@ rocblas_hbmvn_kernel(bool           is_upper,
 
         rocblas_hbmvn_kernel_calc<DIM_X, DIM_Y>(
             is_upper, n, k, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**

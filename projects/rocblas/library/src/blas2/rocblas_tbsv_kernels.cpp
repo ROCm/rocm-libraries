@@ -225,13 +225,6 @@ rocblas_tbsv_kernel(rocblas_operation transA,
                     int64_t           incx,
                     rocblas_stride    stride_x)
 {
-    uint32_t batch = blockIdx.z;
-
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
-    {
-#endif
 
         const auto* A = load_ptr_batch(Aa, blockIdx.x, shift_A, stride_A);
         auto*       x = load_ptr_batch(xa, blockIdx.x, shift_x, stride_x);
@@ -252,9 +245,6 @@ rocblas_tbsv_kernel(rocblas_operation transA,
             rocblas_tbsv_backward_substitution_calc<CONJ, true, BLK_SIZE>(
                 is_unit_diag, n, k, A, lda, x, incx);
 
-#if DEVICE_GRID_YZ_16BIT
-    }
-#endif
 }
 
 template <typename TConstPtr, typename TPtr>

@@ -161,11 +161,8 @@ rocblas_copy_matrix_trsm(rocblas_int    rows,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const T* xa = load_ptr_batch(a, batch, offset_a, stride_a);
         T*       xb = load_ptr_batch(b, batch, offset_b, stride_b);
@@ -174,10 +171,7 @@ rocblas_copy_matrix_trsm(rocblas_int    rows,
         for(size_t ty = blockIdx.y * DIM_Y + threadIdx.y; ty < cols && tx < rows;
             ty += DIM_Y * gridDim.y)
             xb[tx + size_t(ldb) * ty] = xa[tx + size_t(lda) * ty];
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* ===============copy helper============================================= */
@@ -245,20 +239,14 @@ rocblas_set_matrix_trsm(int64_t        rows,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         T* xa = load_ptr_batch(a, batch, offset_a, stride_a);
 
         if(tx < rows && ty < cols)
             xa[tx + lda * ty] = T(0.0);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* ===============set helper============================================= */
@@ -2018,11 +2006,8 @@ rocblas_trsm_small_right_device(rocblas_fill      uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
@@ -2270,10 +2255,7 @@ rocblas_trsm_small_right_device(rocblas_fill      uplo,
             for(int i = 0; i < n; i++)
                 B[i * size_t(ldb) + tx] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /*
@@ -2303,11 +2285,8 @@ rocblas_trsm_small_64_right_device(rocblas_fill      uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
@@ -2406,10 +2385,7 @@ rocblas_trsm_small_64_right_device(rocblas_fill      uplo,
             for(int i = 0; i < n; i++)
                 B[i * size_t(ldb) + tx] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* T = float, double, etc.
@@ -2448,11 +2424,8 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
@@ -2629,10 +2602,7 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
                     break;
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <const int NB,
@@ -2664,11 +2634,8 @@ rocblas_trsm_small_left_device_sharedB(rocblas_fill      uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
@@ -2857,10 +2824,7 @@ rocblas_trsm_small_left_device_sharedB(rocblas_fill      uplo,
             for(int i = 0; i <= maxColA; i++)
                 B[i + tx * size_t(ldb)] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /*
@@ -2890,11 +2854,8 @@ rocblas_trsm_small_64_left_device(rocblas_fill      uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
@@ -2994,10 +2955,7 @@ rocblas_trsm_small_64_left_device(rocblas_fill      uplo,
             for(int i = 0; i < maxColB; i++)
                 B[i * size_t(ldb) + tx] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* T = float, double, etc.
@@ -3190,11 +3148,8 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
@@ -3274,10 +3229,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
             // store back to mem
             B[offY * size_t(ldb_norm) + tx * size_t(ldb_trans)] = valB;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T,
@@ -3312,11 +3264,8 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_forward_substitution(rocblas_operati
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
         auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
@@ -3386,10 +3335,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_forward_substitution(rocblas_operati
             // store back to mem
             B[offY * size_t(ldb_norm) + tx * size_t(ldb_trans)] = valB;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T,

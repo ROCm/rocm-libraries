@@ -44,11 +44,8 @@ rocblas_copy_kernel(rocblas_int    n,
     int64_t  tid   = blockIdx.x * DIM_X + threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         auto*       y = load_ptr_batch(ya, batch, shifty, stridey);
@@ -57,10 +54,7 @@ rocblas_copy_kernel(rocblas_int    n,
 
             y[tid * incy] = x[tid * incx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //! @brief Optimized kernel for the floating points.
@@ -79,11 +73,8 @@ rocblas_scopy_2_kernel(rocblas_int n,
     int64_t  tid   = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         auto*       y = load_ptr_batch(ya, batch, shifty, stridey);
@@ -96,10 +87,7 @@ rocblas_scopy_2_kernel(rocblas_int n,
         }
         if(n % 2 != 0 && tid == n - 1)
             y[tid] = x[tid];
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, int NB, typename T, typename U>

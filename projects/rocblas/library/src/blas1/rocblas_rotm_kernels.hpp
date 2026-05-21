@@ -97,11 +97,8 @@ rocblas_rotm_kernel_batched(rocblas_int    n,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto p    = load_ptr_batch(param, batch, offset_param, stride_param);
         auto flag = p[0];
@@ -124,10 +121,7 @@ rocblas_rotm_kernel_batched(rocblas_int    n,
                                  h12,
                                  h22,
                                  batch);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <int NB, typename T, typename U>

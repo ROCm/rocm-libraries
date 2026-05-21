@@ -63,19 +63,14 @@ namespace
         auto beta = load_scalar(beta_host_device);
 
         uint32_t batch = blockIdx.z;
-#if DEVICE_GRID_YZ_16BIT
-        DEVICE_GRID_SETUP
-        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+        for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
         {
-#endif
 
             auto C = cond_load_ptr_batch(beta != 0, CP_array, batch, shift_c, stride_c);
             auto D = load_ptr_batch(DP_array, batch, shift_d, stride_d);
             gemm_ex_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc, D, ldd);
 
-#if DEVICE_GRID_YZ_16BIT
         }
-#endif
     }
 
     template <typename TScal, typename TConstPtr, typename TPtr>
@@ -172,17 +167,12 @@ namespace
         auto     beta  = load_scalar(beta_host_device);
         uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-        DEVICE_GRID_SETUP
-        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+        for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
         {
-#endif
             auto C = load_ptr_batch(dC, batch, shift_c, stride_c);
             rocblas_gemm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
 
-#if DEVICE_GRID_YZ_16BIT
         }
-#endif
     }
 
     template <typename TScal, typename TConstPtr>
@@ -282,11 +272,8 @@ namespace
         int      bly   = blockIdx.y; // block's n position
         uint32_t batch = blockIdx.z; // block's matrix in the batch
 
-#if DEVICE_GRID_YZ_16BIT
-        DEVICE_GRID_SETUP
-        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+        for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
         {
-#endif
 
             auto* dA = load_ptr_batch(dA_input, batch, a_st_or_of);
             auto* dB = load_ptr_batch(dB_input, batch, b_st_or_of);
@@ -419,9 +406,7 @@ namespace
                 }
             }
 
-#if DEVICE_GRID_YZ_16BIT
         }
-#endif
     }
 
     // general alpha, beta, restricted m, n, k to multiples of blocks
@@ -467,11 +452,8 @@ namespace
         int      bly   = blockIdx.y; // block's n position
         uint32_t batch = blockIdx.z; // block's matrix in the batch
 
-#if DEVICE_GRID_YZ_16BIT
-        DEVICE_GRID_SETUP
-        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+        for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
         {
-#endif
 
             auto* dA = load_ptr_batch(dA_input, batch, a_st_or_of);
             auto* dB = load_ptr_batch(dB_input, batch, b_st_or_of);
@@ -591,9 +573,7 @@ namespace
                 }
             }
 
-#if DEVICE_GRID_YZ_16BIT
         }
-#endif
     }
 
     template <bool BATCHED, typename T, typename TiConstPtr, typename ToConstPtr, typename ToPtr>

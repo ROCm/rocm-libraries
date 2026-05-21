@@ -636,15 +636,12 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
                                     rocblas_int    batch_count)
 {
 // gfx90a gfx942 kernels
-#if defined(__SPIRV__) || defined(__gfx90a__) || defined(__SPIRV__) || defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx90a__) || defined(__gfx942__)
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
@@ -656,10 +653,7 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
 
         rocblas_gemvt_row_vectorized_kernel_calc<CONJ, TILE_DIM_X, TILE_DIM_Y>(
             m, n, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 
 #endif
 }
@@ -697,28 +691,18 @@ rocblas_gemv_scal_kernel(rocblas_int    n,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto* __restrict__ y = load_ptr_batch(ya, batch, offset_y, stride_y);
         auto beta            = load_scalar(beta_device_host, batch, stride_beta);
 
         if(beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
         rocblas_gemv_scal_kernel_calc<NB>(n, beta, stride_beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //
@@ -1558,21 +1542,14 @@ rocblas_gemvn_double_buffered_kernel(rocblas_int    m,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
@@ -1582,10 +1559,7 @@ rocblas_gemvn_double_buffered_kernel(rocblas_int    m,
 
         rocblas_gemvn_double_buffered_kernel_calc<DIM_X, DIM_Y, elements_per_thread>(
             m, n, alpha, A, lda, x, incx, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool CONJ,
@@ -1616,21 +1590,14 @@ rocblas_gemvt_double_buffered_kernel(rocblas_int    m,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
@@ -1640,10 +1607,7 @@ rocblas_gemvt_double_buffered_kernel(rocblas_int    m,
 
         rocblas_gemvt_double_buffered_kernel_calc<CONJ, DIM_X, elements_per_thread>(
             m, n, alpha, A, lda, x, incx, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <int DIM_X, int DIM_Y, typename T_Index, typename Ti, typename Tex, typename To>
@@ -1674,22 +1638,15 @@ rocblas_gemvn_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
 
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
@@ -1699,10 +1656,7 @@ rocblas_gemvn_kernel(rocblas_int    m,
 
         rocblas_gemvn_kernel_calc<DIM_X, DIM_Y, T_Index>(
             m, n, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // lda always cast to size_t so single kernel
@@ -1731,22 +1685,15 @@ rocblas_gemvt_kernel(rocblas_int    m,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
 
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
@@ -1755,10 +1702,7 @@ rocblas_gemvt_kernel(rocblas_int    m,
         auto* y = load_ptr_batch(ya, batch, shifty, stridey);
 
         rocblas_gemvt_kernel_calc<CONJ, NB_X>(m, n, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool CONJ, int NB_X, typename T_Index, typename Ti, typename Tex, typename To>
@@ -1785,21 +1729,14 @@ rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
 
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
@@ -1809,10 +1746,7 @@ rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
 
         rocblas_gemvt_reduce_kernel_calc<CONJ, NB_X, T_Index>(
             m, n, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool CONJ, int NB_X, int WIN, typename T_Index, typename Ti, typename U, typename Tex>
@@ -1834,11 +1768,8 @@ rocblas_gemvt_sn_kernel(rocblas_int    m,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
@@ -1847,10 +1778,7 @@ rocblas_gemvt_sn_kernel(rocblas_int    m,
 
         rocblas_gemvt_sn_kernel_calc<CONJ, NB_X, WIN, T_Index>(
             m, n, alpha, A, lda, x, incx, workspace, batch);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <int NB, int WIN, typename Tex, typename U, typename To>
@@ -1867,20 +1795,14 @@ rocblas_gemvt_sn_reduce(rocblas_int    n_sums,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto* y    = load_ptr_batch(ya, batch, shifty, stridey);
         auto  beta = load_scalar(beta_device_host, batch, stride_beta);
 
         rocblas_gemvt_sn_reduce_calc<NB, WIN>(n_sums, beta, y, incy, workspace, batch);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool CONJ, int NB_X, typename Ti, typename Tex, typename To>
@@ -2001,7 +1923,7 @@ rocblas_gemvn_sm_mn_batched_kernel(rocblas_int    m,
                                    rocblas_int    batch_count)
 {
 // gfx90a gfx942 kernels
-#if defined(__SPIRV__) || defined(__gfx90a__) || defined(__SPIRV__) || defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx90a__) || defined(__gfx942__)
 
     const int b = blockIdx.x * blockDim.y + threadIdx.y;
     if(b >= batch_count)

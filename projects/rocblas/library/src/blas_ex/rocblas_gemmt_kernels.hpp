@@ -80,11 +80,8 @@ rocblas_internal_gemmt_kernel(rocblas_int    N,
 
     uint32_t batch = blockIdx.z; // block's matrix in the batch
 
-#if DEVICE_GRID_YZ_16BIT
-    DEVICE_GRID_SETUP
-    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto* dA = load_ptr_batch(dA_array, batch, stride_a);
         auto* dB = load_ptr_batch(dB_array, batch, stride_b);
@@ -165,10 +162,7 @@ rocblas_internal_gemmt_kernel(rocblas_int    N,
                 }
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, typename TScal, typename TConstPtr, typename TPtr>
