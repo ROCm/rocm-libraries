@@ -305,3 +305,5 @@ cmake                                                                           
 
 By default, the Dispatcher generates a smaller `tests` set of kernels. To generate a full `profiler` set of 
 kernels, use CMake flag `-D DISPATCHER_CONFIG_SET=profiler` at the configuration step.
+
+To build only the CK Tile profiler, one can use an additional flag `-DCK_PROFILER_OP_FILTER="_tile"`.
