@@ -712,14 +712,30 @@ namespace TensileLite
         {
             if(sizeMapping.streamK == 4)
             {
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                int overrideTiles = pAMDGPU->skTiles;
+                int overrideSplit = pAMDGPU->skSplit;
+
                 auto itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
                 auto tiles = problem.getNumTiles(sizeMapping, 1);
+                // Determine number of stream-k tiles and splitting factor
                 uint32_t skTiles = 0;
-                uint32_t skItersPerWI = 0;
-                
+                uint32_t skSplit = 2;
+                // Check for debug overrides
+                if (overrideTiles > -1)
+                    skTiles = overrideTiles;
+                if (overrideSplit > -1)
+                    skSplit = overrideSplit;
+                // Calculate number of stream-k iterations per workitem
+                uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
+                // Calculate real splitting factor in case iterations don't divide evenly
+                skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+                uint32_t totalItems = (tiles - skTiles) + skTiles * skSplit;
+
                 args.template append<uint32_t>("ItersPerTile", itersPerTile);
-                args.template append<uint32_t>("TotalTiles", tiles);
+                args.template append<uint32_t>("TotalItems", totalItems);
                 args.template append<uint32_t>("SKTiles", skTiles);
+                args.template append<uint32_t>("SKSplit", skSplit);
                 args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
                 args.template append<uint32_t>("SKGrid", sk.grid);
             }

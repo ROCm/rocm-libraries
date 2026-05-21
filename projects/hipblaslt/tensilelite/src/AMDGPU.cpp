@@ -57,6 +57,8 @@ namespace TensileLite
         , skGridMultiplier(getSKGridMultiplier())
         , skFixedGrid(getSKFixedGrid())
         , skFullTiles(getSKFullTiles())
+        , skTiles(getSKTiles())
+        , skSplit(getSKSplit())
         , fixedWGM(getFixedWGM())
         , fixedWGMXCC(getFixedWGMXCC())
         , fixedWGMXCCCHUNK(getFixedWGMXCCCHUNK())
