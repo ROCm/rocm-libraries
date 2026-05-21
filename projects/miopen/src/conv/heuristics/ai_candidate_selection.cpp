@@ -247,7 +247,6 @@ namespace {
 // ExtractTunaNetND2dFeatures emits 46 features; the input_encoder model expects 43 because
 // direction one-hot is omitted (direction is a constant in CandidateSelection metadata).
 constexpr std::size_t kCandidateSelectionEncoderInputSize = 43;
-constexpr std::size_t kCandidateSelectionKernelConfigEncoderInputSize = 39;
 
 float FeatureAt(const std::map<std::string, float>& features, const std::string& key)
 {
@@ -447,6 +446,28 @@ std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& me
     return active;
 }
 
+// Derived feature count from ConvKernConfigPreprocessor::_count_derived_features (models.py).
+constexpr std::size_t kKernelConfigDerivedFeatureCount = 10;
+
+std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata)
+{
+    const auto active_params           = ActiveOutputParams(metadata);
+    const auto& sequence_encodings     = metadata.sequence_encodings();
+    std::size_t onehot_features        = 0;
+    std::size_t raw_numerical_features = 0;
+
+    for(const auto& param_name : active_params)
+    {
+        const auto enc_it = sequence_encodings.find(param_name);
+        if(enc_it != sequence_encodings.end())
+            onehot_features += enc_it->second.size();
+        else
+            ++raw_numerical_features;
+    }
+
+    return onehot_features + raw_numerical_features + kKernelConfigDerivedFeatureCount;
+}
+
 bool ParamNameEndsWith(const std::string& param_name, const std::string& suffix)
 {
     return param_name.size() >= suffix.size() &&
@@ -499,9 +520,10 @@ MIOPEN_INTERNALS_EXPORT
 std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
     const std::vector<float>& raw_config_features, const CandidateSelectionMetadata& metadata)
 {
-    const auto active_params     = ActiveOutputParams(metadata);
-    const auto& sequence_encodings = metadata.sequence_encodings();
-    const float missing_token    = metadata.GetMissingValueToken();
+    const auto active_params              = ActiveOutputParams(metadata);
+    const auto& sequence_encodings        = metadata.sequence_encodings();
+    const float missing_token             = metadata.GetMissingValueToken();
+    const std::size_t expected_output_dim = ComputeKernelConfigPreprocessorOutputDim(metadata);
 
     if(raw_config_features.size() != active_params.size())
     {
@@ -511,7 +533,7 @@ std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
     }
 
     std::vector<float> engineered;
-    engineered.reserve(kCandidateSelectionKernelConfigEncoderInputSize);
+    engineered.reserve(expected_output_dim);
 
     // 1. One-hot encoding for categorical output params (ConvKernConfigPreprocessor.forward).
     for(std::size_t i = 0; i < active_params.size(); ++i)
@@ -571,11 +593,11 @@ std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
     // K-dimension.
     engineered.push_back(std::log1pf(k_per_block));
 
-    if(engineered.size() != kCandidateSelectionKernelConfigEncoderInputSize)
+    if(engineered.size() != expected_output_dim)
     {
         MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected "
-                     + std::to_string(kCandidateSelectionKernelConfigEncoderInputSize)
-                     + " features, got " + std::to_string(engineered.size()));
+                     + std::to_string(expected_output_dim) + " features, got "
+                     + std::to_string(engineered.size()));
     }
 
     return engineered;
