@@ -19,6 +19,7 @@ add_executable(
     ConvImplicitGemmPlanBuilderTest.cpp
     GraphSignatureTest.cpp
     HipModuleSmokeTest.cpp
+    IntegrationGpuCkDslConvFp16Test.cpp
     JitCacheTest.cpp
     PerfMeasurementTest.cpp
 )
