@@ -184,6 +184,7 @@ struct Modifier {
         FLAT,
         GLOBAL,
         MUBUF,
+        CACHE_SCOPE,
         SMEM,
         SDWA,
         DPP,
@@ -320,6 +321,19 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    MUBUFScope scope;
+};
+
+// Carries just the cache scope token for SOPP-format memory fences such as
+// global_wb / global_inv on gfx1250+. These instructions are not buffer ops
+// and do not need offen/glc/slc/lds/etc., so they cannot reuse MUBUFModifiers
+// without coupling to fields that may diverge in future MUBUF refactors.
+struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::CACHE_SCOPE;
+
+    CacheScopeModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+        : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
+
     MUBUFScope scope;
 };
 

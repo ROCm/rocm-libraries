@@ -37,7 +37,7 @@ bool genInstructions(const std::string& arch, const std::string& inputDir,
 
 using namespace stinkytofu;
 
-void usage() {
+static void usage() {
     std::cout
         << "Usage: tablegen <outdir> <hardwareDir>\n"
         << "       tablegen --gen-instructions --arch=<gfx> --input-dir=<dir> --output-dir=<dir>\n"
