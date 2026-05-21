@@ -1617,6 +1617,28 @@ namespace rocisa
         }
     };
 
+    struct SSetGprIdxU32 : public CommonInstruction
+    {
+        SSetGprIdxU32(const std::shared_ptr<Container>& dst,
+                      const InstructionInput&           src,
+                      const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_set_gpr_idx_u32");
+        }
+
+        SSetGprIdxU32(const SSetGprIdxU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSetGprIdxU32>(*this);
+        }
+    };
+
     struct SSetRegIMM32B32 : public CommonInstruction
     {
         SSetRegIMM32B32(const std::shared_ptr<Container>& dst,

@@ -230,15 +230,20 @@ namespace rocisa
             int newVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
             int oriVal = getVgprMsb();
             if(newVal != oriVal && !outputInlineAsm){
-                // Base layer WA: need to store previous msb value in [15:8] bits.
-                int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
-                std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
-                std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
-                    ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
-                msbStr = formatStr(false, msbStr, msbComment, false);
-                // Base layer WA: add a no-vgpr inst if oriVal is non-determined and right after label
-                if(oriVal == -1)
-                    msbStr = "s_nop 0\n" + msbStr;
+                std::string msbStr;
+                if(getAsmCaps()["HasWMMA_V4"])
+                    msbStr = "s_set_vgpr_frames " + std::to_string(newVal) + "\n";
+                else {
+                    // Base layer WA: need to store previous msb value in [15:8] bits.
+                    int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
+                    msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
+                    std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
+                        ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
+                    msbStr = formatStr(false, msbStr, msbComment, false);
+                    // Base layer WA: add a no-vgpr inst if oriVal is non-determined and right after label
+                    if(oriVal == -1)
+                        msbStr = "s_nop 0\n" + msbStr;
+                }
                 kStr = msbStr + kStr;
                 rocIsa::getInstance().setVgprMsb(newVal);
             }

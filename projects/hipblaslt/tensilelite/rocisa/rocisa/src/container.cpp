@@ -501,6 +501,20 @@ void init_containers(nb::module_ m)
                  new(&self) rocisa::HWRegContainer(std::get<0>(t), std::get<1>(t));
              });
 
+    nb::class_<rocisa::GprIdxSelContainer, rocisa::Container>(m_con, "GprIdxSelContainer")
+        .def(nb::init<std::string>(), nb::arg("sel"))
+        .def_rw("sel", &rocisa::GprIdxSelContainer::sel)
+        .def("__str__", &rocisa::GprIdxSelContainer::toString)
+        .def("__deepcopy__",
+             [](const rocisa::GprIdxSelContainer& self, nb::dict&) {
+                 return rocisa::GprIdxSelContainer(self);
+             })
+        .def("__getstate__",
+             [](const rocisa::GprIdxSelContainer& self) { return std::make_tuple(self.sel); })
+        .def("__setstate__", [](rocisa::GprIdxSelContainer& self, std::tuple<std::string> t) {
+            new(&self) rocisa::GprIdxSelContainer(std::get<0>(t));
+        });
+
     nb::class_<rocisa::RegName>(m_con, "RegName")
         .def(nb::init<const std::string&, const std::vector<int>&>(),
              nb::arg("name"),

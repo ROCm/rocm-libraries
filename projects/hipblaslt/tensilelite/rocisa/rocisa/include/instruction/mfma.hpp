@@ -354,9 +354,33 @@ namespace rocisa
         std::string toString() const override
         {
             auto        newInstStr = preStr();
+            std::vector<std::shared_ptr<RegisterContainer>> regs = {acc, a, b, acc2};
+            std::vector<bool> oldFlags;
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                oldFlags.reserve(regs.size());
+                for(const auto& reg : regs)
+                {
+                    oldFlags.push_back(reg ? reg->disableVgprMsbEncoding : false);
+                    // This instruction path supports native 10-bit VGPR operand encoding,
+                    // so disable MSB/frame-based VGPR remapping while formatting operands.
+                    if(reg)
+                        reg->disableVgprMsbEncoding = true;
+                }
+            }
             std::string kStr       = newInstStr + " " + getArgStr();
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {a, b, acc2}, acc);
+            // Native 10-bit VGPR instruction set: do not emit frame/MSB setup.
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                for(size_t i = 0; i < regs.size(); ++i)
+                {
+                    if(regs[i])
+                        regs[i]->disableVgprMsbEncoding = oldFlags[i];
+                }
+            }
+            if(!getAsmCaps()["HasWMMA_V4"])
+                setMsb(kStr, {a, b, acc2}, acc);
             return kStr;
         }
 
@@ -576,8 +600,32 @@ namespace rocisa
         std::string toString() const override
         {
             auto        newInstStr = preStr();
-            std::string kStr       = newInstStr + " " + getArgStr();
-            setMsb(kStr, {a, b, acc2}, acc);
+            std::vector<std::shared_ptr<RegisterContainer>> regs = {acc, a, b, acc2, mxsa, mxsb};
+            std::vector<bool> oldFlags;
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                oldFlags.reserve(regs.size());
+                for(const auto& reg : regs)
+                {
+                    oldFlags.push_back(reg ? reg->disableVgprMsbEncoding : false);
+                    // This instruction path supports native 10-bit VGPR operand encoding,
+                    // so disable MSB/frame-based VGPR remapping while formatting operands.
+                    if(reg)
+                        reg->disableVgprMsbEncoding = true;
+                }
+            }
+            std::string kStr = newInstStr + " " + getArgStr();
+            // Native 10-bit VGPR instruction set: do not emit frame/MSB setup.
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                for(size_t i = 0; i < regs.size(); ++i)
+                {
+                    if(regs[i])
+                        regs[i]->disableVgprMsbEncoding = oldFlags[i];
+                }
+            }
+            if(!getAsmCaps()["HasWMMA_V4"])
+                setMsb(kStr, {a, b, acc2}, acc);
             return formatWithComment(kStr);
         }
     };
@@ -698,9 +746,30 @@ namespace rocisa
         std::string toString() const override
         {
             auto        newInstStr = preStr();
-            std::string kStr       = newInstStr + " " + getArgStr();
+            std::vector<std::shared_ptr<RegisterContainer>> regs = {acc, a, b, metadata};
+            std::vector<bool> oldFlags;
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                oldFlags.reserve(regs.size());
+                for(const auto& reg : regs)
+                {
+                    oldFlags.push_back(reg ? reg->disableVgprMsbEncoding : false);
+                    if(reg)
+                        reg->disableVgprMsbEncoding = true;
+                }
+            }
+            std::string kStr = newInstStr + " " + getArgStr();
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                for(size_t i = 0; i < regs.size(); ++i)
+                {
+                    if(regs[i])
+                        regs[i]->disableVgprMsbEncoding = oldFlags[i];
+                }
+            }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {a, b, metadata}, acc);
+            if(!getAsmCaps()["HasWMMA_V4"])
+                setMsb(kStr, {a, b, metadata}, acc);
             return kStr;
         }
 

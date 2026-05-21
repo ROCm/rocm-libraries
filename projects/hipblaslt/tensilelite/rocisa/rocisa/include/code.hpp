@@ -747,7 +747,8 @@ namespace rocisa
                 // macro formatting
                 std::string tmp = x->toString();
                 size_t pos = tmp.find("\n");
-                if(tmp.find("s_set_vgpr_msb") != std::string::npos)
+                if(tmp.find("s_set_vgpr_msb") != std::string::npos
+                   || tmp.find("s_set_vgpr_frames") != std::string::npos)
                     tmp.insert(pos+1, "    ");
                 s += "    " + tmp;
             }

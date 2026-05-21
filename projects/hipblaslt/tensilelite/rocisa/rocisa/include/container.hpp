@@ -639,6 +639,34 @@ namespace rocisa
         std::vector<int> value;
     };
 
+    // Destination selector for s_set_gpr_idx_u32 (e.g. idx0, dst_idx123); not a physical SGPR.
+    struct GprIdxSelContainer : public Container
+    {
+        std::string sel;
+
+        explicit GprIdxSelContainer(std::string sel)
+            : Container()
+            , sel(std::move(sel))
+        {
+        }
+
+        GprIdxSelContainer(const GprIdxSelContainer& other)
+            : Container()
+            , sel(other.sel)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<GprIdxSelContainer>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return sel;
+        }
+    };
+
     struct RegName
     {
         std::string      name;
@@ -746,6 +774,9 @@ namespace rocisa
         int                    regIdx;
         int                    regNum;
         mutable  int           msb;
+        // Some opcodes support native 10-bit VGPR indices and must bypass
+        // MSB/frame-based VGPR rewriting in register string emission.
+        bool                   disableVgprMsbEncoding;
         bool                   isInlineAsm;
         bool                   isMinus;
         bool                   isAbs;
@@ -762,6 +793,7 @@ namespace rocisa
             , regIdx(regIdx)
             , regNum(int(ceil(regNum)))
             , msb(0)
+            , disableVgprMsbEncoding(false)
             , isInlineAsm(false)
             , isMinus(false)
             , isAbs(false)
@@ -783,6 +815,7 @@ namespace rocisa
             , regIdx(regIdx)
             , regNum(int(ceil(regNum)))
             , msb(0)
+            , disableVgprMsbEncoding(false)
             , isInlineAsm(false)
             , isMinus(false)
             , isAbs(isAbs)
@@ -798,6 +831,7 @@ namespace rocisa
             , regIdx(other.regIdx)
             , regNum(other.regNum)
             , msb(other.msb)
+            , disableVgprMsbEncoding(other.disableVgprMsbEncoding)
             , isInlineAsm(other.isInlineAsm)
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
@@ -823,6 +857,7 @@ namespace rocisa
             , regIdx(other.regIdx)
             , regNum(other.regNum)
             , msb(other.msb)
+            , disableVgprMsbEncoding(other.disableVgprMsbEncoding)
             , isInlineAsm(other.isInlineAsm)
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
@@ -840,6 +875,7 @@ namespace rocisa
                 regIdx      = other.regIdx;
                 regNum      = other.regNum;
                 msb         = other.msb;
+                disableVgprMsbEncoding = other.disableVgprMsbEncoding;
                 isInlineAsm = other.isInlineAsm;
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
@@ -858,6 +894,7 @@ namespace rocisa
                 regIdx      = other.regIdx;
                 regNum      = other.regNum;
                 msb         = other.msb;
+                disableVgprMsbEncoding = other.disableVgprMsbEncoding;
                 isInlineAsm = other.isInlineAsm;
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
@@ -1000,7 +1037,10 @@ namespace rocisa
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
             std::string msbStr = "";
-            if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v")
+            // Native 10-bit VGPR opcodes (for example v_wmma family) should use
+            // direct VGPR indices, not frame/MSB remapping with -256 offsets.
+            if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v"
+               && !disableVgprMsbEncoding)
             {
                 setMsb();
                 if(msb > 0)

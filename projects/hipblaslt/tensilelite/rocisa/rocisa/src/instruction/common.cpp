@@ -696,6 +696,17 @@ void common_inst(nb::module_ m_common)
             return new rocisa::SSetRegB32(self);
         });
 
+    nb::class_<rocisa::SSetGprIdxU32, rocisa::CommonInstruction>(m_common, "SSetGprIdxU32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SSetGprIdxU32& self, nb::dict&) {
+            return new rocisa::SSetGprIdxU32(self);
+        });
+
     nb::class_<rocisa::SSetRegIMM32B32, rocisa::CommonInstruction>(m_common, "SSetRegIMM32B32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
