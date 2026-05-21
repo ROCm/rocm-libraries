@@ -60,6 +60,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     EXECLO,
     EXECHI,
     HWRegContainer,
+    MemTokenData,
     Holder,
     HolderContainer,
     RegisterContainer,
@@ -1744,6 +1745,50 @@ class TestVCCWavefront(_WavefrontTestCase):
 
     def test_to_string_alias(self):
         self.assertEqual(VCC().toString(), str(VCC()))
+
+
+# ===========================================================================
+# MemTokenData (T5)
+# ===========================================================================
+
+
+class TestMemTokenData(unittest.TestCase):
+    def test_empty_tokens(self):
+        self.assertEqual(str(MemTokenData()), "mem_token:")
+        self.assertEqual(MemTokenData().toString(), "mem_token:")
+
+    def test_single_and_multiple_tokens(self):
+        self.assertEqual(str(MemTokenData([7])), "mem_token: 7")
+        self.assertEqual(str(MemTokenData([1, 2, 3])), "mem_token: 1, 2, 3")
+
+    def test_default_arg_none(self):
+        m = MemTokenData(None)
+        self.assertEqual(m.tokens, [])
+
+    def test_tokens_list_copied(self):
+        raw = [1, 2]
+        m = MemTokenData(raw)
+        raw.append(3)
+        self.assertEqual(m.tokens, [1, 2])
+
+    def test_tokens_mutable_like_cpp_binding(self):
+        m = MemTokenData([1])
+        m.tokens.append(2)
+        self.assertEqual(str(m), "mem_token: 1, 2")
+
+    def test_is_container(self):
+        self.assertIsInstance(MemTokenData([0]), Container)
+
+    def test_clone_and_pickle(self):
+        m = MemTokenData([4, 5])
+        self.assertEqual(str(m.clone()), str(m))
+        self.assertEqual(str(copy.deepcopy(m)), str(m))
+        self.assertEqual(str(pickle.loads(pickle.dumps(m))), str(m))
+
+    def test_kernel_writer_style_single_meta(self):
+        # KernelWriterAssembly passes a one-element list from memTokenLdsBufferMeta.
+        m = MemTokenData([42])
+        self.assertEqual(str(m), "mem_token: 42")
 
 
 if __name__ == "__main__":

@@ -31,12 +31,12 @@ Done (real):
     - ``RegName``, ``RegisterContainer`` (:class:`Container`)   (T2)
     - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (T4)
     - ``HWRegContainer``                                      (T4)
+    - ``MemTokenData``                                        (T5)
     - ``Holder``, ``HolderContainer``, ``replaceHolder``      (T2)
     - ``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``            (T3)
     - ``ContinuousRegister``                                  (T3)
 
 TODO (dummy):
-    - ``MemTokenData``                                        (T5)
     - Modifier classes (``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/
       VOP3P/True16Modifiers``) — deferred to instruction-emit phase.
 """
@@ -1331,6 +1331,49 @@ class HWRegContainer(Container):
 
 
 # ---------------------------------------------------------------------------
+# MemTokenData -- virtual scheduling fence metadata (T5).
+# ---------------------------------------------------------------------------
+#
+# Attached to instructions via setMemToken(); emits no asm by itself but
+# carries token ids for the dependency graph. C++ binding exposes a
+# mutable ``tokens`` vector (def_rw).
+class MemTokenData(Container):
+    """Memory-token list carried on fence/barrier instructions.
+
+    Constructor: ``MemTokenData(tokens=[])``. ``tokens`` is a mutable
+    list of ints (mirrors C++ ``std::vector<int>``).
+    """
+
+    __slots__ = ("tokens",)
+
+    def __init__(self, tokens: Optional[List[int]] = None) -> None:
+        self.tokens: List[int] = list(tokens) if tokens is not None else []
+
+    def toString(self) -> str:
+        result = "mem_token:"
+        for i, tok in enumerate(self.tokens):
+            if i > 0:
+                result += ","
+            result += f" {tok}"
+        return result
+
+    def __repr__(self) -> str:
+        return f"MemTokenData(tokens={self.tokens!r})"
+
+    def __copy__(self) -> "MemTokenData":
+        return MemTokenData(self.tokens)
+
+    def __deepcopy__(self, memo: dict) -> "MemTokenData":
+        return MemTokenData(list(self.tokens))
+
+    def __getstate__(self) -> List[int]:
+        return list(self.tokens)
+
+    def __setstate__(self, state: List[int]) -> None:
+        self.tokens = list(state)
+
+
+# ---------------------------------------------------------------------------
 # Remaining surface kept as dummies (covered by later tasks).
 # ---------------------------------------------------------------------------
 
@@ -1343,4 +1386,3 @@ SDWAModifiers = make_dummy_class(f"{_P}.SDWAModifiers")
 DPPModifiers = make_dummy_class(f"{_P}.DPPModifiers")
 VOP3PModifiers = make_dummy_class(f"{_P}.VOP3PModifiers")
 True16Modifiers = make_dummy_class(f"{_P}.True16Modifiers")
-MemTokenData = make_dummy_class(f"{_P}.MemTokenData")

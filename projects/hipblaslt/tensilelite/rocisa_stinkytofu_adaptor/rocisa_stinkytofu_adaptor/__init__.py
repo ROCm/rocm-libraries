@@ -63,7 +63,7 @@ Not yet done (dummy):
       ``instruction``, ``functions``, ``asmpass``, ``macro``.
     - ``container``: register-reference layer + ``Container`` ABC and
       hardware tokens (``VCC`` / ``EXEC`` / ``EXECLO`` / ``EXECHI`` /
-      ``HWRegContainer``); ``*Modifiers`` / ``MemTokenData`` still dummy.
+      ``HWRegContainer``, ``MemTokenData``); ``*Modifiers`` still dummy.
 """
 
 from __future__ import annotations
