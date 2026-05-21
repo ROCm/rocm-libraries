@@ -17281,6 +17281,8 @@ class KernelWriterAssembly(KernelWriter):
     sizeTile0, sizeTile1 = du, mt
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
+    # TDM hardware padding not yet validated for subtile; assert until enabled in calcLdsPad.
+    assert ldsPadSize == 0, f"Subtile TDM padding not yet supported (LdsPad{tc}={kernel[f'LdsPad{tc}']})"
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))

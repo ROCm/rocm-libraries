@@ -2399,7 +2399,10 @@ class Solution(collections.abc.Mapping):
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
-        # SubtileImpl does not need LDS padding.
+        # SubtileImpl: LDS padding is disabled.
+        # gfx950 subtile uses software swizzle+rotation for bank conflict avoidance instead.
+        # gfx1250 subtile (TDM) currently has no bank conflict mitigation -- TDM hardware
+        # padding could be enabled here in the future by computing non-zero LdsPad values.
         if state["UseSubtileImpl"]:
           return 0, 0, 0, 0, 0
         isMX = state["ProblemType"].get("MXBlockA", 0) != 0 or state["ProblemType"].get("MXBlockB", 0) != 0
