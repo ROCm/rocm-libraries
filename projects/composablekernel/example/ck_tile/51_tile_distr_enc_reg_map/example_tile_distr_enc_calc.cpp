@@ -34,36 +34,45 @@ int check_tile_distr_enc()
     TileDistrEncRegMap<BEnc>::print();
     TileDistrEncRegMap<CEnc>::print();
 
-    // The only thing we check here is that CTranspose works as expected.
-    using AEncTransp = typename TileDistrEncCalc<MmaOp, true>::AWarpDstrEncoding;
-    using BEncTransp = typename TileDistrEncCalc<MmaOp, true>::BWarpDstrEncoding;
-    using CEncTransp = typename TileDistrEncCalc<MmaOp, true>::CWarpDstrEncoding;
-
-    // When using TransposeC, the A and B matrix layouts should be swapped.
-    static_assert(std::is_same<AEncTransp, BEnc>());
-    static_assert(std::is_same<BEncTransp, AEnc>());
-
-    // Make sure the C matrix layout is transposed in the CTranspose case.
     int err = 0;
-    for(index_t lane = 0; lane < TileDistrEncRegMap<CEnc>::num_lanes; lane++)
-    {
-        for(index_t vec = 0; vec < TileDistrEncRegMap<CEnc>::num_vector_items; vec++)
-        {
-            auto coords = TileDistrEncRegMap<CEnc>::calc_matrix_indices_from_lane_vector(lane, vec);
-            auto coords_transp =
-                TileDistrEncRegMap<CEncTransp>::calc_matrix_indices_from_lane_vector(lane, vec);
 
-            if(coords[0] != coords_transp[1] || coords[1] != coords_transp[0])
+    // CTranspose consistency check.
+    //
+    // Skipped for sparse intrinsics: A carries a compression ratio but B does not, so the
+    // transposed A (which becomes B) would have an inconsistent vector size vs. MmaOp::AVecType
+    // and trip the static_asserts inside TileDistrEncCalc.
+    if constexpr(MmaOp::OpFamily != MmaOpFamily::SPARSE)
+    {
+        using AEncTransp = typename TileDistrEncCalc<MmaOp, true>::AWarpDstrEncoding;
+        using BEncTransp = typename TileDistrEncCalc<MmaOp, true>::BWarpDstrEncoding;
+        using CEncTransp = typename TileDistrEncCalc<MmaOp, true>::CWarpDstrEncoding;
+
+        // When using TransposeC, the A and B matrix layouts should be swapped.
+        static_assert(std::is_same<AEncTransp, BEnc>());
+        static_assert(std::is_same<BEncTransp, AEnc>());
+
+        // Make sure the C matrix layout is transposed in the CTranspose case.
+        for(index_t lane = 0; lane < TileDistrEncRegMap<CEnc>::num_lanes; lane++)
+        {
+            for(index_t vec = 0; vec < TileDistrEncRegMap<CEnc>::num_vector_items; vec++)
             {
-                err = 1;
-                printf("\033[31mLane %2d vec %2d maps to C matrix coords %2d %2d and transposed C "
-                       "matrix coords %2d %2d, inconsistent!\033[0m\n",
-                       lane,
-                       vec,
-                       coords[0],
-                       coords[1],
-                       coords_transp[0],
-                       coords_transp[1]);
+                auto coords =
+                    TileDistrEncRegMap<CEnc>::calc_matrix_indices_from_lane_vector(lane, vec);
+                auto coords_transp =
+                    TileDistrEncRegMap<CEncTransp>::calc_matrix_indices_from_lane_vector(lane, vec);
+
+                if(coords[0] != coords_transp[1] || coords[1] != coords_transp[0])
+                {
+                    err = 1;
+                    printf("\033[31mLane %2d vec %2d maps to C matrix coords %2d %2d and "
+                           "transposed C matrix coords %2d %2d, inconsistent!\033[0m\n",
+                           lane,
+                           vec,
+                           coords[0],
+                           coords[1],
+                           coords_transp[0],
+                           coords_transp[1]);
+                }
             }
         }
     }
