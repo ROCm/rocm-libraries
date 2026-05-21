@@ -76,7 +76,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     using CLayout  = remove_cvref_t<typename Problem::CLayout>;
 
     // Keeping rest the same, change ADataType to FP8 for the BlockGemm call
-    using QuantizedABQuantProblem = GemmABQuantPipelineProblem<ck_tile::fp8_t,
+    using QuantizedABQuantProblem = GemmABQuantPipelineProblem<fp8_t,
                                                                typename Problem::AQDataType,
                                                                typename Problem::BDataType,
                                                                typename Problem::BQDataType,
@@ -86,11 +86,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                                                                typename Problem::AQuantGroupSize,
                                                                typename Problem::BQuantGroupSize,
                                                                Problem::TransposeC,
-                                                               typename Problem::ComputeDataType,
+                                                               fp8_t,
                                                                Problem::Scheduler,
                                                                Problem::HasHotLoop,
                                                                Problem::TailNum>;
-
     using BlockGemm =
         remove_cvref_t<decltype(Policy::template GetBlockGemm<QuantizedABQuantProblem>())>;
 
@@ -115,13 +114,9 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     static constexpr index_t GetVectorSizeB() { return Policy::template GetVectorSizeB<Problem>(); }
     static constexpr index_t GetVectorSizeC() { return Policy::template GetVectorSizeC<Problem>(); }
     static constexpr index_t GetVectorSizeAQ()
-    {
-        return Policy::template GetVectorSizeAQ<Problem>();
-    }
+    { return Policy::template GetVectorSizeAQ<Problem>(); }
     static constexpr index_t GetVectorSizeBQ()
-    {
-        return Policy::template GetVectorSizeBQ<Problem>();
-    }
+    { return Policy::template GetVectorSizeBQ<Problem>(); }
 
     static constexpr index_t GetSmemPackA() { return Policy::template GetSmemPackA<Problem>(); }
     static constexpr index_t GetSmemPackB() { return Policy::template GetSmemPackB<Problem>(); }
@@ -303,8 +298,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             // Note: A/B DataType PkInt4/PkFp4 gets converted during loading, before going to
             // LDS
-            auto&& [a_lds_block, b_lds_block] =
-                Base::template GetABLdsTensorViews<OverrideADataType, OverrideBDataType>(p_smem);
+            auto&& [a_lds_block, b_lds_block] = Base::GetABLdsTensorViews(p_smem);
 
             constexpr auto a_lds_load_tile_distr =
                 make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
