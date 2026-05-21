@@ -44,6 +44,11 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+static const rocblas_int env_sytrd_blocksize = []() {
+    const char* v = std::getenv("SYTRD_BLOCKSIZE");
+    return v ? std::max(1, std::min(std::atoi(v), (int)xxTRD_BLOCKSIZE)) : (int)xxTRD_BLOCKSIZE;
+}();
+
 template <bool BATCHED, typename T>
 void rocsolver_sytrd_hetrd_getMemorySize(const rocblas_int n,
                                          const rocblas_int batch_count,
@@ -160,7 +165,7 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    rocblas_int k = xxTRD_BLOCKSIZE;
+    rocblas_int k = env_sytrd_blocksize;
     rocblas_int kk = xxTRD_xxTD2_SWITCHSIZE;
 
     // if the matrix is too small, use the unblocked variant of the algorithm
@@ -376,7 +381,7 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    rocblas_int k = xxTRD_BLOCKSIZE;
+    rocblas_int k = env_sytrd_blocksize;
     rocblas_int kk = xxTRD_xxTD2_SWITCHSIZE;
 
     // if the matrix is too small, use the unblocked variant of the algorithm
