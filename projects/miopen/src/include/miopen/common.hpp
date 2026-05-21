@@ -26,9 +26,9 @@
 #ifndef GUARD_MIOPEN_COMMON_HPP_
 #define GUARD_MIOPEN_COMMON_HPP_
 
-#include <miopen/manage_ptr.hpp>
 #include <miopen/miopen.h>
 #include <miopen/config.hpp>
+#include <miopen/manage_ptr.hpp>
 
 #if MIOPEN_BACKEND_OPENCL
 

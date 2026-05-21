@@ -26,8 +26,7 @@
 #ifndef GUARD_CPU_ADAM_HPP
 #define GUARD_CPU_ADAM_HPP
 
-#include "tensor_holder.hpp"
-
+#include <miopen/tensor_holder.hpp>
 #include <miopen/float_equal.hpp>
 
 template <typename T1, typename T2>

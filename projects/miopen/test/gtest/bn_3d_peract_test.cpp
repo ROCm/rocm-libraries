@@ -1,29 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cmath>
-#include <chrono>
-
-#include <iostream>
-#include <limits>
-#include <string>
-#include <tuple>
-#include <vector>
-
 #include <miopen/activ.hpp>
+#include <miopen/tensor_holder.hpp>
 #include <miopen/batch_norm.hpp>
-#include <miopen/ford.hpp>
-#include <miopen/miopen.h>
-#include <miopen/par_for.hpp>
-#include <miopen/tensor.hpp>
+#include <miopen/verify.hpp>
 
 #include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 
 #define MIO_BN_TEST_EXPAVGFACTOR 0.1
 #define MIO_BN_TEST_EPSILON 1e-5

@@ -26,16 +26,7 @@
 
 #pragma once
 
-#include <algorithm>
 #include <gtest/gtest.h>
-#include <iostream>
-#include <iterator>
-#include <miopen/env.hpp>
-#include <tuple>
-#include <sstream>
-#include <string>
-#include <string_view>
-#include <vector>
 
 #include "../driver.hpp"
 #include "../lib_env_var.hpp"

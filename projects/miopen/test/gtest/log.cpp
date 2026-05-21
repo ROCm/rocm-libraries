@@ -23,19 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <cstdio>
-#include <cstdlib>
 
 #include "log.hpp"
 #include "tensor_util.hpp"
-#include "get_handle.hpp"
-#include "../lib_env_var.hpp"
 
 #include <gtest/gtest_common.hpp>
-#include <miopen/config.h>
 #include <miopen/fusion_plan.hpp>
-#include <miopen/logger.hpp>
-#include "../random.hpp"
 
 #if MIOPEN_BACKEND_OPENCL
 #define BKEND "OpenCL"

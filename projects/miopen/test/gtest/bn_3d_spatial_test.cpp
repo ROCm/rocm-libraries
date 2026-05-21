@@ -26,11 +26,8 @@
 
 #include <miopen/activ.hpp>
 #include <miopen/batch_norm.hpp>
-#include <miopen/ford.hpp>
 
 #include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "random.hpp"
 #include "test_parameter_name_generator.hpp"
 
 // Run CPU emulations in hierarchical reduction mode.

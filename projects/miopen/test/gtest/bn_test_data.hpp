@@ -24,15 +24,13 @@
  *
  *******************************************************************************/
 #pragma once
-#include "random.hpp"
 
-#include <miopen/miopen.h>
-#include <miopen/solver_id.hpp>
+#include <miopen/fusionHost.hpp>
+#include <miopen/fusion_plan.hpp>
+#include <miopen/batch_norm.hpp>
 #include <miopen/batchnorm/problem_description.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
+#include <miopen/verify.hpp>
 
-#include "tensor_util.hpp"
 #include "get_handle.hpp"
 
 #define WORKAROUND_SWDEV_549725 1

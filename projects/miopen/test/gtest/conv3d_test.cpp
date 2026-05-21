@@ -23,11 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <tuple>
-#include <miopen/miopen.h>
-#include <gtest/gtest.h>
-#include "../conv3d.hpp"
-#include "get_handle.hpp"
+#include "conv3d.hpp"
 #include "gtest_common.hpp"
 
 namespace conv3d_test {

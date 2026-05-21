@@ -27,9 +27,10 @@
 #ifndef GUARD_TENSOR_UTIL_HPP
 #define GUARD_TENSOR_UTIL_HPP
 
-#include "tensor_holder.hpp"
-#include <miopen/stringutils.hpp>
+#include <miopen/tensor_holder.hpp>
 #include <miopen/filesystem.hpp>
+
+#include <fstream>
 
 namespace fs = miopen::fs;
 

@@ -1,15 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "compare_helper.hpp"
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
-#include "random.hpp"
-#include "../network_data.hpp"
+#include "compare_helper.hpp"
+#include "network_data.hpp"
 
-#include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
+#include <miopen/batch_norm.hpp>
 
 #include <gtest/gtest.h>
 

@@ -8,23 +8,14 @@
 #include "get_handle.hpp"
 #include "network_data.hpp"
 #include "serialize.hpp"
-#include "miopen/stringutils.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
-#include "verify.hpp"
 
-#include <functional>
-#include <deque>
-#include <half/half.hpp>
-#include <type_traits>
+#include <miopen/tensor_holder.hpp>
 #include <miopen/filesystem.hpp>
-#include <miopen/functional.hpp>
 #include <miopen/expanduser.hpp>
 #include <miopen/md5.hpp>
-#include <miopen/type_name.hpp>
-#include <miopen/env.hpp>
-#include <miopen/rank.hpp>
-#include <miopen/bfloat16.hpp>
+#include <miopen/verify.hpp>
+
+#include <deque>
 
 namespace env = miopen::env;
 

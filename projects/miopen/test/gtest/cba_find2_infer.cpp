@@ -23,20 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest.h>
-#include <gtest/gtest_common.hpp>
-#include <miopen/generic_search.hpp>
-#include <miopen/miopen.h>
-#include <miopen/search_options.hpp>
-#include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
-#include <miopen/fusion.hpp>
-#include <miopen/fusion/solvers.hpp>
-#include <miopen/fusion/fusion_invoke_params.hpp>
 
-#include "tensor_util.hpp"
-#include "get_handle.hpp"
+#include <miopen/generic_search.hpp>
+#include <miopen/fusion/solvers.hpp>
+
 #include "cba_find2.hpp"
 
 namespace cba_find2_infer {

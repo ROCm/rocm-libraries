@@ -31,9 +31,7 @@
 #include <stdexcept>
 #include <thread>
 
-#include <miopen/miopen.h>
-
-#include "../tensor_holder.hpp"
+#include <miopen/tensor_holder.hpp>
 
 namespace miopen {
 namespace tests {

@@ -27,11 +27,12 @@
 #define GUARD_GPU_CONV_HPP
 
 #include <miopen/env.hpp>
+#include <miopen/any_solver.hpp>
 #include <miopen/convolution.hpp>
-#include <miopen/conv/wrw_invoke_params.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/conv/data_invoke_params.hpp>
 
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
 
 namespace env = miopen::env;
 

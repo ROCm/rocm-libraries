@@ -8,10 +8,8 @@
 #include <utility>
 #include <half/half.hpp>
 
-#include <iostream>
-
-#include "verify.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 namespace test_helpers {
 template <typename T>

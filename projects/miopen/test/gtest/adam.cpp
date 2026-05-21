@@ -23,8 +23,6 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <sstream>
-#include <string_view>
 
 #include "adam.hpp"
 #include "test_parameter_name_generator.hpp"

@@ -23,14 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest.h>
-#include <miopen/fusion/solvers.hpp>
-#include <miopen/fusion/fusion_invoke_params.hpp>
-#include <gtest/gtest_common.hpp>
 
-#include "tensor_holder.hpp"
+#include <miopen/fusion/solvers.hpp>
+
 #include "get_handle.hpp"
 #include "conv_test_base.hpp"
+#include "gtest_common.hpp"
 
 #if MIOPEN_BACKEND_HIP
 

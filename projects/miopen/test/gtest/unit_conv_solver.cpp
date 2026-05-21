@@ -24,21 +24,13 @@
  *
  *******************************************************************************/
 
-#include <miopen/conv/data_invoke_params.hpp>
-#include <miopen/conv/wrw_invoke_params.hpp>
-#include <miopen/errors.hpp>
-#include <miopen/generic_search.hpp>
-#include <miopen/any_solver.hpp>
+#include <miopen/cpu_conv.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 
-#include "unit_conv_solver.hpp"
-
-#include "get_handle.hpp"
-#include "../gpu_conv.hpp"
 #include "conv_common.hpp"
 #include "conv_tensor_gen.hpp"
-#include "tensor_holder.hpp"
-
+#include "unit_conv_solver.hpp"
+#include "../gpu_conv.hpp"
 #include "../workspace.hpp"
 
 namespace miopen {

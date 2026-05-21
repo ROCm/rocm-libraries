@@ -24,32 +24,11 @@
  *
  *******************************************************************************/
 
-#include <cfloat>
-#include <cmath>
-#include <ctime>
-
-#include <array>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-#include <vector>
-
-#include <miopen/batch_norm.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 #include <miopen/activ.hpp>
+#include <miopen/batch_norm.hpp>
 
-#include "driver.hpp"
 #include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 
 // Run CPU emulations in hierarchical reduction mode.
 // #define MIO_HEIRARCH_SEL 0

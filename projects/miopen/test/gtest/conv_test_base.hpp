@@ -26,12 +26,12 @@
 #pragma once
 
 #include <miopen/bfloat16.hpp>
-#include <miopen/miopen.h>
-#include <iostream>
+#include <miopen/tensor_holder.hpp>
 
-#include "tensor_holder.hpp"
 #include "conv_common.hpp"
 #include "conv_tensor_gen.hpp"
+
+#include <fstream>
 
 using Direction = miopen::conv::Direction;
 

@@ -29,12 +29,9 @@
 #include <miopen/bz2.hpp>
 #include <miopen/kern_db.hpp>
 #include <miopen/temp_file.hpp>
+#include <miopen/random.hpp>
 
 #include "test.hpp"
-#include "random.hpp"
-
-#include <algorithm>
-#include <vector>
 
 #if MIOPEN_ENABLE_SQLITE
 std::vector<char> random_bytes(size_t length)

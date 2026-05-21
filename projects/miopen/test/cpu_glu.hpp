@@ -26,8 +26,7 @@
 
 #pragma once
 
-#include "tensor_holder.hpp"
-
+#include <miopen/tensor_holder.hpp>
 #include <miopen/ford.hpp>
 
 template <typename T>

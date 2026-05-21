@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "bn.hpp"
+
 /* typename XDataType,
    typename DxDataType,
    typename DyDataType,

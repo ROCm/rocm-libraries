@@ -25,12 +25,10 @@
  *******************************************************************************/
 
 #include "get_handle.hpp"
-#include <gtest/gtest.h>
-#include <miopen/miopen.h>
+#include "bn_infer_tester.hpp"
+
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/batchnorm/problem_description.hpp>
-
-#include "bn_infer_tester.hpp"
 
 #define PERF_ENABLE 0
 

@@ -2,15 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #define MIOPEN_BETA_API 1
-#include "../driver/tensor_driver.hpp"
+
 #include "cpu_cat.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
-#include <gtest/gtest.h>
+
 #include <miopen/cat.hpp>
-#include <miopen/miopen.h>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
+
+#include <gtest/gtest.h>
 
 struct CatTestCase
 {
