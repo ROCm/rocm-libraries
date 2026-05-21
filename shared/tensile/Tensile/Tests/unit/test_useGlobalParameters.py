@@ -22,7 +22,11 @@
 #
 ################################################################################
 
+import pytest
 from Tensile.Common import globalParameters
+
+pytestmark = pytest.mark.requires_compiler
+
 
 def test_Simple(useGlobalParameters):
     with useGlobalParameters():
@@ -30,11 +34,21 @@ def test_Simple(useGlobalParameters):
 
         globalParameters["PinClocks"] = True
 
+
     # outside the with statement, changes should be reverted.
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     assert not globalParameters["PinClocks"]
 
 def test_Args(useGlobalParameters):
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     with useGlobalParameters(PinClocks=True):
         assert globalParameters["PinClocks"]
 
     assert not globalParameters["PinClocks"]
+import pytest
+pytestmark = pytest.mark.requires_compiler
+

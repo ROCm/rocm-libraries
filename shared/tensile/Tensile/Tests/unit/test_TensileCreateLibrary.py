@@ -34,6 +34,7 @@ from typing import List, Tuple
 from unittest.mock import MagicMock, call, mock_open, patch
 
 import pytest
+pytestmark = pytest.mark.requires_compiler
 import yaml
 
 import Tensile.ClientWriter as ClientWriter

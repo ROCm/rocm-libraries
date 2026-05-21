@@ -22,7 +22,10 @@
 #
 ################################################################################
 
+import pytest
 from Tensile.Common import tryAssembler
+
+pytestmark = pytest.mark.requires_compiler
 
 def test_Simple(useGlobalParameters):
     with useGlobalParameters():

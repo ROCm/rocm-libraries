@@ -23,6 +23,7 @@
 ################################################################################
 
 import os
+import pytest
 from copy import deepcopy
 
 import yaml
@@ -31,6 +32,7 @@ from Tensile.__init__ import __version__
 import Tensile.LibraryIO as LibraryIO
 from Tensile.Utilities.ConditionalImports import yamlLoader
 
+pytestmark = pytest.mark.requires_compiler
 
 # string literals for testing
 # list format
@@ -49,6 +51,7 @@ aldebaran_l = r"""
 """
 
 sizes = r"""
+
 - DummyIndexAssignment
 - - - [128, 128, 1, 128]
     - [0, 80.0]
@@ -57,22 +60,34 @@ sizes = r"""
 """
 
 dvEff_l = r"""
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 - null
 - null
 - DeviceEfficiency
 """
 
 cuEff_l = r"""
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 - null
 - null
 - CUEfficiency
 """
 
 fp16AltImpl_l = "- Fp16AltImpl\n"
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 fp16AltImplRound_l = "- Fp16AltImplRound\n"
 legacySuffix_l = "- null\n"
 
 # dict format general
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 version_d = "MinimumRequiredVersion: " + __version__ + "\n"
 dvEff_d = "PerfMetric: DeviceEfficiency\n"
 cuEff_d = "PerfMetric: CUEfficiency\n"
@@ -82,12 +97,18 @@ fp16AltImplRound_d = "Fp16AltImplRound: true\n"
 fp16AltImplRoundFalse_d = "Fp16AltImplRound: false\n"
 
 vega20_d = r"""
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 ScheduleName: vega20
 ArchitectureName: gfx906
 DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Device 66af, Vega 20]
 """
 
 aldebaran_d = r"""
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 ScheduleName: aldebaran
 ArchitectureName: gfx90a
 CUCount: 104
@@ -95,6 +116,9 @@ DeviceNames: [Device 0050, Device 0051, Device 0052, Device 0054, Device 0062]
 """
 
 # dict format matching
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 matchingLibrary = r"""
 LibraryType: Matching
 Library:
@@ -108,6 +132,9 @@ Library:
 """
 
 # dict format decision tree
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 treeLibrary = r"""
 LibraryType: DecisionTree
 Library:
@@ -126,6 +153,9 @@ Library:
   - {type: SizeInRange, index: 1, value: {min: 6000, max: 7000}}
 
 - features:
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
   - {index: 0, type: FreeSizeB}
   trees:
   - tree:
@@ -138,6 +168,9 @@ Library:
 """
 
 
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 def createLibraryLogicList(arch_str, suffix_str, fp16AltImpl, fp16AltImplRound):
     # paths to test data
     scriptDir = os.path.dirname(os.path.realpath(__file__))
@@ -148,37 +181,61 @@ def createLibraryLogicList(arch_str, suffix_str, fp16AltImpl, fp16AltImplRound):
             os.path.join(dataDir, "library_data", "initialSolutionParameters.yaml"))
 
     # read test data
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     problemType = LibraryIO.readYAML(problemTypePath)["ProblemType"]
     solutionParameters = LibraryIO.readYAML(solutionParametersPath)
 
     # solutions
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     sol0 = deepcopy(solutionParameters)
     sol0["SolutionIndex"] = 0
     sol0["SolutionNameMin"] = "foo"
     sol0["ProblemType"] = problemType
 
     sol1 = deepcopy(solutionParameters)
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     sol1["SolutionIndex"] = 1
     sol1["SolutionNameMin"] = "bar"
     sol0["ProblemType"] = problemType
 
     # other components
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     prefixData = yaml.load(version_l + arch_str, yamlLoader)
     sizeData = yaml.load(sizes, yamlLoader)
     suffixData = yaml.load(suffix_str, yamlLoader)
 
     # handle fp16AltImpl and combine
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     rv = prefixData + [problemType] + [[sol0, sol1]] + sizeData + suffixData
     if fp16AltImpl:
         fp16AltData = yaml.load(fp16AltImpl_l, yamlLoader)
         rv += fp16AltData
 
     if fp16AltImplRound:
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
         fp16AltRoundData = yaml.load(fp16AltImplRound_l, yamlLoader)
         rv += fp16AltRoundData
 
     return rv
+import pytest
+pytestmark = pytest.mark.requires_compiler
 
+
+
+import pytest
+pytestmark = pytest.mark.requires_compiler
 
 def createLibraryLogicDict(arch_str, suffix_str, lib_str, fp16AltImpl_str, fp16AltImplRound_str):
     # paths to test data
@@ -190,39 +247,63 @@ def createLibraryLogicDict(arch_str, suffix_str, lib_str, fp16AltImpl_str, fp16A
             os.path.join(dataDir, "library_data", "initialSolutionParameters.yaml"))
 
     # read test data
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     problemType = LibraryIO.readYAML(problemTypePath)["ProblemType"]
     solutionParameters = LibraryIO.readYAML(solutionParametersPath)
 
     # solutions
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     sol0 = deepcopy(solutionParameters)
     sol0["SolutionIndex"] = 0
     sol0["SolutionNameMin"] = "foo"
     sol0["ProblemType"] = problemType
 
     sol1 = deepcopy(solutionParameters)
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     sol1["SolutionIndex"] = 1
     sol1["SolutionNameMin"] = "bar"
     sol0["ProblemType"] = problemType
 
     # other components
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     prefixData = yaml.load(version_d + arch_str, yamlLoader)
     libData = yaml.load(lib_str, yamlLoader)
     suffixData = yaml.load(suffix_str, yamlLoader)
 
     # handle fp16AltImpl and combine
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     fp16Data = {}
     if fp16AltImpl_str is not None:
         fp16Data = yaml.load(fp16AltImpl_str, yamlLoader)
 
     fp16RoundData = {}
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     if fp16AltImplRound_str is not None:
         fp16RoundData = yaml.load(fp16AltImplRound_str, yamlLoader)
 
     data = {**prefixData, **libData, **suffixData, **fp16Data, **fp16RoundData}
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
     data["ProblemType"] = problemType
     data["Solutions"] = [sol0, sol1]
     return data
 
+
+import pytest
+pytestmark = pytest.mark.requires_compiler
 
 def test_parseSolutionsData(useGlobalParameters):
     with useGlobalParameters():
@@ -233,10 +314,19 @@ def test_parseSolutionsData(useGlobalParameters):
                 dataDir, "solutions", "solutions_nn_3.yaml"))
 
         solutions = LibraryIO.readYAML(solutionsPath)
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
 
         LibraryIO.parseSolutionsData(solutions, "test_parseSolutionsData")
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
         assert True
 
+
+import pytest
+pytestmark = pytest.mark.requires_compiler
 
 def test_parseLibraryLogicList(useGlobalParameters):
     with useGlobalParameters():
@@ -244,18 +334,33 @@ def test_parseLibraryLogicList(useGlobalParameters):
                                         "test_parseLibraryLogicList")
 
         LibraryIO.parseLibraryLogicData(createLibraryLogicList(aldebaran_l, cuEff_l, False, False),
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
                                         "test_parseLibraryLogicList")
 
         LibraryIO.parseLibraryLogicData(createLibraryLogicList(vega20_l, legacySuffix_l, False, False),
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
                                         "test_parseLibraryLogicList")
 
         LibraryIO.parseLibraryLogicData(createLibraryLogicList(aldebaran_l, dvEff_l, True, False),
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
                                         "test_parseLibraryLogicList")
 
         LibraryIO.parseLibraryLogicData(createLibraryLogicList(aldebaran_l, dvEff_l, True, True),
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
                                         "test_parseLibraryLogicList")
         assert True
 
+
+import pytest
+pytestmark = pytest.mark.requires_compiler
 
 def test_parseLibraryLogicMatching(useGlobalParameters):
     with useGlobalParameters():
@@ -264,18 +369,30 @@ def test_parseLibraryLogicMatching(useGlobalParameters):
             "test_parseLibraryLogicMatching")
 
         LibraryIO.parseLibraryLogicData(
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
             createLibraryLogicDict(aldebaran_d, matchingLibrary, cuEff_d, None, None),
             "test_parseLibraryLogicMatching")
 
         LibraryIO.parseLibraryLogicData(
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
             createLibraryLogicDict(aldebaran_d, matchingLibrary, dvEff_d, fp16AltImpl_d, None),
             "test_parseLibraryLogicMatching")
 
         LibraryIO.parseLibraryLogicData(
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
             createLibraryLogicDict(aldebaran_d, matchingLibrary, dvEff_d, fp16AltImpl_d, fp16AltImplRound_d),
             "test_parseLibraryLogicMatching")
         assert True
 
+
+import pytest
+pytestmark = pytest.mark.requires_compiler
 
 def test_parseLibraryLogicDecisionTree(useGlobalParameters):
     with useGlobalParameters():
@@ -284,14 +401,23 @@ def test_parseLibraryLogicDecisionTree(useGlobalParameters):
             "test_parseLibraryLogicDecisionTree")
 
         LibraryIO.parseLibraryLogicData(
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
             createLibraryLogicDict(aldebaran_d, treeLibrary, cuEff_d, None, None),
             "test_parseLibraryLogicDecisionTree")
 
         LibraryIO.parseLibraryLogicData(
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
             createLibraryLogicDict(aldebaran_d, treeLibrary, dvEff_d, fp16AltImpl_d, None),
             "test_parseLibraryLogicDecisionTree")
 
         LibraryIO.parseLibraryLogicData(
+import pytest
+pytestmark = pytest.mark.requires_compiler
+
             createLibraryLogicDict(aldebaran_d, treeLibrary, dvEff_d, fp16AltImpl_d, fp16AltImplRound_d),
             "test_parseLibraryLogicDecisionTree")
         assert True

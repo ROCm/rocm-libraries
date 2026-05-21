@@ -23,6 +23,7 @@
 ################################################################################
 
 import pytest
+pytestmark = pytest.mark.requires_compiler
 
 import Tensile.Component  as Component
 import Tensile.Components as Components

@@ -9,6 +9,7 @@ test_categories:
       - "unit"
     exclude_markers:
       - "disabled"
+      - "requires_compiler"
     labels:
       - "quick"
       - "pre-commit"
