@@ -148,6 +148,96 @@ All stages run on the same stream. Same-stream FIFO ordering already guarantees 
 - split-KV attention (`attention_tiled_3d_segment` -> `attention_tiled_3d_reduce`);
 - any future fixup kernel chains (k-fixup GEMM, im2col + GEMM + col2im).
 
+## CK-Tile-style multi-kernel launch
+
+`runtime/launcher.py` also exposes a low-level CK-Tile-shaped pair of primitives that mirror `ck_tile::launch_kernel` and `ck_tile::make_kernel` (`include/ck_tile/host/kernel_launch.hpp` lines 118-286) field-for-field. Use these when you want the C++ shape directly: each callable is a closure that has already baked in `(values, grid, block, lds_bytes)`, and `launch_kernel` is variadic over closures with optional cold-warmup + timed-iters wrapping.
+
+```python
+from ck_dsl import StreamConfig, launch_kernel, make_kernel
+
+# Production (no timing): runs each callable once on the stream
+# under no_fence, returns 0.0. No implicit final sync -- the caller
+# is responsible (via wait_stream_and_release or torch's stream-aware
+# next-read).
+launch_kernel(
+    StreamConfig(stream_id=stream),
+    make_kernel(seg_launcher, seg_vals, seg_grid, seg_block),
+    make_kernel(red_launcher, red_vals, red_grid, red_block),
+)
+
+# Benchmark: cold_niters warmup + nrepeat timed iters wrapped by
+# one HIP-event pair. Returns mean per-iteration ms.
+ms = launch_kernel(
+    StreamConfig(stream_id=stream, time_kernel=True,
+                 cold_niters=5, nrepeat=100),
+    make_kernel(seg_launcher, seg_vals, seg_grid, seg_block),
+    make_kernel(red_launcher, red_vals, red_grid, red_block),
+)
+```
+
+`StreamConfig` mirrors `ck_tile::stream_config`: `stream_id`, `time_kernel`, `log_level`, `cold_niters`, `nrepeat`, `is_gpu_timer`, `flush_cache`. `stream_id=0` auto-resolves to torch's current stream.
+
+`make_kernel(launcher, values, grid, block, *, lds_bytes=0)` returns a `Callable[[StreamConfig], None]` that:
+
+- Captures `values` via `dict(values)` and freezes `(grid, block, lds_bytes)` so caller mutations after closure construction do not affect the closure.
+- Reads `stream_id` from its `StreamConfig` argument **at call time** (not at construction time), so the same closure can be replayed on different streams.
+- Always launches with `fence=False`. The only sync points are the timing-loop boundary inside `launch_kernel` (when `time_kernel=True`), the caller's explicit drain, and torch's stream-aware next-read.
+
+Bare host lambdas with the same `Callable[[StreamConfig], None]` shape compose freely with `make_kernel` closures -- mirrors the C++ `MOR_SORTING_MP_DISPATCH_` pattern at `example/ck_tile/15_fused_moe/instances/fused_moesorting_api.cpp:481`:
+
+```python
+def maybe_clear_workspace(s):
+    Runtime().memset(ws_ptr, 0, ws_bytes, stream=s.stream_id)
+
+launch_kernel(
+    StreamConfig(stream_id=stream),
+    maybe_clear_workspace,                 # bare lambda
+    make_kernel(seg_launcher, seg_vals, ...),
+    make_kernel(red_launcher, red_vals, ...),
+)
+```
+
+### When to use which
+
+| Need | Use |
+| --- | --- |
+| Fixed stage list per problem-shape, hot dispatch, implicit last-stage fence | `PipelineLauncher` |
+| One-shot benchmark drivers, autotuner harnesses, mixed kernel + host callables | `launch_kernel` + `make_kernel` |
+| Group of timed launches reported as a single ms (cold+warmup wraps the whole group) | `launch_kernel(StreamConfig(time_kernel=True, ...))` |
+| Fire-and-forget single-launch | `KernelLauncher(values, config=cfg)` directly |
+
+### Migration note for `PipelineLauncher` callers
+
+`PipelineLauncher` honours `cfg.fence` on the **last** stage and therefore implicitly fences the host on pipeline completion. `launch_kernel` does not -- the closures returned by `make_kernel` are always `fence=False`, and `launch_kernel` itself never inserts an implicit final sync. Code paths that read an output tensor on the host immediately after `pipeline(...)` returns relied on the last-stage fence. When migrating to `launch_kernel`, add an explicit `wait_stream_and_release(stream)` (or rely on torch's stream-aware next-read sync) before the host read.
+
+### Macro-style shorthand convention for instance authors
+
+CK Tile's `MOE_SORTING_MP_*` macros at `example/ck_tile/15_fused_moe/instances/fused_moesorting_api.cpp` lines 201-309 each expand to a self-invoking lambda that returns a `make_kernel` closure. The Python equivalent for instance authors is a per-phase factory function:
+
+```python
+def moe_sort_histogram_callable(spec, args, *, launcher=None):
+    """CK-style per-phase callable factory for launch_kernel(s, ...)."""
+    if launcher is None:
+        launcher = _get_or_build_hist_launcher(spec)   # cached per spec
+    grid  = moe_sort_histogram_grid(spec, args.num_tokens)
+    block = (spec.block_size, 1, 1)
+    return make_kernel(launcher, args.histogram_values(), grid, block,
+                       lds_bytes=moe_sort_histogram_lds(spec))
+```
+
+A CK-style chained launch then reads as:
+
+```python
+launch_kernel(
+    StreamConfig(stream_id=stream),
+    moe_sort_histogram_callable(spec, args),
+    moe_sort_scan_callable(spec, args),
+    moe_sort_scatter_callable(spec, args),
+)
+```
+
+This is the recipe for converting any multi-phase instance (moe_sorting's three builders, fused_moe's gather / silu_mul / topk_weighted_reduce, etc.) into a CK-style chain.
+
 ## WorkspacePool
 
 ```python
@@ -293,6 +383,19 @@ for _ in range(N):
 ```python
 pipeline = PipelineLauncher([seg, red])
 pipeline([seg_vals, red_vals], [seg_cfg, red_cfg], stream=0)
+```
+
+### CK-style multi-kernel launch
+
+```python
+from ck_dsl import StreamConfig, launch_kernel, make_kernel
+
+ms = launch_kernel(
+    StreamConfig(stream_id=stream, time_kernel=True,
+                 cold_niters=5, nrepeat=100),
+    make_kernel(seg, seg_vals, seg_grid, seg_block),
+    make_kernel(red, red_vals, red_grid, red_block),
+)
 ```
 
 ### Manifest execute

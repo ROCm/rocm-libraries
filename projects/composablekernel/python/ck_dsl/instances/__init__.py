@@ -168,6 +168,13 @@ from .transpose import (  # noqa: F401
     transpose2d_grid,
     transpose2d_signature,
 )
+from .transpose_bc import (  # noqa: F401
+    TransposeBcSpec,
+    build_transpose_bc,
+    is_valid_spec as is_valid_transpose_bc_spec,
+    transpose_bc_grid,
+    transpose_bc_signature,
+)
 from .batched_transpose import (  # noqa: F401
     BatchedTranspose2DSpec,
     batched_transpose2d_grid,
@@ -249,6 +256,7 @@ from .topk_softmax import (  # noqa: F401
     topk_softmax_signature,
 )
 from .moe_sorting import (  # noqa: F401
+    MoeSortingLauncher,
     MoeSortingSpec,
     build_moe_sort_histogram,
     build_moe_sort_scan,
@@ -267,15 +275,39 @@ from .fused_moe import (  # noqa: F401
     FusedMoeSpec,
     build_moe_gather,
     build_moe_silu_mul,
+    build_moe_silu_mul_packed,
+    build_moe_static_scatter_gather,
     build_moe_topk_weighted_reduce,
     is_valid_spec as is_valid_fused_moe_spec,
     moe_fused_workspace_bytes,
     moe_gather_grid,
     moe_gather_signature,
     moe_silu_mul_grid,
+    moe_silu_mul_packed_grid,
+    moe_silu_mul_packed_signature,
     moe_silu_mul_signature,
+    moe_static_scatter_gather_grid,
+    moe_static_scatter_gather_signature,
     moe_topk_weighted_reduce_grid,
     moe_topk_weighted_reduce_signature,
+)
+from .fused_moe_e2e import (  # noqa: F401
+    FusedMoeForward,
+    FusedMoeForwardSpec,
+)
+from .moe_gemm_fused import (  # noqa: F401
+    FusedDownReduceGemmSpec,
+    FusedGateUpSiluGemmSpec,
+    FusedInterleavedGateUpSiluGemmSpec,
+    build_moe_down_reduce_gemm,
+    build_moe_gate_up_silu_gemm,
+    build_moe_interleaved_gate_up_silu_gemm,
+    moe_down_reduce_gemm_grid,
+    moe_down_reduce_gemm_signature,
+    moe_gate_up_silu_gemm_grid,
+    moe_gate_up_silu_gemm_signature,
+    moe_interleaved_gate_up_silu_gemm_grid,
+    moe_interleaved_gate_up_silu_gemm_signature,
 )
 from .flatmm import (  # noqa: F401
     FlatMMSpec,
