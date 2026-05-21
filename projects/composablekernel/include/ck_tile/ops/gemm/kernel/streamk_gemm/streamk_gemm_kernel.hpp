@@ -623,4 +623,5 @@ struct StreamKKernel
         return max(occupancy, 1);
     }
 };
+
 } // namespace ck_tile

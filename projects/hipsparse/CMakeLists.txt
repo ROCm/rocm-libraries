@@ -8,7 +8,7 @@ include(hipsparse_shim)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
-project(hipsparse VERSION 4.5.0 LANGUAGES CXX C)
+project(hipsparse VERSION 4.6.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
     cmake_policy(SET CMP0066 NEW) # Honor per-config flags in try_compile()
@@ -33,6 +33,18 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     else()
         set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix." FORCE)
     endif()
+endif()
+
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP HIPSPARSE_COPYRIGHT_YEAR "%Y")
+    if(hipsparse_VERSION_TWEAK)
+        set(HIPSPARSE_PRODUCT_VERSION_DISPLAY "${hipsparse_VERSION_MAJOR}.${hipsparse_VERSION_MINOR} (${hipsparse_VERSION_TWEAK})")
+    else()
+        set(HIPSPARSE_PRODUCT_VERSION_DISPLAY "${hipsparse_VERSION_MAJOR}.${hipsparse_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
 endif()
 
 # --- Build options and validation ---

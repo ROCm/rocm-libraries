@@ -15,10 +15,20 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..common.exceptions import ExecutionError
+from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
+from ..execution.timing import Timer
+from ..metrics import (
+    CpuTimeProbe,
+    GpuSmiProbe,
+    compute_flops,
+    compute_io_bytes,
+    derive_throughputs,
+)
+from ..metrics._diagnostic import warn_once
+from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
     CorrectnessResult,
@@ -30,15 +40,6 @@ from ..validation.reference_provider import (
     ReferenceProviderRegistry,
 )
 from ..validation.validator import Validator
-
-# Keywords in error messages that indicate an unsupported combination
-# rather than a hard error.
-_SUPPORT_CHECK_KEYWORDS = (
-    "support check failed",
-    "not supported",
-    "unsupported",
-    "no engine",
-)
 
 
 def _resolve_engine_name(engine_id: int) -> str:
@@ -65,19 +66,6 @@ def _resolve_engine_name(engine_id: int) -> str:
     return f"engine_{engine_id:#x}"
 
 
-def _is_support_error(error_msg: str) -> bool:
-    """Check if an error message indicates a support/compatibility issue.
-
-    Args:
-        error_msg: The error message string.
-
-    Returns:
-        True if the error indicates an unsupported combination.
-    """
-    lower = error_msg.lower()
-    return any(kw in lower for kw in _SUPPORT_CHECK_KEYWORDS)
-
-
 def _get_reference_provider(
     config: SuiteConfig, graph_json: Dict[str, Any]
 ) -> Optional[ReferenceProvider]:
@@ -89,9 +77,12 @@ def _get_reference_provider(
 
     Returns:
         ReferenceProvider instance if available and supports the graph,
-        None otherwise. Caller distinguishes "not requested" from
-        "requested but unsupported" via ``config.reference_provider``.
+        None if validation was not requested (``config.reference_provider``
+        is ``"none"``) or if the provider is unavailable/unsupported.
     """
+    if config.reference_provider == "none":
+        return None
+
     try:
         provider = ReferenceProviderRegistry.get_provider(config.reference_provider)
     except ValueError:
@@ -207,7 +198,7 @@ def _check_correctness(
             max_rel_diff=worst_rel_diff,
         )
 
-    except Exception as e:
+    except (ValueError, RuntimeError, ExecutionError) as e:
         return CorrectnessResult(
             execution_success=True,
             tolerance_match=False,
@@ -223,6 +214,7 @@ def run_graph_all_providers(
     tensor_infos: list,
     config: SuiteConfig,
     handle: Any,
+    reporter: Optional[Reporter] = None,
 ) -> GraphResult:
     """Run a single graph against every engine the backend ranks for it.
 
@@ -264,25 +256,38 @@ def run_graph_all_providers(
             gpu_backend=config.gpu_backend,
         )
         engine_ids = discovery_executor.discover_engines(handle)
-    except (ExecutionError, RuntimeError) as e:
-        msg = str(e)
-        status = "skipped" if _is_support_error(msg) else "error"
-        result_kwargs: Dict[str, Any] = {
-            "provider": "unknown",
-            "engine_id": 0,
-            "status": status,
-            "correctness": CorrectnessResult.failed(
-                rtol=config.rtol, atol=config.atol, error_message=msg
-            ),
-        }
-        if status == "error":
-            result_kwargs["error_message"] = f"Engine discovery failed: {msg}"
-        else:
-            result_kwargs["skip_reason"] = msg
+    except UnsupportedGraphError as e:
         return GraphResult(
             graph_name=graph_name,
             graph_path=str(graph_path),
-            results=[ProviderEngineResult(**result_kwargs)],
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="skipped",
+                    skip_reason=str(e),
+                    correctness=CorrectnessResult.failed(
+                        rtol=config.rtol, atol=config.atol, error_message=str(e)
+                    ),
+                )
+            ],
+        )
+    except (ExecutionError, RuntimeError) as e:
+        msg = str(e)
+        return GraphResult(
+            graph_name=graph_name,
+            graph_path=str(graph_path),
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="error",
+                    error_message=f"Engine discovery failed: {msg}",
+                    correctness=CorrectnessResult.failed(
+                        rtol=config.rtol, atol=config.atol, error_message=msg
+                    ),
+                )
+            ],
         )
 
     if config.engine_filter is not None:
@@ -308,29 +313,116 @@ def run_graph_all_providers(
 
     ref_provider = _get_reference_provider(config, graph_json)
 
+    # Compute analytical metrics once per graph — they're a function of
+    # the graph shape only and don't change across engines. Both calls
+    # are pure-Python and microsecond-cheap, but no point repeating
+    # them per engine. Failures route through warn_once and yield None.
+    analytical_flops: Optional[int] = None
+    analytical_flops_partial = False
+    analytical_io_bytes: Optional[int] = None
+    if config.metrics.basic_enabled:
+        try:
+            analytical_flops, analytical_flops_partial = compute_flops(graph_json)
+        except Exception as e:
+            warn_once("analytical", f"compute_flops failed for {graph_name}: {e}")
+        try:
+            analytical_io_bytes = compute_io_bytes(tensor_infos)
+        except Exception as e:
+            warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
+
     pe_results: List[ProviderEngineResult] = []
     for engine_id in engine_ids:
         engine_name = _resolve_engine_name(engine_id)
-        pe_result = _run_single_provider_engine(
-            graph_path=graph_path,
-            graph_json_str=graph_json_str,
-            graph_name=graph_name,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
-            provider=engine_name,
-            engine_id=engine_id,
-            ref_provider=ref_provider,
-            validation_requested=validation_requested,
-            graph_json=graph_json,
-        )
+        if reporter is not None:
+            reporter.print_engine_start(engine_name)
+        with Timer() as t:
+            pe_result = _run_single_provider_engine(
+                graph_path=graph_path,
+                graph_json_str=graph_json_str,
+                graph_name=graph_name,
+                tensor_infos=tensor_infos,
+                config=config,
+                handle=handle,
+                provider=engine_name,
+                engine_id=engine_id,
+                ref_provider=ref_provider,
+                validation_requested=validation_requested,
+                graph_json=graph_json,
+                analytical_flops=analytical_flops,
+                analytical_flops_partial=analytical_flops_partial,
+                analytical_io_bytes=analytical_io_bytes,
+            )
+        pe_result.elapsed_time_ms = t.elapsed_ms
+        if reporter is not None:
+            reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
 
     return GraphResult(
         graph_name=graph_name,
         graph_path=str(graph_path),
         results=pe_results,
+        engine_ids=engine_ids,
     )
+
+
+def _collect_basic_metrics_post_loop(
+    result: ProviderEngineResult,
+    cpu_time_probe: Optional[CpuTimeProbe],
+    benchmark_iters: int,
+    analytical_flops: Optional[int],
+    analytical_flops_partial: bool,
+    analytical_io_bytes: Optional[int],
+) -> None:
+    """Populate the basic always-on metric fields on ``result``.
+
+    Called once after the timed loop when ``metrics.tier == "basic"``.
+    Pulled out of :func:`_run_single_provider_engine` to keep that
+    function focused on the timed loop itself; the basic-tier book
+    keeping is otherwise just a long sequence of conditionals on
+    intermediate results.
+    """
+    if cpu_time_probe is not None and cpu_time_probe.delta is not None:
+        # Per-iter microseconds is the interpretable unit: the loop
+        # total is dominated by Python dispatch cost, and per-iter
+        # lets users compare directly against the kernel mean (also
+        # reported per-iter).
+        iters = max(benchmark_iters, 1)
+        result.cpu_user_time_per_iter_us = (
+            cpu_time_probe.delta.user_time_ms * 1000.0 / iters
+        )
+        result.cpu_kernel_time_per_iter_us = (
+            cpu_time_probe.delta.kernel_time_ms * 1000.0 / iters
+        )
+
+    # Analytical totals were computed once at the graph level; propagate
+    # them onto every engine's result so JSON consumers don't have to
+    # look up across structures.
+    result.analytical_flops = analytical_flops
+    result.analytical_flops_partial = analytical_flops_partial
+    result.analytical_io_bytes = analytical_io_bytes
+
+    # Derived throughputs use the *arithmetic mean* of post-warmup kernel
+    # timings — no trimming, no outlier rejection. A single noisy iter
+    # (context switch, thermal throttle) skews the headline number; for
+    # tighter signal use gpu_kernel_stats.min_ms or p95_ms.
+    kernel_mean = (
+        result.gpu_kernel_stats.mean_ms if result.gpu_kernel_stats is not None else None
+    )
+    tflops, gbytes = derive_throughputs(
+        analytical_flops, analytical_io_bytes, kernel_mean
+    )
+    result.derived_tflops_per_s = tflops
+    result.derived_gbytes_per_s = gbytes
+
+    # VRAM is sampled here (still inside the BufferManager context, so
+    # workspace + I/O buffers are still allocated). This is the only
+    # amdsmi field we expose per-engine — see ProviderEngineResult
+    # docstring.
+    try:
+        snap = GpuSmiProbe().snapshot()
+        result.vram_used_mb = snap.get("vram_used_mb")
+    except Exception as e:
+        warn_once("gpu_smi", f"vram snapshot failed: {e}")
 
 
 def _run_single_provider_engine(
@@ -345,6 +437,9 @@ def _run_single_provider_engine(
     ref_provider: Optional[ReferenceProvider],
     validation_requested: bool,
     graph_json: Dict[str, Any],
+    analytical_flops: Optional[int] = None,
+    analytical_flops_partial: bool = False,
+    analytical_io_bytes: Optional[int] = None,
 ) -> ProviderEngineResult:
     """Execute a single engine for a graph (single attempt)."""
     # Initialise the result conservatively as an error and mutate fields as
@@ -354,6 +449,8 @@ def _run_single_provider_engine(
         engine_id=engine_id,
         status="error",
     )
+
+    metrics_basic = config.metrics.basic_enabled
 
     try:
         bench_config = BenchmarkConfig(
@@ -370,6 +467,8 @@ def _run_single_provider_engine(
         )
         executor.prepare(handle, engine_id=engine_id)
         result.cpu_build_time_ms = executor.init_time_ms
+        if metrics_basic:
+            result.workspace_bytes = executor.workspace_size
 
         with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
@@ -379,15 +478,68 @@ def _run_single_provider_engine(
             variant_pack = bm.create_variant_pack()
             executor.warmup(handle, variant_pack)
 
-            bench_result = executor.benchmark(
-                handle, variant_pack, graph_name=graph_name
-            )
+            # Wrap the timed loop with always-on host probes when basic
+            # tier is enabled. The probes are designed to be no-cost on
+            # the GPU side: CPU-time sampling is two read-only kernel
+            # calls before/after the loop, and the amdsmi snapshot fires
+            # once after the benchmark returns. Failures inside probes
+            # are swallowed and surface as None fields on the result.
+            cpu_time_probe = CpuTimeProbe() if metrics_basic else None
+            if cpu_time_probe is not None:
+                cpu_time_probe.__enter__()
+            try:
+                bench_result = executor.benchmark(
+                    handle, variant_pack, graph_name=graph_name
+                )
+            finally:
+                if cpu_time_probe is not None:
+                    cpu_time_probe.__exit__(None, None, None)
 
             result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             if bench_result.has_kernel_timings:
                 result.gpu_kernel_stats = BenchmarkStats.from_timings(
                     bench_result.kernel_timings
                 )
+
+            if metrics_basic:
+                _collect_basic_metrics_post_loop(
+                    result=result,
+                    cpu_time_probe=cpu_time_probe,
+                    benchmark_iters=config.benchmark_iters,
+                    analytical_flops=analytical_flops,
+                    analytical_flops_partial=analytical_flops_partial,
+                    analytical_io_bytes=analytical_io_bytes,
+                )
+
+            # Opt-in profiling pass — runs *after* the timed pass and
+            # always-on probes, so the profiler's overhead can't
+            # pollute the headline numbers. The orchestrator handles
+            # tool-missing / paranoid / parse failures internally and
+            # never raises; we still wrap defensively because anything
+            # bubbling out would otherwise mark a successful timed run
+            # as failed.
+            if config.metrics.opt_in_pass_requested:
+                try:
+                    from ..metrics.profiling_orchestrator import (
+                        run_profiling_passes,
+                    )
+
+                    extra = run_profiling_passes(
+                        graph_path=graph_path,
+                        engine_id=engine_id,
+                        seed=config.seed,
+                        warmup_iters=config.warmup_iters,
+                        benchmark_iters=config.benchmark_iters,
+                        metrics_config=config.metrics,
+                        plugin_path=config.plugin_path,
+                    )
+                    if extra:
+                        result.extra_metrics = extra
+                except Exception as e:
+                    warn_once(
+                        "profiling_orchestrator",
+                        f"profiling pass failed: {e}",
+                    )
 
             if ref_provider is not None:
                 result.correctness = _check_correctness(
@@ -419,25 +571,30 @@ def _run_single_provider_engine(
         result.status = "success"
         return result
 
-    except ExecutionError as e:
-        error_msg = str(e)
-        # Drop any partial timing collected before the failure so the JSON
-        # output never carries half-populated stats on an error/skip entry.
+    except UnsupportedGraphError as e:
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None
         result.e2e_stats = None
+        result.status = "skipped"
+        result.skip_reason = str(e)
+        result.correctness = CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=str(e)
+        )
+        return result
+
+    except ExecutionError as e:
+        error_msg = str(e)
+        result.cpu_build_time_ms = None
+        result.gpu_kernel_stats = None
+        result.e2e_stats = None
+        result.status = "error"
+        result.error_message = error_msg
         result.correctness = CorrectnessResult.failed(
             rtol=config.rtol, atol=config.atol, error_message=error_msg
         )
-        if _is_support_error(error_msg):
-            result.status = "skipped"
-            result.skip_reason = error_msg
-        else:
-            result.status = "error"
-            result.error_message = error_msg
         return result
 
-    except Exception as e:
+    except (ValueError, RuntimeError, OSError) as e:
         error_msg = str(e)
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None

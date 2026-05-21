@@ -101,17 +101,17 @@ inline bool launchKernel(const char* kernelName,
     // The stream determines execution ordering.  All kernels on the same
     // stream run sequentially; using the handle's stream allows the caller
     // to overlap SDPA work with independent operations on other streams.
-    hipError_t err = hipModuleLaunchKernel(func,
-                                           gridX,
-                                           gridY,
-                                           gridZ,
-                                           blockDim,
-                                           K_BLOCK_DIM_Y,
-                                           K_BLOCK_DIM_Z,
-                                           0, // shared memory (kernel uses LDS internally)
-                                           stream,
-                                           nullptr, // kernel args (not used with config)
-                                           config);
+    const hipError_t err = hipModuleLaunchKernel(func,
+                                                 gridX,
+                                                 gridY,
+                                                 gridZ,
+                                                 blockDim,
+                                                 K_BLOCK_DIM_Y,
+                                                 K_BLOCK_DIM_Z,
+                                                 0, // shared memory (kernel uses LDS internally)
+                                                 stream,
+                                                 nullptr, // kernel args (not used with config)
+                                                 config);
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to launch "
@@ -148,7 +148,7 @@ public:
     {
         if(_module != nullptr)
         {
-            hipError_t err = hipModuleUnload(_module);
+            const hipError_t err = hipModuleUnload(_module);
             if(err != hipSuccess)
             {
                 HIPDNN_PLUGIN_LOG_ERROR(
@@ -172,7 +172,7 @@ public:
         {
             if(_module != nullptr)
             {
-                hipError_t err = hipModuleUnload(_module);
+                const hipError_t err = hipModuleUnload(_module);
                 if(err != hipSuccess)
                 {
                     HIPDNN_PLUGIN_LOG_ERROR("Failed to unload kernel module during move, error: "
