@@ -94,6 +94,7 @@ inline const char* gpuTargetName(GpuTarget t)
     case GpuTarget::gfx1102: return "gfx1102";
     case GpuTarget::gfx1150: return "gfx1150";
     case GpuTarget::gfx1151: return "gfx1151";
+    case GpuTarget::_count: break;
     }
     return "???";
 }

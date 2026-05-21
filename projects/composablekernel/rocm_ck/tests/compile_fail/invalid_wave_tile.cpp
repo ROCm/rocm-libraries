@@ -11,4 +11,5 @@ using namespace rocm_ck;
 
 constexpr auto bad = makeSpec(
     Signature{.dtype = DataType::FP32, .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-    GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {32, 32, 16}});
+    GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {32, 32, 16}},
+    TargetSet::cdna());

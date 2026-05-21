@@ -1,9 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 // Must fail: attempts to create more epilogue AddOps than supported
-// Expected error: "unexpected operator after GEMM epilogue chain"
-// NOTE: kMaxPhysicalTensors=8 but current GEMM implementation caps at 6 physical tensors
-// (A, B, output, D0, D1, scale). This test triggers the epilogue chain limit first.
+// Expected error: "maximum 2 D tensors in epilogue chain"
 
 #include <rocm_ck/gemm_spec.hpp>
 
@@ -19,4 +17,5 @@ constexpr auto bad = makeSpec(
                           AddOp{.lhs = "C", .rhs = "D0", .out = "E0"},
                           AddOp{.lhs = "E0", .rhs = "D1", .out = "E1"},
                           AddOp{.lhs = "E1", .rhs = "D2", .out = "E2"}}},
-    GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}});
+    GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+    TargetSet::cdna());

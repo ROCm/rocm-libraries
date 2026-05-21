@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 // Must fail: too many operations in Signature (exceeds kMaxOps = 8)
-// Expected error: "unexpected operator after GEMM epilogue chain" or array bounds error
+// Expected error: "excess elements in struct initializer"
 
 #include <rocm_ck/gemm_spec.hpp>
 

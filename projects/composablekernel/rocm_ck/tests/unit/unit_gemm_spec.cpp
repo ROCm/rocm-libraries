@@ -9,6 +9,7 @@ using ::rocm_ck::AddOp;
 using ::rocm_ck::DataType;
 using ::rocm_ck::EpilogueOp;
 using ::rocm_ck::FastGeluOp;
+using ::rocm_ck::GeluOp;
 using ::rocm_ck::GemmAlgorithm;
 using ::rocm_ck::GemmOp;
 using ::rocm_ck::GemmSpec;
@@ -23,6 +24,7 @@ using ::rocm_ck::Quantization;
 using ::rocm_ck::ReluOp;
 using ::rocm_ck::SigmoidOp;
 using ::rocm_ck::Signature;
+using ::rocm_ck::SiluOp;
 using ::rocm_ck::StoreStrategy;
 using ::rocm_ck::TargetSet;
 using ::rocm_ck::Tensor;
@@ -959,10 +961,9 @@ TEST(MakeSpec, TwoConsecutiveAddOpsProduceTwoDTensors)
     EXPECT_EQ(slot(k, "bias0"), 3);       // D0
     EXPECT_EQ(slot(k, "bias1"), 4);       // D1
     EXPECT_EQ(slot(k, "E"), 2);           // final output
-    // CK Tile folds D tensors via parameter pack — second AddOp extends D0+D1
-    // into a single Add epilogue op, not a separate one
-    EXPECT_EQ(k.num_epilogue_ops, 1);
+    EXPECT_EQ(k.num_epilogue_ops, 2);
     EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Add);
+    EXPECT_EQ(k.epilogue_ops[1], EpilogueOp::Add);
 }
 
 // ============================================================================
@@ -982,4 +983,137 @@ TEST(MakeSpec, AcceptsMaxEpilogueOps)
     EXPECT_EQ(k.num_epilogue_ops, 2);
     EXPECT_TRUE(k.hasEpilogueOp(EpilogueOp::Add));
     EXPECT_TRUE(k.hasEpilogueOp(EpilogueOp::Relu));
+}
+
+// ============================================================================
+// Epilogue generalization: ordering, chaining, interleaving
+// ============================================================================
+
+TEST(MakeSpec, UnaryOnlyWithoutBinaryOp)
+{
+    constexpr auto k = makeSpec(Signature{.dtype = DataType::FP16,
+                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                    ReluOp{.in = "C", .out = "D"}}},
+                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                TargetSet::cdna());
+
+    EXPECT_EQ(k.num_epilogue_ops, 1);
+    EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Relu);
+    EXPECT_EQ(k.num_physical_tensors, 3);
+    EXPECT_EQ(k.numDTensors(), 0);
+}
+
+TEST(MakeSpec, ChainedUnaryOps)
+{
+    constexpr auto k = makeSpec(Signature{.dtype = DataType::FP16,
+                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                    ReluOp{.in = "C", .out = "D"},
+                                                    SigmoidOp{.in = "D", .out = "E"}}},
+                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                TargetSet::cdna());
+
+    EXPECT_EQ(k.num_epilogue_ops, 2);
+    EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Relu);
+    EXPECT_EQ(k.epilogue_ops[1], EpilogueOp::Sigmoid);
+    EXPECT_EQ(k.num_physical_tensors, 3);
+    EXPECT_EQ(slot(k, "E"), 2);
+}
+
+TEST(MakeSpec, UnaryBeforeBinaryOp)
+{
+    constexpr auto k = makeSpec(Signature{.dtype = DataType::FP16,
+                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                    ReluOp{.in = "C", .out = "D"},
+                                                    AddOp{.lhs = "D", .rhs = "bias", .out = "E"}}},
+                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                TargetSet::cdna());
+
+    EXPECT_EQ(k.num_epilogue_ops, 2);
+    EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Relu);
+    EXPECT_EQ(k.epilogue_ops[1], EpilogueOp::Add);
+    EXPECT_EQ(k.num_physical_tensors, 4);
+    EXPECT_EQ(slot(k, "E"), 2);
+    EXPECT_EQ(slot(k, "bias"), 3);
+}
+
+TEST(MakeSpec, InterleavedBinaryUnaryBinary)
+{
+    constexpr auto k = makeSpec(Signature{.dtype = DataType::FP16,
+                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                    AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
+                                                    ReluOp{.in = "D", .out = "E"},
+                                                    MulOp{.lhs = "E", .rhs = "scale", .out = "F"}}},
+                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                TargetSet::cdna());
+
+    EXPECT_EQ(k.num_epilogue_ops, 3);
+    EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Add);
+    EXPECT_EQ(k.epilogue_ops[1], EpilogueOp::Relu);
+    EXPECT_EQ(k.epilogue_ops[2], EpilogueOp::Mul);
+    EXPECT_EQ(k.numDTensors(), 2);
+    EXPECT_EQ(slot(k, "bias"), 3);
+    EXPECT_EQ(slot(k, "scale"), 4);
+    EXPECT_EQ(slot(k, "F"), 2);
+}
+
+TEST(MakeSpec, MulOpOnly)
+{
+    constexpr auto k = makeSpec(Signature{.dtype = DataType::FP16,
+                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                    MulOp{.lhs = "C", .rhs = "scale", .out = "D"}}},
+                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                TargetSet::cdna());
+
+    EXPECT_EQ(k.num_epilogue_ops, 1);
+    EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Mul);
+    EXPECT_EQ(k.numDTensors(), 1);
+    EXPECT_EQ(slot(k, "scale"), 3);
+}
+
+TEST(MakeSpec, AllActivationVariants)
+{
+    constexpr auto gelu = makeSpec(Signature{.dtype = DataType::FP16,
+                                             .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                       GeluOp{.in = "C", .out = "D"}}},
+                                   GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                   TargetSet::cdna());
+    EXPECT_EQ(gelu.epilogue_ops[0], EpilogueOp::Gelu);
+
+    constexpr auto fast_gelu =
+        makeSpec(Signature{.dtype = DataType::FP16,
+                           .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                     FastGeluOp{.in = "C", .out = "D"}}},
+                 GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                 TargetSet::cdna());
+    EXPECT_EQ(fast_gelu.epilogue_ops[0], EpilogueOp::FastGelu);
+
+    constexpr auto silu = makeSpec(Signature{.dtype = DataType::FP16,
+                                             .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                       SiluOp{.in = "C", .out = "D"}}},
+                                   GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                   TargetSet::cdna());
+    EXPECT_EQ(silu.epilogue_ops[0], EpilogueOp::Silu);
+
+    constexpr auto sigmoid = makeSpec(Signature{.dtype = DataType::FP16,
+                                                .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                        SigmoidOp{.in = "C", .out = "D"}}},
+                                      GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                      TargetSet::cdna());
+    EXPECT_EQ(sigmoid.epilogue_ops[0], EpilogueOp::Sigmoid);
+}
+
+TEST(MakeSpec, EpilogueOpsPreserveInsertionOrder)
+{
+    constexpr auto k = makeSpec(Signature{.dtype = DataType::FP16,
+                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
+                                                    SigmoidOp{.in = "C", .out = "D"},
+                                                    AddOp{.lhs = "D", .rhs = "bias", .out = "E"},
+                                                    FastGeluOp{.in = "E", .out = "F"}}},
+                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                                TargetSet::cdna());
+
+    EXPECT_EQ(k.num_epilogue_ops, 3);
+    EXPECT_EQ(k.epilogue_ops[0], EpilogueOp::Sigmoid);
+    EXPECT_EQ(k.epilogue_ops[1], EpilogueOp::Add);
+    EXPECT_EQ(k.epilogue_ops[2], EpilogueOp::FastGelu);
 }

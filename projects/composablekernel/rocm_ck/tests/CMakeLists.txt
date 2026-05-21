@@ -25,6 +25,7 @@ function(add_rocm_ck_test test_name)
     add_executable(${test_name} ${ARGN})
     target_link_libraries(${test_name} PRIVATE rocm_ck GTest::gtest_main GTest::gmock)
     target_compile_options(${test_name} PRIVATE
+        -Wall -Werror
         -Wno-global-constructors           # GTest registration macros
         -Wno-undef                         # GTest internal headers
         -Wno-zero-as-null-pointer-constant # C++20 <=> comparisons to 0

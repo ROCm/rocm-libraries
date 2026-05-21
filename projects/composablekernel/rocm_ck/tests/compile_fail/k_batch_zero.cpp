@@ -1,7 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// k_batch = 0 must fail at compile time.
+// Must fail: k_batch = 0.
+// Expected error: "k_batch must be positive"
 
 #include <rocm_ck/gemm_spec.hpp>
 using rocm_ck::TargetSet;

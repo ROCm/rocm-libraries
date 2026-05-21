@@ -44,7 +44,8 @@ void validate(const Args& args, const Spec& spec)
         if(args.tensors[slot].ptr == nullptr)
         {
             std::fprintf(stderr,
-                         "rocm_ck::validate: tensor \"%s\" (slot %d) has null pointer\n",
+                         "rocm_ck::validate: tensor \"%.*s\" (slot %d) has null pointer\n",
+                         spec.physical_tensors[i].name.len,
                          spec.physical_tensors[i].name.data,
                          slot);
             std::abort();

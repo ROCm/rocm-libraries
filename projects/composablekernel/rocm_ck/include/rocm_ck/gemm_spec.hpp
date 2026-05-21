@@ -302,7 +302,7 @@ struct GemmSpec
 /// Lookup a physical tensor by name. consteval — compile-time only.
 /// Used in static_asserts and consteval makeSpec() result inspection.
 /// For runtime access, use GemmSpec::output() or physical_tensors[] directly.
-consteval PhysicalTensor tensor(GemmSpec k, std::string_view name)
+consteval PhysicalTensor tensor(const GemmSpec& k, std::string_view name)
 {
     for(int i = 0; i < k.num_physical_tensors; ++i)
         if(k.physical_tensors[i].name == name)
@@ -311,13 +311,13 @@ consteval PhysicalTensor tensor(GemmSpec k, std::string_view name)
 }
 
 /// Slot index lookup by name. consteval — compile-time only.
-consteval int slot(GemmSpec k, std::string_view name) { return tensor(k, name).args_slot; }
+consteval int slot(const GemmSpec& k, std::string_view name) { return tensor(k, name).args_slot; }
 
 /// Dtype lookup by name. consteval — compile-time only.
-consteval DataType dtype(GemmSpec k, std::string_view name) { return tensor(k, name).dtype; }
+consteval DataType dtype(const GemmSpec& k, std::string_view name) { return tensor(k, name).dtype; }
 
 /// Layout lookup by name. consteval — compile-time only.
-consteval Layout layout(GemmSpec k, std::string_view name) { return tensor(k, name).layout; }
+consteval Layout layout(const GemmSpec& k, std::string_view name) { return tensor(k, name).layout; }
 
 // ============================================================================
 // Epilogue op helpers
@@ -401,7 +401,8 @@ consteval std::pair<DataType, Layout> extractDTensorMeta(const ResolvedSignature
 ///   - Block tile is divisible by (block_waves x wave_tile) in each dimension
 ///
 /// Derives workgroup_size = block_waves.m x block_waves.n x block_waves.k x wavefront_size.
-consteval GemmSpec makeSpec(Signature sig, GemmAlgorithm algo, TargetSet targets)
+consteval GemmSpec
+makeSpec(const Signature& sig, const GemmAlgorithm& algo, const TargetSet& targets)
 {
     ResolvedSignature resolved = resolve(sig);
 
@@ -441,50 +442,49 @@ consteval GemmSpec makeSpec(Signature sig, GemmAlgorithm algo, TargetSet targets
     DataType d1_dtype = DataType::FP32;
     Layout d1_layout  = Layout::Row;
 
-    int next_op = 1;
-
-    // Binary ops: AddOp or MulOp — consumes a D tensor
-    if(next_op < kMaxOps)
+    for(int next_op = 1; next_op < kMaxOps; ++next_op)
     {
+        if(std::holds_alternative<std::monostate>(sig.ops[next_op]))
+            break;
+
+        if(num_epi_ops >= kMaxEpilogueOps)
+            throw "too many epilogue operations (max 4)";
+
         if(auto bin = parseBinaryEpilogueOp(sig.ops[next_op]); bin.has_value())
         {
-            auto [op, rhs, out]           = *bin;
-            epi_ops[num_epi_ops++]        = op;
-            num_d_tensors                 = 1;
-            d0_name                       = rhs;
-            std::tie(d0_dtype, d0_layout) = extractDTensorMeta(resolved, d0_name);
-            final_output                  = out;
-            next_op++;
+            auto [op, rhs, out] = *bin;
 
-            // Second consecutive AddOp — second D tensor (Add+Add: result += D0 + D1).
-            // CK Tile's ComposedCDEOp folds D tensors via parameter pack.
-            if(next_op < kMaxOps && std::holds_alternative<AddOp>(sig.ops[next_op]))
+            if(num_d_tensors >= 2)
+                throw "maximum 2 D tensors in epilogue chain";
+
+            epi_ops[num_epi_ops++] = op;
+
+            auto [dt, lo] = extractDTensorMeta(resolved, rhs);
+            if(num_d_tensors == 0)
             {
-                const AddOp& add2             = std::get<AddOp>(sig.ops[next_op]);
-                num_d_tensors                 = 2;
-                d1_name                       = add2.rhs;
-                std::tie(d1_dtype, d1_layout) = extractDTensorMeta(resolved, d1_name);
-                final_output                  = add2.out;
-                next_op++;
+                d0_name   = rhs;
+                d0_dtype  = dt;
+                d0_layout = lo;
             }
+            else
+            {
+                d1_name   = rhs;
+                d1_dtype  = dt;
+                d1_layout = lo;
+            }
+            num_d_tensors++;
+            final_output = out;
         }
-    }
-
-    // Unary ops: activations applied after binary combine
-    if(next_op < kMaxOps)
-    {
-        if(auto epi = parseUnaryEpilogueOp(sig.ops[next_op]); epi.has_value())
+        else if(auto epi = parseUnaryEpilogueOp(sig.ops[next_op]); epi.has_value())
         {
             epi_ops[num_epi_ops++] = epi->first;
             final_output           = epi->second;
-            next_op++;
+        }
+        else
+        {
+            throw "unrecognized operator in epilogue chain";
         }
     }
-
-    // Remaining ops must be empty
-    for(int i = next_op; i < kMaxOps; ++i)
-        if(!std::holds_alternative<std::monostate>(sig.ops[i]))
-            throw "unexpected operator after GEMM epilogue chain";
 
     // Direct2D epilogue does not support D tensors
     if(algo.store_strategy == StoreStrategy::Direct2D && num_d_tensors > 0)

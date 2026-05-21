@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 // Must fail: too many epilogue operations (exceeds kMaxEpilogueOps = 4)
-// Expected error: "unexpected operator after GEMM epilogue chain" or array index out of bounds
+// Expected error: "too many epilogue operations (max 4)"
 
 #include <rocm_ck/gemm_spec.hpp>
 
@@ -17,4 +17,5 @@ constexpr auto bad = makeSpec(Signature{.dtype   = DataType::FP16,
                                                     ReluOp{.in = "F", .out = "G"},
                                                     ReluOp{.in = "G", .out = "H"},
                                                     ReluOp{.in = "H", .out = "I"}}},
-                              GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}});
+                              GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}},
+                              TargetSet::cdna());
