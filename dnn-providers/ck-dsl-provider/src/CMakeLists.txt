@@ -17,6 +17,7 @@ add_library(
     engines/conv_implicit_gemm/ConvImplicitGemmPlan.cpp
     engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.cpp
     graph/GraphSignature.cpp
+    perf/PerfMeasurement.cpp
     python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
     python/PythonError.cpp
