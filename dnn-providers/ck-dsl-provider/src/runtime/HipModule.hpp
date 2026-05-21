@@ -82,10 +82,36 @@ class HipModule {
         return _kernelName;
     }
 
+    /// Launch metadata captured from the artifact at ctor time. The
+    /// plan layer reads these on every ``execute`` so callers don't
+    /// have to thread the original ``KernelArtifact`` alongside the
+    /// module. The HSACO bytes themselves are not retained -- the HIP
+    /// runtime copied what it needs during ``hipModuleLoadData``.
+    const KernelArtifact::GridSpec& grid() const noexcept {
+        return _grid;
+    }
+    const KernelArtifact::BlockSpec& block() const noexcept {
+        return _block;
+    }
+    std::uint32_t ldsBytes() const noexcept {
+        return _ldsBytes;
+    }
+    const std::vector<ArgSchema>& argSchema() const noexcept {
+        return _argSchema;
+    }
+    const std::string& kind() const noexcept {
+        return _kind;
+    }
+
    private:
     hipModule_t _module{nullptr};
     hipFunction_t _function{nullptr};
     std::string _kernelName;
+    std::string _kind;
+    KernelArtifact::GridSpec _grid{};
+    KernelArtifact::BlockSpec _block{};
+    std::uint32_t _ldsBytes{0};
+    std::vector<ArgSchema> _argSchema;
 };
 
 }  // namespace ck_dsl_provider

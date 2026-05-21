@@ -17,10 +17,14 @@ converts -- but still gfx950 ISA since the DSL is gfx950-only). The
 resulting kernel signature is ``(A: ptr, C: ptr, N: i32)`` so launching
 over a one-element buffer copies a single FP16 value.
 
-# TODO(I-7): add ``compile(op_kind: str, payload: dict) -> dict`` that
-# instantiates the matching ``ck_dsl`` Spec dataclass via ``**payload``,
-# calls ``ck_dsl.helpers.compile.compile_kernel``, and returns the same
-# shape as :func:`compile_smoke` (hsaco + launch metadata).
+M1 step I-7 adds :func:`compile`, the production entry the C++
+``CompileServiceBridge::compile`` calls on a JitCache miss. It
+dispatches on ``op_kind`` and, for ``"conv_implicit_gemm"``,
+instantiates the matching ``ck_dsl`` dataclasses from the payload dict
+that ``ConvImplicitGemmPayload::convImplicitGemmSpecToPayload``
+emitted, runs ``build_implicit_gemm_conv`` + ``compile_kernel``, and
+returns the artifact plus the launch metadata derived from the spec
+(grid from M / K + tile sizes, block from spec.block_size).
 """
 
 from __future__ import annotations
@@ -140,3 +144,102 @@ def compile_smoke() -> dict:
         "arg_schema": _smoke_arg_schema(),
         "isa": artifact.isa,
     }
+
+
+def _conv_implicit_gemm_arg_schema() -> List[Dict[str, Any]]:
+    """Schema for the implicit-GEMM conv kernel signature.
+
+    From ``ck_dsl.instances.conv_implicit_gemm.build_implicit_gemm_conv``
+    the kernel takes six positional parameters:
+
+      A: ptr<f16> global    (input  NHWC)
+      B: ptr<f16> global    (weight KRSC)
+      D: ptr<f16> global    (output NHWK)
+      A_bytes: i32          (buffer-rsrc bounds for OOB clamping)
+      B_bytes: i32
+      D_bytes: i32
+
+    Natural alignment is sufficient; the AMDGPU host-side calling
+    convention packs these into 36 bytes (3 * 8 ptrs + 3 * 4 i32).
+    """
+    return [
+        {"name": "A", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "B", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "D", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "A_bytes", "kind": "I32", "size": _I32_SIZE, "align": _I32_ALIGN},
+        {"name": "B_bytes", "kind": "I32", "size": _I32_SIZE, "align": _I32_ALIGN},
+        {"name": "D_bytes", "kind": "I32", "size": _I32_SIZE, "align": _I32_ALIGN},
+    ]
+
+
+def _compile_conv_implicit_gemm(payload: dict) -> dict:
+    """Build + compile an implicit-GEMM conv kernel from the payload.
+
+    Caller contract: ``payload`` is the dict
+    ``ConvImplicitGemmPayload::convImplicitGemmSpecToPayload`` emits --
+    a nested ``"problem"`` dict plus the top-level
+    ``ImplicitGemmConvSpec`` kwargs. We forward it verbatim into the
+    dataclass constructors; field-set drift would have failed at the
+    adapter test stage (the I-6 round-trip canary).
+    """
+    from ck_dsl.helpers.compile import compile_kernel
+    from ck_dsl.instances.conv_implicit_gemm import (
+        ConvProblem,
+        ImplicitGemmConvSpec,
+        build_implicit_gemm_conv,
+    )
+
+    problem_payload = dict(payload["problem"])
+    problem = ConvProblem(**problem_payload)
+
+    spec_kwargs = {k: v for k, v in payload.items() if k != "problem"}
+    spec = ImplicitGemmConvSpec(problem=problem, **spec_kwargs)
+
+    kernel_def = build_implicit_gemm_conv(spec)
+    artifact = compile_kernel(kernel_def)
+
+    # Grid derivation per plan §4:
+    #   M = N*Ho*Wo, num_pid_m = ceil(M / tile_m)
+    #   num_pid_n = ceil(K / tile_n)
+    #   grid = (num_pid_n, num_pid_m, 1)  -- matches the kernel's
+    #     ``grid_order="NM"`` convention where block.x indexes N tiles
+    #     and block.y indexes M tiles (see
+    #     ``build_implicit_gemm_conv`` body, line ~490).
+    #   block = (block_size, 1, 1)
+    M = problem.M
+    num_pid_m = (M + spec.tile_m - 1) // spec.tile_m
+    num_pid_n = (problem.N_gemm + spec.tile_n - 1) // spec.tile_n
+
+    return {
+        "hsaco": artifact.hsaco,
+        "kernel_name": artifact.kernel_name,
+        "kind": "conv_implicit_gemm",
+        "grid": (num_pid_n, num_pid_m, 1),
+        "block": (spec.block_size, 1, 1),
+        # The implicit-GEMM kernel allocates its LDS via smem_alloc with
+        # statically-known shapes (A_smem / B_smem / optional C_smem for
+        # cshuffle), so the dynamic-LDS arg to hipModuleLaunchKernel is
+        # zero. Static LDS lives inside the HSACO's kernarg descriptor.
+        "lds_bytes": 0,
+        "arg_schema": _conv_implicit_gemm_arg_schema(),
+        "isa": artifact.isa,
+    }
+
+
+def compile(op_kind: str, payload: dict) -> dict:
+    """Compile one DSL kernel from a typed payload dict.
+
+    Called by the C++ ``CompileServiceBridge::compile`` on a
+    ``JitCache`` miss. Dispatches on ``op_kind``; the only kind in M1
+    is ``"conv_implicit_gemm"``. Unknown kinds raise ``ValueError``,
+    which the bridge surfaces as a ``HipdnnPluginException``.
+
+    The returned dict shape matches :func:`compile_smoke` so the C++
+    side can use the same translation path for both smoke and
+    production compiles.
+    """
+    if op_kind == "conv_implicit_gemm":
+        return _compile_conv_implicit_gemm(payload)
+    raise ValueError(
+        f"ck_dsl_provider.compile_service: unsupported op_kind {op_kind!r}"
+    )
