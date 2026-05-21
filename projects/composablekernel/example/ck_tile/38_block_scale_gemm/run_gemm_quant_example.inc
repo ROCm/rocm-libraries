@@ -88,7 +88,9 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
     // Base pipeline selection based on quant mode and preshuffle settings
     constexpr auto base_gemm_pipeline = []() {
         if constexpr(eight_waves)
-            return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+            // EightWaves pipeline body uses the EightWaves-specific tail/hot-loop
+            // schedule, which differs from the standard CompV3 base.
+            return ck_tile::BaseGemmPipelineAgBgCrCompV3EightWaves<GemmPipelineProblem>{};
         else if constexpr(GemmConfig::PreshuffleB)
             return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
         else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped &&

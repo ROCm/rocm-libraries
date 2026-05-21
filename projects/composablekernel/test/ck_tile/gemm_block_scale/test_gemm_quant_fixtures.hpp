@@ -1256,7 +1256,9 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
 
         constexpr auto base_gemm_pipeline = []() {
             if constexpr(eight_waves)
-                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+                // EightWaves pipeline body uses the EightWaves-specific tail/hot-loop
+                // schedule, which differs from the standard CompV3 base.
+                return ck_tile::BaseGemmPipelineAgBgCrCompV3EightWaves<GemmPipelineProblem>{};
             else if constexpr(PreshuffleB)
                 return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
             else if constexpr(IS_FP8BLOCKSCALE)
@@ -1336,7 +1338,17 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
                                                      Base::M_Warp_Tile,
                                                      Base::N_Warp_Tile,
                                                      Base::K_Warp_Tile,
-                                                     transpose_c>>>;
+                                                     transpose_c,
+                                                     1,          // kNumWaveGroups_
+                                                     false,      // FixedVectorSize_
+                                                     1,          // VectorSizeC_
+                                                     1,          // BlockedXDLN_PerWarp_
+                                                     false,      // DoubleSmemBuffer_
+                                                     void,       // AComputeDataType_
+                                                     void,       // BComputeDataType_
+                                                     false,      // TilesPacked_
+                                                     eight_waves // EightWavePipeline_
+                                                     >>>;
 
             using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
                                                     GemmPipeline,
