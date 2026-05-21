@@ -1519,6 +1519,7 @@ class CKTileDepthwiseConvKernelGenerator:
 #include <functional>
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/grouped_convolution.hpp"
 #include "ck_tile/ops/grouped_convolution/pipeline/grouped_convolution_forward_depthwise_pipeline.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
