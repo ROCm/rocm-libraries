@@ -40,6 +40,21 @@ using ::rocm_ck::makeSpec;
 // OGradDotO frozen baselines
 // ============================================================================
 
+TEST(FmhaBwdCompat, OGradDotO_FP16_D32_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 32);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
 TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch)
 {
     constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
@@ -78,6 +93,36 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D64_Batch)
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_v, 64);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D96_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 96);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D256_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 256);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_TRUE(k.pad_seqlen_q);
     EXPECT_TRUE(k.pad_hdim_v);
@@ -469,17 +514,44 @@ TEST(FmhaBwdCompat, Registry_OGradDotO_FallsToPaddedWhenNoPadMissing)
     EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_bf16_d128_batch");
 }
 
-TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsD32)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_fp16_d32_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsD96)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_fp16_d96_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsD256)
 {
     const auto* v = findVariant(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::FP16, .hdim_v = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_fp16_d256_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 160, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
     EXPECT_EQ(v, nullptr);
 }
 
 TEST(FmhaBwdCompat, Registry_OGradDotO_VariantCount)
 {
-    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 5);
+    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 8);
 }
 
 // ============================================================================
