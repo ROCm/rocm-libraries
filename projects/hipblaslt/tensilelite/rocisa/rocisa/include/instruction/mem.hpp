@@ -424,7 +424,17 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
-            return {dst, base};
+            return {dst, base, soffset};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {base, soffset};
         }
 
         std::string getArgStr() const
