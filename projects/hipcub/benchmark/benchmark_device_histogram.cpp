@@ -127,6 +127,15 @@ private:
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
+        HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_input,
+                                                         d_histogram,
+                                                         Bins + 1,
+                                                         lower_level,
+                                                         upper_level,
+                                                         int(size),
+                                                         stream));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
@@ -209,6 +218,16 @@ private:
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
+        HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
+            d_temporary_storage,
+            temporary_storage_bytes,
+            d_input,
+            d_histogram,
+            num_levels,
+            lower_level,
+            upper_level,
+            int(size),
+            stream)));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
@@ -280,6 +299,14 @@ class range_benchmark : public primbench::benchmark_interface
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
+        HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                          temporary_storage_bytes,
+                                                          d_input,
+                                                          d_histogram,
+                                                          Bins + 1,
+                                                          d_levels,
+                                                          int(size),
+                                                          stream));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
@@ -365,6 +392,15 @@ class multi_range_benchmark : public primbench::benchmark_interface
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
+        HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+            d_temporary_storage,
+            temporary_storage_bytes,
+            d_input,
+            d_histogram,
+            num_levels,
+            d_levels,
+            int(size),
+            stream)));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
