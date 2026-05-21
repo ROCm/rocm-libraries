@@ -28,7 +28,6 @@
 
 #include <miopen/tensor_holder.hpp>
 
-
 template <std::size_t NSpatialDim, typename Tout, typename Tbias>
 void cpu_bias_forward_impl(tensor<Tout>& out, const tensor<Tbias>& bias)
 {

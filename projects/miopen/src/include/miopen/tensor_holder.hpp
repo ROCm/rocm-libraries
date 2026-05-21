@@ -48,7 +48,6 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #include <array>
 #include <ostream>
 #include <iostream>
-#include <iomanip>
 
 template <class F>
 void visit_tensor_size(size_t n, F f)
@@ -457,27 +456,6 @@ struct tensor
         stream.flags(flags);
     }
 };
-
-template <class T>
-void serialize(std::istream& s, tensor<T>& x)
-{
-    std::vector<size_t> lens;
-    serialize(s, lens);
-    std::vector<size_t> strides;
-    serialize(s, strides);
-    x.desc = miopen::TensorDescriptor{miopen_type<T>{}, lens, strides};
-    serialize(s, x.data);
-}
-
-template <class T>
-void serialize(std::ostream& s, const tensor<T>& x)
-{
-    const auto& lens    = x.desc.GetLengths();
-    const auto& strides = x.desc.GetStrides();
-    serialize(s, lens);
-    serialize(s, strides);
-    serialize(s, x.data);
-}
 
 struct tensor_generate
 {
