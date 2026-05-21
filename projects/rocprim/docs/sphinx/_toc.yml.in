@@ -23,6 +23,8 @@ subtrees:
       title: Use the SPIR-V target
     - file: how-to/rocPRIM-primbench.rst
       title: Use primbench for benchmarking
+    - file: how-to/rocPRIM-run-tests.rst
+      title: Run unit tests on multiple GPUs
 
 - caption: Reference
   entries:
