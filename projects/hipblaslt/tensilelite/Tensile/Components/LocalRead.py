@@ -556,6 +556,65 @@ class LocalReadMFMA(LocalRead):
             packCodeT.add(VCvtPkF32toBF16(dst=v5d, src0=v2, src1=v3))
             commentStr = "" if noComment else "__TF32_2_" + tc + "_%d pack final end"%(baseValuiIdx//8)
             packCodeT.add(VCvtPkF32toBF16(dst=v4d, src0=v0, src1=v1, comment=commentStr))
+
+    def localReadMX(self, writer, kernel, bufferIdx, iui, epsi, tP):
+        tc      = tP["tensorChar"]
+        mxTc    = tc[3]
+        imod    = Module("LocalReadDo%s_I%s" % (tc,iui))
+        pack    = Module("pack%s_I%s"%(tc,iui))
+        packPre = Module("pack%s_I%s Pre"%(tc,iui))
+
+        tile01           = tP["tile01Idx"]
+        instruction      = tP["localReadInstruction"]
+        bpr              = 4 # bytes/register
+
+        vectorWidth      = kernel["VectorWidth%s"%tc]
+        LdsPad           = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
+        mxUnit: int      = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{mxTc}"]
+        matrixInstT      = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
+        stridePerRead    = instruction.blockWidth * bpr
+        tilePerRead      = stridePerRead // mxUnit
+        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
+                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
+
+        numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
+        numReadsPerVector = int(vectorWidth // tilePerRead)
+        numVgpr           = int(ceil(instruction.blockWidth))
+
+        valufIdx = 0
+        for vIdx in range(0, numVectorsPerTile):
+            for eIdx in range(0, numReadsPerVector):
+                valuiIdx = int(valufIdx)
+                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
+                destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
+
+                # load read instruction
+                paramList = []
+
+                offset_val = eIdx * stridePerRead
+                offset_val = offset_val + vIdx * MIWaveGroupShape[tile01] * mxUnit
+                offset_val = offset_val + tP["localReadOffset"]
+                if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
+                    offset_val = int(offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                offset_val = offset_val + tP["localReadSwapByteOffset"]
+
+                paramList.append(int(offset_val))
+
+                comment = "L -> Reg for MX"
+
+                addrIdx = paramList[0] // 65536
+                srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
+                paramList[0] -= addrIdx * 65536
+
+                ds = DSModifiers(na=1, offset=paramList[0])
+                LocalReadX = instruction.getInst()
+                localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
+
+                valufIdx += numVgpr
+
+        return imod, pack, packPre
+
+
     """
     Local Read: Do It A/B
     iui = Inner Unroll Idx
@@ -581,6 +640,11 @@ class LocalReadMFMA(LocalRead):
 
         isgfx950 = kernel["ISA"][:2] == (9, 5)
         isgfx950mx = isgfx950 and ("MXS" in tc)
+
+        if ("MXS" in tc and writer.states.asmCaps["HasWMMA_V3"]
+            and kernel["MXScaleFormat"] == "InMemorySwizzle"):
+            return self.localReadMX(writer, kernel, bufferIdx, iui, epsi, tP)
+
         MacDataType      = f"MacDataType{tc}" if(tc=="A" or tc=="B") else "DataType"
         tile01           = tP["tile01Idx"]
         instruction      = tP["localReadInstruction"]
@@ -607,8 +671,29 @@ class LocalReadMFMA(LocalRead):
         if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            tileStride = mxUnit
-            UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            # MX scale LDS strides, gated by MXScaleFormat:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
+            #       tileStride   = mxUnit
+            #       UnrollStride = MT * mxUnit  (M-blocks interleaved on K)
+            #   - NoSwizzle (canonical): LDS layout follows UnrollMajorLDS<tc>,
+            #     which is mirrored from UnrollMajorLDS<A/B> = not TLU<A/B>:
+            #       UMLDS=1 (K-major LDS):  addr(m,k) = k + m*(_DepthU_MXS + LdsPad)
+            #         tileStride   = _DepthU_MXS + LdsPad
+            #         UnrollStride = mxUnit
+            #       UMLDS=0 (M-major LDS):  addr(m,k) = m + k*(MT + LdsPad)
+            #         tileStride   = 1
+            #         UnrollStride = MT + LdsPad
+            mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzled:
+                tileStride = mxUnit
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                tileStride = kernel["_DepthU%s" % tc] + LdsPad
+                UnrollStride = mxUnit
+            else:
+                tileStride = 1
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad
 
         enableLDSTr = tP["enableLDSTr"]
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
@@ -1425,14 +1510,19 @@ class LocalReadMFMA(LocalRead):
                             else:
                                 valufIdx += blockWidth if (not tP["isM"]) else (numVgpr if writer.states.asmCaps["HasSWMMAC_gfx1250"] else 1)
 
-                            # load read instrution
+                            # load read instruction
                             paramList = []
 
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
                                 if "MXS" in tc:
-                                    incOffset = 0
+                                    # rIdx walks the K-scales packed into one MFMA-K sub-iter.
+                                    # Step is UnrollStride, which equals mxUnit for K-major LDS
+                                    # (UMLDS=1) and MT+LdsPad for M-major LDS (UMLDS=0). For
+                                    # UMLDS=1, numReadsPerUnroll is typically 1 so this loop
+                                    # degenerates to the pre-existing incOffset=0 behavior.
+                                    incOffset = rIdx * numElementPerRead * UnrollStride
                                 elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
                                     incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride

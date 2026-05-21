@@ -17,6 +17,7 @@
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck {
@@ -31,7 +32,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 #endif
     kernel_gemm_dpp(const typename GridwiseGemm::Argument karg)
 {
-#if(defined(__gfx103__) || defined(__gfx11__))
+#if defined(__gfx103__) || defined(__gfx11__) || defined(__gfx12__)
     __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
     const auto a_grid_desc_ak0_m_ak1 = amd_wave_read_first_lane(

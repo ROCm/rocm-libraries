@@ -55,7 +55,6 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1,
                                            miopen::solver::conv::ConvAsm5x10u2v2b1,
                                            miopen::solver::conv::ConvHipDirectFwd11x11,
-                                           miopen::solver::conv::ConvOclDirectFwdGen,
                                            miopen::solver::conv::ConvOclDirectFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
@@ -204,14 +203,7 @@ static auto GetBwdWrW2DSolvers()
 {
     return miopen::solver::SolverContainer<miopen::solver::conv::ConvAsmBwdWrW1x1,
                                            miopen::solver::conv::ConvAsmBwdWrW3x3,
-                                           miopen::solver::conv::ConvOclBwdWrW2<1>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<2>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<4>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<8>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<16>,
-                                           miopen::solver::conv::ConvOclBwdWrW2NonTunable,
                                            miopen::solver::conv::ConvOclBwdWrW53,
-                                           miopen::solver::conv::ConvOclBwdWrW1x1,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw>{};

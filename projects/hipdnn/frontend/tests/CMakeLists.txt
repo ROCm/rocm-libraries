@@ -39,7 +39,6 @@ add_executable(
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
-    TestEngineOverrideConfig.cpp
     TestError.cpp
     TestFrontendLogging.cpp
     TestGraph.cpp
@@ -65,6 +64,8 @@ add_executable(
     TestReductionNode.cpp
     TestRMSNormAttributes.cpp
     TestRMSNormNode.cpp
+    TestRMSNormBackwardAttributes.cpp
+    TestRMSNormBackwardNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
     TestSetEnginePluginPaths.cpp
     TestTensorAttributes.cpp
