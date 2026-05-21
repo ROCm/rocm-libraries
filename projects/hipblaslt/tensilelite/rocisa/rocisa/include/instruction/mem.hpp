@@ -395,6 +395,55 @@ namespace rocisa
         }
     };
 
+    struct SMemAtomicIncInstruction : public AtomicReadWriteInstruction
+    {
+        std::shared_ptr<Container>   base;
+        InstructionInput             soffset;
+        std::optional<SMEMModifiers> smem;
+
+        SMemAtomicIncInstruction(InstType                          instType,
+                                 const std::shared_ptr<Container>& dst,
+                                 const std::shared_ptr<Container>& base,
+                                 const InstructionInput&           soffset,
+                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                 const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
+            , base(base)
+            , soffset(soffset)
+            , smem(smem)
+        {
+            instStr = "s_atomic_inc";
+        }
+
+        SMemAtomicIncInstruction(const SMemAtomicIncInstruction& other)
+            : AtomicReadWriteInstruction(other)
+            , base(other.base ? other.base->clone() : nullptr)
+            , smem(other.smem)
+        {
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, base};
+        }
+
+        std::string getArgStr() const
+        {
+            return dst->toString() + ", " + base->toString() + ", " + InstructionInputToString(soffset);
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            if(smem)
+            {
+                kStr += smem->toString();
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
     struct SMemAtomicDecInstruction : public AtomicReadWriteInstruction
     {
         std::shared_ptr<Container>   base;
@@ -2867,6 +2916,28 @@ namespace rocisa
         const std::shared_ptr<Container> getMsbDstParam() const override
         {
             return dstAddr;
+        }
+    };
+
+    struct SAtomicInc : public SMemAtomicIncInstruction
+    {
+        SAtomicInc(const std::shared_ptr<Container>& dst,
+                   const std::shared_ptr<Container>& base,
+                   const InstructionInput&           soffset,
+                   std::optional<SMEMModifiers>      smem    = std::nullopt,
+                   const std::string&                comment = "")
+            : SMemAtomicIncInstruction(InstType::INST_B32, dst, base, soffset, smem, comment)
+        {
+        }
+
+        SAtomicInc(const SAtomicInc& other)
+            : SMemAtomicIncInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicInc>(*this);
         }
     };
 

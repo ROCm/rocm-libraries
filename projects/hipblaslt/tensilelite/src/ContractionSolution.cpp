@@ -752,12 +752,18 @@ namespace TensileLite
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
-            // SK doesn't care gsu
-            if(gsu > 1)
+            if(sizeMapping.streamK == 4)
             {
-                std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-                          << "setting GSU to 1." << std::endl;
-                gsu = 1;
+                auto itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                auto tiles = problem.getNumTiles(sizeMapping, 1);
+                uint32_t skTiles = 0;
+                uint32_t skItersPerWI = 0;
+                
+                args.template append<uint32_t>("ItersPerTile", itersPerTile);
+                args.template append<uint32_t>("TotalTiles", tiles);
+                args.template append<uint32_t>("SKTiles", skTiles);
+                args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
+                args.template append<uint32_t>("SKGrid", sk.grid);
             }
 
             auto tiles = problem.getNumTiles(sizeMapping, 1);
@@ -790,42 +796,72 @@ namespace TensileLite
             {
                 if(sk.reduction == origami::reduction_t::parallel)
                 {
-                    uint32_t skSplit
-                        = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
-                    uint32_t skItersPerWG = itersPerTile / skSplit;
-
-                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                    args.template append<uint32_t>("skGrid", sk.grid);
-                    args.template append<uint32_t>("skTiles", skSplit);
+                    std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+                            << "setting GSU to 1." << std::endl;
+                    gsu = 1;
                 }
-                else
+
+                auto tiles = problem.getNumTiles(sizeMapping, 1);
+
+                // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
+                // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
+                auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                auto     totalIters   = tiles * itersPerTile;
+                uint32_t magicNumberItersPerTile;
+                uint32_t magicShiftItersPerTile;
+                magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
+
+                args.template append<uint32_t>("itersPerTile", itersPerTile);
+                args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
+                args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
+                args.template append<uint32_t>("totalIters", totalIters);
+
+                if(sizeMapping.streamK == 1) // Basic SK
                 {
-                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                    assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                    int fullTiles = pAMDGPU->skFullTiles;
-
-                    bool bigEnough = tiles > sk.grid;
-                    // skTiles is number of Stream-K tiles to complete
-                    // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
-                    // followed by an even number of data-parllel tiles.
-                    // If total tiles is evenly divisble by grid size,
-                    // then no Stream-K tiles are needed, all data-parallel
-                    uint32_t skTiles = sk.grid;
-                    // If not evenly divisible, determine number of Stream-K tiles
-                    if(tiles % sk.grid != 0)
+                    uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
+                    args.template append<uint32_t>("SKItersPerWG", itersPerWave);
+                }
+                else if(sizeMapping.streamK >= 2) // Two-tile SK
+                {
+                    if(sk.reduction == origami::reduction_t::parallel)
                     {
-                        // Number of data-parallel tiles on each workgroup would be:
-                        // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
-                        skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                        // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                        skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
+                        uint32_t skSplit
+                            = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
+                        uint32_t skItersPerWG = itersPerTile / skSplit;
+
+                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                        args.template append<uint32_t>("skGrid", sk.grid);
+                        args.template append<uint32_t>("skTiles", skSplit);
                     }
+                    else
+                    {
+                        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                        assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                        int fullTiles = pAMDGPU->skFullTiles;
 
-                    uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
+                        bool bigEnough = tiles > sk.grid;
+                        // skTiles is number of Stream-K tiles to complete
+                        // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
+                        // followed by an even number of data-parllel tiles.
+                        // If total tiles is evenly divisble by grid size,
+                        // then no Stream-K tiles are needed, all data-parallel
+                        uint32_t skTiles = sk.grid;
+                        // If not evenly divisible, determine number of Stream-K tiles
+                        if(tiles % sk.grid != 0)
+                        {
+                            // Number of data-parallel tiles on each workgroup would be:
+                            // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
+                            skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                            // Cap Stream-K tiles at total number of tiles in case of large multiplier
+                            skTiles = min(skTiles, tiles);
+                        }
 
-                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                    args.template append<uint32_t>("skGrid", sk.grid);
-                    args.template append<uint32_t>("skTiles", skTiles);
+                        uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
+
+                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                        args.template append<uint32_t>("skGrid", sk.grid);
+                        args.template append<uint32_t>("skTiles", skTiles);
+                    }
                 }
             }
         }
@@ -2836,9 +2872,22 @@ namespace TensileLite
         StreamKSettings sk;
         if(sizeMapping.streamK > 0)
         {
-            sk.reduction         = getSKReduction(problem, hardware);
             auto tiles           = problem.getNumTiles(sizeMapping, 1);
-            sk.grid              = getSKGrid(problem, hardware, tiles, sk.reduction);
+            if (sizeMapping.streamK == 4)
+            {
+                sk.reduction = origami::reduction_t::tree;
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+                assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                size_t cuCount = pAMDGPU->computeUnitCount;
+                sk.grid = cuCount;
+                if(pAMDGPU->skFixedGrid > 0)
+                    sk.grid = pAMDGPU->skFixedGrid;
+            }
+            else
+            {
+                sk.reduction         = getSKReduction(problem, hardware);
+                sk.grid              = getSKGrid(problem, hardware, tiles, sk.reduction);
+            }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(sk.grid > 0
                && (sk.reduction == origami::reduction_t::parallel

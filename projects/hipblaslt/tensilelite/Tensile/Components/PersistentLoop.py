@@ -22,7 +22,7 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SCmpGeU32, SMulI32
+from rocisa.instruction import VMovB32, SCmpGeU32, SMulI32, SLongBranchNegative
 from ..Component import Component
 import abc
 
@@ -128,7 +128,10 @@ class PersistentLoopOn(PersistentLoop):
         module = Module("PersistentLoop On closePersistentLoop")
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(skCloseLoopLabel)
-        if kernel["StreamK"] == 2:
+        if kernel["StreamK"] == 4:
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+        elif kernel["StreamK"] == 2:
             streamk = Component.StreamK.find(writer)
             sTmp = writer.sgprPool.checkOut(1, "TotalIters")
             module.add(streamk.computeTotalIters(writer, kernel, sTmp))
