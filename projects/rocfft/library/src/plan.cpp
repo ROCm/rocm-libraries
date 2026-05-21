@@ -2299,9 +2299,7 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
             rootPlanData.deviceProp = get_curr_device_prop();
         }
         auto singlePlan       = BuildSingleDevicePlan(rootPlanData,
-                                                desc.get_local_comm_rank(),
                                                 item_loc,
-                                                fft_operations.fft_type,
                                                 fft_operations.get_load_ops(),
                                                 fft_operations.get_store_ops(),
                                                 true);
