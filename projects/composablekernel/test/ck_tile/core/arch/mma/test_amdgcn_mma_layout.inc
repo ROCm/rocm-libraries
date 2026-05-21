@@ -23,26 +23,27 @@ using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace mma;
 
-using I4        = pk_int4_t;
-using F4        = pk_fp4_t;
-using F6        = pk_fp6x16_t;
-using BF6       = pk_bf6x16_t;
-using F8        = fp8_t;
-using BF8       = bf8_t;
-using I32       = int32_t;
-using F16       = fp16_t;
-using BF16      = bf16_t;
-using F32       = fp32_t;
-using F64       = fp64_t;
-using I8        = int8_t;
-using BF8       = bf8_t;
-using I32       = int32_t;
-using Target908 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
-using Target90a = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
-using Target942 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX942>());
-using Target950 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
-using Target11  = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
-using Target12  = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
+using I4         = pk_int4_t;
+using F4         = pk_fp4_t;
+using F6         = pk_fp6x16_t;
+using BF6        = pk_bf6x16_t;
+using F8         = fp8_t;
+using BF8        = bf8_t;
+using I32        = int32_t;
+using F16        = fp16_t;
+using BF16       = bf16_t;
+using F32        = fp32_t;
+using F64        = fp64_t;
+using I8         = int8_t;
+using BF8        = bf8_t;
+using I32        = int32_t;
+using Target908  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
+using Target90a  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
+using Target942  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX942>());
+using Target950  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
+using Target11   = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
+using Target12   = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
+using Target1250 = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1250>());
 #if defined(CK_MMA_TEST_ARCH_GFX950)
 using TestTarget = Target950;
 #elif defined(CK_MMA_TEST_ARCH_GFX942)
@@ -196,17 +197,54 @@ struct MmaLayoutTestKernel
                 {
                     a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem_pack);
 
-                    // Calc an appropriate sparse idx value for a single 1 in position k. We use a
-                    // baseline index of 0x88888888. This sends each compressed index i to
-                    // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
-                    // instead. We update only the absolutely necessary pair of bits for this
-                    // (idx[v*2:v*2+1]), where v is meant to be the idx of the *value items* in the
-                    // lane. Note that this simple calculation works for any 4:2 sparse intrinsic
-                    // with up to 16 packed k elements per lane.
+                    if constexpr(MmaOpTraits<MmaOp>::IsSparse && MmaOp::kK != 64)
+                    {
+                        // X32 swmmac path: sparse_idx is a single wave-uniform i32. Calc an
+                        // appropriate value for a single 1 in position k. We use a baseline
+                        // index of 0x88888888. This sends each compressed index i to
+                        // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
+                        // instead. We update only the absolutely necessary pair of bits for
+                        // this (idx[v*2:v*2+1]), where v is meant to be the idx of the *value
+                        // items* in the lane. Note that this simple calculation works for any
+                        // 4:2 sparse intrinsic with up to 16 packed k elements per lane.
 
-                    // Calc vector item idx as if the datatype were not packed (value item).
-                    uint32_t vec_value_item_idx = v * MmaOp::APackedSize + k_rem_pack;
-                    sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
+                        // Calc vector item idx as if the datatype were not packed (value item).
+                        uint32_t vec_value_item_idx = v * MmaOp::APackedSize + k_rem_pack;
+                        sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
+                    }
+                }
+            }
+
+            // X64 swmmac path (gfx1250): the per-lane sparsity index is only 16 bits wide and
+            // each lane independently owns metadata for a different chunk of A's packed cols.
+            // See findings.md for the full HW model. We construct a per-lane i32 (low half =
+            // `index_key:0`, high half = `index_key:1`) where exactly one lane writes a
+            // non-default nibble describing our (m, k) placement; every other lane keeps the
+            // collision-free default 0x88888888.
+            if constexpr(MmaOpTraits<MmaOp>::IsSparse && MmaOp::kK == 64)
+            {
+                // pcol is the post-sparse-compression column. For non-value-packed A types
+                // (APackedSize == 1, e.g. f16/bf16) this is just k / kCompressionRatio.
+                const int pcol     = static_cast<int>(k) / MmaOp::kCompressionRatio;
+                const int key      = (pcol >> 4) & 1;          // 0 = low i16, 1 = high i16
+                const int idx_lane = static_cast<int>(m) +
+                                     16 * ((pcol >> 3) & 1);   // lane that carries this nibble
+                const int nib_pos  = (pcol >> 1) & 3;          // nibble within the i16 half
+                const int sub      = pcol & 1;                 // 0 -> idx0 slot, 1 -> idx1 slot
+                const uint32_t k_off = static_cast<uint32_t>(k) & 3u; // K-offset within pair
+
+                sparse_idx = 0x88888888u;
+                if(static_cast<int>(lane) == idx_lane)
+                {
+                    // Build the nibble: the slot we own holds k_off; the other slot in the
+                    // same nibble holds any value different from k_off so the HW's collision
+                    // rule (idx0 == idx1 suppresses the even-pcol contribution) cannot
+                    // silently drop our element.
+                    const uint32_t other = (k_off + 1u) & 3u;
+                    const uint32_t nibble =
+                        (sub == 0) ? ((other << 2) | k_off) : ((k_off << 2) | other);
+                    const int shift = (key * 16) + nib_pos * 4;
+                    sparse_idx      = (sparse_idx & ~(0xFu << shift)) | (nibble << shift);
                 }
             }
 
@@ -225,9 +263,11 @@ struct MmaLayoutTestKernel
 
             if constexpr(MmaOpTraits<MmaOp>::IsSparse)
             {
-                // Sparse_idx is calculated (overwriting default 0 value) in *exactly* one lane
-                // (assert), but must be broadcast to all (warp-level "or" reduction intrinsic).
-                int num_sparse_idx_calced = __popcll(__ballot(sparse_idx != 0));
+                // For both paths we expect exactly one lane to hold a non-default sparse_idx
+                // (X32: only the data-owner lane wrote it; X64: only the index-owner lane).
+                const uint32_t non_default = (MmaOp::kK == 64) ? 0x88888888u : 0u;
+                int num_sparse_idx_calced =
+                    __popcll(__ballot(sparse_idx != non_default));
                 if(num_sparse_idx_calced != 1)
                 {
                     if(threadIdx.x == 0)
@@ -237,16 +277,19 @@ struct MmaLayoutTestKernel
                     }
                     __builtin_trap();
                 }
-                sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
-                c_frag     = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
+                if constexpr(MmaOp::kK != 64)
+                {
+                    // X32 swmmac: sparse_idx is wave-uniform; broadcast it from the producer.
+                    sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
+                }
+                // X64 swmmac (gfx1250): per-lane sparse_idx is the data the HW consumes, so we
+                // do NOT broadcast — each lane already holds either 0x88888888 (default) or
+                // the perturbed value owned by the single index lane.
+                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
-                // The actual scale is computed as pow(2, scale - 127), so:
-                // 125 -> 2^-2 and 129 -> 2^2.
-                int scale_A = 125;
-                int scale_B = 129;
-                c_frag      = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
+                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
@@ -336,7 +379,6 @@ void run_mma_layout_test()
         const uint32_t m = case_idx / (MmaOp::kK * MmaOp::kN);
         const uint32_t k = (case_idx / MmaOp::kN) % MmaOp::kK;
         const uint32_t n = case_idx % MmaOp::kN;
-
         EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
     }
 }
@@ -477,6 +519,47 @@ using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu4_w32
     amdgcn_mma<I4,   I4,   I32,  16u, 16u, 64u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::SPARSE>  // swmmac_i32_16x16x64_iu4_w32
 >;
+
+using Gfx1250Intrinsics = ::testing::Types<
+    // amdgcn_mma<F32,  F32,  F32, 16u, 16u, 4u,   DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x4_f32
+    // amdgcn_mma<BF16, BF16, F32, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x32_bf16
+    // amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_bf16_16x16x32_bf16
+    // amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_bf16f32_16x16x32_bf16
+    // amdgcn_mma<F8,   F8,   F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_fp8_fp8
+    // amdgcn_mma<F8,   BF8,  F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_fp8_bf8
+    // amdgcn_mma<BF8,  F8,   F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_bf8_fp8
+    // amdgcn_mma<BF8,  BF8,  F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_bf8_bf8
+    // amdgcn_mma<F8,   F8,   F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_fp8_fp8
+    // amdgcn_mma<F8,   BF8,  F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_fp8_bf8
+    // amdgcn_mma<BF8,  F8,   F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_bf8_fp8
+    // amdgcn_mma<BF8,  BF8,  F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_bf8_bf8
+    // amdgcn_mma<I8,   I8,   I32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_i32_16x16x64_iu8
+    // amdgcn_mma<F8,   F8,   F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_fp8_fp8
+    // amdgcn_mma<F8,   BF8,  F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_fp8_bf8
+    // amdgcn_mma<BF8,  F8,   F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_bf8_fp8
+    // amdgcn_mma<BF8,  BF8,  F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_bf8_bf8
+    // amdgcn_mma<F8,   F8,   F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_fp8_fp8
+    // amdgcn_mma<F8,   BF8,  F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_fp8_bf8
+    // amdgcn_mma<BF8,  F8,   F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_bf8_fp8
+    // amdgcn_mma<BF8,  BF8,  F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_bf8_bf8
+    // amdgcn_mma<F16,  F16,  F32, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x32_f16
+    // amdgcn_mma<F16,  F16,  F16, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x32_f16
+    // amdgcn_mma<BF16, BF16, F32, 16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,                Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x64_bf16
+    // amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_bf16_16x16x64_bf16
+    // amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_bf16f32_16x16x64_bf16
+    // amdgcn_mma<FP8,  FP8,  F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x128_fp8_fp8
+    // amdgcn_mma<FP8,  BF8,  F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x128_fp8_bf8
+    // amdgcn_mma<BF8,  FP8,  F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x128_bf8_fp8
+    // amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x128_bf8_bf8
+    // amdgcn_mma<FP8,  FP8,  F16,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f16_16x16x128_fp8_fp8
+    // amdgcn_mma<FP8,  BF8,  F16,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f16_16x16x128_fp8_bf8
+    // amdgcn_mma<BF8,  FP8,  F16,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f16_16x16x128_bf8_fp8
+    // amdgcn_mma<BF8,  BF8,  F16,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f16_16x16x128_bf8_bf8
+    // amdgcn_mma<I8,   I8,   I32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_i32_16x16x128_iu8
+    // amdgcn_mma<F16,  F16,  F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x64_f16
+    amdgcn_mma<F16,  F16,  F16,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>  // swmmac_f16_16x16x64_f16
+>;
+
 // clang-format on
 
 template <typename MmaOp>
@@ -484,3 +567,4 @@ class TestMmaLayout : public ::testing::Test
 {
 };
 } // namespace
+

@@ -508,6 +508,8 @@ CK_TILE_DEVICE uint32x3_t _to_fp6_pk16(T src, float scale = 1.0f)
 }
 
 // Overload for scalar and small vectors (size 1 or 16)
+// TODO: commented out due to vector_traits template argument mismatch
+#if 0
 template <typename T,
           bool stochastic_rounding            = false,
           typename std::enable_if<vector_traits<T>::vector_size == 1 ||
@@ -533,6 +535,7 @@ CK_TILE_DEVICE pk_fp6_raw_t _to_pk_fp6(T src, float scale = 1.0f)
 
     return cvt.pf6[0];
 }
+#endif
 
 // Device conversion functions for BF6 E3M2 with pkscale and Opsel
 template <typename T, int Opsel>
@@ -588,6 +591,8 @@ CK_TILE_DEVICE uint32x3_t _to_bf6_pk16(T src, float scale = 1.0f)
 }
 
 // Overload for scalar and small vectors (size 1 or 16)
+// TODO
+#if 0
 template <typename T,
           bool stochastic_rounding            = false,
           typename std::enable_if<vector_traits<T>::vector_size == 1 ||
@@ -613,6 +618,7 @@ CK_TILE_DEVICE pk_bf6_raw_t _to_pk_bf6(T src, float scale = 1.0f)
 
     return cvt.pbf6[0];
 }
+#endif
 #endif
 } // namespace impl
 #endif
@@ -943,20 +949,12 @@ CK_TILE_HOST_DEVICE constexpr float pk_bf6_to_float(const pk_bf6_t& x, float sca
 
 CK_TILE_HOST_DEVICE constexpr pk_fp6_t float_to_pk_fp6(const float& x, float scale)
 {
-#if CK_TILE_FP6_CVT_DEVICE
-    return pk_fp6_t(impl::_to_pk_fp6(x, scale));
-#else
     return pk_fp6_t(convert_to_type<pk_fp6_t>(x, scale));
-#endif
 }
 
 CK_TILE_HOST_DEVICE constexpr pk_bf6_t float_to_pk_bf6(const float& x, float scale)
 {
-#if CK_TILE_FP6_CVT_DEVICE
-    return impl::_to_pk_bf6(x, scale);
-#else
     return pk_bf6_t(convert_to_type<pk_bf6_t>(x, scale));
-#endif
 }
 
 // ====== FP16 Conversions ======
@@ -973,20 +971,12 @@ CK_TILE_HOST_DEVICE constexpr fp16_t pk_bf6_to_fp16(const pk_bf6_t& x, float sca
 
 CK_TILE_HOST_DEVICE constexpr pk_fp6_t fp16_to_pk_fp6(const fp16_t& x, float scale)
 {
-#if CK_TILE_FP6_CVT_DEVICE
-    return impl::_to_pk_fp6(x, scale);
-#else
     return pk_fp6_t(convert_to_type<pk_fp6_t>(type_convert<float>(x), scale));
-#endif
 }
 
 CK_TILE_HOST_DEVICE constexpr pk_bf6_t fp16_to_pk_bf6(const bf16_t& x, float scale)
 {
-#if CK_TILE_FP6_CVT_DEVICE
-    return impl::_to_pk_bf6(x, scale);
-#else
     return pk_bf6_t(convert_to_type<pk_bf6_t>(type_convert<float>(x), scale));
-#endif
 }
 
 // PK_FP6/PK_BF6 -> FP16x16
@@ -1042,20 +1032,12 @@ CK_TILE_HOST_DEVICE constexpr bf16_t pk_bf6_to_bf16(const pk_bf6_t& x, float sca
 
 CK_TILE_HOST_DEVICE constexpr pk_fp6_t bf16_to_pk_fp6(const bf16_t& x, float scale)
 {
-#if CK_TILE_FP6_CVT_DEVICE
-    return pk_fp6_t(impl::_to_pk_fp6(x, scale));
-#else
     return pk_fp6_t(convert_to_type<pk_fp6_t>(type_convert<float>(x), scale));
-#endif
 }
 
 CK_TILE_HOST_DEVICE constexpr pk_bf6_t bf16_to_pk_bf6(const bf16_t& x, float scale)
 {
-#if CK_TILE_FP6_CVT_DEVICE
-    return pk_bf6_t(impl::_to_pk_bf6(x, scale));
-#else
     return pk_bf6_t(convert_to_type<pk_bf6_t>(type_convert<float>(x), scale));
-#endif
 }
 
 // PK_FP6/PK_BF6 -> BF16x16

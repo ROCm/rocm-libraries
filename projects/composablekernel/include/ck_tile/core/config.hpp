@@ -566,18 +566,17 @@ struct amdgcn_compiler_target_state
     static constexpr bool CK_TILE_ARCH_GFX1201 = false;
 #endif // __gfx1201__
 
-#if defined(__gfx12_generic__)
-    static constexpr bool CK_TILE_ARCH_GFX12_GENERIC = true;
-#else
-    static constexpr bool CK_TILE_ARCH_GFX12_GENERIC = false;
-#endif // __gfx12_generic__
-
-    // GFX12.5
 #if defined(__gfx1250__)
     static constexpr bool CK_TILE_ARCH_GFX1250 = true;
 #else
     static constexpr bool CK_TILE_ARCH_GFX1250 = false;
 #endif // __gfx1250__
+
+#if defined(__gfx12_generic__)
+    static constexpr bool CK_TILE_ARCH_GFX12_GENERIC = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX12_GENERIC = false;
+#endif // __gfx12_generic__
 };
 
 /**

@@ -76,6 +76,11 @@ if(GPU_TARGETS MATCHES "gfx120")
     target_compile_options(test_amdgcn_mma_layout_gfx12 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 endif()
 
+if(GPU_TARGETS MATCHES "gfx1250")
+    add_gtest_executable(test_amdgcn_mma_layout_gfx1250 test_amdgcn_mma_layout_gfx1250.cpp)
+    target_compile_options(test_amdgcn_mma_layout_gfx1250 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+endif()
+
 add_gtest_executable(test_amdgcn_mma_pipeline pipeline/test_amdgcn_mma_pipeline.cpp)
 target_compile_options(test_amdgcn_mma_pipeline PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 
