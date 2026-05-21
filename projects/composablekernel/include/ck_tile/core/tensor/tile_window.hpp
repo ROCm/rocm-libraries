@@ -155,6 +155,21 @@ struct tile_window_with_static_distribution
         return coords;
     }
 
+    template <typename IAccess_>
+    CK_TILE_DEVICE static void advance_access_coords(
+        typename Base::WindowAdaptorCoord& window_adaptor_thread_coord,
+        typename Base::BottomTensorCoord& bottom_tensor_thread_coord,
+        IAccess_)
+    {
+        using SFC_Ys = typename Base::Traits::SFC_Ys;
+        constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(IAccess_{});
+        constexpr auto idx_diff_ps_ys = container_concat(
+            generate_tuple([](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+            idx_diff_ys);
+        Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+            window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+    }
+
     template <index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true,
               bool static_move_ys         = false>
@@ -284,14 +299,8 @@ struct tile_window_with_static_distribution
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    advance_access_coords(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                 }
             });
         });
@@ -475,17 +484,8 @@ struct tile_window_with_static_distribution
                     // move thread coordinate
                     if constexpr(!static_move_ys && iCoordAccess != (NumAccessPerCoord - 1))
                     {
-                        constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                        constexpr auto idx_diff_ps_ys =
-                            container_concat(generate_tuple([&](auto) { return number<0>{}; },
-                                                            number<Base::NDimP>{}),
-                                             idx_diff_ys);
-
-                        Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                            window_adaptor_thread_coord,
-                            bottom_tensor_thread_coord,
-                            idx_diff_ps_ys);
+                        advance_access_coords(
+                            window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                     }
                 });
             });
@@ -550,14 +550,8 @@ struct tile_window_with_static_distribution
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    advance_access_coords(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                 }
             });
         });
@@ -633,14 +627,8 @@ struct tile_window_with_static_distribution
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    advance_access_coords(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
 
                     m0_inc_with_memory(size_per_issue);
                 }
@@ -730,16 +718,8 @@ struct tile_window_with_static_distribution
                     // Move thread coordinate if not last access
                     if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                     {
-                        constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-                        constexpr auto idx_diff_ps_ys =
-                            container_concat(generate_tuple([&](auto) { return number<0>{}; },
-                                                            number<Base::NDimP>{}),
-                                             idx_diff_ys);
-
-                        Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                            window_adaptor_thread_coord,
-                            bottom_tensor_thread_coord,
-                            idx_diff_ps_ys);
+                        advance_access_coords(
+                            window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                     }
                 });
             });
@@ -824,23 +804,13 @@ struct tile_window_with_static_distribution
                     // Move thread coordinate if not last access
                     if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                     {
-                        constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-                        constexpr auto idx_diff_ps_ys =
-                            container_concat(generate_tuple([&](auto) { return number<0>{}; },
-                                                            number<Base::NDimP>{}),
-                                             idx_diff_ys);
-
                         if constexpr(!static_move_ys)
-                            Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                                window_adaptor_thread_coord,
-                                bottom_tensor_thread_coord,
-                                idx_diff_ps_ys);
+                            advance_access_coords(
+                                window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
 #if !defined(__gfx125__)
                         if constexpr(!static_move_ys)
-                            Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                                window_adaptor_warp_coord,
-                                bottom_tensor_warp_coord,
-                                idx_diff_ps_ys);
+                            advance_access_coords(
+                                window_adaptor_warp_coord, bottom_tensor_warp_coord, iAccess);
 #endif
                     }
                 });
@@ -1418,14 +1388,8 @@ struct tile_window_with_static_distribution
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    advance_access_coords(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                 }
             });
         });
@@ -1509,14 +1473,8 @@ struct tile_window_with_static_distribution
                 // move thread coordinate
                 if constexpr(!static_move_ys && iCoordAccess != (NumAccessPerCoord - 1))
                 {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    advance_access_coords(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                 }
             });
         });
@@ -1572,14 +1530,8 @@ struct tile_window_with_static_distribution
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    advance_access_coords(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, iAccess);
                 }
             });
         });
