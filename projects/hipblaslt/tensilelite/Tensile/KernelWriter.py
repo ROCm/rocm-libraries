@@ -4330,15 +4330,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     Emits, when NoTailLoop is False:
       - LoopCounterL = K mod DU + early-exit to SkipTailLoopL;
-      - PGR>0 tail-entry gating: c=0 reset (zero accD, undo preLoop
-        GR_INC), small-counter realign (XOR LWA back), or large-counter
-        SRD +1 DU advance — driven by snapshot of OrigLoopCounter taken
-        before calculateLoopNumIter resets it;
+      - PGR>0 tail-entry gating keyed off a snapshot of
+        OrigLoopCounter (taken before calculateLoopNumIter resets it):
+          - origCounter == 0: branch straight to the tail body. The
+            upstream `SkipSubtileMainLoop<L>` gate in
+            `kernelBodySubtile` skipped preLoop/mainloop/NGLL/NLL, so
+            SRDs are at K=0, LWAs at buf 0, accD at zero — no undo
+            needed.
+          - 0 < origCounter < PGR: small-counter LWA realign (XOR LWA
+            back to match LR buffer).
+          - origCounter >= PGR: SRD +1 DU advance to undo the per-iter
+            GR_INC's off-by-one at loop exit.
       - per-lane kPosBase = tidInK * numMIInUnroll;
       - re-issued DepthU-shaped GR + LR (data + MX scale);
       - per-mmak v_cmp_ge_i32 + per-MFMA v_cndmask zeroing of
         A/B/MXSA/MXSB inputs against LoopCounterL;
       - MFMAs into the existing D accumulators.
+
+    No `closeLoop(... finalLoop=True)` is emitted: the body processes
+    all K_tail in a single pass and nothing branches to
+    `TailLoopEndL`. Only the post-tail `SkipTailLoopL` label is
+    emitted (via `closeLoop(... emitEndLabelOnly=True)`) so the
+    `calculateLoopNumIter` early-exit branch resolves.
     """
     module = Module("tailLoopSubtile")
     kPosBaseVgpr = None
@@ -4665,16 +4678,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
       for tailTile in tailAllocTiles:
         tailTile.deallocVgprTileRegisters_legacy(self, kernel)
 
-      # The scaffold's mmak loop processes ALL K_tail in one body pass,
-      # but closeLoop emits a per-iter `LoopCounterL -= MatrixInstK`
-      # plus back-edge that would re-issue GR + re-accumulate MFMAs on
-      # subsequent iterations. Zero LoopCounterL so the sub underflows
-      # past 0 and the back-edge falls through after one pass. Safe
-      # because every lane mask above has already captured LoopCounterL.
-      module.add(SMovB32(dst=sgpr("LoopCounterL"), src=0,
-                         comment="single-iter tail: force closeLoop fall-through"))
-
-      module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -1, finalLoop=True))
+      # No `closeLoop(... finalLoop=True)` here. The subtile tail body
+      # processes the entire K_tail in a single pass via the `mmak`
+      # loop above (every lane mask was emitted against the current
+      # `LoopCounterL = K mod DU` snapshot), so the per-iter
+      # `s_sub_i32 LoopCounterL, ..., MIK` + back-edge to
+      # `TailLoopBeginL` that `closeLoop` would emit is dead code:
+      # the only useful effect would be the `TailLoopEndL:` label,
+      # which nothing branches to. The standalone `OrigLoopCounter`
+      # increment closeLoop emits is for the legacy LRO-damage
+      # recovery block, which is bypassed for `UseSubtileImpl=1`
+      # kernels (see `closeLoop`'s `needTailEndCode`/subtile branch).
+      # Per nakajee review: closeLoop is not necessary in the subtile
+      # tail scaffold.
       self.vgprPool.checkIn(kPosBaseVgpr)
       self.states.inTailLoop = False
     # Always emit SkipTailLoopL so the early-exit branch resolves

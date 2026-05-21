@@ -243,40 +243,44 @@ class TestTailEmitContent_PGR0:
             "FP4 tail must NOT emit `s_sub_u32 … SrdMXSB` rewind"
         )
 
-    def test_emits_loop_counter_zero_before_closeloop(self, fp4_pgr0_asm):
-        """Tail body must zero `LoopCounterL` right before `closeLoop`.
+    def test_omits_closeloop_emit(self, fp4_pgr0_asm):
+        """Tail scaffold must NOT emit `closeLoop(... finalLoop=True)`.
 
-        The legacy `closeLoop(finalLoop=True, tailLoop=True)` emits a
-        per-iter `s_sub_i32 LoopCounterL, ..., MatrixInstK` and a
+        Per nakajee review (PR #7636): the subtile tail body processes
+        the entire K_tail in a single pass via the `mmak` loop above
+        (every lane mask was emitted against the current
+        `LoopCounterL = K mod DU` snapshot). The `closeLoop` emit
+        would produce a per-iter `s_sub_i32 LoopCounterL, ..., MIK` +
         `s_cbranch_scc0 label_TailLoopBeginL` back-edge that re-runs
-        the body while LoopCounterL > 0. The subtile scaffold processes
-        the entire K_tail in a single body pass via the `mmak` loop, so
-        repeated body iterations would re-accumulate accD and narrow
-        the per-MFMA lane mask each pass. Zeroing LoopCounterL forces
-        the sub to underflow past 0, dropping the back-edge.
+        the body while LoopCounterL > 0. Since the body is one-shot
+        for subtile, those instructions are dead code; the only
+        useful effect (the `TailLoopEndL:` label) has no in-bound
+        branches. We also no longer need the `s_mov_b32 LoopCounterL,
+        0` that previously forced fall-through.
         """
         tail = _extract_tail_section(fp4_pgr0_asm)
-        assert tail, "No tail block emitted; cannot test counter zeroing"
-        zero_match = re.search(
+        assert tail, "No tail block emitted; cannot test closeLoop omission"
+        assert not re.search(
+            r"s_sub_i32\s+s\[sgprLoopCounterL\][^\n]*dec counterL", tail
+        ), (
+            "Tail must NOT emit the closeLoop per-iter decrement "
+            "`s_sub_i32 sgprLoopCounterL ... dec counterL` "
+            "(closeLoop is unnecessary for the single-pass subtile "
+            "tail body). Tail excerpt:\n" + tail[-1500:]
+        )
+        assert not re.search(
             r"s_mov_b32\s+s\[sgprLoopCounterL\],\s*0\b[^\n]*single-iter tail",
             tail,
+        ), (
+            "Tail must NOT emit the `s_mov_b32 sgprLoopCounterL, 0` "
+            "force-fall-through (it only existed to neutralize the "
+            "now-removed closeLoop decrement). Tail excerpt:\n"
+            + tail[-1500:]
         )
-        assert zero_match, (
-            "Tail must emit `s_mov_b32 sgprLoopCounterL, 0` with the "
-            "single-iter rationale before the closeLoop decrement. "
-            "Tail body excerpt:\n" + tail[-1500:]
-        )
-
-        sub_match = re.search(
-            r"s_sub_i32\s+s\[sgprLoopCounterL\]", tail
-        )
-        assert sub_match, (
-            "closeLoop must still emit `s_sub_i32 sgprLoopCounterL` "
-            "(this test pins the relative ordering)."
-        )
-        assert zero_match.start() < sub_match.start(), (
-            "tail-single-iter zeroing must appear BEFORE the closeLoop "
-            "decrement (so the sub underflows past 0 on the first iter)."
+        assert "TailLoopEndL" not in tail, (
+            "Tail must NOT define `TailLoopEndL` (closeLoop emitted "
+            "it, but nothing branches there). Tail excerpt:\n"
+            + tail[-1500:]
         )
 
     def test_emits_kReg_first_init(self, fp4_pgr0_asm):
@@ -710,16 +714,31 @@ class TestTailEmitContent_PGR2:
         assert re.search(r"v_and_b32.*\b63\b", tail) or \
                re.search(r"v_and_b32.*0x3f", tail)
 
-    def test_pgr2_loop_counter_zero_before_closeloop(self, fp4_pgr2_asm):
-        """PGR=2 reuses the single-iter forcing
-        (`s_mov_b32 sgprLoopCounterL, 0` before closeLoop).
+    def test_pgr2_omits_closeloop_emit(self, fp4_pgr2_asm):
+        """PGR=2 also omits `closeLoop(... finalLoop=True)` (per
+        nakajee review on PR #7636). See PGR=0 counterpart
+        `test_omits_closeloop_emit` for full rationale: the
+        `s_sub_i32 LoopCounterL` decrement / back-edge / TailLoopEndL
+        emit are all unreachable / dead for the single-pass subtile
+        tail body, and the `s_mov_b32 LoopCounterL, 0` workaround is
+        gone with them.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
-        assert re.search(
+        assert not re.search(
+            r"s_sub_i32\s+s\[sgprLoopCounterL\][^\n]*dec counterL", tail
+        ), "PGR=2 tail must NOT emit closeLoop per-iter decrement"
+        assert not re.search(
             r"s_mov_b32\s+s\[sgprLoopCounterL\],\s*0\b[^\n]*single-iter tail",
             tail
-        ), "PGR=2 tail must force single-iter via LoopCounterL=0"
+        ), (
+            "PGR=2 tail must NOT emit the `s_mov_b32 sgprLoopCounterL, 0` "
+            "force-fall-through (no longer needed without closeLoop)."
+        )
+        assert "TailLoopEndL" not in tail, (
+            "PGR=2 tail must NOT define `TailLoopEndL` "
+            "(closeLoop is no longer emitted)."
+        )
 
 
 # ── Tests: PGR=1 ─────────────────────────────────────────────────────────────

@@ -2258,9 +2258,11 @@ class TestEmitAllLoopsTail_PGR0:
 
     Drives `KernelWriter._emitTailLoopScaffoldSubtile` via the shared
     fixture and pins: SkipTailLoopL is always emitted; the Tail Loop
-    banner / TailLoopBeginL / TailLoopEndL labels appear when
-    `NoTailLoop=False`; and the LoopCounterL early-exit branch fires
-    before the tail body.
+    banner / TailLoopBeginL labels appear when `NoTailLoop=False`;
+    and the LoopCounterL early-exit branch fires before the tail
+    body. `TailLoopEndL` is no longer emitted at all (the subtile
+    scaffold no longer calls `closeLoop(... finalLoop=True)` per
+    nakajee review on PR #7636).
     """
 
     def test_omits_tail_when_NoTailLoop_true(self):
@@ -2268,8 +2270,10 @@ class TestEmitAllLoopsTail_PGR0:
 
         The scaffold still always emits `SkipTailLoopL:` so any branches
         targeting it (e.g. the early-exit from `calculateLoopNumIter`)
-        resolve. Only the body (Tail Loop banner, TailLoopBeginL,
-        TailLoopEndL) is gated by NoTailLoop.
+        resolve. Only the body (Tail Loop banner, TailLoopBeginL) is
+        gated by NoTailLoop. `TailLoopEndL` is never emitted by the
+        subtile scaffold (closeLoop is unnecessary; see nakajee review
+        on PR #7636).
         """
         asm = _emit_subtile_tailloop_scaffold_asm(fp4=True, no_tail_loop=True)
         assert "Tail Loop" not in asm, \
