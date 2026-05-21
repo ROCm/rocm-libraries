@@ -447,7 +447,7 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
     {
-        auto conv_ptrs = DeviceOpType::GetInstances();
+        auto conv_ptrs                  = DeviceOpType::GetInstances();
         const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
         if constexpr(IsSplitKNeeded<DeviceOpType>() || CheckSplitK)
         {
@@ -616,10 +616,10 @@ template <typename DeviceOpType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
 {
-    const auto args         = CKArgsType{problem};
+    const auto args                = CKArgsType{problem};
     std::size_t max_workspace_size = 0;
 
-    const auto ptrs = DeviceOpType::GetInstances();
+    const auto ptrs                 = DeviceOpType::GetInstances();
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     for(auto& ptr : ptrs)
     {

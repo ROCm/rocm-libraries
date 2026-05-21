@@ -128,9 +128,7 @@ private:
                         continue;
                     const std::string reason = GetSkipReason(*info);
                     if(reason.empty())
-                        std::printf("[  SKIPPED ] %s.%s\n",
-                                    info->test_suite_name(),
-                                    info->name());
+                        std::printf("[  SKIPPED ] %s.%s\n", info->test_suite_name(), info->name());
                     else
                         std::printf("[  SKIPPED ] %s.%s -- %s\n",
                                     info->test_suite_name(),
@@ -162,8 +160,8 @@ private:
 
 inline bool RegisterWrappingPrinter()
 {
-    auto& listeners        = ::testing::UnitTest::GetInstance()->listeners();
-    auto* default_printer  = listeners.Release(listeners.default_result_printer());
+    auto& listeners       = ::testing::UnitTest::GetInstance()->listeners();
+    auto* default_printer = listeners.Release(listeners.default_result_printer());
     listeners.Append(new WrappingPrinter(default_printer));
     return true;
 }
@@ -195,19 +193,14 @@ struct Descriptors
     }
 };
 
-inline uint64_t SolverIdFromName(const char* name)
-{
-    return miopen::solver::Id(name).Value();
-}
+inline uint64_t SolverIdFromName(const char* name) { return miopen::solver::Id(name).Value(); }
 
 // SetupDescriptorsImpl -- shared rank-templated descriptor builder. The
 // reproducer-family tests use uniform pad=1, stride=1, dilation=1 in all
 // spatial dims, so those are hard-coded here.
 template <int Ndim>
-inline ::testing::AssertionResult SetupDescriptorsImpl(const int* x_dims,
-                                                      const int* w_dims,
-                                                      miopenDataType_t dtype,
-                                                      Descriptors& d)
+inline ::testing::AssertionResult
+SetupDescriptorsImpl(const int* x_dims, const int* w_dims, miopenDataType_t dtype, Descriptors& d)
 {
     static_assert(Ndim == 2 || Ndim == 3, "Only 2D/3D supported");
     constexpr int rank = Ndim + 2;
@@ -249,8 +242,8 @@ inline ::testing::AssertionResult SetupDescriptorsImpl(const int* x_dims,
     {
         int yDim[rank] = {0};
         int yNbDims    = 0;
-        if(miopenGetConvolutionNdForwardOutputDim(
-               d.convDesc, d.xDesc, d.wDesc, &yNbDims, yDim) != miopenStatusSuccess)
+        if(miopenGetConvolutionNdForwardOutputDim(d.convDesc, d.xDesc, d.wDesc, &yNbDims, yDim) !=
+           miopenStatusSuccess)
             return ::testing::AssertionFailure() << "get yDim failed";
         if(yNbDims != rank)
             return ::testing::AssertionFailure() << "yNbDims != " << rank;

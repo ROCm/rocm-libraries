@@ -80,8 +80,7 @@ MemoryEstimate EstimateRequiredMemoryFwd(TestCase tc,
                                          miopenTensorLayout_t layout,
                                          const miopen::solver::conv::ConvSolverInterface& solver)
 {
-    auto conv_case =
-        miopen::unit_tests::GetConvTestForGroupXdlops<datatype>(layout, std::move(tc));
+    auto conv_case = miopen::unit_tests::GetConvTestForGroupXdlops<datatype>(layout, std::move(tc));
     const auto x_desc = conv_case.GetXTensorDescriptor();
     const auto w_desc = conv_case.GetWTensorDescriptor();
     const auto y_desc =
@@ -111,19 +110,19 @@ MemoryEstimate EstimateRequiredMemoryFwd(TestCase tc,
 
 } // namespace
 
-#define SKIP_IF_INSUFFICIENT_DEVICE_MEMORY(datatype, solver_expr)                              \
-    do                                                                                          \
-    {                                                                                           \
-        miopen::unit_tests::UnitTestConvSolverParams _params;                                    \
-        miopenTensorLayout_t _layout;                                                            \
-        TestCase _tc;                                                                            \
-        std::tie(_params, _layout, _tc) = this->GetParam();                                      \
-        const auto _mem = EstimateRequiredMemoryFwd<datatype>(_tc, _layout, (solver_expr));     \
-        if(_mem.available < _mem.required)                                                       \
-        {                                                                                        \
-            GTEST_SKIP() << "Insufficient device memory: need " << _mem.required                 \
-                         << " bytes, device has " << _mem.available;                             \
-        }                                                                                        \
+#define SKIP_IF_INSUFFICIENT_DEVICE_MEMORY(datatype, solver_expr)                           \
+    do                                                                                      \
+    {                                                                                       \
+        miopen::unit_tests::UnitTestConvSolverParams _params;                               \
+        miopenTensorLayout_t _layout;                                                       \
+        TestCase _tc;                                                                       \
+        std::tie(_params, _layout, _tc) = this->GetParam();                                 \
+        const auto _mem = EstimateRequiredMemoryFwd<datatype>(_tc, _layout, (solver_expr)); \
+        if(_mem.available < _mem.required)                                                  \
+        {                                                                                   \
+            GTEST_SKIP() << "Insufficient device memory: need " << _mem.required            \
+                         << " bytes, device has " << _mem.available;                        \
+        }                                                                                   \
     } while(0)
 
 using GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_LargeStride_FP16 =
