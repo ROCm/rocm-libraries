@@ -152,22 +152,17 @@ class TestRunInternalProfilingSuccessPath:
         assert cfg.plugin_path == plugin
 
     def test_non_success_status_returns_one(self, tmp_path, monkeypatch, capsys):
-        import sys as _sys
         from unittest.mock import MagicMock
 
-        fake_hipdnn = MagicMock()
-        fake_hipdnn.Handle.return_value = MagicMock()
-        monkeypatch.setitem(_sys.modules, "hipdnn_frontend", fake_hipdnn)
-        fake_loader_cls = MagicMock()
-        fake_loader = fake_loader_cls.return_value
-        fake_loader.load_json.return_value = {"name": "g"}
-        fake_loader.extract_tensor_info.return_value = {}
-        monkeypatch.setattr(internal_profiling, "GraphLoader", fake_loader_cls)
-
+        captured: dict = {}
+        self._patch_stack(monkeypatch, captured)
         bad_result = MagicMock()
         bad_result.status = "error"
         bad_result.error_message = "boom from engine"
         bad_result.skip_reason = None
+        # Override the success default from _patch_stack with a failing
+        # result. The hipdnn / GraphLoader stubs from _patch_stack stay
+        # in place — we only need to swap the runner.
         monkeypatch.setattr(
             internal_profiling,
             "_run_single_provider_engine",
@@ -181,17 +176,8 @@ class TestRunInternalProfilingSuccessPath:
         assert "engine 42" in err
 
     def test_execution_exception_returns_one(self, tmp_path, monkeypatch, capsys):
-        import sys as _sys
-        from unittest.mock import MagicMock
-
-        fake_hipdnn = MagicMock()
-        fake_hipdnn.Handle.return_value = MagicMock()
-        monkeypatch.setitem(_sys.modules, "hipdnn_frontend", fake_hipdnn)
-        fake_loader_cls = MagicMock()
-        fake_loader = fake_loader_cls.return_value
-        fake_loader.load_json.return_value = {"name": "g"}
-        fake_loader.extract_tensor_info.return_value = {}
-        monkeypatch.setattr(internal_profiling, "GraphLoader", fake_loader_cls)
+        captured: dict = {}
+        self._patch_stack(monkeypatch, captured)
 
         def raising(**kw):
             raise RuntimeError("kernel exploded")

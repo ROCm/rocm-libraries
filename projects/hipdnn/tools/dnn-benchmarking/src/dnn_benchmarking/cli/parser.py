@@ -328,6 +328,20 @@ Tarball Input:
             "./profiling-output/<utc-timestamp>/."
         ),
     )
+    metrics_group.add_argument(
+        "--profiling-timeout",
+        type=int,
+        default=600,
+        metavar="SECONDS",
+        help=(
+            "Wall-clock budget for each external profiler subprocess "
+            "(rocprofv3, perf, rocprof-compute, rocpd convert). Default "
+            "600 s. A wedged child surfaces as 'timed out after Ns' in "
+            "extra_metrics['<source>']['skipped'] instead of hanging the "
+            "suite. Bump for known-long workloads (heavy graph under "
+            "multi-pass PMC replay). Pass 0 to disable the timeout."
+        ),
+    )
 
     # Hidden re-exec sub-mode: when an opt-in profiling source is
     # requested, the parent process shells out to a fresh CLI invocation

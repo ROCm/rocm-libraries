@@ -11,28 +11,28 @@ runs that segment is pure noise in the artifact path the user sees.
 from pathlib import Path
 
 from dnn_benchmarking.metrics._artifact_paths import (
-    _strip_rocprofv3_suffix,
+    _strip_results_infix,
     flatten_hostname_dir,
 )
 
 
-class TestStripRocprofv3Suffix:
+class TestStripResultsInfix:
     def test_strips_results_infix(self):
         # rocprofv3 produces `<-o value>_results.<ext>`; with `-o results`
         # that becomes `results_results.db` — strip back to `results.db`.
-        assert _strip_rocprofv3_suffix("results_results.db") == "results.db"
-        assert _strip_rocprofv3_suffix("results_results.pftrace") == "results.pftrace"
+        assert _strip_results_infix("results_results.db") == "results.db"
+        assert _strip_results_infix("results_results.pftrace") == "results.pftrace"
 
     def test_leaves_unrelated_names_alone(self):
-        assert _strip_rocprofv3_suffix("results.db") == "results.db"
-        assert _strip_rocprofv3_suffix("counters.csv") == "counters.csv"
+        assert _strip_results_infix("results.db") == "results.db"
+        assert _strip_results_infix("counters.csv") == "counters.csv"
         # Has `_results.` but stem doesn't end with `_results` — not our pattern.
-        assert _strip_rocprofv3_suffix("foo_results.bar.txt") == "foo_results.bar.txt"
+        assert _strip_results_infix("foo_results.bar.txt") == "foo_results.bar.txt"
 
     def test_no_extension_returns_unchanged(self):
         # Edge: filename without an extension is rocprofv3-uncharacteristic
         # but the helper shouldn't crash on it.
-        assert _strip_rocprofv3_suffix("readme") == "readme"
+        assert _strip_results_infix("readme") == "readme"
 
 
 class TestFlattenHostnameDir:

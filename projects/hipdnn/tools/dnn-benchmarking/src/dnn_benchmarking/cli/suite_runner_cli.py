@@ -164,6 +164,7 @@ def run_suite_cli(
             roofline=args.roofline,
             pmc_allow_multipass=args.pmc_allow_multipass,
             profiling_output_dir=args.profiling_output_dir,
+            profiling_timeout_s=args.profiling_timeout,
         )
         # --profiling-output-dir is only meaningful when at least one
         # opt-in profiling source fires. Passing it solo is a silent

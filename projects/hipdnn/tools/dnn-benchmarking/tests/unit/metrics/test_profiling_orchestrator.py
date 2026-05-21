@@ -83,7 +83,7 @@ class TestResolveOutputDir:
 
         captured_pmc_dirs = []
 
-        def fake_pmc(inner_argv, out_dir, pmc_set):
+        def fake_pmc(inner_argv, out_dir, pmc_set, timeout_s):
             captured_pmc_dirs.append(out_dir)
             return {"pmc": {}}
 
@@ -253,15 +253,60 @@ class TestDispatch:
             )
         assert result["pmc"]["unexpected_error"] == "boom"
 
+    def test_forwards_profiling_timeout_to_every_source(self, tmp_path):
+        """``--profiling-timeout`` is the single source of truth for the
+        per-subprocess wall-clock budget. The orchestrator must hand the
+        configured value to every source it dispatches, not let any
+        source quietly fall back to its module default — otherwise a
+        user who bumps the timeout still sees timeouts in some sources.
+        """
+        cfg = MetricsConfig(
+            pmc_set="basic",
+            emit_trace="pftrace",
+            perf=True,
+            roofline=True,
+            profiling_timeout_s=1234,
+        )
+        captured = {}
+
+        def make_capture(key):
+            def fake(**kwargs):
+                captured[key] = kwargs.get("timeout_s")
+                return {key: {}}
+
+            return fake
+
+        with patch.object(
+            orch._pmc_mod, "run", side_effect=make_capture("pmc")
+        ), patch.object(
+            orch._trace_mod, "run", side_effect=make_capture("trace")
+        ), patch.object(
+            orch._perf_mod, "run", side_effect=make_capture("perf")
+        ), patch.object(
+            orch._roofline_mod, "run", side_effect=make_capture("roofline")
+        ):
+            orch.run_profiling_passes(
+                graph_path=tmp_path / "g.json",
+                engine_id=1,
+                engine_name="ENGINE_X",
+                seed=None,
+                warmup_iters=1,
+                benchmark_iters=1,
+                metrics_config=cfg,
+                plugin_path=None,
+                out_dir=tmp_path,
+            )
+        assert captured == {"pmc": 1234, "trace": 1234, "perf": 1234, "roofline": 1234}
+
     def test_subdir_per_source_is_created(self, tmp_path):
         cfg = MetricsConfig(pmc_set="basic", emit_trace="pftrace")
         captured = {}
 
-        def fake_pmc(inner_argv, out_dir, pmc_set):
+        def fake_pmc(inner_argv, out_dir, pmc_set, timeout_s):
             captured["pmc_dir"] = out_dir
             return {"pmc": {}}
 
-        def fake_trace(inner_argv, out_dir, fmt):
+        def fake_trace(inner_argv, out_dir, fmt, timeout_s):
             captured["trace_dir"] = out_dir
             return {"trace": {}}
 

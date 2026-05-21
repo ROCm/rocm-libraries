@@ -31,9 +31,9 @@ against the workload directory we record in
 
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from ._artifact_paths import profiling_subprocess_timeout_seconds
+from ._artifact_paths import DEFAULT_PROFILING_TIMEOUT_S, find_first
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 
@@ -56,16 +56,10 @@ def _build_argv(
     ]
 
 
-def _find_named(search_dir: Path, name: str) -> Optional[Path]:
-    """Return the first match for an exact filename anywhere under
-    ``search_dir``, or ``None`` if absent."""
-    candidates = sorted(search_dir.rglob(name))
-    return candidates[0] if candidates else None
-
-
 def run(
     inner_argv: List[str],
     out_dir: Path,
+    timeout_s: int = DEFAULT_PROFILING_TIMEOUT_S,
 ) -> Dict[str, Any]:
     """Run rocprof-compute --roof-only and record the artefact paths.
 
@@ -88,20 +82,26 @@ def run(
     workload_dir = out_dir / "workload"
     argv = _build_argv(workload_dir, inner_argv, binary)
 
-    timeout_s = profiling_subprocess_timeout_seconds() or None
+    subprocess_timeout = timeout_s or None
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=subprocess_timeout,
         )
     except subprocess.TimeoutExpired:
         warn_once(
             "roofline",
-            f"rocprof-compute timed out after {timeout_s}s — roofline replay "
-            "fires the workload ~3 times; raise DNN_BENCH_PROFILING_TIMEOUT_S "
+            f"rocprof-compute timed out after {subprocess_timeout}s — roofline "
+            "replay fires the workload ~3 times; raise --profiling-timeout "
             "for slow workloads",
         )
         return {
-            "roofline": {"skipped": f"rocprof-compute timed out after {timeout_s}s"}
+            "roofline": {
+                "skipped": f"rocprof-compute timed out after {subprocess_timeout}s"
+            }
         }
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("roofline", f"rocprof-compute invocation failed: {e}")
@@ -128,9 +128,9 @@ def run(
     #   * rocprof-compute 3.6+ writes directly to `-p` (so `out_dir/`)
     #     and ignores `-n`.
     #
-    # `_find_named` rglobs from `out_dir` so it handles both shapes.
-    roofline_csv = _find_named(out_dir, "roofline.csv")
-    sysinfo_csv = _find_named(out_dir, "sysinfo.csv")
+    # `find_first` rglobs from `out_dir` so it handles both shapes.
+    roofline_csv = find_first(out_dir, "roofline.csv")
+    sysinfo_csv = find_first(out_dir, "sysinfo.csv")
     # If neither named artefact is anywhere under out_dir, distinguish
     # "tool ran but produced no recognised output" (some CSVs present)
     # from "tool produced nothing at all" (likely a version mismatch

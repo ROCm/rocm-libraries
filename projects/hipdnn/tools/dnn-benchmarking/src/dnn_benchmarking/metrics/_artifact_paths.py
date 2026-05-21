@@ -8,36 +8,27 @@ Lives in its own module to avoid a circular import between
 modules (which need these helpers).
 """
 
-import os
 from pathlib import Path
+from typing import Optional
+
+DEFAULT_PROFILING_TIMEOUT_S = 600
 
 
-def profiling_subprocess_timeout_seconds() -> int:
-    """Wall-clock budget for a single profiling subprocess invocation.
+def find_first(search_dir: Path, pattern: str) -> Optional[Path]:
+    """First match for ``pattern`` anywhere under ``search_dir``, or None.
 
-    Every external profiler we shell out to (rocprofv3 PMC + trace,
-    perf, rocprof-compute, rocpd convert) can wedge — a hung kernel
-    under PMC, a perf paranoid race, a rocprof-compute multi-stage
-    pipeline that silently stalls. Without a timeout the entire
-    benchmark suite blocks on the wedged child indefinitely, which
-    breaks the orchestrator's "nothing about profiling is fatal"
-    contract.
-
-    Default is 600 s (10 min) — long enough for a heavy graph under
-    multi-pass PMC replay on a slow host, short enough that a stuck
-    child doesn't burn a CI slot. Override via the
-    ``DNN_BENCH_PROFILING_TIMEOUT_S`` env var for known-long workloads;
-    set to ``0`` to disable the timeout entirely (not recommended).
+    Used by each profiling source to locate its primary artifact
+    (rocpd db, roofline csv, pftrace, etc.) when the output layout
+    varies across tool versions — e.g. rocprofv3 nests under
+    ``<hostname>/``, rocprof-compute 3.6+ writes flat under ``-p``.
+    Recursive rglob handles both. Sorted so the choice is deterministic
+    when more than one file matches.
     """
-    raw = os.environ.get("DNN_BENCH_PROFILING_TIMEOUT_S", "600")
-    try:
-        value = int(raw)
-    except ValueError:
-        return 600
-    return max(value, 0)
+    candidates = sorted(search_dir.rglob(pattern))
+    return candidates[0] if candidates else None
 
 
-def _strip_rocprofv3_suffix(name: str) -> str:
+def _strip_results_infix(name: str) -> str:
     """Drop the ``_results`` infix rocprofv3 hardcodes into output filenames.
 
     rocprofv3 names every output file ``<-o value>_results.<ext>`` —
@@ -87,7 +78,7 @@ def flatten_hostname_dir(out_dir: Path) -> None:
     for f in list(out_dir.iterdir()):
         if not f.is_file():
             continue
-        new_name = _strip_rocprofv3_suffix(f.name)
+        new_name = _strip_results_infix(f.name)
         if new_name != f.name:
             f.replace(out_dir / new_name)
     # Then, hostname subdirs (the default-`-o` case).
@@ -96,7 +87,7 @@ def flatten_hostname_dir(out_dir: Path) -> None:
             continue
         for f in list(sub.iterdir()):
             if f.is_file():
-                target = out_dir / _strip_rocprofv3_suffix(f.name)
+                target = out_dir / _strip_results_infix(f.name)
                 f.replace(target)
         try:
             sub.rmdir()

@@ -78,16 +78,17 @@ wall-clock budget. A wedged child surfaces as
 `extra_metrics["<source>"]["skipped"] == "timed out after Ns"`
 instead of blocking the entire suite.
 
-Default is **600 s (10 min)** per subprocess. Override via env var:
+Default is **600 s (10 min)** per subprocess. Override via
+`--profiling-timeout SECONDS`:
 
 ```bash
 # Bump to 30 min for genuinely-long workloads (large convs under
 # multi-pass PMC replay on a slow host).
-DNN_BENCH_PROFILING_TIMEOUT_S=1800 python -m dnn_benchmarking ...
+python -m dnn_benchmarking --profiling-timeout 1800 ...
 
 # Disable the timeout entirely (not recommended — a wedged
 # subprocess will hang the suite indefinitely).
-DNN_BENCH_PROFILING_TIMEOUT_S=0 python -m dnn_benchmarking ...
+python -m dnn_benchmarking --profiling-timeout 0 ...
 ```
 
 The budget applies *per subprocess*, not per suite — a four-source

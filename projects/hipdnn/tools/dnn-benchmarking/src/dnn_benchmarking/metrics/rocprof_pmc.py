@@ -29,9 +29,13 @@ import sqlite3
 import subprocess
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from ._artifact_paths import flatten_hostname_dir, profiling_subprocess_timeout_seconds
+from ._artifact_paths import (
+    DEFAULT_PROFILING_TIMEOUT_S,
+    find_first,
+    flatten_hostname_dir,
+)
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 from .arch import detect_arch
@@ -158,11 +162,6 @@ def _build_argv(
     return argv
 
 
-def _find_rocpd_db(search_dir: Path) -> Optional[Path]:
-    candidates = sorted(search_dir.rglob("*.db"))
-    return candidates[0] if candidates else None
-
-
 def _parse_rocpd_db(db_path: Path) -> Dict[str, Any]:
     """Walk the rocpd schema and aggregate per-kernel PMC values.
 
@@ -260,6 +259,7 @@ def run(
     inner_argv: List[str],
     out_dir: Path,
     pmc_set: str,
+    timeout_s: int = DEFAULT_PROFILING_TIMEOUT_S,
 ) -> Dict[str, Any]:
     """Run rocprofv3 PMC collection and return the extra_metrics slice.
 
@@ -269,21 +269,16 @@ def run(
         out_dir: Per-source output directory; the rocpd db lands inside
             ``<out_dir>/<hostname>/``.
         pmc_set: One of ``basic``, ``memory``, ``flops``, ``all``.
+        timeout_s: Wall-clock budget for the rocprofv3 subprocess.
+            ``0`` disables. Sourced from ``MetricsConfig.profiling_timeout_s``
+            (CLI ``--profiling-timeout``).
 
     Never raises — failures are reported via the returned dict's
     ``error_tail`` / ``warnings`` keys plus a ``warn_once`` to stderr.
     """
     arch = detect_arch()
     counter_groups = _resolve_counter_groups(arch, pmc_set)
-    # Flat, dedup-preserved view for diagnostics + JSON `counters_requested`.
-    # Argv emission keeps the per-group lists intact — a counter that
-    # legitimately appears in two groups gets two readings (one per
-    # pass), which we don't want to silently collapse there.
-    seen: Dict[str, None] = {}
-    for group in counter_groups:
-        for name in group:
-            seen.setdefault(name, None)
-    counters = list(seen)
+    counters = _resolve_counter_list(arch, pmc_set)
     if not counters:
         warn_once("rocprof_pmc", f"no counters defined for arch={arch} set={pmc_set}")
         return {
@@ -324,23 +319,27 @@ def run(
     out_dir.mkdir(parents=True, exist_ok=True)
     argv = _build_argv(counter_groups, out_dir, inner_argv, rocprofv3_binary)
 
-    timeout_s = profiling_subprocess_timeout_seconds() or None
+    subprocess_timeout = timeout_s or None
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=subprocess_timeout,
         )
     except subprocess.TimeoutExpired:
         warn_once(
             "rocprof_pmc",
-            f"rocprofv3 PMC pass timed out after {timeout_s}s — likely a "
-            "wedged kernel or multi-pass replay; set "
-            "DNN_BENCH_PROFILING_TIMEOUT_S to extend",
+            f"rocprofv3 PMC pass timed out after {subprocess_timeout}s — "
+            "likely a wedged kernel or multi-pass replay; raise "
+            "--profiling-timeout to extend",
         )
         return {
             "pmc": {
                 "set": pmc_set,
                 "arch": arch,
-                "skipped": f"rocprofv3 PMC pass timed out after {timeout_s}s",
+                "skipped": f"rocprofv3 PMC pass timed out after {subprocess_timeout}s",
             }
         }
     except (OSError, subprocess.SubprocessError) as e:
@@ -377,7 +376,7 @@ def run(
         result["returncode"] = proc.returncode
         return {"pmc": result}
 
-    db_path = _find_rocpd_db(out_dir)
+    db_path = find_first(out_dir, "*.db")
     if db_path is None:
         warn_once("rocprof_pmc", "rocprofv3 produced no .db file")
         result["warnings"] = ["no .db file found in output directory"]

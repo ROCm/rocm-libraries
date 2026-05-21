@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ._artifact_paths import flatten_hostname_dir, profiling_subprocess_timeout_seconds
+from ._artifact_paths import (
+    DEFAULT_PROFILING_TIMEOUT_S,
+    find_first,
+    flatten_hostname_dir,
+)
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 
@@ -50,11 +54,6 @@ def _build_argv(
     ]
 
 
-def _find_artifact(search_dir: Path, suffix: str) -> Optional[Path]:
-    candidates = sorted(search_dir.rglob(f"*{suffix}"))
-    return candidates[0] if candidates else None
-
-
 def _rocpd_importable() -> bool:
     """True iff `import rocpd` succeeds in the current interpreter.
 
@@ -71,7 +70,7 @@ def _rocpd_importable() -> bool:
     return True
 
 
-def _convert_to_kineto(db_path: Path) -> Optional[Path]:
+def _convert_to_kineto(db_path: Path, timeout_s: int) -> Optional[Path]:
     """Convert a rocpd db to Chrome-trace format. Returns the .json path or None.
 
     Caller has already verified rocpd is importable via
@@ -79,7 +78,7 @@ def _convert_to_kineto(db_path: Path) -> Optional[Path]:
     converter exiting non-zero (missing transitive deps, schema drift).
     """
     out_path = db_path.with_suffix(".chrome.json")
-    timeout_s = profiling_subprocess_timeout_seconds() or None
+    subprocess_timeout = timeout_s or None
     try:
         proc = subprocess.run(
             [
@@ -97,10 +96,12 @@ def _convert_to_kineto(db_path: Path) -> Optional[Path]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=timeout_s,
+            timeout=subprocess_timeout,
         )
     except subprocess.TimeoutExpired:
-        warn_once("rocprof_trace", f"rocpd convert timed out after {timeout_s}s")
+        warn_once(
+            "rocprof_trace", f"rocpd convert timed out after {subprocess_timeout}s"
+        )
         return None
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("rocprof_trace", f"rocpd convert invocation failed: {e}")
@@ -119,6 +120,7 @@ def run(
     inner_argv: List[str],
     out_dir: Path,
     fmt: str,
+    timeout_s: int = DEFAULT_PROFILING_TIMEOUT_S,
 ) -> Dict[str, Any]:
     """Run rocprofv3 trace and return the extra_metrics slice.
 
@@ -127,6 +129,7 @@ def run(
         out_dir: Per-source output directory.
         fmt: ``pftrace`` or ``kineto``. ``kineto`` triggers a post-run
             ``python -m rocpd convert``.
+        timeout_s: Per-subprocess wall-clock budget; ``0`` disables.
 
     Never raises.
     """
@@ -166,20 +169,24 @@ def run(
         rocprof_fmt = "pftrace" if fmt == "pftrace" else "rocpd"
     argv = _build_argv(rocprof_fmt, out_dir, inner_argv, rocprofv3_binary)
 
-    timeout_s = profiling_subprocess_timeout_seconds() or None
+    subprocess_timeout = timeout_s or None
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=subprocess_timeout,
         )
     except subprocess.TimeoutExpired:
         warn_once(
             "rocprof_trace",
-            f"rocprofv3 trace pass timed out after {timeout_s}s",
+            f"rocprofv3 trace pass timed out after {subprocess_timeout}s",
         )
         return {
             "trace": {
                 "format": fmt,
-                "skipped": f"rocprofv3 trace pass timed out after {timeout_s}s",
+                "skipped": f"rocprofv3 trace pass timed out after {subprocess_timeout}s",
             }
         }
     except (OSError, subprocess.SubprocessError) as e:
@@ -213,7 +220,7 @@ def run(
         return {"trace": result}
 
     if rocprof_fmt == "pftrace":
-        path = _find_artifact(out_dir, ".pftrace")
+        path = find_first(out_dir, "*.pftrace")
         if path is None:
             warn_once("rocprof_trace", "no .pftrace file produced")
             result["warnings"] = ["no .pftrace artifact found"]
@@ -226,13 +233,13 @@ def run(
     # record the db path + kineto_unavailable note rather than re-running
     # the workload — the user already has the db and can convert
     # themselves with `python -m rocpd convert -i <db>`.
-    db_path = _find_artifact(out_dir, ".db")
+    db_path = find_first(out_dir, "*.db")
     if db_path is None:
         warn_once("rocprof_trace", "no rocpd .db file produced")
         result["warnings"] = ["no rocpd .db artifact found"]
         return {"trace": result}
     result["db_path"] = str(db_path)
-    chrome_path = _convert_to_kineto(db_path)
+    chrome_path = _convert_to_kineto(db_path, timeout_s=timeout_s)
     if chrome_path is None:
         result["kineto_unavailable"] = (
             "rocpd convert failed; rerun manually: "

@@ -25,7 +25,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ._artifact_paths import profiling_subprocess_timeout_seconds
+from ._artifact_paths import DEFAULT_PROFILING_TIMEOUT_S
 from ._diagnostic import warn_once
 
 PERF_EVENTS_USER = [
@@ -110,8 +110,12 @@ def _parse_perf_csv(csv_path: Path) -> Dict[str, Any]:
 def run(
     inner_argv: List[str],
     out_dir: Path,
+    timeout_s: int = DEFAULT_PROFILING_TIMEOUT_S,
 ) -> Dict[str, Any]:
-    """Run perf stat, parse CSV, return extra_metrics slice. Never raises."""
+    """Run perf stat, parse CSV, return extra_metrics slice. Never raises.
+
+    ``timeout_s`` bounds the perf subprocess; ``0`` disables.
+    """
     binary = shutil.which("perf")
     if binary is None:
         warn_once("perf", "perf binary not found on PATH; skipping CPU counters")
@@ -130,14 +134,22 @@ def run(
     csv_path = out_dir / "perf.csv"
     argv = _build_argv(events, csv_path, inner_argv)
 
-    timeout_s = profiling_subprocess_timeout_seconds() or None
+    subprocess_timeout = timeout_s or None
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=subprocess_timeout,
         )
     except subprocess.TimeoutExpired:
-        warn_once("perf", f"perf invocation timed out after {timeout_s}s")
-        return {"perf": {"skipped": f"perf invocation timed out after {timeout_s}s"}}
+        warn_once("perf", f"perf invocation timed out after {subprocess_timeout}s")
+        return {
+            "perf": {
+                "skipped": f"perf invocation timed out after {subprocess_timeout}s"
+            }
+        }
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("perf", f"perf invocation failed: {e}")
         return {"perf": {"skipped": f"perf invocation failed: {e}"}}

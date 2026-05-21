@@ -317,7 +317,7 @@ class TestRunFailureModes:
     def test_timeout_returns_skipped(self, tmp_path, monkeypatch):
         """A wedged rocprofv3 invocation surfaces as skipped, not a
         hung suite. Default budget is 600s; users can raise it via
-        DNN_BENCH_PROFILING_TIMEOUT_S for genuinely-long workloads."""
+        --profiling-timeout for genuinely-long workloads."""
         import subprocess
 
         monkeypatch.setattr(rocprof_pmc, "detect_arch", lambda: "gfx942")

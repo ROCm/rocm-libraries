@@ -205,11 +205,15 @@ def run_profiling_passes(
         engine_id=engine_id,
         seed=seed,
         warmup_iters=warmup_iters,
-        benchmark_iters=benchmark_iters,
+        # Single iter — warmups should be enough to stabilise; re-evaluate
+        # if any source shows noisy counters in practice.
+        benchmark_iters=1,
         plugin_path=plugin_path,
     )
 
     aggregated: Dict[str, Any] = {}
+
+    timeout_s = metrics_config.profiling_timeout_s
 
     if metrics_config.pmc_set is not None:
         try:
@@ -223,6 +227,7 @@ def run_profiling_passes(
                         f"pmc_{metrics_config.pmc_set}",
                     ),
                     pmc_set=metrics_config.pmc_set,
+                    timeout_s=timeout_s,
                 )
             )
         except Exception as e:
@@ -241,6 +246,7 @@ def run_profiling_passes(
                         f"trace_{metrics_config.emit_trace}",
                     ),
                     fmt=metrics_config.emit_trace,
+                    timeout_s=timeout_s,
                 )
             )
         except Exception as e:
@@ -253,6 +259,7 @@ def run_profiling_passes(
                 _perf_mod.run(
                     inner_argv=inner_argv,
                     out_dir=_subdir(out_dir, graph_path, engine_name, "perf"),
+                    timeout_s=timeout_s,
                 )
             )
         except Exception as e:
@@ -265,6 +272,7 @@ def run_profiling_passes(
                 _roofline_mod.run(
                     inner_argv=inner_argv,
                     out_dir=_subdir(out_dir, graph_path, engine_name, "roofline"),
+                    timeout_s=timeout_s,
                 )
             )
         except Exception as e:

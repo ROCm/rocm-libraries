@@ -1024,6 +1024,18 @@ class TestProfilingFlagParsing:
         )
         assert args.profiling_output_dir == Path(str(tmp_path / "out"))
 
+    def test_profiling_timeout_default_and_override(self):
+        """600s default matches MetricsConfig.profiling_timeout_s default
+        — if these drift, a user-passed flag could silently revert to a
+        different per-source value."""
+        parser = create_parser()
+        assert parser.parse_args(["--graph", "g.json"]).profiling_timeout == 600
+        args = parser.parse_args(["--graph", "g.json", "--profiling-timeout", "1800"])
+        assert args.profiling_timeout == 1800
+        # 0 is the documented "disable timeout" sentinel and must parse.
+        args = parser.parse_args(["--graph", "g.json", "--profiling-timeout", "0"])
+        assert args.profiling_timeout == 0
+
 
 class TestProfilingFlagPropagation:
     """All seven profiling flags must round-trip from argparse Namespace
@@ -1060,6 +1072,7 @@ class TestProfilingFlagPropagation:
                 "--perf": True,
                 "--roofline": True,
                 "--profiling-output-dir": str(tmp_path / "out"),
+                "--profiling-timeout": 1234,
             }
         )
 
@@ -1088,6 +1101,7 @@ class TestProfilingFlagPropagation:
         assert m.perf is True
         assert m.roofline is True
         assert m.profiling_output_dir == Path(str(tmp_path / "out"))
+        assert m.profiling_timeout_s == 1234
 
     def test_pmc_all_without_multipass_rejected_at_cli_layer(self):
         """The dataclass-level check in MetricsConfig.__post_init__ must

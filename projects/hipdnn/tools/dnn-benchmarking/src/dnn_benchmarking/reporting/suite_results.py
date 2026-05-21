@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
+from ..metrics.arch import detect_arch
 from .statistics import BenchmarkStats
 
 
@@ -574,14 +575,9 @@ def collect_environment_info() -> Dict[str, Any]:
 
     # gfx target via the same torch -> rocminfo -> fallback chain used
     # by metrics.rocprof_pmc, so the JSON output and the PMC keying
-    # agree on what arch this run targeted.
-    gpu_arch: Optional[str] = None
-    try:
-        from ..metrics.arch import detect_arch
-
-        gpu_arch = detect_arch()
-    except Exception:
-        pass
+    # agree on what arch this run targeted. detect_arch() never raises —
+    # it returns "fallback" when no GPU is detectable.
+    gpu_arch = detect_arch()
 
     info: Dict[str, Any] = {
         "rocm_version": rocm_version,

@@ -168,6 +168,11 @@ class MetricsConfig:
         profiling_output_dir: Root directory for profiling artefacts.
             ``None`` until the orchestrator resolves a default
             (``./profiling-output/<utc-timestamp>/``) at suite start.
+        profiling_timeout_s: Wall-clock budget (seconds) for each external
+            profiler subprocess. Default 600 s; ``0`` disables. Sized to
+            absorb a heavy graph under multi-pass PMC replay on a slow
+            host while still bounding a wedged child so the suite doesn't
+            block indefinitely.
     """
 
     tier: Literal["basic", "off"] = "basic"
@@ -177,6 +182,7 @@ class MetricsConfig:
     roofline: bool = False
     pmc_allow_multipass: bool = False
     profiling_output_dir: Optional[Path] = None
+    profiling_timeout_s: int = 600
 
     def __post_init__(self) -> None:
         # Normalise empty / whitespace-only strings to None. The CLI
@@ -227,6 +233,11 @@ class MetricsConfig:
             )
         if isinstance(self.profiling_output_dir, str):
             self.profiling_output_dir = Path(self.profiling_output_dir)
+        if self.profiling_timeout_s < 0:
+            raise ValueError(
+                f"profiling_timeout_s must be >= 0 (0 disables); "
+                f"got {self.profiling_timeout_s}"
+            )
 
     @property
     def basic_enabled(self) -> bool:

@@ -443,9 +443,11 @@ class TestCollectEnvironmentInfo:
     def test_includes_gpu_arch_from_detect_arch(self, monkeypatch):
         """gpu_arch is sourced from metrics.arch.detect_arch so the
         JSON output and the rocprof_pmc PMC keying agree on the
-        gfx target."""
-        from dnn_benchmarking.metrics import arch as arch_mod
+        gfx target. Patch the binding in suite_results (where the name
+        is now bound at import time), not in arch_mod — patching the
+        source module after the name has been imported wouldn't take."""
+        from dnn_benchmarking.reporting import suite_results as sr_mod
 
-        monkeypatch.setattr(arch_mod, "detect_arch", lambda: "gfx942")
+        monkeypatch.setattr(sr_mod, "detect_arch", lambda: "gfx942")
         info = collect_environment_info()
         assert info["gpu_arch"] == "gfx942"
