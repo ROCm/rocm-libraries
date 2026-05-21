@@ -53,8 +53,8 @@ struct ProblemDims
     bool isGfx120X = false;
 };
 
-ProblemDims extractProblemDims(const BatchnormBwdParams& params,
-                               const hipDeviceProp_t& deviceProperties)
+static ProblemDims extractProblemDims(const BatchnormBwdParams& params,
+                                      const hipDeviceProp_t& deviceProperties)
 {
     ProblemDims dims{};
 
@@ -67,14 +67,7 @@ ProblemDims extractProblemDims(const BatchnormBwdParams& params,
     dims.useFp32 = !dims.useFp16Mix && !dims.useBfp16Mix;
 
     const auto* xDims = params.x()->dims();
-    if(xDims->size() == 3)
-    {
-        dims.n = static_cast<size_t>(xDims->Get(0));
-        dims.c = static_cast<size_t>(xDims->Get(1));
-        dims.h = 1;
-        dims.w = static_cast<size_t>(xDims->Get(2));
-    }
-    else if(xDims->size() == 4)
+    if(xDims->size() == 4)
     {
         dims.n = static_cast<size_t>(xDims->Get(0));
         dims.c = static_cast<size_t>(xDims->Get(1));
@@ -219,10 +212,29 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormBwdParams
     return _bias;
 }
 
-void BatchnormBwdPlan::compileSpatial(const IKernelCompiler& kernelCompiler,
-                                      const hipDeviceProp_t& deviceProperties,
-                                      const ProblemDims& dims)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
+    : _params(std::move(params))
+    , _usesSavedStats(_params.hasSavedStats())
+    , _epsilon(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)
 {
+}
+
+size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+{
+    return 0;
+}
+
+void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                               const hipDeviceProp_t& deviceProperties)
+{
+    const auto dims = extractProblemDims(_params, deviceProperties);
+
+    if(_params.optActivation().has_value())
+    {
+        _activationAlpha = static_cast<float>(_params.optActivation()->alpha);
+        _activationBeta = static_cast<float>(_params.optActivation()->beta);
+    }
+
     constexpr unsigned int STASH_VALUES_BWD = 2;
     KernelConfig config;
     if(useMultiple(dims.n,
@@ -270,8 +282,8 @@ void BatchnormBwdPlan::compileSpatial(const IKernelCompiler& kernelCompiler,
     _invInNhw = 1.0f / static_cast<float>(dims.inNhw);
 
     size_t xlocalsize = config.xlocalsize;
-    size_t ylocalsize = config.ylocalsize;
-    size_t zlocalsize = config.zlocalsize;
+    const size_t ylocalsize = config.ylocalsize;
+    const size_t zlocalsize = config.zlocalsize;
     size_t xgridsize = 1;
     size_t ygridsize = 1;
     size_t zgridsize = 1;
@@ -281,16 +293,23 @@ void BatchnormBwdPlan::compileSpatial(const IKernelCompiler& kernelCompiler,
     int stashMethod = 0;
     unsigned int ldsSize = 0;
 
-    HipKernelCompileOptions options(_params.x(), deviceProperties);
+    // Get activation mode
+    auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
+    if(_params.optActivation().has_value())
+    {
+        activationMode = (*_params.optActivation()).mode;
+    }
+
+    HipKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
     options.add("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.add("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
+    // Not using FP16 and BFP16 paths due to affine data type requirements
+    options.update("HIP_PLUGIN_USE_FP16", 0);
+    options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.add("HIP_PLUGIN_BN_GFX103X", dims.isGfx103X);
     options.add("HIP_PLUGIN_BN_GFX110X", dims.isGfx110X);
     options.add("HIP_PLUGIN_BN_GFX115X", dims.isGfx115X);
     options.add("HIP_PLUGIN_BN_GFX120X", dims.isGfx120X);
-    options.add(
-        "HIP_PLUGIN_NRN_OP_ID",
-        _params.optActivation().has_value() ? static_cast<int>(_params.optActivation()->mode) : 0);
     options.add("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
     options.add("HIP_PLUGIN_BN_N", dims.n);
     options.add("HIP_PLUGIN_BN_C", dims.c);
@@ -410,69 +429,6 @@ void BatchnormBwdPlan::compileSpatial(const IKernelCompiler& kernelCompiler,
     }
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
-    : _params(std::move(params))
-    , _usesSavedStats(_params.hasSavedStats())
-    , _epsilon(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)
-{
-}
-
-size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle)
-    const // NOLINT(readability-convert-member-functions-to-static)
-{
-    return 0;
-}
-
-void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
-                               const hipDeviceProp_t& deviceProperties)
-{
-    const auto dims = extractProblemDims(_params, deviceProperties);
-    _isSpatialMode = _params.scale()->dims()->size() != _params.x()->dims()->size();
-
-    if(_params.optActivation().has_value())
-    {
-        _activationAlpha = static_cast<float>(_params.optActivation()->alpha);
-        _activationBeta = static_cast<float>(_params.optActivation()->beta);
-    }
-
-    if(_isSpatialMode)
-    {
-        compileSpatial(kernelCompiler, deviceProperties, dims);
-        return;
-    }
-
-    _usesSavedStats = _params.hasSavedStats();
-    _batchCount = static_cast<unsigned int>(dims.n);
-    _inCstride = dims.inCstride;
-    _batchStride = dims.inChw;
-
-    size_t xlocalsize = 1;
-    size_t ylocalsize = (64 >= dims.inCstride) ? 64 : 256;
-    size_t zlocalsize = 1;
-    size_t xgridsize = dims.c;
-    size_t ygridsize = ((dims.inCstride + ylocalsize - 1) / ylocalsize) * ylocalsize;
-
-    HipKernelCompileOptions options(_params.x(), deviceProperties);
-    options.add("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
-    options.add("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
-    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
-    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
-    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
-    options.add("HIP_PLUGIN_BN_C", dims.c);
-    options.add("HIP_PLUGIN_BN_HW", dims.inCstride);
-    options.add("HIP_PLUGIN_BN_N", dims.n);
-
-    _compiledProgram = kernelCompiler.compile("BatchNormBwdPerAct.cpp", options);
-    _runnableKernels.push_back(_compiledProgram->getKernel(
-        _usesSavedStats ? "BatchNormBwdPerActivationSaved" : "BatchNormBwdPerActivation"));
-    _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                      static_cast<unsigned int>(ylocalsize),
-                                      static_cast<unsigned int>(zlocalsize));
-    _runnableKernels[0]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                     static_cast<unsigned int>(ygridsize / ylocalsize),
-                                     1);
-}
-
 void BatchnormBwdPlan::execute(const HipKernelHandle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
@@ -484,20 +440,6 @@ void BatchnormBwdPlan::execute(const HipKernelHandle& handle,
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "BatchnormBwdPlan::execute() called before compile()");
     }
 
-    if(_isSpatialMode)
-    {
-        executeSpatial(handle, deviceBuffers, numDeviceBuffers);
-    }
-    else
-    {
-        executePerActivation(handle, deviceBuffers, numDeviceBuffers);
-    }
-}
-
-void BatchnormBwdPlan::executeSpatial(const HipKernelHandle& handle,
-                                      const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                      uint32_t numDeviceBuffers) const
-{
     auto xBuffer
         = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
     auto dyBuffer
@@ -621,67 +563,6 @@ void BatchnormBwdPlan::executeSpatial(const HipKernelHandle& handle,
                                     _invInNhw,
                                     _activationAlpha,
                                     _activationBeta);
-    }
-}
-
-void BatchnormBwdPlan::executePerActivation(const HipKernelHandle& handle,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers) const
-{
-    auto xBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dyBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dxBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
-
-    void* savedMeanPtr = nullptr;
-    void* savedInvVariancePtr = nullptr;
-    if(_usesSavedStats)
-    {
-        savedMeanPtr = hip_kernel_utils::findDeviceBuffer(
-                           _params.savedMean()->uid(), deviceBuffers, numDeviceBuffers)
-                           .ptr;
-        savedInvVariancePtr = hip_kernel_utils::findDeviceBuffer(_params.savedInvVariance()->uid(),
-                                                                 deviceBuffers,
-                                                                 numDeviceBuffers)
-                                  .ptr;
-    }
-
-    if(_usesSavedStats)
-    {
-        _runnableKernels[0]->launch(handle.getStream(),
-                                    xBuffer.ptr,
-                                    dyBuffer.ptr,
-                                    _batchCount,
-                                    _batchStride,
-                                    _inCstride,
-                                    dxBuffer.ptr,
-                                    scaleBuffer.ptr,
-                                    dscaleBuffer.ptr,
-                                    dbiasBuffer.ptr,
-                                    savedMeanPtr,
-                                    savedInvVariancePtr);
-    }
-    else
-    {
-        _runnableKernels[0]->launch(handle.getStream(),
-                                    xBuffer.ptr,
-                                    dyBuffer.ptr,
-                                    _batchCount,
-                                    _batchStride,
-                                    _inCstride,
-                                    dxBuffer.ptr,
-                                    scaleBuffer.ptr,
-                                    dscaleBuffer.ptr,
-                                    dbiasBuffer.ptr,
-                                    _epsilon);
     }
 }
 

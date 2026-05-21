@@ -10,6 +10,7 @@
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -17,19 +18,14 @@
 namespace asm_sdpa_engine
 {
 
-enum MaskType : int
-{
-    NO_MASK = 0,
-    TOP_LEFT_CAUSAL,
-    BOTTOM_RIGHT_CAUSAL,
-    WINDOW_GENERIC
-};
+using namespace hip_kernel_provider_common;
 
-MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+static MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    bool leftAndRightBoundsSet = attrs.left_bound().has_value() && attrs.right_bound().has_value();
+    const bool leftAndRightBoundsSet
+        = attrs.left_bound().has_value() && attrs.right_bound().has_value();
     // No bounds set at all → check deprecated bools, otherwise no mask
     if(!leftAndRightBoundsSet)
     {
@@ -63,40 +59,28 @@ MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes&
     return MaskType::WINDOW_GENERIC;
 }
 
-enum RoundingMode : int
-{
-    RTNE = 0, // Round to Nearest Even (IEEE default)
-    RTNA, // Round to Nearest Away from zero
-    RTZ // Round toward Zero
-};
-
-RoundingMode getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
+static RoundingMode
+    getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
 {
     // TODO Cannot be specified in the graph, this will require specialized handling
     return RoundingMode::RTNE;
 }
 
-enum BatchMode : int
-{
-    BATCH = 0, // All sequences have same length
-    GROUP // Variable sequence lengths
-};
-
-BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+static BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
                ? BatchMode::GROUP
                : BatchMode::BATCH;
 }
 
-std::string getKernelNameKey(const std::string& archId,
-                             const std::string& dataType,
-                             int hdim_q, // NOLINT(readability-identifier-naming)
-                             int hdim_v, // NOLINT(readability-identifier-naming)
-                             MaskType maskType,
-                             RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
-                             BatchMode mode,
-                             const CFG* cfgs)
+static std::string getKernelNameKey(const std::string& archId,
+                                    const std::string& dataType,
+                                    int hdim_q, // NOLINT(readability-identifier-naming)
+                                    int hdim_v, // NOLINT(readability-identifier-naming)
+                                    MaskType maskType,
+                                    RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
+                                    BatchMode mode,
+                                    const CFG* cfgs)
 {
     std::string kernelNameKey{};
     for(const auto& el : *cfgs)
@@ -126,10 +110,10 @@ std::string getKernelNameKey(const std::string& archId,
     return kernelNameKey;
 }
 
-std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType qType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType kType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType vType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType oType)
+static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType qType,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType kType,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType vType,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType oType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     if(qType == DataType::BFLOAT16 && kType == DataType::BFLOAT16 && vType == DataType::BFLOAT16
@@ -146,7 +130,7 @@ std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType
     return "";
 }
 
-bool isMi308Device(hipStream_t stream)
+static bool isMi308Device(hipStream_t stream)
 {
     int deviceId;
     auto status = hipStreamGetDevice(stream, &deviceId);
@@ -167,7 +151,7 @@ bool isMi308Device(hipStream_t stream)
     return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
 }
 
-std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
+static std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
     {
@@ -233,10 +217,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     const auto& tensorMap = opGraph.getTensorMap();
 
-    int64_t qUid = attrs.q_tensor_uid();
-    int64_t kUid = attrs.k_tensor_uid();
-    int64_t vUid = attrs.v_tensor_uid();
-    int64_t oUid = attrs.o_tensor_uid();
+    const int64_t qUid = attrs.q_tensor_uid();
+    const int64_t kUid = attrs.k_tensor_uid();
+    const int64_t vUid = attrs.v_tensor_uid();
+    const int64_t oUid = attrs.o_tensor_uid();
 
     auto* qTensor = tensorMap.at(qUid);
     auto* kTensor = tensorMap.at(kUid);
@@ -340,10 +324,10 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto& tensorMap = opGraph.getTensorMap();
 
     // Get tensor UIDs
-    int64_t qUid = sdpaAttrs.q_tensor_uid();
-    int64_t kUid = sdpaAttrs.k_tensor_uid();
-    int64_t vUid = sdpaAttrs.v_tensor_uid();
-    int64_t oUid = sdpaAttrs.o_tensor_uid();
+    const int64_t qUid = sdpaAttrs.q_tensor_uid();
+    const int64_t kUid = sdpaAttrs.k_tensor_uid();
+    const int64_t vUid = sdpaAttrs.v_tensor_uid();
+    const int64_t oUid = sdpaAttrs.o_tensor_uid();
 
     // Get tensor attributes
     auto* qTensor = tensorMap.at(qUid);
@@ -428,7 +412,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideBatch = oStrideBatch;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    MaskType maskType = getMaskType(sdpaAttrs);
+    const MaskType maskType = getMaskType(sdpaAttrs);
     params.noMask = maskType == MaskType::NO_MASK;
 
     // Find matching kernel to graph

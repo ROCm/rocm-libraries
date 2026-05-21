@@ -11,6 +11,7 @@
 #include "ck_tile/ops/flatmm/kernel/flatmm_kernel.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -277,8 +278,8 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
         hipDeviceProp_t prop;
         int deviceId = 0; // default device
 
-        constexpr int block_size = UnderlyingGemmKernel::BlockSize().x;
-        int dync_smem_size       = 0;
+        const int block_size = UnderlyingGemmKernel::BlockSize().x;
+        int dync_smem_size   = 0;
         int maxActiveBlocksPerCU;
 
         [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
@@ -312,8 +313,8 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
         hipDeviceProp_t prop;
         int deviceId = 0; // default device
 
-        constexpr int block_size = UnderlyingGemmKernel::BlockSize().x;
-        int dync_smem_size       = 0;
+        const int block_size = UnderlyingGemmKernel::BlockSize().x;
+        int dync_smem_size   = 0;
         int maxActiveBlocksPerCU;
 
         [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);

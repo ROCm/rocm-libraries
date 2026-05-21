@@ -452,28 +452,79 @@ namespace TensileLite
 
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
-            HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
-                                                      kernel.numWorkItems.x,
-                                                      kernel.numWorkItems.y,
-                                                      kernel.numWorkItems.z,
-                                                      kernel.workGroupSize.x,
-                                                      kernel.workGroupSize.y,
-                                                      kernel.workGroupSize.z,
-                                                      kernel.sharedMemBytes, // sharedMem
-                                                      stream, // stream
-                                                      nullptr,
-                                                      (void**)&hipLaunchParams,
-                                                      nullptr, // event
-                                                      nullptr // event
-                                                      ),
-                [&](hipError_t error) {
-                    std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
-                            << " with workgroup size: " << kernel.workGroupSize << std::endl
-                            << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
-                            << " with numWorkItems : " << kernel.numWorkItems << std::endl
-                            << " error: " << hipGetErrorString(error) << std::endl;
+
+#ifdef HIP_HAS_CLUSTER_LAUNCH
+            bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
+            if(enableCluster)
+            {
+                if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
+                              << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
                 }
-            );
+
+                HIP_LAUNCH_CONFIG config = {0};
+                // The grid dimension is not affected by cluster launch, and is still enumerated
+                // using number of blocks.
+                // The grid dimension should be a multiple of cluster size.
+                config.gridDimX = kernel.numWorkGroups.x;
+                config.gridDimY = kernel.numWorkGroups.y;
+                config.gridDimZ = kernel.numWorkGroups.z;
+                config.blockDimX = kernel.workGroupSize.x;
+                config.blockDimY = kernel.workGroupSize.y;
+                config.blockDimZ = kernel.workGroupSize.z;
+
+                hipLaunchAttribute attribute[1];
+                attribute[0].id                 = hipLaunchAttributeClusterDimension;
+                attribute[0].val.clusterDim.x = kernel.clusterDim.x;
+                attribute[0].val.clusterDim.y = kernel.clusterDim.y;
+                attribute[0].val.clusterDim.z = 1;
+                config.attrs = attribute;
+                config.numAttrs = 1;
+                config.sharedMemBytes = kernel.sharedMemBytes;
+
+                const HIP_LAUNCH_CONFIG *pConfig = &config;
+                HIP_CHECK_RETURN_WITH_LOG(hipDrvLaunchKernelEx(pConfig,
+                                                               function,
+                                                               nullptr,
+                                                               (void**)&hipLaunchParams),
+                    [&](hipError_t error) {
+                        std::cerr << "hipDrvLaunchKernelEx failed: " << kernel.kernelName << std::endl
+                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
+                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                                  << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
+            }
+            else
+#endif
+            {
+                HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
+                                                          kernel.numWorkItems.x,
+                                                          kernel.numWorkItems.y,
+                                                          kernel.numWorkItems.z,
+                                                          kernel.workGroupSize.x,
+                                                          kernel.workGroupSize.y,
+                                                          kernel.workGroupSize.z,
+                                                          kernel.sharedMemBytes,
+                                                          stream,
+                                                          nullptr,
+                                                          (void**)&hipLaunchParams,
+                                                          nullptr,
+                                                          nullptr
+                                                          ),
+                    [&](hipError_t error) {
+                        std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
+                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
+                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                                  << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
+            }
 
             if(stopEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
