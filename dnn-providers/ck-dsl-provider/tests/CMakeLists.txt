@@ -16,6 +16,8 @@ add_executable(
     CompileServiceBridgeTest.cpp
     EmbeddedInterpreterTest.cpp
     ConvImplicitGemmAdapterTest.cpp
+    ConvImplicitGemmPlanBuilderTest.cpp
+    GraphSignatureTest.cpp
     HipModuleSmokeTest.cpp
     JitCacheTest.cpp
 )

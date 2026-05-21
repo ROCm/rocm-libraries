@@ -174,58 +174,64 @@ std::vector<ArgSchema> argSchemaFromPy(const py::handle& list) {
     return out;
 }
 
+/// Translate a Python dict (the on-wire shape returned by either
+/// compile_service.compile_smoke or compile_service.compile) into a
+/// C++ ``KernelArtifact``. Caller must hold the GIL.
+///
+/// ``contextTag`` shows up in any thrown HipdnnPluginException so the
+/// operator can tell which entry point produced the malformed dict
+/// (the same dict-shape contract covers both smoke and production).
+KernelArtifact dictToArtifact(const py::dict& resultDict, const char* contextTag) {
+    const char* requiredFields[] = {"hsaco", "kernel_name", "kind",      "grid",
+                                    "block", "lds_bytes",   "arg_schema"};
+    for (const char* field : requiredFields) {
+        if (!resultDict.contains(field)) {
+            std::ostringstream oss;
+            oss << contextTag << ": returned dict is missing '" << field << "'";
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           oss.str());
+        }
+    }
+
+    KernelArtifact artifact;
+    artifact.kernelName = resultDict["kernel_name"].cast<std::string>();
+    artifact.kind = resultDict["kind"].cast<std::string>();
+    artifact.grid = gridFromPy(resultDict["grid"]);
+    artifact.block = blockFromPy(resultDict["block"]);
+    artifact.ldsBytes = castU32(resultDict["lds_bytes"], "lds_bytes");
+    artifact.argSchema = argSchemaFromPy(resultDict["arg_schema"]);
+    if (resultDict.contains("isa")) {
+        artifact.isa = resultDict["isa"].cast<std::string>();
+    }
+
+    // Copy the HSACO bytes out of the py::bytes payload. The caller
+    // holds the GIL so PyBytes_AsStringAndSize is safe; the resulting
+    // std::vector<std::byte> outlives any Python state since it
+    // carries its own storage.
+    auto hsacoBytes = resultDict["hsaco"].cast<py::bytes>();
+    char* buf = nullptr;
+    Py_ssize_t len = 0;
+    if (PyBytes_AsStringAndSize(hsacoBytes.ptr(), &buf, &len) != 0) {
+        // PyBytes_AsStringAndSize sets a Python exception on
+        // failure; convert to py::error_already_set so callers can
+        // funnel through the PythonError translation.
+        throw py::error_already_set();
+    }
+    artifact.hsaco.resize(static_cast<std::size_t>(len));
+    if (len > 0) {
+        std::memcpy(artifact.hsaco.data(), buf, static_cast<std::size_t>(len));
+    }
+    return artifact;
+}
+
 }  // namespace
 
 KernelArtifact CompileServiceBridge::compileSmoke() {
     try {
         py::gil_scoped_acquire gil;
         py::object result = _module.attr("compile_smoke")();
-        auto resultDict = result.cast<py::dict>();
-
-        // Required fields. Missing any of them is a programming error
-        // in the Python compile-service contract; surface it as
-        // INTERNAL_ERROR with a precise field name so the regression
-        // is obvious from one log line.
-        const char* requiredFields[] = {"hsaco", "kernel_name", "kind",      "grid",
-                                        "block", "lds_bytes",   "arg_schema"};
-        for (const char* field : requiredFields) {
-            if (!resultDict.contains(field)) {
-                std::ostringstream oss;
-                oss << "CompileServiceBridge::compileSmoke: returned dict is missing '" << field
-                    << "'";
-                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                               oss.str());
-            }
-        }
-
-        KernelArtifact artifact;
-        artifact.kernelName = resultDict["kernel_name"].cast<std::string>();
-        artifact.kind = resultDict["kind"].cast<std::string>();
-        artifact.grid = gridFromPy(resultDict["grid"]);
-        artifact.block = blockFromPy(resultDict["block"]);
-        artifact.ldsBytes = castU32(resultDict["lds_bytes"], "lds_bytes");
-        artifact.argSchema = argSchemaFromPy(resultDict["arg_schema"]);
-        if (resultDict.contains("isa")) {
-            artifact.isa = resultDict["isa"].cast<std::string>();
-        }
-
-        // Copy the HSACO bytes out of the py::bytes payload. We hold
-        // the GIL here so PyBytes_AsStringAndSize via py::bytes is
-        // safe; the resulting std::vector<std::byte> outlives any
-        // Python state since it carries its own storage.
-        auto hsacoBytes = resultDict["hsaco"].cast<py::bytes>();
-        char* buf = nullptr;
-        Py_ssize_t len = 0;
-        if (PyBytes_AsStringAndSize(hsacoBytes.ptr(), &buf, &len) != 0) {
-            // PyBytes_AsStringAndSize sets a Python exception on
-            // failure; convert to py::error_already_set so we fall
-            // through to the PythonError translation below.
-            throw py::error_already_set();
-        }
-        artifact.hsaco.resize(static_cast<std::size_t>(len));
-        if (len > 0) {
-            std::memcpy(artifact.hsaco.data(), buf, static_cast<std::size_t>(len));
-        }
+        KernelArtifact artifact =
+            dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compileSmoke");
 
         HIPDNN_PLUGIN_LOG_INFO("CompileServiceBridge::compileSmoke produced kernel='"
                                << artifact.kernelName << "' kind='" << artifact.kind
@@ -237,6 +243,27 @@ KernelArtifact CompileServiceBridge::compileSmoke() {
         return artifact;
     } catch (const py::error_already_set& error) {
         PythonError::raise(error, "CompileServiceBridge::compileSmoke");
+    }
+}
+
+KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const py::dict& payload) {
+    try {
+        py::gil_scoped_acquire gil;
+        py::str opKindStr(opKind.data(), opKind.size());
+        py::object result = _module.attr("compile")(opKindStr, payload);
+        KernelArtifact artifact =
+            dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compile");
+
+        HIPDNN_PLUGIN_LOG_INFO(
+            "CompileServiceBridge::compile op_kind='"
+            << std::string(opKind) << "' kernel='" << artifact.kernelName << "' kind='"
+            << artifact.kind << "' hsaco_bytes=" << artifact.hsaco.size() << " grid=("
+            << artifact.grid.x << "," << artifact.grid.y << "," << artifact.grid.z << ") block=("
+            << artifact.block.x << "," << artifact.block.y << "," << artifact.block.z << ")");
+
+        return artifact;
+    } catch (const py::error_already_set& error) {
+        PythonError::raise(error, "CompileServiceBridge::compile");
     }
 }
 
