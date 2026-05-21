@@ -289,7 +289,7 @@ def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
          has the shared offset + row offset baked in, replacing soffset.
   """
   # TDM handles global reads without per-lane VGPRs
-  hasTDM = kernel["enableTDMA"] and kernel["enableTDMB"]
+  hasTDM = kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False)
   if hasTDM:
     tile.sharedVgprGROffset = []
     ti.localSubtilesRegister = []
@@ -858,7 +858,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   module = Module()
 
   # TDM path: emit one tensor_load_to_lds per tensor, skip all per-subtile DTL loads
-  if kernel["enableTDM%s" % tileInfo.tc[0]]:
+  if kernel.get("enableTDM%s" % tileInfo.tc[0], False):
     if sId0 == 0 and sId1 == 0:
       tc = tileInfo.tc
       group0 = "tdm%sGroup0" % tc
@@ -960,7 +960,7 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
 def globalReadLDSBufferSwap(tc, writer, kernel):
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-    if kernel["enableTDM%s" % tc]:
+    if kernel.get("enableTDM%s" % tc, False):
       ldsAddrSgpr = "tdmLdsAddr%s" % tc
       swapSgpr = "tdmLdsSwapMask%s" % tc
       module = Module()
@@ -980,7 +980,7 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
 #
 def globalReadPtrUpdates(tc, writer, kernel):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  hasTDM = kernel["enableTDM%s" % tc]
+  hasTDM = kernel.get("enableTDM%s" % tc, False)
   if hasTDM:
     module = Module()
     inc = int(ti_.localSubtileGrid[1] * ti_.mmaTileShape[1] * ti_.subtileShape[1] * ti_.bpe)

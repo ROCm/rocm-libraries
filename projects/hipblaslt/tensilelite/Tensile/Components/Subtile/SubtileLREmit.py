@@ -426,7 +426,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   # For single-wave, TDM puts all data at the wave's LDS base -- no partition needed.
   # For multi-wave, each wave's TDM writes to a different LDS region, so LR
   # offsets must include a per-wave partition offset.
-  if kernel["enableTDM%s" % tc]:
+  if kernel.get("enableTDM%s" % tc, False):
     numWaves = prod(kernel["MIWaveGroup"])
     if numWaves == 1:
       return

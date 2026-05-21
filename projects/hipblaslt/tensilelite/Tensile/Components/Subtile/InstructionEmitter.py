@@ -182,7 +182,7 @@ class InstructionEmitter:
         if counts is None:
             return []
         
-        if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
+        if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
             tdmCnt = counts.A + counts.B + counts.SA + counts.SB
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
                                    comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
