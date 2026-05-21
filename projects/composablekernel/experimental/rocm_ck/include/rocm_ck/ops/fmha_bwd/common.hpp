@@ -39,13 +39,4 @@ enum class FmhaBiasType
     ALIBI
 };
 
-/// FMHA architecture family used by CK Tile FMHA BWD codegen dispatch.
-enum class FmhaArch
-{
-    GFX9, // gfx9 family excluding gfx950
-    GFX950,
-    GFX11,
-    GFX12
-};
-
 } // namespace rocm_ck

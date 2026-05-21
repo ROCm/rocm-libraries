@@ -8,7 +8,6 @@
 
 using ::rocm_ck::DataType;
 using ::rocm_ck::dqdkdv_grid_size;
-using ::rocm_ck::FmhaArch;
 using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaBwdDQDKDVAlgorithm;
 using ::rocm_ck::FmhaBwdDQDKDVConfig;
@@ -50,7 +49,6 @@ TEST(FmhaBwdDqDkDv, MakeSpecBaseline)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -72,61 +70,6 @@ TEST(FmhaBwdDqDkDv, MakeSpecBF16)
                                                    .mode   = FmhaMode::BATCH},
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     EXPECT_EQ(k.dtype, DataType::BF16);
-}
-
-TEST(FmhaBwdDqDkDv, MakeSpecArchGFX950)
-{
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH,
-                                                   .arch   = FmhaArch::GFX950},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(k.arch, FmhaArch::GFX950);
-    EXPECT_EQ(k.block_size, 256);
-    EXPECT_EQ(k.block_n0, 128);
-}
-
-TEST(FmhaBwdDqDkDv, MakeSpecArchGFX11)
-{
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH,
-                                                   .arch   = FmhaArch::GFX11},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(k.arch, FmhaArch::GFX11);
-    EXPECT_EQ(k.block_size, 128);
-    EXPECT_EQ(k.block_n0, 64);
-}
-
-TEST(FmhaBwdDqDkDv, MakeSpecArchGFX12)
-{
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                   .hdim_q = 64,
-                                                   .hdim_v = 64,
-                                                   .mode   = FmhaMode::BATCH,
-                                                   .arch   = FmhaArch::GFX12},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(k.arch, FmhaArch::GFX12);
-    EXPECT_EQ(k.block_size, 128);
-    EXPECT_EQ(k.block_n0, 64);
-}
-
-TEST(FmhaBwdDqDkDv, MakeSpecGFX9D256UsesN64Tile)
-{
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 256,
-                                                   .hdim_v = 256,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
-    EXPECT_EQ(k.block_size, 256);
-    EXPECT_EQ(k.block_n0, 64);
 }
 
 TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
