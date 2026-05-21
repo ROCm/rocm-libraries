@@ -186,10 +186,13 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
                             << " ms; expected <50 ms (first compile took " << firstMs << " ms)";
 }
 
-TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteIsStub) {
-    // Until I-8, calling execute() on the plan should fail loudly so
-    // anyone hooking up the integration path before I-8 lands sees a
-    // clear "not implemented" instead of an opaque crash.
+TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
+    // I-8: plan.execute() now packs args and launches the real conv
+    // kernel against device buffers. This test allocates X/W/Y at the
+    // bake-off shape, zero-initialises them, runs execute() on the
+    // default stream, and synchronises. Output correctness against
+    // CpuFpReferenceConvolution is the I-10 integration test; for I-8
+    // we only verify the launch path returns hipSuccess.
     auto fbBuilder = makeBakeOffConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);
@@ -197,10 +200,81 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteIsStub) {
     CkDslContext ctx;
     builder().buildPlan(*_handle, graph, engineConfig, ctx);
     ASSERT_TRUE(ctx.hasValidPlan());
+    auto* concretePlan = dynamic_cast<ConvImplicitGemmPlan*>(&ctx.plan());
+    ASSERT_NE(concretePlan, nullptr);
 
-    EXPECT_THROW(ctx.plan().execute(*_handle, /*deviceBuffers=*/nullptr, /*numDeviceBuffers=*/0,
-                                    /*workspace=*/nullptr),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    // Bake-off shape: X = 8*64*56*56 fp16 = 3.21 MB, W = 64*64*3*3
+    // fp16 = 73.7 KB, Y = 8*64*56*56 fp16 = 3.21 MB. The plan-builder
+    // computed these same byte counts and embedded them in the plan
+    // (xBytesForTesting cross-checks one of them).
+    constexpr std::size_t kXBytes = 8 * 64 * 56 * 56 * 2;
+    constexpr std::size_t kWBytes = 64 * 64 * 3 * 3 * 2;
+    constexpr std::size_t kYBytes = 8 * 64 * 56 * 56 * 2;
+    EXPECT_EQ(concretePlan->xBytesForTesting(), static_cast<std::int32_t>(kXBytes));
+
+    void* dX = nullptr;
+    void* dW = nullptr;
+    void* dY = nullptr;
+    ASSERT_EQ(hipMalloc(&dX, kXBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dW, kWBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dY, kYBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(dX, 0, kXBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(dW, 0, kWBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(dY, 0xab, kYBytes), hipSuccess);  // sentinel for "did the launch write?"
+
+    // Tensor UIDs from createValidConvFwdGraph: x=1, w=2, y=3.
+    std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers = {
+        {1, dX},
+        {2, dW},
+        {3, dY},
+    };
+
+    EXPECT_NO_THROW(ctx.plan().execute(*_handle, deviceBuffers.data(),
+                                       static_cast<std::uint32_t>(deviceBuffers.size()),
+                                       /*workspace=*/nullptr));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // Spot-check the output was actually written -- the input is zero
+    // and the weight is zero, so the convolution output is zero
+    // everywhere. The sentinel byte (0xab) must be gone.
+    std::uint16_t firstHalf = 0;
+    ASSERT_EQ(hipMemcpy(&firstHalf, dY, sizeof(firstHalf), hipMemcpyDeviceToHost), hipSuccess);
+    EXPECT_EQ(firstHalf, 0u) << "expected zero output for zero input + zero weight; got 0x"
+                             << std::hex << firstHalf;
+
+    EXPECT_EQ(hipFree(dX), hipSuccess);
+    EXPECT_EQ(hipFree(dW), hipSuccess);
+    EXPECT_EQ(hipFree(dY), hipSuccess);
+}
+
+TEST_F(ConvImplicitGemmPlanBuilderHost, ExecuteRejectsMissingDeviceBuffer) {
+    // Host-only: the uid-lookup throws before any HIP call, so this
+    // case doesn't need a device. Build a plan, then call execute()
+    // with an incomplete deviceBuffers array.
+    auto fbBuilder = makeBakeOffConvFwdGraph();
+    flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
+    flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);
+
+    // The buildPlan compile-on-miss step needs the GPU (it loads the
+    // HSACO via hipModuleLoadData). Skip this case on host-only lanes.
+    int deviceCount = 0;
+    if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0) {
+        GTEST_SKIP() << "ExecuteRejectsMissingDeviceBuffer needs a device to build the plan";
+    }
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    CkDslContext ctx;
+    builder().buildPlan(*_handle, graph, engineConfig, ctx);
+
+    // Only X present in the buffer array. W (uid=2) lookup throws.
+    void* dX = nullptr;
+    ASSERT_EQ(hipMalloc(&dX, 1), hipSuccess);
+    std::vector<hipdnnPluginDeviceBuffer_t> incomplete = {{1, dX}};
+    EXPECT_THROW(
+        ctx.plan().execute(*_handle, incomplete.data(),
+                           static_cast<std::uint32_t>(incomplete.size()), /*workspace=*/nullptr),
+        hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_EQ(hipFree(dX), hipSuccess);
 }
 
 }  // namespace
