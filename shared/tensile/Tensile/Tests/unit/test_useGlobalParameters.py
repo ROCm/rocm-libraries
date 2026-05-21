@@ -36,19 +36,10 @@ def test_Simple(useGlobalParameters):
 
 
     # outside the with statement, changes should be reverted.
-import pytest
-pytestmark = pytest.mark.requires_compiler
-
     assert not globalParameters["PinClocks"]
 
 def test_Args(useGlobalParameters):
-import pytest
-pytestmark = pytest.mark.requires_compiler
-
     with useGlobalParameters(PinClocks=True):
         assert globalParameters["PinClocks"]
 
     assert not globalParameters["PinClocks"]
-import pytest
-pytestmark = pytest.mark.requires_compiler
-
