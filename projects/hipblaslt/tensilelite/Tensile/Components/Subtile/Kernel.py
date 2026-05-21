@@ -929,7 +929,7 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
   if not tileInfo.vgprTiles:
     return module
 
-  # WMMA-only archs (gfx12): no MFMA available for fast zeroing, use scalar moves
+  # No MFMA available for fast zeroing, use scalar moves
   if not writer.states.asmCaps["HasMFMA"]:
     tileAlias = vgpr
     for tile in tileInfo.vgprTiles:
