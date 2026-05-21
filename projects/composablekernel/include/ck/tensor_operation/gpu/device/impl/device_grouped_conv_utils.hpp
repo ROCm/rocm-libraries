@@ -323,14 +323,14 @@ bool IsPackedTensor(const std::array<IndexT, N>& lengths, const std::array<Index
     for(std::size_t i = 0; i < N; ++i)
         dim[i] = {strides[i], lengths[i]};
     std::sort(dim.begin(), dim.end());
-    if(dim[0].first != 1)
-        return false;
-    for(std::size_t i = 1; i < N; ++i)
+    IndexT expected_stride = 1;
+    for(std::size_t i = 0; i < N; ++i)
     {
-        if(dim[i - 1].second == 1)
+        if(dim[i].second == 1)
             continue;
-        if(dim[i].first != dim[i - 1].second * dim[i - 1].first)
+        if(dim[i].first != expected_stride)
             return false;
+        expected_stride *= dim[i].second;
     }
     return true;
 }
