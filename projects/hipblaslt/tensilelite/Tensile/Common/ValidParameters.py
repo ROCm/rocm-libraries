@@ -71,6 +71,14 @@ for i in validMacroTileSides:
         validMacroTiles.append([i, j])
 validTT = 32
 
+maxWGsInCluster = 16
+# 2D [x, y] only — z is always 1 (hardcoded in HipSolutionAdapter); C++ uses dim3 for HIP API compat.
+validClusterDimensions = []
+for i in range(1, maxWGsInCluster + 1):
+  for j in range(1, maxWGsInCluster + 1):
+    if i * j <= maxWGsInCluster:
+      validClusterDimensions.append([i, j])
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -813,7 +821,7 @@ validParameters = { # we need to make sure this matches develop
     # Typically matching 16 bytes is good choice since the stores will be optimally coalesced with 16 bytes/WI.
     # Using a VW too large which results in >16bytes/thread isn't supported
     # For MFMA non SourceSwap: this parameter didn't take effect
-    # -1 means set vw to largest localReadWidth according to MIWaveTile
+    # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
     # If 0, store 1 element per instruction.
@@ -1014,6 +1022,9 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
+    # cluster runs on a separate WGP.
+    "ClusterDim": validClusterDimensions,
 }
 
 newMIValidParameters = {
