@@ -1,9 +1,7 @@
-# CK DSL hipDNN Provider — Plan v0.9
+# CK DSL hipDNN Provider — Plan v0.8
 
 **Status:** All open questions resolved; plan is implementation-ready
-pending a final review pass. v0.9 renames the single M1 engine to
-`CkDslConvImplicitGemmEngine` to make the eventual per-op engine
-structure obvious from M1. v0 amended 2026-05-21 to make **runtime
+pending a final review pass. v0 amended 2026-05-21 to make **runtime
 Python execution** the primary architecture. v0.2 split the embedding
 mechanism (interpreter location) from the binding library (pybind11 vs
 raw C API) and clarified the plugin C-export pattern. v0.3 moved per-op
@@ -456,7 +454,8 @@ dnn-providers/ck-dsl-provider/
 │       └── compile_service.py            # ~30 LoC: dict → ck_dsl Spec → compile → bytes
 ├── src/
 │   ├── CkDslPluginPublic.cpp             # ~12 lines: defines 5 macros + #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
-│   ├── CkDslContainer.{hpp,cpp}          # engine factory; registers one engine per op
+│   ├── CkDslEngine.{hpp,cpp}             # IEngine
+│   ├── CkDslContainer.{hpp,cpp}          # engine factory
 │   ├── CkDslHandle.{hpp,cpp}             # owns interpreter token, JIT cache, stream
 │   ├── CkDslSettings.hpp
 │   ├── adapters/                         # per-op C++ adapter logic — the durable surface
@@ -475,10 +474,8 @@ dnn-providers/ck-dsl-provider/
 │   │   └── JitCache.{hpp,cpp}            # signature → HipModule
 │   ├── graph/
 │   │   └── GraphSignature.{hpp,cpp}      # cache-key derivation from IGraph
-│   └── engines/                              # one IEngine per op (M1 has just conv-igemm;
-│       │                                     # M2+ adds sibling engines for gemm, attention, …)
-│       └── conv_implicit_gemm/
-│           ├── CkDslConvImplicitGemmEngine.{hpp,cpp}   # IEngine for implicit-GEMM conv
+│   └── engines/
+│       └── plans/conv_implicit_gemm/
 │           ├── ConvImplicitGemmPlanBuilder.{hpp,cpp}
 │           └── ConvImplicitGemmPlan.{hpp,cpp}
 ├── integration_tests/
@@ -585,11 +582,8 @@ simplicity.
 ### 6.2 Implementation (each step is a buildable state)
 
 1. **I-1. Provider skeleton compiles.** Copy `miopen-provider/CMake
-   Lists.txt` + plugin C exports + empty `CkDslConvImplicitGemmEngine`
-   (reports no applicable plans). New superbuild preset
-   `ck-dsl-provider`. The engine is named per-op because M2+ adds
-   sibling engines (`CkDslGemmEngine`, `CkDslAttentionEngine`, …) — one
-   per CK DSL spec.
+   Lists.txt` + plugin C exports + empty `CkDslEngine` (reports no
+   applicable plans). New superbuild preset `ck-dsl-provider`.
    *Test:* `cmake --preset ck-dsl-provider && cmake --build build`
    produces `lib/hipdnn_plugins/engines/ck_dsl_plugin.so`.
 
@@ -754,11 +748,8 @@ spawns the I-7 Implementor after the merge.
 - **M4.** Build-time pre-bake fast path: a list of known-hot shapes
   compiled at provider build time and seeded into the disk cache (or
   embedded into the .so). Runtime JIT still serves the long tail.
-- **M5.** Additional per-op engines (`CkDslGemmEngine`,
-  `CkDslAttentionEngine`, …) registered alongside the M1
-  `CkDslConvImplicitGemmEngine`. Applicability ranking against MIOpen.
-  The per-op engine split was baked into the M1 file layout (§5) so
-  this milestone is additive, not a refactor.
+- **M5.** Multiple engines per provider (DSL-conv, DSL-gemm) and
+  applicability ranking against MIOpen.
 - **M6.** Autotuning hooks: let the JIT path try several specs for the
   same graph and persist the winner.
 
@@ -901,13 +892,6 @@ All entries are committed code or in-tree documentation.
   register renumbered to §6.5. **Q8** cold-cache JIT (~150 ms)
   accepted as M1 baseline. **Q9** M1 logs absolute TFLOPS only; perf
   comparison deferred to M2. Plan is now implementation-ready.
-- **v0.9** (2026-05-21) — renamed the single M1 engine
-  `CkDslEngine` → `CkDslConvImplicitGemmEngine` and moved it under
-  `src/engines/conv_implicit_gemm/` alongside its plan builder + plan.
-  Motivation: the eventual provider has one engine per CK DSL spec
-  (M5); baking that into M1's naming means M2+ adds sibling engine
-  directories rather than refactoring the existing one. §5 file tree
-  updated, §6.2 I-1 reworded, §7 M5 reworded.
 - **v0.8** (2026-05-21) — user removed `dsl_docs/BRANCH_NOTES.md` and
   emptied `dsl_docs/00_for_newcomers/`. Dropped both from §9
   references and re-anchored every assertion that previously leaned
