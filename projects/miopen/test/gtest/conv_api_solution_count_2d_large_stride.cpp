@@ -90,8 +90,7 @@ bool IsFwdKnownFailing2D(miopenDataType_t dtype, const Shape2D& s)
 
 bool IsBwdDataKnownFailing2D(miopenDataType_t /*dtype*/, const Shape2D& s)
 {
-    if(s.n == 1 && s.c == 96 &&
-       ((s.h == 4096 && s.w == 8192) || (s.h == 8192 && s.w == 4096)))
+    if(s.n == 1 && s.c == 96 && ((s.h == 4096 && s.w == 8192) || (s.h == 8192 && s.w == 4096)))
         return true;
     if(s.c != 96 || s.h != s.w)
         return false;
@@ -121,18 +120,18 @@ bool IsWrwKnownFailing2D(miopenDataType_t dtype, const Shape2D& s)
 
 void RunFwd(const Shape2D& s, miopenDataType_t dtype)
 {
-    RunCompileFwd(s, dtype, SetupDescriptors2D, IsFwdKnownFailing2D,
-                  "ConvHipImplicitGemmGroupFwdXdlops");
+    RunCompileFwd(
+        s, dtype, SetupDescriptors2D, IsFwdKnownFailing2D, "ConvHipImplicitGemmGroupFwdXdlops");
 }
 void RunBwdData(const Shape2D& s, miopenDataType_t dtype)
 {
-    RunCompileBwdData(s, dtype, SetupDescriptors2D, IsBwdDataKnownFailing2D,
-                      "ConvHipImplicitGemmGroupBwdXdlops");
+    RunCompileBwdData(
+        s, dtype, SetupDescriptors2D, IsBwdDataKnownFailing2D, "ConvHipImplicitGemmGroupBwdXdlops");
 }
 void RunWrw(const Shape2D& s, miopenDataType_t dtype)
 {
-    RunCompileWrw(s, dtype, SetupDescriptors2D, IsWrwKnownFailing2D,
-                  "ConvHipImplicitGemmGroupWrwXdlops");
+    RunCompileWrw(
+        s, dtype, SetupDescriptors2D, IsWrwKnownFailing2D, "ConvHipImplicitGemmGroupWrwXdlops");
 }
 
 class GPU_ConvApi_SolutionCount2DLargeStride_FP16 : public ::testing::TestWithParam<Shape2D>

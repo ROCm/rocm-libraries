@@ -109,28 +109,12 @@ bool IsBwdDataKnownFailing3D(miopenDataType_t dtype, const Shape3D& s)
     // every >INT_MAX shape (the filter blocks all of these because no Bwd
     // large-tensor CK instances are registered yet).
     static constexpr std::array<std::array<int, 3>, 22> baseline = {{
-        {128, 128, 1024},
-        {256, 256, 256},
-        {256, 256, 512},
-        {256, 256, 1024},
-        {512, 512, 64},
-        {512, 512, 84},
-        {512, 512, 86},
-        {512, 512, 88},
-        {512, 512, 128},
-        {512, 512, 256},
-        {512, 512, 512},
-        {512, 512, 1024},
-        {1024, 1024, 16},
-        {1024, 1024, 32},
-        {1024, 1024, 64},
-        {1024, 1024, 84},
-        {1024, 1024, 86},
-        {1024, 1024, 88},
-        {1024, 1024, 128},
-        {1024, 1024, 256},
-        {1024, 1024, 512},
-        {1024, 1024, 1024},
+        {128, 128, 1024},  {256, 256, 256},    {256, 256, 512},   {256, 256, 1024},
+        {512, 512, 64},    {512, 512, 84},     {512, 512, 86},    {512, 512, 88},
+        {512, 512, 128},   {512, 512, 256},    {512, 512, 512},   {512, 512, 1024},
+        {1024, 1024, 16},  {1024, 1024, 32},   {1024, 1024, 64},  {1024, 1024, 84},
+        {1024, 1024, 86},  {1024, 1024, 88},   {1024, 1024, 128}, {1024, 1024, 256},
+        {1024, 1024, 512}, {1024, 1024, 1024},
     }};
     if(MatchesDhw(s, baseline))
         return true;
@@ -166,26 +150,11 @@ bool IsWrwKnownFailing3D(miopenDataType_t dtype, const Shape3D& s)
         // FP32 has additional pre-existing CK tile gaps at sub-INT_MAX squares
         // (256x256x{86,88,128}, 512x512x{32,64,..,256}, 1024x1024x{16,..,88}).
         static constexpr std::array<std::array<int, 3>, 21> fp32_extra = {{
-            {128, 128, 512},
-            {128, 128, 1024},
-            {256, 256, 86},
-            {256, 256, 88},
-            {256, 256, 128},
-            {256, 256, 256},
-            {256, 256, 512},
-            {256, 256, 1024},
-            {512, 512, 32},
-            {512, 512, 64},
-            {512, 512, 84},
-            {512, 512, 86},
-            {512, 512, 88},
-            {512, 512, 128},
-            {512, 512, 256},
-            {1024, 1024, 16},
-            {1024, 1024, 32},
-            {1024, 1024, 64},
-            {1024, 1024, 84},
-            {1024, 1024, 86},
+            {128, 128, 512},  {128, 128, 1024}, {256, 256, 86},   {256, 256, 88},
+            {256, 256, 128},  {256, 256, 256},  {256, 256, 512},  {256, 256, 1024},
+            {512, 512, 32},   {512, 512, 64},   {512, 512, 84},   {512, 512, 86},
+            {512, 512, 88},   {512, 512, 128},  {512, 512, 256},  {1024, 1024, 16},
+            {1024, 1024, 32}, {1024, 1024, 64}, {1024, 1024, 84}, {1024, 1024, 86},
             {1024, 1024, 88},
         }};
         return MatchesDhw(s, fp32_extra);
@@ -209,18 +178,21 @@ bool IsWrwKnownFailing3D(miopenDataType_t dtype, const Shape3D& s)
 
 void RunFwd(const Shape3D& s, miopenDataType_t dtype)
 {
-    RunCompileFwd(s, dtype, SetupDescriptors3D, IsFwdKnownFailing3D,
-                  "ConvHipImplicitGemm3DGroupFwdXdlops");
+    RunCompileFwd(
+        s, dtype, SetupDescriptors3D, IsFwdKnownFailing3D, "ConvHipImplicitGemm3DGroupFwdXdlops");
 }
 void RunBwdData(const Shape3D& s, miopenDataType_t dtype)
 {
-    RunCompileBwdData(s, dtype, SetupDescriptors3D, IsBwdDataKnownFailing3D,
+    RunCompileBwdData(s,
+                      dtype,
+                      SetupDescriptors3D,
+                      IsBwdDataKnownFailing3D,
                       "ConvHipImplicitGemm3DGroupBwdXdlops");
 }
 void RunWrw(const Shape3D& s, miopenDataType_t dtype)
 {
-    RunCompileWrw(s, dtype, SetupDescriptors3D, IsWrwKnownFailing3D,
-                  "ConvHipImplicitGemm3DGroupWrwXdlops");
+    RunCompileWrw(
+        s, dtype, SetupDescriptors3D, IsWrwKnownFailing3D, "ConvHipImplicitGemm3DGroupWrwXdlops");
 }
 
 class GPU_ConvApi_SolutionCount3DLargeStride_FP16 : public ::testing::TestWithParam<Shape3D>
