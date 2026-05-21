@@ -201,7 +201,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
 static constexpr int ALL_DQDKDV_VARIANTS_COUNT = std::size(ALL_DQDKDV_VARIANTS);
 
 /// Find the best DqDkDv variant matching the given config.
-/// Matches on signature (dtype, hdim_q, hdim_v, mode, arch) and feature flags.
+/// Matches on signature (dtype, hdim_q, hdim_v, mode) and feature flags.
 constexpr const FmhaBwdDQDKDVVariant* findVariant(FmhaBwdDQDKDVConfig cfg)
 {
     const auto& sig  = cfg.signature;
@@ -211,7 +211,7 @@ constexpr const FmhaBwdDQDKDVVariant* findVariant(FmhaBwdDQDKDVConfig cfg)
     {
         const auto& v = ALL_DQDKDV_VARIANTS[i];
         if(v.spec.dtype != sig.dtype || v.spec.hdim_q != sig.hdim_q ||
-           v.spec.hdim_v != sig.hdim_v || v.spec.mode != sig.mode || v.spec.arch != sig.arch)
+           v.spec.hdim_v != sig.hdim_v || v.spec.mode != sig.mode)
             continue;
 
         // Feature flags must match exactly
