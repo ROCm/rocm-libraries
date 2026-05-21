@@ -272,7 +272,8 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     index_t valid_instances     = 0;
 
     // profile device Conv instances
-    bool all_pass = true;
+    bool all_pass           = true;
+    bool dummy_run_executed = false;
 
     std::array<ck::index_t, NDimSpatial + 3> input_lengths{};
     std::array<ck::index_t, NDimSpatial + 3> filter_lengths{};
@@ -320,8 +321,14 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     }
 
     index_t num_kernel = 0;
-    for(auto& op_ptr : op_ptrs)
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr = op_ptrs[i];
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)
         {
             auto argument_ptr = op_ptr->MakeArgumentPointer(
@@ -400,8 +407,25 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
 
                 auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-                float avg_time =
-                    invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+                if(time_kernel && !dummy_run_executed)
+                {
+                    // Run first instance as dummy to get proper time from the first instance
+                    invoker_ptr->Run(argument_ptr.get(),
+                                     StreamConfig{nullptr,
+                                                  time_kernel,
+                                                  0 /*log_level*/,
+                                                  5 /*cold_iters*/,
+                                                  50 /*nrepeat_*/,
+                                                  time_kernel /*flush_cache*/});
+                    dummy_run_executed = true;
+                }
+                float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                                  StreamConfig{nullptr,
+                                                               time_kernel,
+                                                               0 /*log_level*/,
+                                                               5 /*cold_iters*/,
+                                                               50 /*nrepeat_*/,
+                                                               time_kernel /*flush_cache*/});
 
                 std::size_t flop      = conv_param.GetFlops();
                 std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
@@ -594,11 +618,6 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
               << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
               << best_split_k << std::endl;
 
-    if(instance_index != -1)
-    {
-        std::cout << "grouped_conv_bwd_weight_instance (" << instance_index << "/" << num_kernel
-                  << "): Passed" << std::endl;
-    }
     return all_pass;
 }
 

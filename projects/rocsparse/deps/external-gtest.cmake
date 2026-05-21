@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@ set( gtest_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_GTEST} )
 append_cmake_cli_arguments( gtest_cmake_args gtest_cmake_args )
 
 set( gtest_git_repository "https://github.com/google/googletest.git" CACHE STRING "URL to download gtest from" )
-set( gtest_git_tag "release-1.11.0" CACHE STRING "URL to download gtest from" )
+set( gtest_git_tag "v1.15.2" CACHE STRING "git tag for gtest version to download" )
 
 if( MSVC )
   list( APPEND gtest_cmake_args -Dgtest_force_shared_crt=ON -DCMAKE_DEBUG_POSTFIX=d )
@@ -55,7 +55,7 @@ else( )
   else( )
     set( gtest_make "make" )
 
-    # The -j paramter does not work with nmake
+    # The -j parameter does not work with nmake
     if( NOT Cores EQUAL 0 )
       math( EXPR Cores "${Cores} + 1 " )
       list( APPEND gtest_make -j ${Cores} )

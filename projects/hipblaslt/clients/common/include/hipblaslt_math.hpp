@@ -68,6 +68,64 @@ inline __device__ __host__ hip_bfloat16 negate(hip_bfloat16 x)
 #endif
 }
 
+#if defined(HIPBLASLT_USE_FP4)
+template <>
+inline __device__ __host__ hipblaslt_f4x2 negate(hipblaslt_f4x2 x)
+{
+    x.__x ^= 0x8; // left fp4 element
+    x.__x ^= 0x80; // right fp4 element
+    return x;
+}
+#endif
+
+#if defined(HIPBLASLT_USE_FP6)
+template <>
+inline __device__ __host__ hipblaslt_f6x16 negate(hipblaslt_f6x16 x)
+{
+    union
+    {
+        hipblaslt_f6x16_storage real;
+        uint8_t                 tmp[12];
+    } cvt;
+
+    cvt.real = x.data;
+
+    for(int i = 0; i < sizeof(cvt.tmp); i += 3)
+    {
+        cvt.tmp[i] ^= 0x20;
+        cvt.tmp[i + 1] ^= 0x8;
+        cvt.tmp[i + 2] ^= 0x82;
+    }
+
+    x.data = cvt.real;
+    return x;
+}
+#endif
+
+#if defined(HIPBLASLT_USE_BF6)
+template <>
+inline __device__ __host__ hipblaslt_bf6x16 negate(hipblaslt_bf6x16 x)
+{
+    union
+    {
+        hipblaslt_bf6x16_storage real;
+        uint8_t                  tmp[12];
+    } cvt;
+
+    cvt.real = x.data;
+
+    for(int i = 0; i < sizeof(cvt.tmp); i += 3)
+    {
+        cvt.tmp[i] ^= 0x20;
+        cvt.tmp[i + 1] ^= 0x8;
+        cvt.tmp[i + 2] ^= 0x82;
+    }
+
+    x.data = cvt.real;
+    return x;
+}
+#endif
+
 template <>
 inline __device__ __host__ hipblaslt_f8_fnuz negate(hipblaslt_f8_fnuz x)
 {
@@ -96,6 +154,20 @@ inline __device__ __host__ hipblaslt_bf8 negate(hipblaslt_bf8 x)
     return x;
 }
 
+// Complex float specialization
+template <>
+inline __device__ __host__ std::complex<float> negate(std::complex<float> x)
+{
+    return std::complex<float>(-x. real(), -x. imag());
+}
+
+// Complex double specialization
+template <>
+inline __device__ __host__ std::complex<double> negate(std::complex<double> x)
+{
+    return std::complex<double>(-x. real(), -x. imag());
+}
+
 // Helper function to reduce intermediate precision and the output type are the same as the input type.
 template <typename TxDLi, typename TxDLo, typename Ti>
 inline void type_to_xdl_math_op_type(Ti* in, size_t s)
@@ -110,4 +182,18 @@ inline void type_to_xdl_math_op_type(Ti* in, size_t s)
     using castType = std::conditional_t<needCast, TxDLi, Ti>;
     for(size_t i = 0; i < s; i++)
         in[i] = static_cast<Ti>(static_cast<castType>(in[i]));
+}
+
+template <typename T>
+inline __host__ __device__ bool hipblaslt_isnan(std::complex<T> arg,
+                                                std::enable_if_t<!std::is_integral<T>::value, int> = 0)
+{
+    return std::isnan(arg.real()) || std::isnan(arg.imag());
+}
+
+template <typename T>
+inline __host__ __device__ bool hipblaslt_isnan(std::complex<T> arg,
+                                                std::enable_if_t<std::is_integral<T>::value, int> = 0)
+{
+    return false;
 }

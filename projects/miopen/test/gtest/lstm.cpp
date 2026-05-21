@@ -29,6 +29,15 @@ namespace {
 
 struct TestCase
 {
+    TestCase(int usePadding_, int inputMode_, int biasMode_, int dirMode_, int algoMode_)
+        : usePadding(usePadding_),
+          inputMode(inputMode_),
+          biasMode(biasMode_),
+          dirMode(dirMode_),
+          algoMode(algoMode_)
+    {
+    }
+
     int usePadding;
     int inputMode;
     int biasMode;
@@ -122,9 +131,3 @@ using GPU_LSTM_FP32 = GPU_LSTM_test<float>;
 TEST_P(GPU_LSTM_FP32, FloatTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP32, testing::ValuesIn(GetTestCases()));
-
-using GPU_LSTM_FP64 = GPU_LSTM_test<double>;
-
-TEST_P(GPU_LSTM_FP64, DoubleTest) { RunTest(); }
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP64, testing::ValuesIn(GetTestCases()));

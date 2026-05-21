@@ -144,7 +144,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     auto x       = get_input_checked(miopenTensorConvolutionX, "miopenTensorConvolutionX");
@@ -220,7 +220,7 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    const auto net_cfg       = conv_problem.BuildConfKey();
+    const auto net_cfg       = conv_problem.MakeNetworkConfig();
     const auto found_invoker = handle.GetInvoker(net_cfg, GetSolver());
 
     if(found_invoker)
@@ -271,7 +271,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const mha::ProblemDescription problem_description = problem_casted.AsMha();
@@ -467,7 +467,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const softmax::ProblemDescription problem_description = problem_casted.AsSoftmax();

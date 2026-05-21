@@ -1,0 +1,18 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "norm_common.fbs";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+table LayernormAttributes {
+    x_tensor_uid:              long;
+    scale_tensor_uid:          long;
+    bias_tensor_uid:           long;
+    epsilon_tensor_uid:        long;
+    y_tensor_uid:              long;
+    normalized_dim_count:      long;
+    mean_tensor_uid:           long = null;
+    inv_variance_tensor_uid:   long = null;
+    forward_phase:             NormFwdPhase = NOT_SET;
+}

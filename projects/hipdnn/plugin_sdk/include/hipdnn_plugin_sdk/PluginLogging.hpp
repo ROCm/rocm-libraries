@@ -14,6 +14,7 @@
  * The component name is stored at runtime when initializeCallbackLogging() is called.
  */
 
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include <shared_mutex>
@@ -49,13 +50,13 @@ HIPDNN_HIDDEN inline std::shared_mutex& getComponentNameMutex()
 
 inline void setComponentName(const std::string& name)
 {
-    std::unique_lock<std::shared_mutex> lock(getComponentNameMutex());
+    const std::unique_lock<std::shared_mutex> lock(getComponentNameMutex());
     getStoredComponentName() = name;
 }
 
 inline std::string getComponentName()
 {
-    std::shared_lock<std::shared_mutex> lock(getComponentNameMutex());
+    const std::shared_lock<std::shared_mutex> lock(getComponentNameMutex());
     return getStoredComponentName();
 }
 
@@ -139,6 +140,17 @@ inline void initializeCallbackLogging(const std::string& componentName,
 
     hipdnn_data_sdk::logging::initializeLogLevel();
     hipdnn_data_sdk::logging::registerLoggingCallback(callbackFunction);
+}
+
+/**
+ * @brief Set the log level for the plugin
+ *
+ * Updates the plugin's local log level cache so that subsequent log level
+ * checks filter messages at the new level.
+ */
+inline void setLogLevel(hipdnnSeverity_t level)
+{
+    hipdnn_data_sdk::logging::setLogLevel(level);
 }
 
 } // namespace hipdnn_plugin_sdk::logging

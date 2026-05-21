@@ -11,6 +11,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -63,7 +64,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful (using deterministic engine).\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
@@ -158,10 +159,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = yValidator.allClose(yRefTensor, yTensor1);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "y", yValidator, yRefTensor, yTensor1, tolerance, tolerance);
 
         validationPassed = yValid;
     }

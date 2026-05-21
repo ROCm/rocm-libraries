@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/config.h>
 #include <miopen/convolution.hpp>
@@ -77,14 +54,13 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvAsm5x10u2v2f1,
                                            miopen::solver::conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1,
                                            miopen::solver::conv::ConvAsm5x10u2v2b1,
-                                           miopen::solver::conv::ConvOclDirectFwd11x11,
-                                           miopen::solver::conv::ConvOclDirectFwdGen,
-                                           miopen::solver::conv::ConvOclDirectFwd1x1,
+                                           miopen::solver::conv::ConvHipDirectFwd11x11,
                                            miopen::solver::conv::ConvOclDirectFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
-                                           miopen::solver::conv::ConvDepthwiseFwd2D>{};
+                                           miopen::solver::conv::ConvDepthwiseFwd2D,
+                                           miopen::solver::conv::ConvDepthwiseFwd3D>{};
 }
 
 static auto GetImplicitGemmSolvers()
@@ -112,8 +88,6 @@ static auto GetImplicitGemmSolvers()
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC,
         miopen::solver::conv::ConvCkIgemmFwdV6r1DlopsNchw,
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-        miopen::solver::conv::ConvHipImplicitGemmFwdXdlops,
-        miopen::solver::conv::ConvHipImplicitGemmBwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops,
@@ -141,7 +115,25 @@ static auto GetWindogradSolvers()
         miopen::solver::conv::ConvMPBidirectWinograd_xdlops<5, 3>,
         miopen::solver::conv::ConvMPBidirectWinograd_xdlops<6, 3>,
         miopen::solver::conv::ConvWinoFuryRxS<2, 3>,
-        miopen::solver::conv::ConvWinoRageRxS<2, 3>>{};
+        miopen::solver::conv::ConvWinoRageRxS<2, 3>,
+        // Transposed Winograd solvers for NHWC layout support
+        miopen::solver::conv::TransposedConvBinWinograd3x3U,
+        miopen::solver::conv::TransposedConvBinWinogradRxS,
+        miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
+        miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
+        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd<2, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd<3, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd<4, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd<5, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd<6, 3>,
+        miopen::solver::conv::TransposedConvBinWinoRxS<2, 3>,
+        miopen::solver::conv::TransposedConvBinWinoRxS<3, 2>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<2, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<3, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<4, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<5, 3>,
+        miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<6, 3>>{};
 }
 
 static auto GetImplicitGemmWrWSolvers()
@@ -183,21 +175,35 @@ static auto GetWindogradWrWSolvers()
         miopen::solver::conv::ConvWinograd3x3MultipassWrW<5, 3>,
         miopen::solver::conv::ConvWinograd3x3MultipassWrW<5, 4>,
         miopen::solver::conv::ConvWinoFuryRxS<2, 3>,
-        miopen::solver::conv::ConvWinoRageRxS<2, 3>>{};
+        miopen::solver::conv::ConvWinoRageRxS<2, 3>,
+        // Transposed Winograd solvers for NHWC layout support
+        miopen::solver::conv::TransposedConvBinWinograd3x3U,
+        miopen::solver::conv::TransposedConvBinWinogradRxS,
+        miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
+        miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
+        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 2>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 3>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 4>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 5>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 6>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 2>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 3>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 3>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 2, 1, 1>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 3, 1, 1>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<5, 3>,
+        miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<5, 4>,
+        miopen::solver::conv::TransposedConvBinWinoRxS<2, 3>,
+        miopen::solver::conv::TransposedConvBinWinoRxS<3, 2>>{};
 }
 
 static auto GetBwdWrW2DSolvers()
 {
     return miopen::solver::SolverContainer<miopen::solver::conv::ConvAsmBwdWrW1x1,
                                            miopen::solver::conv::ConvAsmBwdWrW3x3,
-                                           miopen::solver::conv::ConvOclBwdWrW2<1>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<2>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<4>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<8>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<16>,
-                                           miopen::solver::conv::ConvOclBwdWrW2NonTunable,
                                            miopen::solver::conv::ConvOclBwdWrW53,
-                                           miopen::solver::conv::ConvOclBwdWrW1x1,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw>{};

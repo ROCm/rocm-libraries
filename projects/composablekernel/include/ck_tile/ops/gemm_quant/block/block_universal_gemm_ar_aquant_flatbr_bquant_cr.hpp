@@ -21,18 +21,19 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg : public BlockGemmQuantBase
     template <typename PipelineProblem_, typename GemmPolicy_>
     struct GemmTraits_
     {
-        using Problem         = remove_cvref_t<PipelineProblem_>;
-        using Policy          = remove_cvref_t<GemmPolicy_>;
-        using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-        using AQDataType      = remove_cvref_t<typename Problem::AQDataType>;
-        using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-        using BQDataType      = remove_cvref_t<typename Problem::BQDataType>;
-        using BQLayout        = remove_cvref_t<typename Problem::BQLayout>;
-        using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
-        using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-        using BlockGemmShape  = remove_cvref_t<typename Problem::BlockGemmShape>;
-        using AQuantGroupSize = remove_cvref_t<typename Problem::AQuantGroupSize>;
-        using BQuantGroupSize = remove_cvref_t<typename Problem::BQuantGroupSize>;
+        using Problem          = remove_cvref_t<PipelineProblem_>;
+        using Policy           = remove_cvref_t<GemmPolicy_>;
+        using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+        using AQDataType       = remove_cvref_t<typename Problem::AQDataType>;
+        using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+        using BQDataType       = remove_cvref_t<typename Problem::BQDataType>;
+        using BQLayout         = remove_cvref_t<typename Problem::BQLayout>;
+        using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+        using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+        using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+        using BlockGemmShape   = remove_cvref_t<typename Problem::BlockGemmShape>;
+        using AQuantGroupSize  = remove_cvref_t<typename Problem::AQuantGroupSize>;
+        using BQuantGroupSize  = remove_cvref_t<typename Problem::BQuantGroupSize>;
 
         static constexpr index_t kBlockSize = Problem::kBlockSize;
         static constexpr auto Scheduler     = Problem::Scheduler;
@@ -110,28 +111,31 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg : public BlockGemmQuantBase
              std::is_same_v<AQDataType, ck_tile::bf8_t>) &&
             (std::is_same_v<BQDataType, float> || std::is_same_v<BQDataType, ck_tile::fp8_t> ||
              std::is_same_v<BQDataType, ck_tile::bf8_t>) &&
-            (std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t>) &&
+            (std::is_same_v<AComputeDataType, fp8_t> || std::is_same_v<AComputeDataType, bf8_t>) &&
+            (std::is_same_v<BComputeDataType, fp8_t> || std::is_same_v<BComputeDataType, bf8_t>) &&
             std::is_same_v<CDataType, fp32_t>);
 
         static constexpr index_t InterWaveSchedulingMacClusters = 1;
 
-        static constexpr index_t KPack      = WarpGemm::kKPerThread;
+        static constexpr index_t KPackA     = WarpGemm::kKPerThread;
+        static constexpr index_t KPackB     = WarpGemm::kKPerThread;
         static constexpr index_t KPerThread = KIterPerWarp * WarpGemm::kKPerThread;
         static constexpr bool TransposeC    = Problem::TransposeC;
     };
 
     public:
-    using Base            = BlockGemmQuantBase;
-    using Traits          = GemmTraits_<Problem_, BlockPolicy_>;
-    using Problem         = remove_cvref_t<Problem_>;
-    using BlockPolicy     = remove_cvref_t<BlockPolicy_>;
-    using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-    using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-    using BQDataType      = remove_cvref_t<typename Problem::BQDataType>;
-    using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-    using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
-    using BlockGemmShape  = remove_cvref_t<typename Problem::BlockGemmShape>; // TileFlatmmShape
-    using BQuantGroupSize = remove_cvref_t<typename Problem::BQuantGroupSize>;
+    using Base             = BlockGemmQuantBase;
+    using Traits           = GemmTraits_<Problem_, BlockPolicy_>;
+    using Problem          = remove_cvref_t<Problem_>;
+    using BlockPolicy      = remove_cvref_t<BlockPolicy_>;
+    using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+    using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+    using BQDataType       = remove_cvref_t<typename Problem::BQDataType>;
+    using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+    using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+    using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+    using BlockGemmShape   = remove_cvref_t<typename Problem::BlockGemmShape>; // TileFlatmmShape
+    using BQuantGroupSize  = remove_cvref_t<typename Problem::BQuantGroupSize>;
 
     static_assert(BQuantGroupSize::kM == 1, "only N/K blocks for BQuant preshuffle kernel!");
 
@@ -210,45 +214,45 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg : public BlockGemmQuantBase
             c_acc;
 
         auto zero_accumulators = [&] {
-            static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    static_for<0, (WG::kM * WG::kN) / warp_size, 1>{}([&](auto i) {
-                        c_acc(mIter)(nIter).get_thread_buffer()[i] = 0.0f;
-                    }); // make sure WG::CWarpTensor exposes a clear/zero
+            static_ford<sequence<MIterPerWarp, NIterPerWarp, (WG::kM * WG::kN) / warp_size>>{}(
+                [&](auto mni) {
+                    constexpr auto mIter                       = number<mni[number<0>{}]>{};
+                    constexpr auto nIter                       = number<mni[number<1>{}]>{};
+                    constexpr auto i                           = number<mni[number<2>{}]>{};
+                    c_acc(mIter)(nIter).get_thread_buffer()[i] = 0.0f;
                 });
-            });
         };
         static_for<0, QScalesPerBlockRow, 1>{}([&](auto kQScale) {
             zero_accumulators();
-            static_for<0, KIterPerQScale, 1>{}([&](auto kIterInQScale) {
-                constexpr auto kIter = kQScale * KIterPerQScale + kIterInQScale;
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
-                    static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                        // warp GEMM
-                        WG{}(c_acc(mIter)(nIter),
-                             a_warp_tensor(number<AwarpIter>{}),
-                             b_warp_tensor(nIter)(number<kIter>{}));
-                    });
-                    __builtin_amdgcn_sched_barrier(0x7F6);
-                    // preload next A from lds
-                    if constexpr((kIter * MIterPerWarp + mIter) <
-                                 (KIterPerWarp * MIterPerWarp - m_preload))
-                    {
-                        constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
-                        constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
-
-                        load_and_convert_tile<UnaryOpSize>(
-                            a_warp_tensor(number<AwarpIter>{}),
-                            a_warp_windows(number<AmIter>{})(number<AkIter>{}));
-                    }
-                    // barrier
-                    // Could be deleted
-                    if constexpr((mIter == MIter_2nd_last))
-                    {
-                        block_sync_lds();
-                    }
+            static_ford<sequence<KIterPerQScale, MIterPerWarp>>{}([&](auto km) {
+                constexpr auto kIterInQScale = number<km[number<0>{}]>{};
+                constexpr auto mIter         = number<km[number<1>{}]>{};
+                constexpr auto kIter         = kQScale * KIterPerQScale + kIterInQScale;
+                constexpr auto AwarpIter     = (kIter * MIterPerWarp + mIter) % m_preload;
+                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                    // warp GEMM
+                    WG{}(c_acc(mIter)(nIter),
+                         a_warp_tensor(number<AwarpIter>{}),
+                         b_warp_tensor(nIter)(number<kIter>{}));
                 });
+                __builtin_amdgcn_sched_barrier(0x7F6);
+                // preload next A from lds
+                if constexpr((kIter * MIterPerWarp + mIter) <
+                             (KIterPerWarp * MIterPerWarp - m_preload))
+                {
+                    constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
+                    constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
+
+                    load_and_convert_tile<UnaryOpSize>(
+                        a_warp_tensor(number<AwarpIter>{}),
+                        a_warp_windows(number<AmIter>{})(number<AkIter>{}));
+                }
+                // barrier
+                // Could be deleted
+                if constexpr((mIter == MIter_2nd_last))
+                {
+                    block_sync_lds();
+                }
             });
             static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
                 AQPickerCommon<AQBlockTensor, Traits, mIter, kQScale> aq_picker(aq_block_tensor);

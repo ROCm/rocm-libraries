@@ -64,34 +64,17 @@ class UserArgumentsInfo:
 
 def getSrcValueType(kernel, isTypeA):
     # special cases for F8 datatypes
-    if kernel["ProblemType"]["DataType"].isAnyFloat8():
+    tc='A' if isTypeA else 'B'
+    if kernel["ProblemType"]["MacDataType%s"%tc].isAnyFloat8():
         srcValueType = "FP8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8():
+    elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyBFloat8():
         srcValueType = "BF8"
-    elif kernel["ProblemType"]["DataType"].isAnyFloat8BFloat8():
-        srcValueType = "FP8" if isTypeA else "BF8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8Float8():
-        srcValueType = "BF8" if isTypeA else "FP8"
     else:
-        if isTypeA:
-            srcValueType = kernel["ProblemType"]["DataTypeA"].toNameAbbrev().upper()
-        else:
-            srcValueType = kernel["ProblemType"]["DataTypeB"].toNameAbbrev().upper()
+        srcValueType = kernel["ProblemType"]["DataType%s"%tc].toNameAbbrev().upper()
 
     srcValueType = srcValueType.lower()
     return srcValueType
 
-def getDstValueType(kernel):
-    # special cases for F8 datatypes
-    if kernel["ProblemType"]["DataType"].isAnyFloat8():
-        dstValueType = "FP8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8():
-        dstValueType = "BF8"
-    else:
-        dstValueType = kernel["ProblemType"]["DataType"].toNameAbbrev().upper()
-
-    dstValueType = dstValueType.lower()
-    return dstValueType
 
 # Creates kernel header, compatible with code object version 4 and up. V2 and V3 no longer supported.
 class SignatureDefault(Signature):
@@ -104,7 +87,9 @@ class SignatureDefault(Signature):
         # kern arg size
         kernArgReg = 0
         kernArgReg += 3*writer.states.rpga
-        kernArgReg += max(1,int(writer.states.bpeAB/4)) # alpha
+        # TODO: Check correctness of the following
+        kernArgReg += max(1,int(writer.states.bpeA/4)) # alpha
+        # TODO: alpha and beta should be computeType
         if kernel["ProblemType"]["UseBeta"]:
             kernArgReg += max(1,int(writer.states.bpeCexternal/4)) # beta
         kernArgReg += kernel["ProblemType"]["NumIndicesC"] # strides
@@ -123,7 +108,13 @@ class SignatureDefault(Signature):
 
         group_segment_size = kernel["LdsNumBytes"]
 
+        # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
+        userArgumentsInfo.commonArgsNum += 4
+        userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
+
         sgprWgZ = 1 if kernel["ProblemType"]["NumIndicesC"] > 2 else 0
+        numSgprToLoad = writer.states.numSgprToLoad + userArgumentsInfo.commonArgsNum
+        writer.states.numSgprPreload = min(numSgprToLoad, writer.states.numSgprPreload)
         signature = SignatureBase(kernelName=writer.states.kernelName,
                                     kernArgsVersion=kernel["InternalSupportParams"]["KernArgsVersion"],
                                     codeObjectVersion=kernel["CodeObjectVersion"],
@@ -131,16 +122,13 @@ class SignatureDefault(Signature):
                                     sgprWorkGroup=(1, 1, sgprWgZ),
                                     vgprWorkItem=0,
                                     flatWorkGroupSize=(kernel["NumThreads"]),
-                                    preloadKernArgs=bool(kernel["PreloadKernArgs"]))
+                                    numSgprPreload=writer.states.numSgprPreload)
 
        # General Argument info
         signature.addArg(   "Gemm info", SVK.SIG_VALUE, "u32")
         signature.addArg("kernel info0", SVK.SIG_VALUE, "u32")
         signature.addArg("kernel info1", SVK.SIG_VALUE, "u32")
         signature.addArg("numWG",        SVK.SIG_VALUE, "u32")
-        # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
-        userArgumentsInfo.commonArgsNum += 4
-        userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
 
         srcValueTypeA = getSrcValueType(kernel, True)
         srcValueTypeB = getSrcValueType(kernel, False)
@@ -159,12 +147,19 @@ class SignatureDefault(Signature):
 
         if writer.debugConfig.debugKernel:
             signature.addArg("AddressDbg", SVK.SIG_GLOBALBUFFER, "struct", "generic")
-        signature.addArg(    "D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg(    "C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg(    "A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
-        signature.addArg(    "B", SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+        signature.addArg("D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+        signature.addArg("C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+        signature.addArg("A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
+        if kernel["ProblemType"]["MXBlockA"]:
+            signature.addArg("MXSA", SVK.SIG_GLOBALBUFFER, "void", "generic")
+        signature.addArg("B", SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+        if kernel["ProblemType"]["MXBlockB"]:
+            signature.addArg("MXSB", SVK.SIG_GLOBALBUFFER, "void", "generic")
         userArgumentsInfo.gemmArgumentSize += (8 + 8 + 8 + 8)  # A, B, C, D buffer
-
+        if kernel["ProblemType"]["MXBlockA"]:
+            userArgumentsInfo.gemmArgumentSize += 8
+        if kernel["ProblemType"]["MXBlockB"]:
+            userArgumentsInfo.gemmArgumentSize += 8
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
@@ -184,9 +179,19 @@ class SignatureDefault(Signature):
             signature.addArg(              "strideA%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
 
+        if kernel["ProblemType"]["MXBlockA"]:
+            for i in range(0, writer.states.mxsa.numSgprStrides):
+                signature.addArg(          "strideMXSA%u"%i, SVK.SIG_VALUE,            "u32")
+                userArgumentsInfo.gemmArgumentSize += 4
+
         for i in range(0, writer.states.b.numSgprStrides):
             signature.addArg(              "strideB%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
+
+        if kernel["ProblemType"]["MXBlockB"]:
+            for i in range(0, writer.states.mxsb.numSgprStrides):
+                signature.addArg(          "strideMXSB%u"%i, SVK.SIG_VALUE,            "u32")
+                userArgumentsInfo.gemmArgumentSize += 4
 
         if kernel["ProblemType"]["Sparse"]:
             for i in range(0, writer.states.m.numSgprStrides):
@@ -210,9 +215,8 @@ class SignatureDefault(Signature):
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
             signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
             signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
-            signature.addArg("TotalIters",                         SVK.SIG_VALUE, "u32")
             signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
-            userArgumentsInfo.gemmArgumentSize += 20
+            userArgumentsInfo.gemmArgumentSize += 16
             if kernel["StreamK"] >= 2: # Two-tile SK
                 signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
                 signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
@@ -270,7 +274,7 @@ class SignatureDefault(Signature):
             signature.addArg(    "AmaxWS",      SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(    "AmaxSync",    SVK.SIG_GLOBALBUFFER, "u32",        "generic")
 
-        if (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             signature.addArg(    "dstD", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
             signature.addArg(               "Synchronizer", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(               "GSUSync", SVK.SIG_VALUE,              "u32")
@@ -316,4 +320,4 @@ class SignatureDefault(Signature):
         signature.addDescriptionBlock("GlobalReadVectorWidthA=%u, GlobalReadVectorWidthB=%u" % (glvwA, glvwB) )
         signature.addDescriptionBlock("DirectToLdsA=%s" % d2lA )
         signature.addDescriptionBlock("DirectToLdsB=%s" % d2lB )
-        signature.addDescriptionBlock("UseSgprForGRO=%s" % useSgprForGRO )
+        signature.addDescriptionBlock("UseSgprForGRO=%s" % ("True" if useSgprForGRO else "False") )

@@ -296,7 +296,8 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     index_t best_instance_index = 0;
 
     // profile device op instances
-    bool pass = true;
+    bool pass               = true;
+    bool dummy_run_executed = false;
 
     auto run_impl = [&](auto& op_ptr, auto& argument_ptr) {
         // workspace_sz will be equal to 0 for other layout than NGCHW
@@ -330,6 +331,19 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
             out_device_buf.SetZero();
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
+
+            // Run first instance twice to get proper time
+            if(time_kernel && !dummy_run_executed)
+            {
+                invoker_ptr->Run(argument_ptr.get(),
+                                 StreamConfig{nullptr,
+                                              time_kernel,
+                                              0 /*log_level*/,
+                                              5 /*cold_iters*/,
+                                              50 /*nrepeat_*/,
+                                              time_kernel /*flush_cache*/});
+                dummy_run_executed = true;
+            }
 
             float avg_time = invoker_ptr->Run(argument_ptr.get(),
                                               StreamConfig{nullptr,
@@ -461,8 +475,14 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
 
         run_impl(op_ptrs[0], argument_ptr);
     }
-    for(auto& op_ptr : op_ptrs)
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
                                                         wei_device_buf.GetDeviceBuffer(),
                                                         {},

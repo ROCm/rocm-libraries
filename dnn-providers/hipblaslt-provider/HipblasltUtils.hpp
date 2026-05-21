@@ -4,11 +4,11 @@
 #pragma once
 
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
@@ -87,16 +87,18 @@ struct EpilogueParams
 };
 
 EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs, bool withBias);
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* attrs, bool withBias);
 
-hipDataType tensorDataTypeToHipDataType(const hipdnn_data_sdk::data_objects::DataType& dataType);
+hipDataType
+    tensorDataTypeToHipDataType(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                             uint32_t numDeviceBuffers);
 
-hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensorAttributes(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
 

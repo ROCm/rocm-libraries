@@ -5,6 +5,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
@@ -94,6 +95,9 @@ struct GEMMProblem
 
     int scaleBlockSize = -1;
 
+    // LDS bank conflict swizzle
+    rocRoller::LDSBankSwizzleMode ldsSwizzleMode = rocRoller::LDSBankSwizzleMode::None;
+
     // Scale pretile / swizzle (mirrors client TypeParameters)
     rocRoller::ScaleSkipPermlaneMode scaleSkipPermlane = rocRoller::ScaleSkipPermlaneMode::None;
     std::vector<size_t>              scalePretileA;
@@ -101,6 +105,8 @@ struct GEMMProblem
     std::vector<size_t>              scaleShuffleTileA;
     std::vector<size_t>              scaleShuffleTileB;
 
+    // Pre-tile A matrix (MxK tile dimensions); kernel expects pre-tiled layout (transA must be T)
+    std::vector<size_t> pretileA;
     // Pre-tile B matrix (KxN tile dimensions); kernel expects pre-tiled layout
     std::vector<size_t> pretileB;
 

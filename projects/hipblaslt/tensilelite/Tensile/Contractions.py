@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,11 +67,12 @@ class BoundIndex:
 
 
 class ProblemType:
-    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputType', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
+    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB']
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -132,14 +133,24 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
+
+        if 'MacDataTypeA' in d: #it will either be set as d['MacDataType'] or a specified input
+            rv.computeInputTypeA = DataType(d['MacDataTypeA'])
+        else:
+            rv.computeInputTypeA = srcType
+        if 'MacDataTypeB' in d:
+            rv.computeInputTypeB = DataType(d['MacDataTypeB'])
+        else:
+            rv.computeInputTypeB = srcType
+
         if 'DataTypeA' in d: #it will either be set as d['DataType'] or a specified input
             rv.aType = DataType(d['DataTypeA'])
         else:
-            rv.aType = srcType
+            rv.aType = rv.computeInputTypeA
         if 'DataTypeB' in d:
             rv.bType = DataType(d['DataTypeB'])
         else:
-            rv.bType = srcType
+            rv.bType = rv.computeInputTypeB
 
         if rv.aType.isFloat8BFloat8() or rv.bType.isFloat8BFloat8():
             rv.aType = DataType("F8")
@@ -164,7 +175,6 @@ class ProblemType:
         else:
             rv.amaxDType = computeType
 
-        rv.computeInputType = srcType
         rv.cType = dstType
         rv.dType = dstType
         # we already checked the src/dst/compute types are supported and well-assigned in SolutionStruct
@@ -269,6 +279,17 @@ class ProblemType:
 
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+
+        rv.mxBlockA = d.get('MXBlockA', 0)
+        rv.mxBlockB = d.get('MXBlockB', 0)
+        rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
+        rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+        # mxScaleFormat is a Solution-level parameter and is populated by
+        # Solution.FromOriginalState, which has access to the parent dict.
+
+        rv.metadataLayout = 0
+        if 'MetadataLayout' in d:
+            rv.metadataLayout = d['MetadataLayout']
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -370,7 +391,7 @@ class ProblemType:
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
         if includeType:
-            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputType)))
+            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputTypeA, self.computeInputTypeB)))
             predicates.append(ProblemPredicate("HighPrecisionAccumulate", value=self.highPrecisionAccumulate))
             predicates.append(ProblemPredicate("Activation", value=self.activationType))
             predicates.append(ProblemPredicate("ActivationComputeType", value=self.activationComputeDataType))
@@ -389,7 +410,12 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
-
+            predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
+            if self.mxBlockA:
+                predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+            predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
+            if self.mxBlockB:
+                predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
 
 def extractDimPredicate(cls, key, value, predicateName):
@@ -441,16 +467,6 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
-
-        # Address-interleave restriction:
-        # Require tiles1 = Free1Size / MT1 to be a power-of-two (and divisible).
-        if key == "AssertFree1DivByMT1LowbitGT1":
-            return cls("Free1SizeDivByValueLowbitGT1", index=0, value=value) if value > 0 else None
-
-        # KRingShift wrap restriction (packed value; see Solution.py):
-        # Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap).
-        if key == "AssertKRingShiftTailWrapOnly":
-            return cls("KRingShiftTailWrapOnly", index=-1, value=value) if value > 0 else None
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -604,6 +620,7 @@ class SizeMapping:
                  'streamKAtomic',
                  'sourceKernel',
                  'globalAccumulation',
+                 'adaptiveGemmGSUA',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'activationFused',
@@ -632,15 +649,15 @@ class SizeMapping:
                  'VectorWidthB',
                  'LocalSplitU',
                  'DirectToLdsA',
-                 'DirectToLdsB'
+                 'DirectToLdsB',
                  ]
 
     @classmethod
     def FromOriginalState(cls, d):
         globalAccum = 0
-        if d['GlobalSplitUAlgorithm'] == 'SingleBuffer':
+        if d['_GlobalAccumulation'] == 'SingleBuffer':
             globalAccum = 1
-        if d['GlobalSplitUAlgorithm'] == 'MultipleBuffer':
+        if d['_GlobalAccumulation'] == 'MultipleBuffer':
             globalAccum = 2
         if d['_GlobalAccumulation'] == 'MultipleBufferSingleKernel':
             globalAccum = 3
@@ -692,6 +709,7 @@ class SizeMapping:
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
                    globalAccumulation       = globalAccum,
+                   adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
                    activationFused          = d['ActivationFused'],
@@ -817,6 +835,14 @@ class Solution:
 
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
 
+        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
+        # but it describes the in-device MX scale layout the kernel expects, which
+        # the host (DataInitialization) needs to know to pick an upload layout.
+        # Plumb it onto problemType so the host can read it post-solution-pick.
+        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
+                                        "HostPreSwizzle": 1,
+                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
 
@@ -850,7 +876,9 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
-        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(d['ISA'], d['CUCount'])
+        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+        )
         rv.originalSolution = OriginalSolution(
                                   d,
                                   splitGSU,

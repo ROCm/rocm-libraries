@@ -86,6 +86,7 @@ struct BuildKernel
                             element_wise::PassThrough,
                             element_wise::PassThrough,
                             PrecType, // WeiDataType (C in bwd weight)
+                            PrecType,
                             ConvTraits::FixedGemmParams::FixedVectorSize,
                             ConvTraits::VectorSizeA,
                             ConvTraits::VectorSizeB>;
@@ -99,6 +100,7 @@ struct BuildKernel
                                      ConvConfig::Scheduler,
                                      element_wise::PassThrough,
                                      element_wise::PassThrough,
+                                     PrecType,
                                      PrecType,
                                      ConvTraits::FixedGemmParams::FixedVectorSize,
                                      ConvTraits::VectorSizeA,
@@ -219,12 +221,12 @@ TEST_F(GroupedConvBwdWeightIsSupportedArgumentTest, K0KBatchLimitation)
                                         tensor_layout::convolution::NHWGK>::type;
 
     // k_batch = 128 should pass
-    auto host_args_kbatch_6 = create_2d_host_args(6);
+    auto host_args_kbatch_6 = create_2d_host_args(7);
     auto kargs_6 = typename Kernel::GroupedConvBwdWeightKernelArgsSpecialized(host_args_kbatch_6);
     EXPECT_TRUE(Kernel::IsSupportedArgument(kargs_6));
 
     // k_batch = 129 should fail for half_t output
-    auto host_args_kbatch_7 = create_2d_host_args(7);
+    auto host_args_kbatch_7 = create_2d_host_args(8);
     auto kargs_7 = typename Kernel::GroupedConvBwdWeightKernelArgsSpecialized(host_args_kbatch_7);
     EXPECT_FALSE(Kernel::IsSupportedArgument(kargs_7));
 }

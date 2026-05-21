@@ -284,7 +284,7 @@ TEST_CASE("fastMultiplication and fastDivision lead into combineShifts",
     Expression::FastArithmetic fast(ctx.get());
     auto                       command = std::make_shared<Command>();
     auto                       argTag  = command->allocateTag();
-    auto arg = command->allocateArgument(DataType::UInt32, argTag, ArgumentType::Limit);
+    auto arg = command->allocateArgument(DataType::UInt32, argTag, ArgumentType::Size);
 
     auto argExp = fast(arg->expression());
 

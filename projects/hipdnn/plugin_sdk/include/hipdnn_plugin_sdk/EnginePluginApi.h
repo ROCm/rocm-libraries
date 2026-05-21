@@ -23,7 +23,7 @@ extern "C" {
 
 /**
  * @defgroup EnginePluginFunctions Engine Plugin API Functions
- * @brief Functions that each engine plugin must implement.
+ * @brief Required and optional functions that engine plugins may implement.
  * @{
  */
 
@@ -206,6 +206,62 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroyExecutionContext(
         hipdnnEnginePluginHandle_t handle, hipdnnEnginePluginExecutionContext_t execution_context);
+
+/**
+ * @brief Serializes an execution context into plugin-owned opaque bytes.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in] execution_context The execution context to serialize.
+ * @param[in,out] serialized_context A pointer to a structure where the plugin-specific serialized execution
+ *                                  context bytes will be stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that do not export it do not support compiled execution plan
+ *       serialization.
+ * @note The serialized bytes are plugin-specific and are treated as opaque by hipDNN.
+ * @note The plugin owns the returned buffer. hipDNN must release it by calling
+ *       hipdnnEnginePluginDestroySerializedExecutionContext().
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginSerializeExecutionContext(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t execution_context,
+        hipdnnPluginConstData_t* serialized_context);
+
+/**
+ * @brief Destroys plugin-owned serialized execution context bytes.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in,out] serialized_context A pointer to the serialized execution context bytes returned by
+ *                                  hipdnnEnginePluginSerializeExecutionContext().
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that export hipdnnEnginePluginSerializeExecutionContext must also
+ *       export this function.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginDestroySerializedExecutionContext(
+        hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serialized_context);
+
+/**
+ * @brief Creates an execution context from plugin-specific serialized bytes.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in] serialized_context A pointer to the plugin-specific serialized execution context bytes.
+ * @param[out] execution_context A pointer to a variable where the created execution context will be stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that export hipdnnEnginePluginSerializeExecutionContext must also
+ *       export this function.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginCreateExecutionContextFromSerialized(
+        hipdnnEnginePluginHandle_t handle,
+        const hipdnnPluginConstData_t* serialized_context,
+        hipdnnEnginePluginExecutionContext_t* execution_context);
 
 /**
  * @brief Retrieves the required workspace size for a given execution context.

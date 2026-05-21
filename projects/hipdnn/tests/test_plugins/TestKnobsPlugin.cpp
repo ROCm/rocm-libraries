@@ -4,8 +4,17 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+
+#include <cstdint>
+#include <vector>
+
+// Thread-local storage for raw flatbuffer bytes of each received EngineConfig.
+// Tests read these via the exported getCount/getDataAt/getSizeAt/reset C functions,
+// then unpack to EngineConfigT for direct comparison.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static thread_local std::vector<std::vector<uint8_t>> gReceivedKnobs;
 
 // NOLINTNEXTLINE
 thread_local char
@@ -137,7 +146,8 @@ public:
             flatbuffers::FlatBufferBuilder builder;
 
             // Create knobs vector using KnobFactory
-            std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
+            std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>
+                knobOffsets;
 
             if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPlugin>())
             {
@@ -219,7 +229,7 @@ public:
                 {}));
 
             auto knobsVector = builder.CreateVector(knobOffsets);
-            auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, engineId, knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
@@ -325,6 +335,13 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
                                                         const hipdnnPluginConstData_t* opGraph,
                                                         size_t* workspaceSize)
 {
+    // Record raw flatbuffer bytes so tests can unpack and compare EngineConfigT directly.
+    if(engineConfig != nullptr && engineConfig->ptr != nullptr && engineConfig->size > 0)
+    {
+        const auto* bytes = static_cast<const uint8_t*>(engineConfig->ptr);
+        gReceivedKnobs.emplace_back(bytes, bytes + engineConfig->size);
+    }
+
     return TestPluginBase::enginePluginGetWorkspaceSize(
         handle, engineConfig, opGraph, workspaceSize);
 }
@@ -363,5 +380,33 @@ hipdnnPluginStatus_t
 {
     return TestPluginBase::enginePluginExecuteOpGraph(
         handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
+}
+
+HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsCount()
+{
+    return static_cast<uint32_t>(gReceivedKnobs.size());
+}
+
+HIPDNN_PLUGIN_EXPORT const uint8_t* hipdnnTestKnobsPluginGetReceivedKnobsDataAt(uint32_t index)
+{
+    if(index >= gReceivedKnobs.size())
+    {
+        return nullptr;
+    }
+    return gReceivedKnobs[index].data();
+}
+
+HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsSizeAt(uint32_t index)
+{
+    if(index >= gReceivedKnobs.size())
+    {
+        return 0;
+    }
+    return static_cast<uint32_t>(gReceivedKnobs[index].size());
+}
+
+HIPDNN_PLUGIN_EXPORT void hipdnnTestKnobsPluginResetReceivedKnobs()
+{
+    gReceivedKnobs.clear();
 }
 } // extern "C"

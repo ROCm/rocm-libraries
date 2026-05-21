@@ -7,9 +7,8 @@
 // registry and asserts ALL fields. If a schema change breaks a test,
 // the change is not backwards-compatible.
 //
-// NOTE: block_size and block_n0 in DqDkDv are demo constants
-// (dqdkdv_spec.hpp:200-204). Update when architecture-dependent tile
-// selection is implemented.
+// NOTE: DqDkDv block_size and block_n0 are selected from CK Tile's
+// architecture-dependent non-trload tile tables.
 //
 // The findVariant() tests require the registry header from the example
 // directory, which is added to the include path by CMakeLists.txt.
@@ -29,6 +28,7 @@ using ::rocm_ck::ALL_DQDKDV_VARIANTS_COUNT;
 using ::rocm_ck::ALL_OGRAD_DOT_O_VARIANTS_COUNT;
 using ::rocm_ck::DataType;
 using ::rocm_ck::findVariant;
+using ::rocm_ck::FmhaArch;
 using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaBwdConvertDQConfig;
 using ::rocm_ck::FmhaBwdDQDKDVConfig;
@@ -132,6 +132,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -154,6 +155,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch)
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.block_per_cu, 1);
     EXPECT_EQ(k.block_size, 256);
     EXPECT_EQ(k.block_n0, 128);
@@ -207,6 +209,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -230,6 +233,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_ALiBi)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -258,6 +262,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias_DBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_TRUE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -281,6 +286,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_EBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -304,6 +310,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_ALiBi)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -332,6 +339,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_EBias_DBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_TRUE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -355,6 +363,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Dropout)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -379,6 +388,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_TRUE(k.has_mask);
@@ -655,6 +665,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_CMaskBR)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_SWA)
@@ -666,6 +677,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_SWA)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.arch, FmhaArch::GFX9);
 }
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR_SharesSpecWithCMask)
@@ -679,6 +691,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR_SharesSpecWithCMask)
     EXPECT_EQ(k_br.hdim_q, k_cmask.hdim_q);
     EXPECT_EQ(k_br.hdim_v, k_cmask.hdim_v);
     EXPECT_EQ(k_br.mode, k_cmask.mode);
+    EXPECT_EQ(k_br.arch, k_cmask.arch);
     EXPECT_EQ(k_br.has_mask, k_cmask.has_mask);
     EXPECT_EQ(k_br.pad_hdim_q, k_cmask.pad_hdim_q);
     EXPECT_EQ(k_br.pad_hdim_v, k_cmask.pad_hdim_v);
@@ -695,6 +708,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_SWA_SharesSpecWithCMask)
     EXPECT_EQ(k_swa.hdim_q, k_cmask.hdim_q);
     EXPECT_EQ(k_swa.hdim_v, k_cmask.hdim_v);
     EXPECT_EQ(k_swa.mode, k_cmask.mode);
+    EXPECT_EQ(k_swa.arch, k_cmask.arch);
     EXPECT_EQ(k_swa.has_mask, k_cmask.has_mask);
     EXPECT_EQ(k_swa.pad_hdim_q, k_cmask.pad_hdim_q);
     EXPECT_EQ(k_swa.pad_hdim_v, k_cmask.pad_hdim_v);

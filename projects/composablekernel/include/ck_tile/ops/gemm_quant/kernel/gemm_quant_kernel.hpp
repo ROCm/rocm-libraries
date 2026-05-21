@@ -14,6 +14,10 @@
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/tile_gemm_quant_traits.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 namespace detail {
@@ -1553,7 +1557,7 @@ struct QuantGemmKernel
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
-
+        assert(kargs.k_batch == 1);
         RunGemm(
             a_ptr, b_ptr, aq_ptr, bq_ptr, c_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
     }
@@ -1574,3 +1578,4 @@ struct QuantGemmKernel
 };
 
 } // namespace ck_tile
+#pragma clang diagnostic pop

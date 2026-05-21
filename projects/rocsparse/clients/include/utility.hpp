@@ -769,6 +769,21 @@ public:
         }
     }
 
+    template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
+    explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                h.bdir,
+                                h.bdim,
+                                h.width,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                h.base,
+                                get_datatype<T>())
+    {
+    }
+
     rocsparse_local_spmat(int64_t              m,
                           int64_t              n,
                           int64_t              nnz,

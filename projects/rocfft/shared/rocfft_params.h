@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "../shared/fft_params.h"
 #include "../shared/gpubuf.h"
 #include "../shared/precision_type.h"
+#include "../shared/rocfft_hip.h"
 #include "rocfft/rocfft.h"
 #include "rocfft_enums_vs_fft_enums.h"
 
@@ -32,7 +33,7 @@
 #include <mpi.h>
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -78,8 +79,8 @@ public:
     rocfft_plan             plan = nullptr;
     rocfft_execution_info   info = nullptr;
     rocfft_plan_description desc = nullptr;
-    gpubuf_t<void>          wbuffer;
-    size_t                  workbuffersize = 0;
+    std::vector<gpubuf>     wbuffers;
+    std::vector<size_t>     workbuffersizes;
 
     explicit rocfft_params_base() = default;
 
@@ -135,7 +136,7 @@ public:
             rocfft.plan_description_destroy(desc);
             desc = nullptr;
         }
-        wbuffer.free();
+        wbuffers.clear();
     }
 
     void validate_fields() const override
@@ -153,16 +154,20 @@ public:
         return rocfft_precision_from_fftparams(precision);
     }
 
-    size_t vram_footprint() override
+    std::vector<size_t> vram_footprint() override
     {
-        size_t val = fft_params::vram_footprint();
+        auto footprint = io_vram_footprint();
         if(setup_structs() != fft_status_success)
         {
             throw std::runtime_error("Struct setup failed");
         }
-        val += workbuffersize;
 
-        return val;
+        // add work buffer sizes returned by library
+        for(size_t i = 0; i < footprint.size(); ++i)
+        {
+            footprint[i] += workbuffersizes[i];
+        }
+        return footprint;
     }
 
     // Convert the generic fft_field structure to a rocfft_field
@@ -298,12 +303,19 @@ public:
             }
         }
 
-        fft_status = rocfft.plan_get_work_buffer_size(plan, &workbuffersize);
-        if(fft_status != rocfft_status_success)
+        // Set work buffers for all HIP devices
+        const int ndevices = rocfft_scoped_device::device_count();
+        workbuffersizes.resize(ndevices);
+        wbuffers.resize(ndevices);
+        for(int device = 0; device < ndevices; ++device)
         {
-            throw std::runtime_error("rocfft_plan_get_work_buffer_size failed");
+            rocfft_scoped_device dev(device);
+            fft_status = rocfft.plan_get_work_buffer_size(plan, workbuffersizes.data() + device);
+            if(fft_status != rocfft_status_success)
+            {
+                throw std::runtime_error("rocfft_plan_get_work_buffer_size failed");
+            }
         }
-
         return fft_status_from_rocfftparams(fft_status);
     }
 
@@ -315,33 +327,35 @@ public:
             return ret;
         }
         // default behavior is to feed rocfft with a work area if it needs one
-        if(workbuffersize > 0 && auto_allocate != fft_auto_allocation_on)
+        bool need_workbuffers = std::any_of(
+            workbuffersizes.begin(), workbuffersizes.end(), [](size_t s) { return s > 0; });
+        if(need_workbuffers && auto_allocate != fft_auto_allocation_on)
         {
-            hipError_t hip_status = hipSuccess;
-            hip_status            = wbuffer.alloc(workbuffersize);
-            if(hip_status != hipSuccess)
+            const int ndevices = rocfft_scoped_device::device_count();
+            for(int device = 0; device < ndevices; ++device)
             {
-                std::ostringstream oss;
-                oss << "work buffer allocation failed (" << workbuffersize << " requested)";
-                size_t mem_free  = 0;
-                size_t mem_total = 0;
-                hip_status       = hipMemGetInfo(&mem_free, &mem_total);
-                if(hip_status == hipSuccess)
-                {
-                    oss << "free vram: " << mem_free << " total vram: " << mem_total;
-                }
-                else
-                {
-                    oss << "hipMemGetInfo also failed";
-                }
-                throw work_buffer_alloc_failure(oss.str(), workbuffersize);
-            }
+                if(workbuffersizes[device] == 0)
+                    continue;
 
-            auto rocret
-                = rocfft.execution_info_set_work_buffer(info, wbuffer.data(), workbuffersize);
-            if(rocret != rocfft_status_success)
-            {
-                throw std::runtime_error("rocfft_execution_info_set_work_buffer failed");
+                rocfft_scoped_device dev(device);
+
+                hipError_t hip_status = hipSuccess;
+                hip_status            = wbuffers[device].alloc(workbuffersizes[device]);
+                if(hip_status != hipSuccess)
+                {
+                    std::ostringstream oss;
+                    oss << "work buffer allocation failed ("
+                        << byte_size_to_str(workbuffersizes[device]) << " requested)";
+                    oss << "\n" << device_memory_accountant::singleton().get_details(device);
+                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
+                }
+
+                auto rocret = rocfft.execution_info_set_work_buffer(
+                    info, wbuffers[device].data(), workbuffersizes[device]);
+                if(rocret != rocfft_status_success)
+                {
+                    throw std::runtime_error("rocfft_execution_info_set_work_buffer failed");
+                }
             }
         }
 
@@ -414,8 +428,8 @@ public:
         return fft_status_from_rocfftparams(ret);
     }
 
-    void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
-                           std::vector<gpubuf>& /* input_data_gpu (unused) */,
+    void multi_gpu_prepare(const std::vector<hostbuf>& input_data_host,
+                           const std::vector<gpubuf>& /* input_data_gpu (unused) */,
                            std::vector<void*>& mgpu_ibuffers,
                            std::vector<void*>& mgpu_obuffers) override
     {
@@ -521,8 +535,7 @@ public:
                                            * compute_ptrdiff(obrick->length(), obrick->stride));
                     }
 
-                    // set device for the alloc, but we want to return to the
-                    // default device as the source of a following memcpy
+                    // scope for device-specific
                     {
                         rocfft_scoped_device dev(io_brick->device);
                         multi_gpu_data.emplace_back();
@@ -532,45 +545,46 @@ public:
                         io_buffer_vec.push_back(multi_gpu_data.back().data());
                         if(placement == fft_placement_inplace)
                             mgpu_obuffers.push_back(multi_gpu_data.back().data());
-                    }
-                    if(io == fft_io::fft_io_in)
-                    {
-                        // copy cpu input data to device buffer(s)
-                        const auto input_data_host_offset = io_brick->lower_field_offset(
-                            cpu_ref_params.istride, cpu_ref_params.idist);
 
-                        // transpose input data to the brick's shape in host memory, then
-                        // memcpy (as is) into allocated device buffer
-                        std::vector<hostbuf> host_tmp(1);
-                        host_tmp.front().alloc(alloc_byte_size);
-
-                        std::vector<size_t> cpu_istrides_with_idist(cpu_ref_params.istride);
-                        cpu_istrides_with_idist.insert(cpu_istrides_with_idist.begin(),
-                                                       cpu_ref_params.idist);
-
-                        copy_buffers(input_data_host,
-                                     host_tmp,
-                                     io_brick->length(),
-                                     /* "nbatch" = */ 1,
-                                     cpu_ref_params.precision,
-                                     cpu_ref_params.itype,
-                                     cpu_istrides_with_idist,
-                                     /* "idist" = */ 0,
-                                     array_type,
-                                     io_brick->stride,
-                                     /* "odist" =  */ 0,
-                                     {input_data_host_offset},
-                                     /* "ooffset" = */ {0});
-
-                        // memcpy the transposed brick to the device
-                        if(hipMemcpy(io_buffer_vec.back(),
-                                     host_tmp.front().data(),
-                                     alloc_byte_size,
-                                     hipMemcpyHostToDevice)
-                           != hipSuccess)
+                        if(io == fft_io::fft_io_in)
                         {
-                            throw std::runtime_error(
-                                "rocfft_params::multi_gpu_prepare: hipMemcpy failed");
+                            // copy cpu input data to device buffer(s)
+                            const auto input_data_host_offset = io_brick->lower_field_offset(
+                                cpu_ref_params.istride, cpu_ref_params.idist);
+
+                            // transpose input data to the brick's shape in host memory, then
+                            // memcpy (as is) into allocated device buffer
+                            std::vector<hostbuf> host_tmp(1);
+                            host_tmp.front().alloc(alloc_byte_size);
+
+                            std::vector<size_t> cpu_istrides_with_idist(cpu_ref_params.istride);
+                            cpu_istrides_with_idist.insert(cpu_istrides_with_idist.begin(),
+                                                           cpu_ref_params.idist);
+
+                            copy_buffers(input_data_host,
+                                         host_tmp,
+                                         io_brick->length(),
+                                         /* "nbatch" = */ 1,
+                                         cpu_ref_params.precision,
+                                         cpu_ref_params.itype,
+                                         cpu_istrides_with_idist,
+                                         /* "idist" = */ 0,
+                                         array_type,
+                                         io_brick->stride,
+                                         /* "odist" =  */ 0,
+                                         {input_data_host_offset},
+                                         /* "ooffset" = */ {0});
+
+                            // memcpy the transposed brick to the device
+                            if(hipMemcpy(io_buffer_vec.back(),
+                                         host_tmp.front().data(),
+                                         alloc_byte_size,
+                                         hipMemcpyHostToDevice)
+                               != hipSuccess)
+                            {
+                                throw std::runtime_error(
+                                    "rocfft_params::multi_gpu_prepare: hipMemcpy failed");
+                            }
                         }
                     }
                 }
@@ -764,7 +778,7 @@ struct rocfft_funcs
 
 struct dyna_rocfft_funcs
 {
-#ifdef WIN32
+#ifdef _WIN32
     typedef HMODULE ROCFFT_LIB;
 #else
     typedef void* ROCFFT_LIB;
@@ -773,7 +787,7 @@ struct dyna_rocfft_funcs
     // Load the rocfft library
     static ROCFFT_LIB lib_load(const std::string& path)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return LoadLibraryA(path.c_str());
 #else
         return dlopen(path.c_str(), RTLD_LAZY);
@@ -783,7 +797,7 @@ struct dyna_rocfft_funcs
     // Return a string describing the error loading rocfft
     static const char* lib_load_error()
     {
-#ifdef WIN32
+#ifdef _WIN32
         // just return the error number
         static std::string error_str;
         error_str = std::to_string(GetLastError());
@@ -796,7 +810,7 @@ struct dyna_rocfft_funcs
     // Get symbol from rocfft lib
     static void* lib_symbol(ROCFFT_LIB libhandle, const char* sym)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return reinterpret_cast<void*>(GetProcAddress(libhandle, sym));
 #else
         return dlsym(libhandle, sym);
@@ -807,7 +821,7 @@ struct dyna_rocfft_funcs
     {
         if(!libhandle)
             return;
-#ifdef WIN32
+#ifdef _WIN32
         FreeLibrary(libhandle);
 #else
         dlclose(libhandle);
