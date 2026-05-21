@@ -3,6 +3,7 @@
 
 [tool.coverage.run]
 branch = true
+relative_files = true
 concurrency = ["multiprocessing"]
 omit = [
     "*/Tests/*",
