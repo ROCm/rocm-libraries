@@ -82,8 +82,12 @@ jobs:
           #   checkout_paths: ["dnn-providers/miopen-provider"]
           # }'))
 
+          # Common filters applied to every library — changes here re-run all opted-in libraries.
+          COMMON_FILTERS='[".github/workflows/clang-tidy.yml"]'
+
           printf '%s\n' "${LIBS[@]}" \
-            | jq -rs '.[] | "\(.name):\n" + (.path_filters[] | "  - \"\(.)\"") + "\n"' \
+            | jq -rs --argjson common "$COMMON_FILTERS" \
+              '.[] | "\(.name):\n" + ((.path_filters + $common)[] | "  - \"\(.)\"") + "\n"' \
             > path-filters.yml
 
           LIBS_JSON=$(printf '%s\n' "${LIBS[@]}" | jq -sc '.')
