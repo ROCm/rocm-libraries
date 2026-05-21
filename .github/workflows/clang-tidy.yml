@@ -90,7 +90,8 @@ jobs:
               '.[] | "\(.name):\n" + ((.path_filters + $common) | map("  - \"\(.)\"") | join("\n")) + "\n"' \
             > path-filters.yml
 
-          LIBS_JSON=$(printf '%s\n' "${LIBS[@]}" | jq -sc '.')
+          LIBS_JSON=$(printf '%s\n' "${LIBS[@]}" \
+            | jq -sc '[.[] | . + {checkout_paths_str: (.checkout_paths | join("\n"))}]')
           echo "libs=${LIBS_JSON}" >> "$GITHUB_OUTPUT"
 
       - name: Detect changed opted-in projects
@@ -127,7 +128,7 @@ jobs:
       - name: Checkout rocm-libraries
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: ${{ join(matrix.checkout_paths, '\n') }}
+          sparse-checkout: ${{ matrix.checkout_paths_str }}
           sparse-checkout-cone-mode: true
 
       - name: Checkout TheRock
