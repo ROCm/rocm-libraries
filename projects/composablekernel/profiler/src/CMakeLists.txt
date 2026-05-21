@@ -168,9 +168,10 @@ if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
     ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library
   )
 
-  # Profiler needs dispatcher API headers
+  # Profiler needs dispatcher API headers and builder test infrastructure
   target_include_directories(${PROFILER_EXECUTABLE} PRIVATE
     ${PROJECT_SOURCE_DIR}/dispatcher/include
+    ${PROJECT_SOURCE_DIR}/experimental/builder/include
   )
   target_compile_options(${PROFILER_EXECUTABLE} PRIVATE
     -Wno-undefined-func-template
