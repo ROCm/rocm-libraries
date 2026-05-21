@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 
-// just for testing
 #include "hipblaslt/hipblaslt.h"
 #include "UserDrivenTuningParser.hpp"
 #include "check_numerics_matrix.hpp"
