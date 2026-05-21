@@ -203,13 +203,15 @@ struct MmaLayoutTestKernel
 
                     if constexpr(std::is_same_v<typename MmaOp::OpType, WmmaOp>)
                     {
-                        // Use non-zero baseline for all bits, then set the target bit to
-                        // k_rem_sparse. This avoids all-zeros index which may not be handled
-                        // correctly. Other bits don't affect result since their A elements are 0.
-                        sparse_idx = 0xFFFFu ^ ((k_rem_sparse ^ 1u) << vec_value_item_idx);
+                        // SWMMAC uses 1-bit-per-element sparsity index (16 bits for 16 elements).
+                        // Bit i: 0 = select even element, 1 = select odd element from pair i.
+                        // Baseline: all zeros (select even). Set bit to 1 if k is odd.
+                        sparse_idx = (k_rem_sparse << vec_value_item_idx);
                     }
                     else
                     {
+                        // SMFMAC (CDNA) uses 2-bit-per-element sparsity index (4:2 compression).
+                        // Baseline 0x88888888 means each element i maps to dense position 2*i.
                         sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
                     }
                     computed_sparse_idx = true;
@@ -232,9 +234,8 @@ struct MmaLayoutTestKernel
             if constexpr(MmaOpTraits<MmaOp>::IsSparse)
             {
                 // Sparse_idx is calculated in *exactly* one lane (assert), but must be
-                // broadcast to all (warp-level "or" reduction intrinsic). Note: we use a
-                // separate flag because sparse_idx==0 is a valid encoding (WMMA 1-bit: 0
-                // means "select element 0").
+                // broadcast to all (warp-level "or" reduction intrinsic). We use a separate
+                // flag because sparse_idx==0 is valid for WMMA (bit=0 means select even element).
                 int num_sparse_idx_calced = __popcll(__ballot(computed_sparse_idx));
                 if(num_sparse_idx_calced != 1)
                 {
