@@ -52,7 +52,7 @@ template <typename T>
 T logsumexp(std::vector<T>& in_vec)
 {
     auto sum = in_vec[0];
-    for(auto i = 1ULL; i < in_vec.size(); i++)
+    for(size_t i = 1ULL; i < in_vec.size(); i++)
         sum = logaddexp(*(in_vec.begin() + i), sum);
 
     return sum;
@@ -70,11 +70,11 @@ void subvec_logsoftmax(std::vector<Tgpu>& in,
 
     std::vector<Tgpu> sub_in(itr_in, itr_in + length);
     Tgpu max_val = *std::max_element(sub_in.begin(), sub_in.end());
-    for(auto i = 0ULL; i < length; i++)
+    for(size_t i = 0ULL; i < length; i++)
         sub_in[i] -= max_val;
 
     Tgpu sum = logsumexp(sub_in);
-    for(auto i = 0ULL; i < length; i++)
+    for(size_t i = 0ULL; i < length; i++)
         *(itr_out + i) = std::max(Tref(sub_in[i] - sum), Tref(NEGATIVE_CUTOFF_VAL));
 }
 
@@ -95,7 +95,7 @@ std::vector<T> ctc_forward_log(std::vector<T>& probs_logits,
     int label_prime_len = 2 * label.size() + 1;
     blank_lb            = blank_lb < 0 ? 0 : (blank_lb >= class_sz ? class_sz - 1 : blank_lb);
     std::vector<int> label_prime(label_prime_len, blank_lb);
-    for(auto i = 0U; i < label.size(); i++)
+    for(size_t i = 0ULL; i < label.size(); i++)
         label_prime[2 * i + 1] = label[i];
 
     std::vector<T> alpha(input_length * label_prime_len, T(NEGATIVE_CUTOFF_VAL));
@@ -144,7 +144,7 @@ std::vector<T> ctc_backward_log(std::vector<T>& probs_logits,
     int label_prime_len = 2 * label.size() + 1;
     blank_lb            = blank_lb < 0 ? 0 : (blank_lb >= class_sz ? class_sz - 1 : blank_lb);
     std::vector<int> label_prime(label_prime_len, blank_lb);
-    for(auto i = 0U; i < label.size(); i++)
+    for(size_t i = 0ULL; i < label.size(); i++)
         label_prime[2 * i + 1] = label[i];
 
     std::vector<T> beta(input_length * label_prime_len, T(NEGATIVE_CUTOFF_VAL));
@@ -201,7 +201,7 @@ void ctc_gradient_log(std::vector<int>& label,
     int label_prime_len = 2 * label.size() + 1;
     blank_lb            = blank_lb < 0 ? 0 : (blank_lb >= class_sz ? class_sz - 1 : blank_lb);
     std::vector<int> label_prime(label_prime_len, blank_lb);
-    for(auto i = 0U; i < label.size(); i++)
+    for(size_t i = 0ULL; i < label.size(); i++)
         label_prime[2 * i + 1] = label[i];
 
     std::vector<T> alpha_log = ctc_forward_log(probs_logits,
@@ -276,7 +276,7 @@ void ctc_softmaxlayer_gradient_log(std::vector<int>& label,
     int label_prime_len = 2 * label.size() + 1;
     blank_lb            = blank_lb < 0 ? 0 : (blank_lb >= class_sz ? class_sz - 1 : blank_lb);
     std::vector<int> label_prime(label_prime_len, blank_lb);
-    for(auto i = 0U; i < label.size(); i++)
+    for(size_t i = 0ULL; i < label.size(); i++)
         label_prime[2 * i + 1] = label[i];
 
     std::vector<T> alpha_log = ctc_forward_log(probs_logits,
@@ -406,13 +406,13 @@ void RunCTCLossCPUVerify(const int num_class,
         std::vector<Tref> gradients_logits(probs.size(), Tref(NEGATIVE_CUTOFF_VAL));
         std::vector<Tref> softmaxlayer_gradients_logit(probs.size(), 0);
 
-        for(auto j = 0ULL; j < max_time_step * batch_size; j++)
+        for(size_t j = 0ULL; j < max_time_step * batch_size; j++)
             subvec_logsoftmax(probs, probs_logits, j * class_sz, j * class_sz, class_sz);
 
         auto probs_logits_use = is_softmax_applied ? probs_logits : probs;
 
         std::vector<int> label_offsets(batch_size, 0);
-        for(auto j = 1ULL; j < batch_size; j++)
+        for(size_t j = 1ULL; j < batch_size; j++)
             label_offsets[j] = label_offsets[j - 1] + labelLengths[j - 1];
 
         auto per_batch_work = [&](int j) {
@@ -486,7 +486,7 @@ void RunCTCLossCPUVerify(const int num_class,
         }
         else
         {
-            for(auto j = 0ULL; j < batch_size; j++)
+            for(size_t j = 0ULL; j < batch_size; j++)
             {
                 per_batch_work(j);
             }

@@ -484,7 +484,7 @@ auto GenericSearch(const Solver s,
     ThreadSafeQueue<std::tuple<PerformanceConfig, ConvSolution, bool>> solution_queue;
     std::vector<std::thread> compile_agents;
     compile_agents.reserve(total_threads);
-    for(auto idx = 0U; idx < total_threads; ++idx)
+    for(size_t idx = 0U; idx < total_threads; ++idx)
     {
         compile_agents.emplace_back(CompileAgent<PerformanceConfig, Solver, Context, Problem>,
                                     idx,
@@ -640,7 +640,7 @@ auto GenericSearch(const Solver s,
 
                     try
                     {
-                        for(auto i = 1u; i < env::value(MIOPEN_TUNING_ITERATIONS); ++i)
+                        for(uint64_t i = 1ULL; i < env::value(MIOPEN_TUNING_ITERATIONS); ++i)
                         {
                             invoker(profile_h, invoke_ctx);
                             samples.push_back(profile_h.GetKernelTime());

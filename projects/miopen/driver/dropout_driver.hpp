@@ -275,12 +275,12 @@ int DropoutDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     Tgpu Data_scale = static_cast<Tgpu>(0.01);
 
-    for(auto i = 0ULL; i < in_sz; i++)
+    for(size_t i = 0ULL; i < in_sz; i++)
     {
         in.data[i] = prng::gen_0_to_B(Data_scale);
     }
 
-    for(auto i = 0ULL; i < out_sz; i++)
+    for(size_t i = 0ULL; i < out_sz; i++)
     {
         dout.data[i] = prng::gen_0_to_B(Data_scale);
     }
@@ -299,7 +299,7 @@ int DropoutDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(inflags.GetValueInt("use_mask") == 1)
     {
-        for(auto i = 0ULL; i < reserveSpaceSize; i++)
+        for(size_t i = 0ULL; i < reserveSpaceSize; i++)
         {
             reservespace[i]      = static_cast<uint8_t>(prng::gen_canonical<float>() > dropout);
             reservespace_host[i] = reservespace[i];

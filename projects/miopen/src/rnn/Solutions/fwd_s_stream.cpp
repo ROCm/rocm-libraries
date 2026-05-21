@@ -47,7 +47,7 @@ void RNNModularSingleStreamFWD::ComputeFWD(const Handle& handle,
 
     rnnAlgoModules.AddBias(handle, runtimeArgs);
 
-    for(auto layer_i = 0U; layer_i < rnnDesc.nLayers; ++layer_i)
+    for(size_t layer_i = 0ULL; layer_i < rnnDesc.nLayers; ++layer_i)
     {
 
         for(int dir = 0; dir < sequence_directions; dir++)
@@ -55,10 +55,10 @@ void RNNModularSingleStreamFWD::ComputeFWD(const Handle& handle,
             const auto seq_dir = dir == 0 ? rnn_base::SequenceDirection::Forward
                                           : rnn_base::SequenceDirection::Reverse;
 
-            if(layer_i != 0)
+            if(layer_i != 0ULL)
                 rnnAlgoModules.PropHiddenY(handle, runtimeArgs, layer_i, seq_dir);
 
-            for(auto ti = 0U; ti < max_seq_len; ti++)
+            for(size_t ti = 0ULL; ti < max_seq_len; ti++)
             {
                 const rnn_base::SequenceIterator cur_seq(ti, seq_dir, max_seq_len, true);
 
@@ -108,7 +108,7 @@ void RNNDynamicModularSingleStreamFWD::ComputeFWD(const Handle& handle,
 
     rnnAlgoModules.AddBias(handle, runtimeArgs);
 
-    for(auto layer_i = 0ULL; layer_i < rnnDesc.nLayers; ++layer_i)
+    for(size_t layer_i = 0ULL; layer_i < rnnDesc.nLayers; ++layer_i)
     {
 
         for(int dir = 0; dir < sequence_directions; dir++)
@@ -116,14 +116,14 @@ void RNNDynamicModularSingleStreamFWD::ComputeFWD(const Handle& handle,
             const auto seq_dir = dir == 0 ? rnn_base::SequenceDirection::Forward
                                           : rnn_base::SequenceDirection::Reverse;
 
-            if(layer_i != 0)
+            if(layer_i != 0ULL)
                 rnnAlgoModules.PropHiddenY(handle, runtimeArgs, layer_i, seq_dir);
 
-            for(auto ti = 0ULL; ti < real_seq_iterations; ti++)
+            for(size_t ti = 0ULL; ti < real_seq_iterations; ti++)
             {
                 const rnn_base::SequenceIterator cur_seq(ti, seq_dir, real_seq_iterations, true);
 
-                if(ti == 0)
+                if(ti == 0ULL)
                     rnnAlgoModules.PropHxCx(handle, runtimeArgs, layer_i, cur_seq, seq_dir);
                 else
                     rnnAlgoModules.PropHiddenHt(handle, runtimeArgs, layer_i, cur_seq, seq_dir);

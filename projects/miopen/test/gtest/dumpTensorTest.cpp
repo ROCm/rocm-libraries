@@ -51,7 +51,7 @@ void compare(const tensor<T>& host_tensor,
 {
     ASSERT_EQ(host_tensor.data.size(), tensor_from_file.data.size());
 
-    for(auto i = 0ULL; i < host_tensor.data.size(); ++i)
+    for(size_t i = 0ULL; i < host_tensor.data.size(); ++i)
     {
         // if(compare_nan && i == nan_index)
         if(compare_nan)

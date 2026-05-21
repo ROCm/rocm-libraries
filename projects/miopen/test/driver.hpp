@@ -112,7 +112,7 @@ struct test_driver
         template <class Source, class T>
         void add_source(Source src, T& x)
         {
-            data_sources.push_back([=, this, &x](std::function<void()> callback) {
+            data_sources.push_back([=, &x](std::function<void()> callback) {
                 for(auto y : src()) // NOLINT
                 {
                     x = T(y);
@@ -332,7 +332,7 @@ struct test_driver
     template <class X, class G>
     generate_tensor_t<X, G> generate_tensor(std::set<X> dims, X single, G g)
     {
-        return {[=, this]() -> std::set<X> {
+        return {[=]() -> std::set<X> {
                     if(full_set)
                         return dims;
                     else
@@ -351,7 +351,7 @@ struct test_driver
     template <class F, class G>
     auto lazy_generate_tensor(F f, G g) -> generate_tensor_t<miopen::range_value<decltype(f())>, G>
     {
-        return {[=, this]() -> decltype(f()) {
+        return {[=]() -> decltype(f()) {
                     if(full_set)
                         return f();
                     else
@@ -363,7 +363,7 @@ struct test_driver
     template <class F, class X, class G>
     generate_tensor_t<X, G> lazy_generate_tensor(F f, X single, G g)
     {
-        return {[=, this]() -> std::set<X> {
+        return {[=]() -> std::set<X> {
                     if(full_set)
                         return f();
                     else
@@ -382,25 +382,23 @@ struct test_driver
     template <class F, class G>
     generate_tensor_t<std::vector<int>, G> get_tensor(F gen_shapes, G gen_value)
     {
-        return lazy_generate_tensor([=, this] { return gen_shapes(batch_factor); }, gen_value);
+        return lazy_generate_tensor([=] { return gen_shapes(batch_factor); }, gen_value);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_bn_spatial_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor([=, this] { return get_bn_spatial_inputs(batch_factor); },
-                                    {4, 64, 28, 28},
-                                    tensor_elem_gen);
+        return lazy_generate_tensor(
+            [=] { return get_bn_spatial_inputs(batch_factor); }, {4, 64, 28, 28}, tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_bn_peract_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor([=, this] { return get_bn_peract_inputs(batch_factor); },
-                                    {16, 32, 8, 8},
-                                    tensor_elem_gen);
+        return lazy_generate_tensor(
+            [=] { return get_bn_peract_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
@@ -408,14 +406,14 @@ struct test_driver
     get_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
         return lazy_generate_tensor(
-            [=, this] { return get_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
+            [=] { return get_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_3d_bn_spatial_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor([=, this] { return get_3d_bn_spatial_inputs(batch_factor); },
+        return lazy_generate_tensor([=] { return get_3d_bn_spatial_inputs(batch_factor); },
                                     {16, 32, 8, 8, 8},
                                     tensor_elem_gen);
     }
@@ -424,7 +422,7 @@ struct test_driver
     generate_tensor_t<std::vector<int>, G>
     get_3d_bn_peract_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor([=, this] { return get_3d_bn_peract_inputs(batch_factor); },
+        return lazy_generate_tensor([=] { return get_3d_bn_peract_inputs(batch_factor); },
                                     {16, 32, 8, 8, 8},
                                     tensor_elem_gen);
     }
@@ -434,7 +432,7 @@ struct test_driver
     get_weights_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
         return lazy_generate_tensor(
-            [=, this] { return get_weights(batch_factor); }, {64, 32, 5, 5}, tensor_elem_gen);
+            [=] { return get_weights(batch_factor); }, {64, 32, 5, 5}, tensor_elem_gen);
     }
 
     template <class X>
@@ -458,7 +456,7 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_data(std::vector<T> dims, T single)
     {
-        return {[=, this]() -> std::vector<T> {
+        return {[=]() -> std::vector<T> {
             if(full_set)
                 return dims;
             else
@@ -470,7 +468,7 @@ struct test_driver
     generate_data_t<std::vector<T>>
     generate_data_limited(std::vector<T> dims, int limit_multiplier, T single)
     {
-        return {[=, this]() -> std::vector<T> {
+        return {[=]() -> std::vector<T> {
             if(full_set)
             {
                 if(limit_set > 0)
@@ -506,7 +504,7 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_data(std::vector<T> dims)
     {
-        return {[=, this]() -> std::vector<T> {
+        return {[=]() -> std::vector<T> {
             if(full_set)
                 return dims;
             else
@@ -517,15 +515,13 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_multi_data(std::vector<std::vector<T>> multi_dims)
     {
-        return {[=, this]() -> std::vector<T> {
-            return generate_data(multi_dims.at(dataset_id))(T{});
-        }};
+        return {[=]() -> std::vector<T> { return generate_data(multi_dims.at(dataset_id))(T{}); }};
     }
 
     template <class T>
     generate_data_t<std::vector<T>> generate_data_limited(std::vector<T> dims, int limit_multiplier)
     {
-        return {[=, this]() -> std::vector<T> {
+        return {[=]() -> std::vector<T> {
             if(full_set)
             {
                 if(limit_set > 0)
@@ -551,7 +547,7 @@ struct test_driver
     generate_data_t<std::vector<T>>
     generate_multi_data_limited(std::vector<std::vector<T>> multi_dims, int limit_multiplier)
     {
-        return {[=, this]() -> std::vector<T> {
+        return {[=]() -> std::vector<T> {
             return generate_data_limited(multi_dims.at(dataset_id), limit_multiplier)(T{});
         }};
     }
@@ -559,7 +555,7 @@ struct test_driver
     template <class F, class T>
     auto lazy_generate_data(F f, T single) -> generate_data_t<decltype(f())>
     {
-        return {[=, this]() -> decltype(f()) {
+        return {[=]() -> decltype(f()) {
             if(full_set)
                 return f();
             else
@@ -570,7 +566,7 @@ struct test_driver
     template <class F>
     auto lazy_generate_data(F f) -> generate_data_t<decltype(f())>
     {
-        return {[=, this]() -> decltype(f()) {
+        return {[=]() -> decltype(f()) {
             if(full_set)
                 return f();
             else
@@ -581,7 +577,7 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_single(T single)
     {
-        return {[=, this]() -> std::vector<T> { return {single}; }};
+        return {[=]() -> std::vector<T> { return {single}; }};
     }
 
     template <class X>
@@ -617,11 +613,11 @@ struct test_driver
 
     auto verify_reporter()
     {
-        return [=, this](bool pass,
-                         std::vector<double> error,
-                         const auto& out_cpu,
-                         const auto& out_gpu,
-                         auto fail) {
+        return [=](bool pass,
+                   std::vector<double> error,
+                   const auto& out_cpu,
+                   const auto& out_gpu,
+                   auto fail) {
             if(not pass or verbose)
             {
                 if(not error.empty() or not pass)
@@ -803,7 +799,7 @@ struct test_driver
             // Compute gpu
             if(time)
             {
-                for(auto i = 0; i < warmup_iter; ++i)
+                for(int i = 0; i < warmup_iter; ++i)
                 {
                     v.gpu(xs...);
                 }

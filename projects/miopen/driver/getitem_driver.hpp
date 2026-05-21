@@ -68,7 +68,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
     auto element_index = std::vector<int32_t>(indexCount * index_numel + indexCount);
 
     std::vector<size_t> output_dims;
-    for(size_t i = 0; i < dimCount; i++)
+    for(size_t i = 0ULL; i < dimCount; i++)
     {
         output_dims.push_back(dx_dims[dims[i]]);
     }
@@ -88,11 +88,11 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
         const auto& index_dim = dims[j];
         const auto& dim_size  = output_dims[j];
 
-        for(decltype(index_numel) o = 0; o < index_numel; o++)
+        for(int32_t o = 0; o < index_numel; o++)
         {
             int32_t getitem_index = indexs[j][o];
 
-            if(getitem_index >= 0 && static_cast<decltype(dim_size)>(getitem_index) < dim_size)
+            if(getitem_index >= 0 && static_cast<size_t>(getitem_index) < dim_size)
             {
                 element_index[(o * indexCount) + j] = getitem_index;
             }
@@ -113,7 +113,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
     }
 
     // GetItem
-    for(decltype(dy_numel) o = 0; o < dy_numel; o++)
+    for(int64_t o = 0; o < dy_numel; o++)
     {
         tensor_layout_t<5> ncdhw(dy_tv, o);
         tensor_layout_t<5> idx(ncdhw);
@@ -357,7 +357,7 @@ int GetitemDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         dy[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }
 
-    for(size_t i = 0; i < indexDescs.size(); i++)
+    for(size_t i = 0ULL; i < indexDescs.size(); i++)
     {
         size_t index_sz = GetTensorSize(indexDescs[i]);
         index_devs.push_back(std::unique_ptr<GPUMem>(new GPUMem(ctx, index_sz, sizeof(int32_t))));
@@ -365,7 +365,7 @@ int GetitemDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         auto& index    = indexs.back();
         auto index_dev = index_devs.back().get();
 
-        for(auto j = 0ULL; j < index_sz; j++)
+        for(size_t j = 0ULL; j < index_sz; j++)
         {
             index[j] = prng::gen_A_to_B<int32_t>(static_cast<int32_t>(0),
                                                  static_cast<int32_t>(output_dims[i]));
