@@ -26,6 +26,7 @@
 #include <cstring>
 #include <list>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include "../../../shared/array_predicate.h"
@@ -130,6 +131,66 @@ struct rocfft_field_t
      * once and only once by the field's bricks.
      */
     bool has_valid_tessellation() const;
+
+    /**
+     * @param[in] dim dimension index of interest (flattened: length axes
+     * followed by batch axes)
+     * @return `true` iff the corresponding length dimension is not partial
+     * in any of the field's bricks.
+     * 
+     * @throw An `std::logic_error` is thrown if the field has no bricks. An
+     * `std::invalid_argument` is thrown if `dim` is out of range.
+     */
+    bool has_undistributed_axis(size_t dim) const;
+
+    /**
+     * @return An `std::set<size_t>` of the length dimensions that are not
+     * partial in any of the field's bricks.
+     * 
+     * @throw An `std::logic_error` is thrown if the field has no bricks.
+     */
+    std::set<size_t> get_undistributed_length_dimensions() const;
+
+    /**
+     * @brief Verifies whether this field is consistent as input (resp. output)
+     * for embarrassingly-parallel computations of specific types of Fourier
+     * Transforms and, if so, returns the corresponding output (resp. input)
+     * field. All of this object's bricks must have full (i.e., non-partial)
+     * length axes in their layouts.
+     * 
+     * @param[in] other_io I/O label for the field to be returned. Explicitly,
+     * the calling object's layout is considered an input (resp. output) layout
+     * if the argument value is `io_data_label::OUTPUT` (resp. `io_data_label::INPUT`)
+     * @param[in] fft_type intended type of Fourier Transform
+     * @param[in] placement intended placement of each brick's results for the
+     * desired transform. For out-of-place operations, each brick in the
+     * returned field is given a default, contiguous data layout.
+     * @param[in] other_innermost_length_is_odd flag indicating whether the
+     * logical span of the innermost length axis in the corresponding field's
+     * full data range is odd (if `true`) or not (if `false`). This is ignored
+     * (and can be safely omitted in calls) *unless* the field to be returned
+     * corresponds to the input of a real forward transform or the output of a
+     * real inverse transform.
+     * @return An `std::optional<rocfft_field_t>` object which has a value set
+     * iff a corresponding field for the desired operation does actually exist.
+     * The returned value may have no value set for in-place operations. When a
+     * value is set, the returned field has as many bricks as the current object
+     * (sharing the same locations, brick-wise).
+     * 
+     * @throw An `std::logic_error` is thrown if the current object has no brick,
+     * or if any of its bricks has some partial length axis in its data layout.
+     */
+    std::optional<rocfft_field_t>
+        get_other_embarrassingly_parallel_io_field(io_data_label           other_io,
+                                                   rocfft_transform_type   fft_type,
+                                                   rocfft_result_placement placement,
+                                                   bool other_innermost_length_is_odd
+                                                   = false) const;
+
+    inline bool operator==(const rocfft_field_t& other) const
+    {
+        return bricks == other.bricks;
+    }
 };
 
 struct rocfft_plan_description_t
@@ -296,6 +357,26 @@ struct rocfft_plan_description_t
         return fieldPtrs;
     }
 
+    /**
+     * @return true iff the input (resp. output) innermost length is odd for
+     * argument value `io_data_label::INPUT` (resp. `io_data_label::OUTPUT`).
+     * @throw An `std::invalid_argument` is thrown if the argument is neither
+     * `io_data_label::INPUT` nor `io_data_label::OUTPUT`.
+     */
+    inline bool innermost_length_is_odd(io_data_label io) const
+    {
+        switch(io)
+        {
+        case io_data_label::INPUT:
+            return input_layout.lengths().front() % 2 == 1;
+        case io_data_label::OUTPUT:
+            return output_layout.lengths().front() % 2 == 1;
+        default:
+            throw std::invalid_argument("Unknown io data label given to "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        }
+    }
+
     // returns true if a field has bricks such that any rank has
     // bricks on more than one device
     static bool multiple_devices_in_rank(const rocfft_field_t& field);
@@ -344,6 +425,11 @@ struct rocfft_plan_t
     // - we have no particular optimization for this FFT and we'll need
     //   to fall back to a single-device plan
     bool BuildOptMultiDevicePlan();
+
+    // Alternative path to BuildOptMultiDevicePlan (will eventually substitute it)
+    // returns `true` iff a successful multi-device computing plan configuration
+    // was set up
+    bool BuildMultiDevicePlan();
 
     // check log level, log the topologically sorted plan if plan
     // logging is enabled
@@ -440,43 +526,6 @@ private:
         CreateOutputScatteringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
                                             const rocfft_location_t&   exec_plan_location,
                                             const std::vector<size_t>& antecedents);
-
-    // Transpose the input field to the output field by adding work items
-    // to the plan.  Antecedents are provided as a vector of item
-    // indexes, one per brick.  Final work item per brick (that future
-    // per-brick operations can depend on) is returned in outputItems.
-    //
-    // transposeNumber identifies this particular transpose in the
-    // plan, for debugging.
-    void GlobalTranspose(size_t                     elem_size,
-                         const rocfft_field_t&      inField,
-                         const rocfft_field_t&      outField,
-                         std::vector<BufferPtr>&    input,
-                         std::vector<BufferPtr>&    output,
-                         const std::vector<size_t>& inputAntecedents,
-                         std::vector<size_t>&       outputItems,
-                         size_t                     transposeNumber);
-
-    // default global all-to-all transpose
-    void GlobalTransposeA2A(size_t                     elem_size,
-                            const rocfft_field_t&      inField,
-                            const rocfft_field_t&      outField,
-                            std::vector<BufferPtr>&    input,
-                            std::vector<BufferPtr>&    output,
-                            const std::vector<size_t>& inputAntecedents,
-                            std::vector<size_t>&       outputItems,
-                            const std::string&         itemGroup);
-
-    // fallback case for global transpose that uses point-to-point
-    // communications, for when all-to-all isn't possible.
-    void GlobalTransposeP2P(size_t                     elem_size,
-                            const rocfft_field_t&      inField,
-                            const rocfft_field_t&      outField,
-                            std::vector<BufferPtr>&    input,
-                            std::vector<BufferPtr>&    output,
-                            const std::vector<size_t>& inputAntecedents,
-                            std::vector<size_t>&       outputItems,
-                            const std::string&         itemGroup);
 
     // Transform (complex-complex FFT) a whole field along specified
     // dimensions.  Input and output ptrs are provided as a vector of
@@ -599,6 +648,124 @@ private:
      */
     NodeMetaData get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
                                                    const rocfft_location_t& exec_plan_location);
+
+    struct field_view_t
+    {
+        field_view_t(const rocfft_field_t&         field_,
+                     const std::vector<BufferPtr>& buffers_,
+                     rocfft_array_type             array_type_,
+                     rocfft_precision              precision_,
+                     const std::string&            group_name_ = "");
+
+        field_view_t get_view_for_lengths(const std::set<size_t>& len_dims) const;
+        field_view_t get_embedding_view() const;
+
+        inline bool operator==(const field_view_t& other) const
+        {
+            // group_name is irrelevant for logical comparisons of field views
+            // Do not use a strict equality of `array_type` as that would prevent simple
+            // re-interpretation of `rocfft_array_type_hermitian_interleaved` into
+            // `rocfft_array_type_complex_interleaved` and vice-versa.
+            return field == other.field && precision == other.precision
+                   && array_type_is_complex(array_type) == array_type_is_complex(other.array_type)
+                   && buffers == other.buffers;
+        }
+        inline bool operator!=(const field_view_t& other) const
+        {
+            return !(*this == other);
+        }
+
+        const rocfft_field_t         field;
+        const std::vector<BufferPtr> buffers;
+        const rocfft_array_type      array_type;
+        const rocfft_precision       precision;
+        const std::string            group_name;
+    };
+
+    template <io_data_label io>
+    field_view_t make_user_field_view() const;
+
+    struct embarrassingly_parallel_fft
+    {
+        embarrassingly_parallel_fft(rocfft_transform_type   fft_type_,
+                                    rocfft_result_placement placement_,
+                                    rocfft_precision        precision_,
+                                    const field_view_t&     input_view_,
+                                    const field_view_t&     output_view_);
+        inline void set_load_ops(const LoadOps& load_operations)
+        {
+            load_ops = load_operations;
+        }
+        inline void set_store_ops(const StoreOps& store_operations)
+        {
+            store_ops = store_operations;
+        }
+
+        inline const std::optional<LoadOps>& get_load_ops() const
+        {
+            return load_ops;
+        }
+        inline const std::optional<StoreOps>& get_store_ops() const
+        {
+            return store_ops;
+        }
+
+        const rocfft_transform_type   fft_type;
+        const rocfft_result_placement placement;
+        const rocfft_precision        precision;
+        const field_view_t            input, output;
+
+        std::string get_description() const;
+        std::string get_group() const;
+
+    private:
+        inline std::vector<size_t> get_axes_in_embedding() const
+        {
+            // validation checks at object's construction guarantee
+            // it's identical for all I/O bricks
+            return input.field.bricks[0].layout.corresponding_axes_in_embedding();
+        }
+        std::optional<LoadOps>  load_ops  = std::nullopt;
+        std::optional<StoreOps> store_ops = std::nullopt;
+    };
+
+    template <io_data_label field_view_label>
+    embarrassingly_parallel_fft make_embarrassingly_parallel_fft_from_user_field(
+        const std::set<size_t>        fft_len_dims,
+        std::vector<TempBufferLease>& leased_buffers,
+        bool                          prefer_in_place_if_possible);
+
+    std::vector<size_t> create_plan_items_for(const embarrassingly_parallel_fft& parallel_fft,
+                                              const std::vector<size_t>&         antecedents);
+
+    // Transpose the input field to the output field by adding work items
+    // to the plan.  Antecedents are provided as a vector of item
+    // indexes, one per brick.  Final work item per brick (that future
+    // per-brick operations can depend on) is returned in outputItems.
+    std::vector<size_t> GlobalTranspose(const field_view_t&        input,
+                                        const field_view_t&        output,
+                                        const std::vector<size_t>& antecedents);
+
+    // default global all-to-all transpose
+    std::vector<size_t> GlobalTransposeA2A(const field_view_t&        input,
+                                           const field_view_t&        output,
+                                           const std::vector<size_t>& antecedents);
+
+    // fallback case for global transpose that uses point-to-point
+    // communications, for when all-to-all isn't possible.
+    std::vector<size_t> GlobalTransposeP2P(const field_view_t&        input,
+                                           const field_view_t&        output,
+                                           const std::vector<size_t>& antecedents);
+
+    // Pre-existing signature, to be used only for complex fields only! (Note: this will be removed eventually)
+    void GlobalTranspose(size_t                     elem_size,
+                         const rocfft_field_t&      inField,
+                         const rocfft_field_t&      outField,
+                         std::vector<BufferPtr>&    input,
+                         std::vector<BufferPtr>&    output,
+                         const std::vector<size_t>& inputAntecedents,
+                         std::vector<size_t>&       outputItems,
+                         size_t                     transposeNumber);
 };
 
 bool PlanPowX(ExecPlan& execPlan);
