@@ -605,7 +605,14 @@ class MXScaleGRGeometry(MXScaleInputGeometry):
       return self
     instM    = self.scaleLayout.instM
     mt_mma   = kernel[f"MacroTile{tc}"] // instM
-    du_scale = kernel[f"_DepthU{tc}"] // self.instK
+    # Drive the scale GR per-fetch K span from _DepthUMXS{tc}.  When
+    # ScaleDepthURatio{tc}=R, _DepthUMXS{tc} = R * data_DU / mxBlock, so
+    # scale_K = _DepthUMXS{tc} * mxBlock = R * data_DU (in data elements) and
+    # one scale GR fetch covers R data-DU body iters.  For R=1 this reduces
+    # to the original formula (du_scale = data_DU // instK).
+    mxBlock  = self.scaleLayout.mxBlock
+    scale_K  = kernel[f"_DepthUMXS{tc}"] * mxBlock
+    du_scale = scale_K // self.instK
     return replace(self, subtileShape=(mt_mma, du_scale))
 
   def emitGlobalReadOffset(self, ti: 'TileInfo', writer, kernel) -> 'Module':

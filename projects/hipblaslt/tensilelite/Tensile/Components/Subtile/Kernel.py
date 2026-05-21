@@ -392,11 +392,22 @@ class TileInfo:
       # MXScaleTilePair geometry expects data DepthU (not scale DepthU = _DepthUMXSA/MXSB).
       # ABTilePair uses the per-TC DepthU key directly.
       if isinstance(geometry, MXScaleTilePair):
-        self.depthU = kernel["_DepthU%s" % _tc]  # data DepthU for A or B (needed by globalMMATileGrid)
-        self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
+        # Decouple-scale-DU: scaleSchedulingPeriod R says one scale fetch covers
+        # R data-DU body iters.  R defaults to 1 for backwards compatibility.
+        # self.depthU  = data DepthU (per body iter, used by globalMMATileGrid
+        #                of ABInput-like callers).
+        # self.scaleDepthU = R * data DepthU in data-element units; this is the
+        # K span covered by ONE scale fetch (== R body iters' worth of data K).
+        # When R == 1 self.scaleDepthU == self.depthU so all downstream grids
+        # are bit-identical to the prior implementation.
+        self.scaleSchedulingPeriod = int(kernel.get(f"ScaleDepthURatio{_tc}", 1))
+        _mxBlock = geometry.scaleLayout.mxBlock
+        self.depthU = kernel["_DepthU%s" % _tc]
+        self.scaleDepthU = kernel["_DepthUMXS%s" % _tc] * _mxBlock
       else:
         self.depthU = kernel["_DepthU%s" % tc]
         self.scaleDepthU = self.depthU
+        self.scaleSchedulingPeriod = 1
       self.waveGroupSize = kernel["MIWaveGroup"][0 if isA else 1]
       self.isSwizzled = isinstance(geometry, MXScaleTilePair)
     elif isinstance(geometry, CDTileGeometry):
@@ -476,14 +487,20 @@ class TileInfo:
       lr_cfg = geometry.lr
       self.gr = None
       self.lr = None
-      self.globalMMATileGrid   = list(gr_cfg.globalMMATileGrid(self.macroTile, self.depthU))
+      # All MX-scale grids are sized per scale fetch, not per data body iter, by
+      # passing self.scaleDepthU (= R * data_DU in data-element units) to the
+      # geometry methods.  globalMMATileGrid then returns scale MMA tile counts
+      # covering the full R-period; dividing by lr_cfg.subtileShape (= (2,2))
+      # gives the LR subtile grid for one scale fetch.  When R == 1 this
+      # collapses to the prior per-body-iter sizing (scaleDepthU == depthU).
+      self.globalMMATileGrid   = list(gr_cfg.globalMMATileGrid(self.macroTile, self.scaleDepthU))
       self.localMMATileGrid    = [self.globalMMATileGrid[0] // self.waveGroupSize, self.globalMMATileGrid[1]]
       self.subtileShape          = list(gr_cfg.subtileShape)
       self.subtileShape        = self.subtileShape
       self.globalSubtileGrid   = [1, 1]  # all waves load the full scale tile in one round
       self.localSubtileGrid    = [1, 1]
       self.subtileSize         = lr_cfg.subtileSizeBytes() // lr_cfg.subtileShape[0]
-      self.lrGlobalSubtileGrid = list(lr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
+      self.lrGlobalSubtileGrid = list(lr_cfg.globalSubtileGrid(self.macroTile, self.scaleDepthU))
       self.lrSubtileSize       = lr_cfg.subtileSizeBytes()
       self.lrSubtileShape      = list(lr_cfg.subtileShape)
       self.lrLocalSubtileGrid  = [int(self.localMMATileGrid[0] / lr_cfg.subtileShape[0]),
@@ -540,7 +557,9 @@ class TileInfo:
       # LR uses subtileShape; check coverage in scale MMA tile units.
       mmaM, mmaK = geometry.mmaTileShape
       lr_st = geometry.lr.subtileShape
-      scale_K_tiles = self.depthU // geometry.instK  # data depthU → scale MMA K tile count
+      # Per scale fetch: scale_K_tiles counts scale MMA K tiles in one R-period
+      # (R*data_DU//instK).  For R == 1 this equals the old data_DU//instK.
+      scale_K_tiles = self.scaleDepthU // geometry.instK
       self._check_dim(self.macroTile // mmaM, lr_st[0], self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]')
       self._check_dim(scale_K_tiles,          lr_st[1], self.lrGlobalSubtileGrid[1], 1,                 'depthU[LR]')
     elif isinstance(geometry, CDTileGeometry):
@@ -1220,10 +1239,25 @@ def mainLoop(writer, kernel):
   grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
   grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   numSubIterK = tiA.localMMATileGrid[1]
-  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=numSubIterK) if scaleTiA else None
-  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=numSubIterK) if scaleTiB else None
+  # Decouple-scale-DU: scale LR/GR granularities are in scale-MMA-tile units and
+  # already encode the per-fetch K span via the updated scaleTi*.localMMATileGrid
+  # (sized from scaleDepthU = R * data_DU).  lrS*Gran.k = lrSubtileShape[1] is
+  # the K span of one scale LR fetch (always 2 for the (2,2) LR subtile); the
+  # scheduler uses scaleSchedulingPeriod=R below to know that one scale fetch
+  # spans R data body iters.
+  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
+  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
+
+  # R-period: number of data body iters covered by one scale fetch.  R == 1 for
+  # non-MX kernels and for MX kernels with ScaleDepthURatio == 1 (the existing
+  # MT128x128/DU=256 baseline), so the scheduler sees no change for those cases.
+  scaleSchedulingPeriod = 1
+  if scaleTiA is not None:
+    scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiA, 'scaleSchedulingPeriod', 1))
+  if scaleTiB is not None:
+    scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiB, 'scaleSchedulingPeriod', 1))
 
   schedulerPgr = pgr
 
@@ -1246,7 +1280,8 @@ def mainLoop(writer, kernel):
           grSB=grSBGran,
           numPartitionsM=numPartM,
           numPartitionsN=numPartN,
-          pgr=schedulerPgr
+          pgr=schedulerPgr,
+          scaleSchedulingPeriod=scaleSchedulingPeriod,
       )
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
