@@ -1,7 +1,7 @@
 #!/bin/bash
 
 bench=$1
-func=${2:-sytrd}
+func=${2:-sytrd --uplo L}
 prec=${3:-s}
 dev=${4:-0}
 
@@ -16,24 +16,24 @@ fi
 
 ## Small & medium
 
-i=2
-while [ $i -le 58 ]
-do
-    echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 10 -r $prec $verify --device $dev
-    i=$((i+8))
-done
+# i=2
+# while [ $i -le 58 ]
+# do
+#     echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 20 -r $prec $verify --device $dev
+#     i=$((i+8))
+# done
 
-i=64
-while [ $i -le 256 ]
-do
-    echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 10 -r $prec $verify --device $dev
-    i=$((i+32))
-done
+# i=64
+# while [ $i -le 256 ]
+# do
+#     echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 20 -r $prec $verify --device $dev
+#     i=$((i+32))
+# done
 
 i=320
 while [ $i -le 2048 ]
 do
-    echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 10 -r $prec $verify --device $dev
+    echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 20 -r $prec $verify --device $dev
     i=$((i+64))
 done
 
@@ -42,7 +42,7 @@ done
 i=2176
 while [ $i -le 4096 ]
 do
-    echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 10 -r $prec $verify --device $dev
+    echo -n -e "$i\t"; $bench -f $func -n $i --perf 1 --iters 20 -r $prec $verify --device $dev
     i=$((i+128))
 done
 

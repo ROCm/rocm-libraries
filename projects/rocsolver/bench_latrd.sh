@@ -20,25 +20,25 @@ fi
 i=128
 while [ $i -le 256 ]
 do
-    echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 10 -r $prec $verify --device $dev
+    echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 20 -r $prec $verify --device $dev
     i=$((i+32))
 done
 
-# i=320
-# while [ $i -le 2048 ]
-# do
-#     echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 10 -r $prec $verify --device $dev
-#     i=$((i+64))
-# done
+i=320
+while [ $i -le 2048 ]
+do
+    echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 20 -r $prec $verify --device $dev
+    i=$((i+64))
+done
 
-# ### Large
+### Large
 
-# i=2176
-# while [ $i -le 4096 ]
-# do
-#     echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 10 -r $prec $verify --device $dev
-#     i=$((i+128))
-# done
+i=2176
+while [ $i -le 4096 ]
+do
+    echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 20 -r $prec $verify --device $dev
+    i=$((i+128))
+done
 
 # i=4352
 # while [ $i -le 8192 ]
