@@ -499,6 +499,12 @@ class LogicalScheduler:
         self._preloop_emitted: Optional[List[List[List[EmittedModule]]]] = None
         self._ngll_emitted: Optional[List[List[List[EmittedModule]]]] = None
         self._nll_emitted: Optional[List[List[List[EmittedModule]]]] = None
+        # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are 
+        # unused or freed for reuse within the tail loop.
+        self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
+                                                      'SA': set(), 'SB': set()}
+        self._tail_freed_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
+                                                     'SA': set(), 'SB': set()}
 
     def _ensure_pass(self, *prerequisites: Pass) -> None:
         for p in prerequisites:
@@ -2049,19 +2055,11 @@ class LogicalScheduler:
         cfg = self.config
         numK = cfg.numSubIterK
 
-        # We reuse vgrpTiles from MAINLOOP partitions.
-        tile_maps = [self._partitions[pi][0].mfma.vgpr_tile_maps
-                     for pi in range(cfg.numPartitions)]
+        # We use PGR0, so we only need half the tiles. Getting the tiles for tail loop
+        # and flagging unused tiles so that they can be freed.
+        tile_maps, self._tail_unused_tile_ids = self._compute_tail_tile_state()
         
         preamble = []
-        # PGR=2: NGLL keeps gr_inc (settles PRELOOP MT1's deferred SRD advance
-        # + LW swap) and NLL keeps lr_inc (closes the LR/LW gap for the
-        # NLL-only path).
-        # PGR=1: NLL keeps gr_inc (advances SRD + swaps LW; PRELOOP's single
-        # GR did neither). Path A (K<DU) skips NLL entirely → no advance,
-        # matching skipped PRELOOP.
-        # All tail-entry paths therefore arrive with LR/LW aligned and SRD
-        # correctly advanced — no preamble fixup needed.
 
         # GRs entire MT at once for all tensors.
         all_tiles = {
@@ -2398,6 +2396,9 @@ class LogicalScheduler:
             return module
 
         module.addComment0("TAILLOOP")
+        # Return tile slots dead for the tail loop (PGR>=1 prefetch half)
+        # to the pool so emit_mask_k_init / emit_mask_k checkouts reuse them.
+        self._release_unused_tail_tiles(writer)
         # init must run before populate so each MaskKOp in the body can read
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
@@ -2484,22 +2485,80 @@ class LogicalScheduler:
             self.vgprTilesSB = []
 
     def deallocVgprTiles(self, writer):
-        """Deallocate VGPR tiles allocated by allocVgprTiles."""
-        def _dealloc_tiles(tiles):
-            for tile in tiles:
+        """Deallocate VGPR tiles allocated by allocVgprTiles.
+
+        Skips tile ids in self._tail_freed_tile_ids — those were already
+        returned to the pool by _release_unused_tail_tiles.
+        """
+        def _dealloc_tiles(tiles, freed):
+            for tid, tile in enumerate(tiles):
+                if tid in freed:
+                    continue
                 pool = tile.regList.pool
                 for val in tile:
                     if tile.index(val) % 4 == 0:
                         pool.checkIn(val)
 
-        _dealloc_tiles(self.vgprTilesA)
-        _dealloc_tiles(self.vgprTilesB)
-        _dealloc_tiles(self.vgprTilesSA)
-        _dealloc_tiles(self.vgprTilesSB)
+        _dealloc_tiles(self.vgprTilesA,  self._tail_freed_tile_ids['A'])
+        _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
+        _dealloc_tiles(self.vgprTilesSA, self._tail_freed_tile_ids['SA'])
+        _dealloc_tiles(self.vgprTilesSB, self._tail_freed_tile_ids['SB'])
         self.vgprTilesA = []
         self.vgprTilesB = []
         self.vgprTilesSA = []
         self.vgprTilesSB = []
+        self._tail_freed_tile_ids = {'A': set(), 'B': set(),
+                                     'SA': set(), 'SB': set()}
+
+    def _compute_tail_tile_state(self):
+        """Single source of truth for tail-loop tile usage.
+
+        Returns (tile_maps, unused) where
+          - tile_maps[pi] = self._partitions[pi][0].mfma.vgpr_tile_maps,
+            reused by build_tailloop_pgr0 to wire LR/MFMA/MaskK ops.
+          - unused[tensor] = {tid} for tile slots the tail loop never
+            references (the PGR>=1 prefetch half). Consumed by
+            _release_unused_tail_tiles to reclaim their vgprs.
+
+        """
+        tile_maps = [self._partitions[pi][0].mfma.vgpr_tile_maps
+                     for pi in range(self.config.numPartitions)]
+        used = {t: set() for t in ('A', 'B', 'SA', 'SB')}
+        for pi_map in tile_maps:
+            for tensor in used:
+                m = pi_map.get(tensor, [{}])[0]   # unroll_iter=0 only
+                used[tensor].update(m.values())
+        tiles_by_tensor = {'A':  self.vgprTilesA, 'B':  self.vgprTilesB,
+                           'SA': self.vgprTilesSA, 'SB': self.vgprTilesSB}
+        unused = {
+            tensor: {tid for tid in range(len(tile_list))
+                     if tid not in used[tensor]}
+            for tensor, tile_list in tiles_by_tensor.items()
+        }
+        return tile_maps, unused
+
+    def _release_unused_tail_tiles(self, writer):
+        """Return tile slots dead for the tail loop to the vgpr pool.
+
+        Consumes self._tail_unused_tile_ids (populated by
+        _compute_tail_tile_state in build_tailloop_pgr0). The freed tids
+        are recorded in self._tail_freed_tile_ids so deallocVgprTiles
+        skips them.
+        """
+        assert not any(self._tail_freed_tile_ids[t]
+                       for t in self._tail_freed_tile_ids), \
+            "_release_unused_tail_tiles called twice"
+
+        tiles_by_tensor = {'A':  self.vgprTilesA, 'B':  self.vgprTilesB,
+                           'SA': self.vgprTilesSA, 'SB': self.vgprTilesSB}
+        for tensor, tile_list in tiles_by_tensor.items():
+            for tid in self._tail_unused_tile_ids.get(tensor, ()):
+                tile = tile_list[tid]
+                pool = tile.regList.pool
+                for j, v in enumerate(tile):
+                    if j % 4 == 0:                # match _alloc_tiles block stride
+                        pool.checkIn(v)
+                self._tail_freed_tile_ids[tensor].add(tid)
 
     # ── Populate instructions ──────────────────────────────
 
