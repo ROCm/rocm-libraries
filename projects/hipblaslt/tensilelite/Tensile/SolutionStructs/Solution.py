@@ -2204,7 +2204,7 @@ class Solution(collections.abc.Mapping):
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
         return
-      if state["ScheduleIterAlg"] != 0:
+      if state["_ScheduleIterAlg"] != 0:
         reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0")
         return
       if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
