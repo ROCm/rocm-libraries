@@ -106,7 +106,8 @@ void _rocsparselt_handle::init()
 #endif
 
 #if HIP_FP8_TYPE_OCP
-    has_fp8_ocp = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "950");
+    has_fp8_ocp = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "950")
+                  || gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "1250");
 #endif
 
     is_init = (uintptr_t)(this);
