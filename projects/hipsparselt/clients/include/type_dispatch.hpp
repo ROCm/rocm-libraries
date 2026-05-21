@@ -77,9 +77,10 @@ auto hipsparselt_simple_dispatch(const Arguments& arg)
 template <template <typename...> class TEST>
 auto hipsparselt_spmm_dispatch(const Arguments& arg)
 {
-    const auto Ti = arg.a_type, To = arg.c_type;
+    const auto Ti    = arg.a_type, To = arg.c_type;
     auto       Tc    = arg.compute_type;
     auto       TBias = arg.bias_type;
+    auto       TGate = arg.gate_type;
 
     if(arg.b_type == Ti && arg.d_type == To)
     {
@@ -88,9 +89,9 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
             switch(TBias)
             {
             case HIP_R_16F:
-                return TEST<__half, __half, float, __half>{}(arg);
+                return TEST<__half, __half, float, __half, __half>{}(arg);
             case HIP_R_32F:
-                return TEST<__half, __half, float, float>{}(arg);
+                return TEST<__half, __half, float, float, __half>{}(arg);
             default:
                 break;
             }
@@ -100,72 +101,72 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
             switch(TBias)
             {
             case HIP_R_16BF:
-                return TEST<hip_bfloat16, hip_bfloat16, float, hip_bfloat16>{}(arg);
+                return TEST<hip_bfloat16, hip_bfloat16, float, hip_bfloat16, hip_bfloat16>{}(arg);
             case HIP_R_32F:
-                return TEST<hip_bfloat16, hip_bfloat16, float, float>{}(arg);
+                return TEST<hip_bfloat16, hip_bfloat16, float, float, hip_bfloat16>{}(arg);
             default:
                 break;
             }
         }
         if(Ti == To && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_16F && TBias == HIP_R_16F)
         {
-            return TEST<__half, __half, __half, __half>{}(arg);
+            return TEST<__half, __half, __half, __half, __half>{}(arg);
         }
         else if(Ti == To && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_16F
                 && TBias == HIP_R_16BF)
         {
-            return TEST<hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16>{}(arg);
+            return TEST<hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16>{}(arg);
         }
         else if(Ti == To && To == HIP_R_8I && Tc == HIPSPARSELT_COMPUTE_32I && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, int8_t, int32_t, float>{}(arg);
+            return TEST<int8_t, int8_t, int32_t, float, int8_t>{}(arg);
         }
         else if(Ti == HIP_R_8I && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32I
                 && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, __half, int32_t, float>{}(arg);
+            return TEST<int8_t, __half, int32_t, float, int8_t>{}(arg);
         }
         else if(Ti == HIP_R_8I && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_32I
                 && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, hip_bfloat16, int32_t, float>{}(arg);
+            return TEST<int8_t, hip_bfloat16, int32_t, float, int8_t>{}(arg);
         }
         else if(Ti == HIP_R_8I && To == HIP_R_32I && Tc == HIPSPARSELT_COMPUTE_32I
                 && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, int32_t, int32_t, float>{}(arg);
-        }        
+            return TEST<int8_t, int32_t, int32_t, float, int8_t>{}(arg);
+        }
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<hipsparselt_fp8_e4m3, float, float, float>{}(arg);
+            return TEST<hipsparselt_fp8_e4m3, float, float, float, hipsparselt_fp8_e4m3>{}(arg);
         }
         else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<hipsparselt_fp8_e5m2, float, float, float>{}(arg);
+            return TEST<hipsparselt_fp8_e5m2, float, float, float, hipsparselt_fp8_e5m2>{}(arg);
         }
 #ifdef __HIP_PLATFORM_NVIDIA__
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_16F)
         {
-            return TEST<hipsparselt_fp8_e4m3, __half, float, __half>{}(arg);
+            return TEST<hipsparselt_fp8_e4m3, __half, float, __half, hipsparselt_fp8_e4m3>{}(arg);
         }
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_16BF)
         {
-            return TEST<hipsparselt_fp8_e4m3, hip_bfloat16, float, hip_bfloat16>{}(arg);
+            return TEST<hipsparselt_fp8_e4m3, hip_bfloat16, float, hip_bfloat16, hipsparselt_fp8_e4m3>{}(arg);
         }
         else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_16F)
         {
-            return TEST<hipsparselt_fp8_e5m2, __half, float, __half>{}(arg);
+            return TEST<hipsparselt_fp8_e5m2, __half, float, __half, hipsparselt_fp8_e5m2>{}(arg);
         }
         else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_16BF)
         {
-            return TEST<hipsparselt_fp8_e5m2, hip_bfloat16, float, hip_bfloat16>{}(arg);
+            return TEST<hipsparselt_fp8_e5m2, hip_bfloat16, float, hip_bfloat16, hipsparselt_fp8_e5m2>{}(arg);
         }
 #endif
 #endif

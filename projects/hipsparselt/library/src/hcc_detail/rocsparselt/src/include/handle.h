@@ -121,7 +121,7 @@ struct _rocsparselt_mat_descr
         clear();
     };
 
-    _rocsparselt_mat_descr* clone()
+    _rocsparselt_mat_descr* clone() const
     {
         return new _rocsparselt_mat_descr(*this);
     };
@@ -229,6 +229,8 @@ struct _rocsparselt_matmul_descr
             delete matrix_C;
             delete matrix_D;
         }
+        if(gate_residual_desc != nullptr)
+            delete gate_residual_desc;
         is_init = 0;
     };
 
@@ -261,7 +263,9 @@ struct _rocsparselt_matmul_descr
     float*      bias_pointer                      = nullptr;
     int64_t     bias_stride                       = 0;
     hipDataType bias_type;
-    int         alpha_vector_scaling = 0;
+    int         alpha_vector_scaling              = 0;
+    void*                   gate_residual_mat_pointer = nullptr;
+    _rocsparselt_mat_descr* gate_residual_desc  = nullptr;
     int64_t     m                    = 0;
     int64_t     n                    = 0;
     int64_t     k                    = 0;
