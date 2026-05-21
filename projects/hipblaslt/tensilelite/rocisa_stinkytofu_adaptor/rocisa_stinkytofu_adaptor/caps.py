@@ -271,3 +271,21 @@ def getCaps(key: IsaKey) -> Tuple[Dict, Dict, Dict, Dict]:
 def supportedIsas() -> Tuple[IsaKey, ...]:
     """Return the ISAs we have static caps for (debug / introspection)."""
     return tuple(_REGISTRY)
+
+
+def glc_bit_name_from_caps(asm_caps: Dict[str, int]) -> str:
+    """Mirror ``rocisa::getGlcBitName()`` (``base.cpp``)."""
+    if asm_caps.get("HasGLCModifier"):
+        return "glc"
+    if asm_caps.get("HasSC0Modifier"):
+        return "sc0"
+    return ""
+
+
+def slc_bit_name_from_caps(asm_caps: Dict[str, int]) -> str:
+    """Mirror ``rocisa::getSlcBitName()`` (``base.cpp``)."""
+    if asm_caps.get("HasGLCModifier"):
+        return "slc"
+    if asm_caps.get("HasSC0Modifier"):
+        return "sc1"
+    return ""

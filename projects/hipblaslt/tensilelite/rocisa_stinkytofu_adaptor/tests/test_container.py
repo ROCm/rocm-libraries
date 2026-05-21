@@ -53,14 +53,24 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from rocisa_stinkytofu_adaptor import rocIsa  # noqa: E402
+from rocisa_stinkytofu_adaptor import getGlcBitName, getSlcBitName  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     Container,
     ContinuousRegister,
+    DSModifiers,
+    DPPModifiers,
     EXEC,
     EXECLO,
     EXECHI,
+    FLATModifiers,
+    GLOBALModifiers,
     HWRegContainer,
     MemTokenData,
+    MUBUFModifiers,
+    SDWAModifiers,
+    SMEMModifiers,
+    True16Modifiers,
+    VOP3PModifiers,
     Holder,
     HolderContainer,
     RegisterContainer,
@@ -72,6 +82,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     sgpr,
     vgpr,
 )
+from rocisa_stinkytofu_adaptor.enum import CacheScope, HighBitSel, SelectBit  # noqa: E402
 
 
 # ===========================================================================
@@ -1750,6 +1761,127 @@ class TestVCCWavefront(_WavefrontTestCase):
 # ===========================================================================
 # MemTokenData (T5)
 # ===========================================================================
+
+
+class _Gfx1250CapsTestCase(unittest.TestCase):
+    """Pin gfx1250 asm caps for modifier ``toString`` (``caps.py`` snapshot)."""
+
+    def setUp(self):
+        self._saved = rocIsa.getInstance().getKernel()
+        rocIsa.getInstance().setKernel((12, 5, 0), 64)
+
+    def tearDown(self):
+        info = self._saved
+        if info.isa is not None:
+            rocIsa.getInstance().setKernel(info.isa, info.wavefrontSize)
+        else:
+            rocIsa.getInstance()._kernel_info = info
+
+
+class TestModifiersGfx1250(_Gfx1250CapsTestCase):
+    """``toString`` parity with ``container.hpp`` under gfx1250 caps."""
+
+    def test_ds_modifiers(self):
+        self.assertEqual(str(DSModifiers(1, 2, gds=True)), " offset:2 gds")
+        self.assertEqual(str(DSModifiers(2, offset0=3, offset1=4)), " offset0:3 offset1:4")
+        self.assertEqual(str(DSModifiers(gds=True)), " offset:0 gds")
+
+    def test_global_modifiers(self):
+        self.assertEqual(str(GLOBALModifiers()), "")
+        self.assertEqual(str(GLOBALModifiers(16)), " offset:16")
+
+    def test_flat_modifiers_gfx1250(self):
+        # gfx1250: HasGLCModifier=0, HasSC0Modifier=0 -> glc/slc bits are silent.
+        flat = FLATModifiers(
+            offset12=8, glc=True, slc=False, dlc=False,
+            scope=CacheScope.SCOPE_NONE, lds=True, isStore=False,
+        )
+        self.assertEqual(str(flat), " offset:8  lds")
+
+    def test_mubuf_modifiers_gfx1250(self):
+        mubuf = MUBUFModifiers(
+            offen=True, offset12=12, glc=True, slc=False,
+            dlc=False, scope=CacheScope.SCOPE_NONE,
+            nt=True, lds=False, isStore=True,
+        )
+        self.assertEqual(str(mubuf), " offen offset:12 ")
+
+    def test_smem_modifiers_gfx1250(self):
+        # HasSCOPEModifier=1 -> literal "glc" is suppressed (C++ SMEM path).
+        smem = SMEMModifiers(
+            glc=True, dlc=False, scope=CacheScope.SCOPE_NONE,
+            nv=False, offset=8,
+        )
+        self.assertEqual(str(smem), " offset:8")
+
+    def test_smem_scope_when_set(self):
+        smem = SMEMModifiers(
+            glc=False, scope=CacheScope.SCOPE_DEV, offset=0,
+        )
+        self.assertEqual(str(smem), " scope:SCOPE_DEV")
+
+    def test_sdwa_modifiers(self):
+        sdwa = SDWAModifiers(
+            dst_sel=SelectBit.WORD_0,
+            src0_sel=SelectBit.WORD_0,
+            src1_sel=SelectBit.WORD_1,
+        )
+        self.assertEqual(
+            str(sdwa), " dst_sel:WORD_0 src0_sel:WORD_0 src1_sel:WORD_1",
+        )
+
+    def test_vop3p_modifiers(self):
+        vop3p = VOP3PModifiers([0, 0], [0, 1], [0, 0])
+        self.assertEqual(
+            str(vop3p), " op_sel:[0,0] op_sel_hi:[0,1] byte_sel:[0,0]",
+        )
+
+    def test_dpp_modifiers(self):
+        dpp = DPPModifiers(row_shr=1, quad_perm=[0, 1, 2, 3])
+        self.assertEqual(str(dpp), " row_shr:1 quad_perm:[0,1,2,3]")
+
+    def test_true16_modifiers(self):
+        self.assertEqual(str(True16Modifiers()), "")
+        self.assertEqual(str(True16Modifiers(HighBitSel.HIGH)), ".h")
+        self.assertEqual(str(True16Modifiers(HighBitSel.LOW)), ".l")
+        self.assertEqual(str(True16Modifiers(2)), ".h")
+
+    def test_is_container(self):
+        self.assertIsInstance(DSModifiers(), Container)
+        self.assertIsInstance(FLATModifiers(), Container)
+
+    def test_clone_and_pickle(self):
+        for obj in (
+            DSModifiers(gds=True),
+            FLATModifiers(lds=True),
+            MUBUFModifiers(offen=True, offset12=12, glc=True, nt=True),
+            SMEMModifiers(offset=8),
+            SDWAModifiers(dst_sel=SelectBit.WORD_0),
+            VOP3PModifiers([1], [2], [3]),
+            DPPModifiers(row_bcast=2),
+            True16Modifiers(HighBitSel.LOW),
+        ):
+            self.assertEqual(str(obj.clone()), str(obj))
+            self.assertEqual(str(copy.deepcopy(obj)), str(obj))
+            self.assertEqual(str(pickle.loads(pickle.dumps(obj))), str(obj))
+
+
+class TestGlcSlcBitNames(_Gfx1250CapsTestCase):
+    def test_gfx1250_defaults_empty(self):
+        self.assertEqual(getGlcBitName(), "")
+        self.assertEqual(getSlcBitName(), "")
+
+    def test_has_glc_modifier_branch(self):
+        caps = dict(rocIsa.getInstance().getAsmCaps())
+        caps["HasGLCModifier"] = 1
+        caps["HasSC0Modifier"] = 0
+        from rocisa_stinkytofu_adaptor.caps import (  # noqa: WPS433
+            glc_bit_name_from_caps,
+            slc_bit_name_from_caps,
+        )
+
+        self.assertEqual(glc_bit_name_from_caps(caps), "glc")
+        self.assertEqual(slc_bit_name_from_caps(caps), "slc")
 
 
 class TestMemTokenData(unittest.TestCase):

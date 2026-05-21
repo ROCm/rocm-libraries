@@ -36,9 +36,9 @@ Done (real):
     - ``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``            (T3)
     - ``ContinuousRegister``                                  (T3)
 
-TODO (dummy):
-    - Modifier classes (``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/
-      VOP3P/True16Modifiers``) — deferred to instruction-emit phase.
+Done (modifiers, T5.2):
+    - ``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/VOP3P/True16Modifiers``
+      (``toString`` follows ``container.hpp`` + active ``rocIsa`` asm caps).
 """
 
 from __future__ import annotations
@@ -48,7 +48,8 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
-from ._dummy import make_dummy_class
+from .caps import glc_bit_name_from_caps, slc_bit_name_from_caps
+from .enum import CacheScope, HighBitSel, SelectBit, UnusedBit
 
 _P = "rocisa.container"
 
@@ -1374,15 +1375,525 @@ class MemTokenData(Container):
 
 
 # ---------------------------------------------------------------------------
-# Remaining surface kept as dummies (covered by later tasks).
+# Instruction modifier descriptors (T5.2) — rocisa::Container subclasses.
 # ---------------------------------------------------------------------------
 
-DSModifiers = make_dummy_class(f"{_P}.DSModifiers")
-FLATModifiers = make_dummy_class(f"{_P}.FLATModifiers")
-GLOBALModifiers = make_dummy_class(f"{_P}.GLOBALModifiers")
-MUBUFModifiers = make_dummy_class(f"{_P}.MUBUFModifiers")
-SMEMModifiers = make_dummy_class(f"{_P}.SMEMModifiers")
-SDWAModifiers = make_dummy_class(f"{_P}.SDWAModifiers")
-DPPModifiers = make_dummy_class(f"{_P}.DPPModifiers")
-VOP3PModifiers = make_dummy_class(f"{_P}.VOP3PModifiers")
-True16Modifiers = make_dummy_class(f"{_P}.True16Modifiers")
+
+def _asm_caps() -> dict:
+    """Active ISA asm caps (requires ``rocIsa.init`` or ``setKernel``)."""
+    from . import rocIsa  # noqa: WPS433
+
+    return rocIsa.getInstance().getAsmCaps()
+
+
+def _cache_scope_to_string(scope: CacheScope) -> str:
+    """Mirror ``rocisa::toString(CacheScope)`` (``enum.hpp``)."""
+    if scope == CacheScope.SCOPE_NONE:
+        return ""
+    return scope.name
+
+
+def _select_bit_to_string(bit: SelectBit) -> str:
+    if bit == SelectBit.SEL_NONE:
+        return ""
+    return bit.name
+
+
+def _unused_bit_to_string(bit: UnusedBit) -> str:
+    if bit == UnusedBit.UNUSED_NONE:
+        return ""
+    return bit.name
+
+
+def _int_vector_to_string(vec: List[int]) -> str:
+    inner = ",".join(str(v) for v in vec)
+    return f"[{inner}]"
+
+
+class DSModifiers(Container):
+    """LDS/GDS modifier bundle (``rocisa::DSModifiers``)."""
+
+    __slots__ = ("na", "offset", "offset0", "offset1", "gds")
+
+    def __init__(
+        self,
+        na: int = 1,
+        offset: int = 0,
+        offset0: int = 0,
+        offset1: int = 0,
+        gds: bool = False,
+    ) -> None:
+        self.na = na
+        self.offset = offset
+        self.offset0 = offset0
+        self.offset1 = offset1
+        self.gds = gds
+
+    def toString(self) -> str:
+        k_str = ""
+        if self.na == 1:
+            k_str += f" offset:{self.offset}"
+        elif self.na == 2:
+            k_str += f" offset0:{self.offset0} offset1:{self.offset1}"
+        if self.gds:
+            k_str += " gds"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"DSModifiers(na={self.na!r}, offset={self.offset!r}, "
+            f"offset0={self.offset0!r}, offset1={self.offset1!r}, gds={self.gds!r})"
+        )
+
+    def __copy__(self) -> "DSModifiers":
+        return DSModifiers(self.na, self.offset, self.offset0, self.offset1, self.gds)
+
+    def __deepcopy__(self, memo: dict) -> "DSModifiers":
+        return DSModifiers(self.na, self.offset, self.offset0, self.offset1, self.gds)
+
+    def __getstate__(self) -> Tuple[int, int, int, int, bool]:
+        return (self.na, self.offset, self.offset0, self.offset1, self.gds)
+
+    def __setstate__(self, state: Tuple[int, int, int, int, bool]) -> None:
+        self.na, self.offset, self.offset0, self.offset1, self.gds = state
+
+
+class FLATModifiers(Container):
+    """FLAT memory modifier bundle (``rocisa::FLATModifiers``)."""
+
+    __slots__ = (
+        "offset12", "glc", "slc", "dlc", "scope", "lds", "isStore",
+    )
+
+    def __init__(
+        self,
+        offset12: int = 0,
+        glc: bool = False,
+        slc: bool = False,
+        dlc: bool = False,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        lds: bool = False,
+        isStore: bool = False,
+    ) -> None:
+        self.offset12 = offset12
+        self.glc = glc
+        self.slc = slc
+        self.dlc = dlc
+        self.scope = scope
+        self.lds = lds
+        self.isStore = isStore
+
+    def toString(self) -> str:
+        caps = _asm_caps()
+        has_dlc = bool(caps.get("HasDLCModifier"))
+        has_scope = bool(caps.get("HasSCOPEModifier"))
+        k_str = ""
+        if self.offset12 != 0:
+            k_str += f" offset:{self.offset12}"
+        if self.glc:
+            k_str += f" {glc_bit_name_from_caps(caps)}"
+        if self.slc:
+            k_str += f" {slc_bit_name_from_caps(caps)}"
+        if has_dlc and self.dlc:
+            k_str += " dlc"
+        if has_scope and self.scope != CacheScope.SCOPE_NONE:
+            k_str += f" scope:{_cache_scope_to_string(self.scope)}"
+        if self.lds:
+            k_str += " lds"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"FLATModifiers(offset12={self.offset12!r}, glc={self.glc!r}, "
+            f"slc={self.slc!r}, dlc={self.dlc!r}, scope={self.scope!r}, "
+            f"lds={self.lds!r}, isStore={self.isStore!r})"
+        )
+
+    def __copy__(self) -> "FLATModifiers":
+        return FLATModifiers(
+            self.offset12, self.glc, self.slc, self.dlc,
+            self.scope, self.lds, self.isStore,
+        )
+
+    def __deepcopy__(self, memo: dict) -> "FLATModifiers":
+        return self.__copy__()
+
+    def __getstate__(self) -> Tuple[int, bool, bool, bool, int, bool, bool]:
+        return (
+            self.offset12, self.glc, self.slc, self.dlc,
+            int(self.scope), self.lds, self.isStore,
+        )
+
+    def __setstate__(
+        self, state: Tuple[int, bool, bool, bool, int, bool, bool],
+    ) -> None:
+        (
+            self.offset12, self.glc, self.slc, self.dlc,
+            scope_val, self.lds, self.isStore,
+        ) = state
+        self.scope = CacheScope(scope_val)
+
+
+class GLOBALModifiers(Container):
+    """GLOBAL memory offset modifier (``rocisa::GLOBALModifiers``)."""
+
+    __slots__ = ("offset",)
+
+    def __init__(self, offset: int = 0) -> None:
+        self.offset = offset
+
+    def toString(self) -> str:
+        if self.offset != 0:
+            return f" offset:{self.offset}"
+        return ""
+
+    def __repr__(self) -> str:
+        return f"GLOBALModifiers(offset={self.offset!r})"
+
+    def __copy__(self) -> "GLOBALModifiers":
+        return GLOBALModifiers(self.offset)
+
+    def __deepcopy__(self, memo: dict) -> "GLOBALModifiers":
+        return GLOBALModifiers(self.offset)
+
+    def __getstate__(self) -> Tuple[int]:
+        return (self.offset,)
+
+    def __setstate__(self, state: Tuple[int]) -> None:
+        self.offset = state[0]
+
+
+class MUBUFModifiers(Container):
+    """MUBUF memory modifier bundle (``rocisa::MUBUFModifiers``)."""
+
+    __slots__ = (
+        "offen", "offset12", "glc", "slc", "dlc", "scope", "nt", "lds", "isStore",
+    )
+
+    def __init__(
+        self,
+        offen: bool = False,
+        offset12: int = 0,
+        glc: bool = False,
+        slc: bool = False,
+        dlc: bool = False,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        nt: bool = False,
+        lds: bool = False,
+        isStore: bool = False,
+    ) -> None:
+        self.offen = offen
+        self.offset12 = offset12
+        self.glc = glc
+        self.slc = slc
+        self.dlc = dlc
+        self.scope = scope
+        self.nt = nt
+        self.lds = lds
+        self.isStore = isStore
+
+    def toString(self) -> str:
+        caps = _asm_caps()
+        has_dlc = bool(caps.get("HasDLCModifier"))
+        has_scope = bool(caps.get("HasSCOPEModifier"))
+        has_nt = bool(caps.get("HasNTModifier"))
+        k_str = ""
+        if self.offen:
+            k_str += f" offen offset:{self.offset12}"
+        if self.glc:
+            k_str += f" {glc_bit_name_from_caps(caps)}"
+        if self.slc:
+            k_str += f" {slc_bit_name_from_caps(caps)}"
+        if has_dlc and self.dlc:
+            k_str += " dlc"
+        if has_scope and self.scope != CacheScope.SCOPE_NONE:
+            k_str += f" scope:{_cache_scope_to_string(self.scope)}"
+        if has_nt and self.nt:
+            k_str += " nt"
+        if self.lds:
+            k_str += " lds"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"MUBUFModifiers(offen={self.offen!r}, offset12={self.offset12!r}, "
+            f"glc={self.glc!r}, slc={self.slc!r}, dlc={self.dlc!r}, "
+            f"scope={self.scope!r}, nt={self.nt!r}, lds={self.lds!r}, "
+            f"isStore={self.isStore!r})"
+        )
+
+    def __copy__(self) -> "MUBUFModifiers":
+        return MUBUFModifiers(
+            self.offen, self.offset12, self.glc, self.slc, self.dlc,
+            self.scope, self.nt, self.lds, self.isStore,
+        )
+
+    def __deepcopy__(self, memo: dict) -> "MUBUFModifiers":
+        return self.__copy__()
+
+    def __getstate__(
+        self,
+    ) -> Tuple[bool, int, bool, bool, bool, int, bool, bool, bool]:
+        return (
+            self.offen, self.offset12, self.glc, self.slc, self.dlc,
+            int(self.scope), self.nt, self.lds, self.isStore,
+        )
+
+    def __setstate__(
+        self,
+        state: Tuple[bool, int, bool, bool, bool, int, bool, bool, bool],
+    ) -> None:
+        (
+            self.offen, self.offset12, self.glc, self.slc, self.dlc,
+            scope_val, self.nt, self.lds, self.isStore,
+        ) = state
+        self.scope = CacheScope(scope_val)
+
+
+class SMEMModifiers(Container):
+    """SMEM modifier bundle (``rocisa::SMEMModifiers``)."""
+
+    __slots__ = ("glc", "dlc", "scope", "nv", "offset")
+
+    def __init__(
+        self,
+        glc: bool = False,
+        dlc: bool = False,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        nv: bool = False,
+        offset: int = 0,
+    ) -> None:
+        self.glc = glc
+        self.dlc = dlc
+        self.scope = scope
+        self.nv = nv
+        self.offset = offset
+
+    def toString(self) -> str:
+        caps = _asm_caps()
+        has_dlc = bool(caps.get("HasDLCModifier"))
+        has_scope = bool(caps.get("HasSCOPEModifier"))
+        k_str = ""
+        if self.offset != 0:
+            k_str += f" offset:{self.offset}"
+        if not has_scope and self.glc:
+            k_str += " glc"
+        if has_dlc and self.dlc:
+            k_str += " dlc"
+        if has_scope and self.scope != CacheScope.SCOPE_NONE:
+            k_str += f" scope:{_cache_scope_to_string(self.scope)}"
+        if self.nv:
+            k_str += " nv"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"SMEMModifiers(glc={self.glc!r}, dlc={self.dlc!r}, "
+            f"scope={self.scope!r}, nv={self.nv!r}, offset={self.offset!r})"
+        )
+
+    def __copy__(self) -> "SMEMModifiers":
+        return SMEMModifiers(self.glc, self.dlc, self.scope, self.nv, self.offset)
+
+    def __deepcopy__(self, memo: dict) -> "SMEMModifiers":
+        return SMEMModifiers(self.glc, self.dlc, self.scope, self.nv, self.offset)
+
+    def __getstate__(self) -> Tuple[bool, bool, int, bool, int]:
+        return (self.glc, self.dlc, int(self.scope), self.nv, self.offset)
+
+    def __setstate__(self, state: Tuple[bool, bool, int, bool, int]) -> None:
+        self.glc, self.dlc, scope_val, self.nv, self.offset = state
+        self.scope = CacheScope(scope_val)
+
+
+class SDWAModifiers(Container):
+    """SDWA modifier bundle (``rocisa::SDWAModifiers``)."""
+
+    __slots__ = ("dst_sel", "dst_unused", "src0_sel", "src1_sel")
+
+    def __init__(
+        self,
+        dst_sel: SelectBit = SelectBit.SEL_NONE,
+        dst_unused: UnusedBit = UnusedBit.UNUSED_NONE,
+        src0_sel: SelectBit = SelectBit.SEL_NONE,
+        src1_sel: SelectBit = SelectBit.SEL_NONE,
+    ) -> None:
+        self.dst_sel = dst_sel
+        self.dst_unused = dst_unused
+        self.src0_sel = src0_sel
+        self.src1_sel = src1_sel
+
+    def toString(self) -> str:
+        k_str = ""
+        if self.dst_sel != SelectBit.SEL_NONE:
+            k_str += f" dst_sel:{_select_bit_to_string(self.dst_sel)}"
+        if self.dst_unused != UnusedBit.UNUSED_NONE:
+            k_str += f" dst_unused:{_unused_bit_to_string(self.dst_unused)}"
+        if self.src0_sel != SelectBit.SEL_NONE:
+            k_str += f" src0_sel:{_select_bit_to_string(self.src0_sel)}"
+        if self.src1_sel != SelectBit.SEL_NONE:
+            k_str += f" src1_sel:{_select_bit_to_string(self.src1_sel)}"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"SDWAModifiers(dst_sel={self.dst_sel!r}, "
+            f"dst_unused={self.dst_unused!r}, src0_sel={self.src0_sel!r}, "
+            f"src1_sel={self.src1_sel!r})"
+        )
+
+    def __copy__(self) -> "SDWAModifiers":
+        return SDWAModifiers(
+            self.dst_sel, self.dst_unused, self.src0_sel, self.src1_sel,
+        )
+
+    def __deepcopy__(self, memo: dict) -> "SDWAModifiers":
+        return SDWAModifiers(
+            self.dst_sel, self.dst_unused, self.src0_sel, self.src1_sel,
+        )
+
+    def __getstate__(self) -> Tuple[int, int, int, int]:
+        return (
+            int(self.dst_sel), int(self.dst_unused),
+            int(self.src0_sel), int(self.src1_sel),
+        )
+
+    def __setstate__(self, state: Tuple[int, int, int, int]) -> None:
+        self.dst_sel = SelectBit(state[0])
+        self.dst_unused = UnusedBit(state[1])
+        self.src0_sel = SelectBit(state[2])
+        self.src1_sel = SelectBit(state[3])
+
+
+class DPPModifiers(Container):
+    """DPP modifier bundle (``rocisa::DPPModifiers``)."""
+
+    __slots__ = ("row_shr", "row_bcast", "bound_ctrl", "quad_perm")
+
+    def __init__(
+        self,
+        row_shr: int = -1,
+        row_bcast: int = -1,
+        bound_ctrl: int = -1,
+        quad_perm: Optional[List[int]] = None,
+    ) -> None:
+        self.row_shr = row_shr
+        self.row_bcast = row_bcast
+        self.bound_ctrl = bound_ctrl
+        self.quad_perm: List[int] = list(quad_perm) if quad_perm else []
+
+    def toString(self) -> str:
+        k_str = ""
+        if self.row_shr != -1:
+            k_str += f" row_shr:{self.row_shr}"
+        if self.row_bcast != -1:
+            k_str += f" row_bcast:{self.row_bcast}"
+        if self.bound_ctrl != -1:
+            k_str += f" bound_ctrl:{self.bound_ctrl}"
+        if self.quad_perm:
+            k_str += f" quad_perm:{_int_vector_to_string(self.quad_perm)}"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"DPPModifiers(row_shr={self.row_shr!r}, row_bcast={self.row_bcast!r}, "
+            f"bound_ctrl={self.bound_ctrl!r}, quad_perm={self.quad_perm!r})"
+        )
+
+    def __copy__(self) -> "DPPModifiers":
+        return DPPModifiers(
+            self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm,
+        )
+
+    def __deepcopy__(self, memo: dict) -> "DPPModifiers":
+        return DPPModifiers(
+            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm),
+        )
+
+    def __getstate__(self) -> Tuple[int, int, int, List[int]]:
+        return (self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm))
+
+    def __setstate__(self, state: Tuple[int, int, int, List[int]]) -> None:
+        self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm = state
+        self.quad_perm = list(self.quad_perm)
+
+
+class VOP3PModifiers(Container):
+    """VOP3P modifier bundle (``rocisa::VOP3PModifiers``)."""
+
+    __slots__ = ("op_sel", "op_sel_hi", "byte_sel")
+
+    def __init__(
+        self,
+        op_sel: Optional[List[int]] = None,
+        op_sel_hi: Optional[List[int]] = None,
+        byte_sel: Optional[List[int]] = None,
+    ) -> None:
+        self.op_sel: List[int] = list(op_sel) if op_sel else []
+        self.op_sel_hi: List[int] = list(op_sel_hi) if op_sel_hi else []
+        self.byte_sel: List[int] = list(byte_sel) if byte_sel else []
+
+    def toString(self) -> str:
+        k_str = ""
+        if self.op_sel:
+            k_str += f" op_sel:{_int_vector_to_string(self.op_sel)}"
+        if self.op_sel_hi:
+            k_str += f" op_sel_hi:{_int_vector_to_string(self.op_sel_hi)}"
+        if self.byte_sel:
+            k_str += f" byte_sel:{_int_vector_to_string(self.byte_sel)}"
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"VOP3PModifiers(op_sel={self.op_sel!r}, "
+            f"op_sel_hi={self.op_sel_hi!r}, byte_sel={self.byte_sel!r})"
+        )
+
+    def __copy__(self) -> "VOP3PModifiers":
+        return VOP3PModifiers(self.op_sel, self.op_sel_hi, self.byte_sel)
+
+    def __deepcopy__(self, memo: dict) -> "VOP3PModifiers":
+        return VOP3PModifiers(
+            list(self.op_sel), list(self.op_sel_hi), list(self.byte_sel),
+        )
+
+    def __getstate__(self) -> Tuple[List[int], List[int], List[int]]:
+        return (list(self.op_sel), list(self.op_sel_hi), list(self.byte_sel))
+
+    def __setstate__(self, state: Tuple[List[int], List[int], List[int]]) -> None:
+        self.op_sel, self.op_sel_hi, self.byte_sel = state
+        self.op_sel = list(self.op_sel)
+        self.op_sel_hi = list(self.op_sel_hi)
+        self.byte_sel = list(self.byte_sel)
+
+
+class True16Modifiers(Container):
+    """True16 high/low selector (``rocisa::True16Modifiers``)."""
+
+    __slots__ = ("high_bit",)
+
+    def __init__(self, high_bit: Union[HighBitSel, int] = HighBitSel.NONE) -> None:
+        if isinstance(high_bit, int):
+            self.high_bit = HighBitSel(high_bit)
+        else:
+            self.high_bit = high_bit
+
+    def toString(self) -> str:
+        if self.high_bit == HighBitSel.NONE:
+            return ""
+        return ".h" if self.high_bit == HighBitSel.HIGH else ".l"
+
+    def __repr__(self) -> str:
+        return f"True16Modifiers(high_bit={self.high_bit!r})"
+
+    def __copy__(self) -> "True16Modifiers":
+        return True16Modifiers(self.high_bit)
+
+    def __deepcopy__(self, memo: dict) -> "True16Modifiers":
+        return True16Modifiers(self.high_bit)
+
+    def __getstate__(self) -> Tuple[int]:
+        return (int(self.high_bit),)
+
+    def __setstate__(self, state: Tuple[int]) -> None:
+        self.high_bit = HighBitSel(state[0])

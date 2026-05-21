@@ -54,16 +54,16 @@ What it does (real):
       ``functions``, ``asmpass``, ``macro``, ``register``.
 
 Not yet done (dummy):
-    - Free functions: ``isaToGfx``, ``getGlcBitName``, ``getSlcBitName``.
+    - Free functions: ``isaToGfx``.
+    - ``getGlcBitName`` / ``getSlcBitName`` (real; gfx1250 asm caps).
     - Counters: ``count*``, ``find*``, ``getMFMAs``.
     - Interop hooks: ``isSupportedByStinkyTofu``, ``StinkyAsmModule``,
       ``toStinkyTofuModule`` — should delegate into compiled stinkytofu
       bindings once the dummy phase ends.
     - Submodules still all-dummy: ``code``, ``label``,
       ``instruction``, ``functions``, ``asmpass``, ``macro``.
-    - ``container``: register-reference layer + ``Container`` ABC and
-      hardware tokens (``VCC`` / ``EXEC`` / ``EXECLO`` / ``EXECHI`` /
-      ``HWRegContainer``, ``MemTokenData``); ``*Modifiers`` still dummy.
+    - ``container``: register-reference layer + ``Container`` ABC,
+      hardware tokens, ``MemTokenData``, and ``*Modifiers``.
 """
 
 from __future__ import annotations
@@ -259,8 +259,16 @@ class rocIsa:
         self._vgpr_idx[name] = idx
 
 isaToGfx = make_dummy_func(f"{_P}.isaToGfx")
-getGlcBitName = make_dummy_func(f"{_P}.getGlcBitName")
-getSlcBitName = make_dummy_func(f"{_P}.getSlcBitName")
+
+
+def getGlcBitName() -> str:
+    """Mirror ``rocisa::getGlcBitName()`` using the active ISA asm caps."""
+    return _caps.glc_bit_name_from_caps(rocIsa.getInstance().getAsmCaps())
+
+
+def getSlcBitName() -> str:
+    """Mirror ``rocisa::getSlcBitName()`` using the active ISA asm caps."""
+    return _caps.slc_bit_name_from_caps(rocIsa.getInstance().getAsmCaps())
 
 countType = make_dummy_func(f"{_P}.countType")
 countInstruction = make_dummy_func(f"{_P}.countInstruction")
