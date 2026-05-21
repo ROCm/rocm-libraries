@@ -1220,8 +1220,11 @@ def mainLoop(writer, kernel):
   grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
   grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   numSubIterK = tiA.localMMATileGrid[1]
-  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=numSubIterK) if scaleTiA else None
-  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=numSubIterK) if scaleTiB else None
+  #lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=numSubIterK) if scaleTiA else None
+  #lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=numSubIterK) if scaleTiB else None
+  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
+  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
+
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 

@@ -104,14 +104,23 @@ class InstructionEmitter:
                 dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
 
                 if self.hasScale:
+                    scaleTiA = self.tileInfoMap['SA']
+                    scaleTiB = self.tileInfoMap['SB']
+                    scaleMA = int(scaleTiA.lrSubtileShape[0])
+                    scaleKA = int(scaleTiA.lrSubtileShape[1])
+                    scaleMB = int(scaleTiB.lrSubtileShape[0])
+                    scaleKB = int(scaleTiB.lrSubtileShape[1])
                     scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
                     scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
                     scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
                     scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
                     scaleAVgpr = next(iter(scaleATile))
                     scaleBVgpr = next(iter(scaleBTile))
-                    sAsel = (a % 2) + 2 * subIterK
-                    sBsel = (b % 2) + 2 * subIterK
+                    # Selector must be RELATIVE to the scale K-LR-subtile (subIterK % scaleK),
+                    # not absolute subIterK; the latter overflows the 4-byte ds_read_b32
+                    # payload as soon as subIterK >= scaleK (i.e. DU >= 4*MI_K).
+                    sAsel = (a % scaleMA) + scaleMA * (subIterK % scaleKA)
+                    sBsel = (b % scaleMB) + scaleMB * (subIterK % scaleKB)
                 else:
                     scaleAVgpr = scaleBVgpr = -1
                     sAsel = sBsel = 0
@@ -145,16 +154,21 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            scaleSubtileK = int(ti.lrSubtileShape[1])
+            scaleKGrid    = int(ti.lrLocalSubtileGrid[1])
+            subtileK      = placement.tiles.subIterK_start // scaleSubtileK
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
-                dsOffset = int(ti.lrSubtileSize) * scaleGroupIdx
+                dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * scaleKGrid + subtileK)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
+
+
         return list(module.flatitems())
 
     def emit_gr(self, placement):
