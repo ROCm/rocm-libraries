@@ -158,8 +158,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             if dstGroup0 is not None:
-                mod.add(SAddU32(sgpr(sgprAddr), sgpr(sgprAddr), sgpr(tmpSgprIdx), "+= baseAddr(lo)"))
-                mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), "+= baseAddr(hi)"))
+                mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
+                mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= tileOffset(hi)"))
             else:
                 mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                 mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
@@ -498,6 +498,8 @@ class TensorDataMoverLoad(TensorDataMover):
     def calPadInterval(ldsBlockSizePerPad: int) -> int:
         ldsBlockDwordsPerPad = ldsBlockSizePerPad // 4 # bytes to dwords
         assert ldsBlockDwordsPerPad > 0
+        assert (ldsBlockDwordsPerPad & (ldsBlockDwordsPerPad - 1)) == 0, \
+            f"LdsBlockSizePerPad//4 ({ldsBlockDwordsPerPad}) must be a power of 2 for TDM hardware encoding"
         return int(log2(ldsBlockDwordsPerPad)) - 1
 
     @staticmethod
