@@ -2237,6 +2237,113 @@ def test_scheduler_R2_FP8_MT256():
         f"ui=R-1 must gate scale gr and gr_inc, got {gated_last_opTypes}")
 
 
+def test_scheduler_R2_FP8_MT256_partN2_symmetric_mxsa_lr():
+    """Under R=2 + numPartitionsN=2, MXSA and MXSB must both have a
+    partition-0 LR with a postOp lr_inc — symmetric MT-transition anchors.
+
+    Regression for the MT256x256x128 MXFP8 K>=512 wrong-half scale-read bug:
+    with MIWaveGroup=[2,2] the partition grid is 1xN=1x2, so the M-axis is
+    not split across partitions and ``loaded_ranges`` dedups partition-0's
+    MXSA LR.  MXSB still gets a partition-0 LR (the N-axis IS split) and the
+    Round-3 postOp rewrite in insert_gr_lr_inc anchors its lr_inc there,
+    moving the LDS read-side swap to AFTER all partition-0 scale reads.
+    MXSA used to land only in partition 1 (mt=1), so insert_gr_lr_inc saw no
+    MT transition for SA and the fallback put MXSA's lr_inc as a PREOP on
+    the partition-1 LR — splitting MXSA reads across the LR-pointer XOR at
+    the partition boundary and producing wrong reads at column 64.
+
+    LogicalScheduler.place_LRs now force-places a partition-0 MXSA LR under
+    R>1 + numPartitionsN>1 so the MT-transition walk applies symmetrically.
+    """
+    cfg = SchedulerConfig(
+        numMFMATilesM=8,
+        numMFMATilesN=8,
+        numSubIterK=1,
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=1),
+        lrSB=ReadGranularity(mn=2, k=1),
+        grSA=ReadGranularity(mn=8, k=1),
+        grSB=ReadGranularity(mn=8, k=1),
+        scaleSchedulingPeriod=2,
+        numPartitionsM=1,
+        numPartitionsN=2,
+    )
+    sched = LogicalScheduler(cfg)
+    sched.build()
+
+    parts = sched._partitions
+    assert len(parts) == 2
+
+    p0_lrs_by_tensor = {lr.tensor: lr for slot in parts[0] for lr in slot.lrs}
+    p1_lrs_by_tensor = {lr.tensor: lr for slot in parts[1] for lr in slot.lrs}
+
+    # ── Symmetric partition-0 anchors for MXSA AND MXSB ──
+    assert 'SA' in p0_lrs_by_tensor, (
+        "MXSA must have a partition-0 LR placement under R>1+numPartitionsN>1 "
+        f"(got partition-0 tensors: {sorted(p0_lrs_by_tensor)})")
+    assert 'SB' in p0_lrs_by_tensor, (
+        "MXSB must have a partition-0 LR placement (pre-existing behavior, "
+        f"got partition-0 tensors: {sorted(p0_lrs_by_tensor)})")
+
+    sa_p0 = p0_lrs_by_tensor['SA']
+    sb_p0 = p0_lrs_by_tensor['SB']
+    assert sa_p0.mtIteration == 0 and sb_p0.mtIteration == 0, (
+        "partition-0 MXSA/MXSB LRs must be mt=0 (current-MT anchors)")
+
+    # postOp lr_inc anchored on the partition-0 LR for BOTH scales
+    sa_post_kinds = [(op.kind, op.tensor) for op in sa_p0.postOps]
+    sb_post_kinds = [(op.kind, op.tensor) for op in sb_p0.postOps]
+    assert ('lr_inc', 'SA') in sa_post_kinds, (
+        "MXSA partition-0 LR must have postOp lr_inc(SA) so the Round-3 "
+        f"MT-transition rewrite is symmetric (got postOps {sa_post_kinds})")
+    assert ('lr_inc', 'SB') in sb_post_kinds, (
+        "MXSB partition-0 LR must have postOp lr_inc(SB) "
+        f"(got postOps {sb_post_kinds})")
+
+    # And MXSA's partition-1 LR must NOT carry the preOp lr_inc anymore —
+    # the postOp on partition 0 is the only anchor now.
+    sa_p1 = p1_lrs_by_tensor['SA']
+    sa_pre_kinds = [(op.kind, op.tensor) for op in sa_p1.preOps]
+    assert ('lr_inc', 'SA') not in sa_pre_kinds, (
+        "MXSA partition-1 LR must NOT have preOp lr_inc(SA) once partition-0 "
+        f"anchor is present (got preOps {sa_pre_kinds})")
+
+
+def test_scheduler_R2_FP8_MT256_partN2_R1_baseline_unchanged():
+    """R=1 with numPartitionsN=2 must NOT add the MXSA partition-0 LR.
+
+    Guards the bit-identical R=1 contract: the force-place path is strictly
+    gated to R>1, so R==1 schedules retain the historical asymmetric MXSA
+    placement (partition-1 mt=1 only).
+    """
+    cfg = SchedulerConfig(
+        numMFMATilesM=8,
+        numMFMATilesN=8,
+        numSubIterK=1,
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=1),
+        lrSB=ReadGranularity(mn=2, k=1),
+        grSA=ReadGranularity(mn=8, k=1),
+        grSB=ReadGranularity(mn=8, k=1),
+        scaleSchedulingPeriod=1,
+        numPartitionsM=1,
+        numPartitionsN=2,
+    )
+    sched = LogicalScheduler(cfg)
+    sched.place_LRs()
+
+    p0_tensors = {lr.tensor for slot in sched._partitions[0] for lr in slot.lrs}
+    assert 'SA' not in p0_tensors, (
+        "R=1 must NOT add a partition-0 MXSA LR (force-place is gated on R>1); "
+        f"got partition-0 tensors {sorted(p0_tensors)}")
+
+
 def test_data_gr_inc_lr_inc_emit_split_R2():
     """Data gr_inc / lr_inc emit contract for ScaleDepthURatio=2.
 

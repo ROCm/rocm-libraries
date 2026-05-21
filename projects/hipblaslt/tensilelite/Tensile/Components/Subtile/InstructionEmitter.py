@@ -333,12 +333,15 @@ class InstructionEmitter:
               detected from a preOp on the new-MT scale LR to a postOp
               on the last pre-transition scale LR (see the
               "MT256 R=2 PGR=2 partition-handoff fix" comment in
-              LogicalScheduler.py).  The fallback case where a scale
-              tensor has only one LR placement (e.g. MXSA when
-              numPartitionsN=2 leaves no partition-0 LR for the
-              M-side scale) keeps the preOp anchor — empirically,
-              flipping that fallback to a postOp regresses PGR=2
-              K=512/1024 sharply, so the asymmetry is intentional.
+              LogicalScheduler.py).  For numPartitionsN>1 +
+              numPartitionsM=1 (MIWaveGroup=[2,2] at MT256x256), the
+              M-axis is not split across partitions so MXSA's
+              loaded_ranges naturally dedups its partition-0 LR;
+              place_LRs force-places a symmetric MXSA partition-0 LR
+              under R>1 + numPartitionsN>1 so the MT-transition walk
+              fires for SA the same way it fires for SB, anchoring
+              MXSA's lr_inc postOp on the partition-0 LR (see the
+              force_sa_partition0 block in place_LRs).
             - scale LR (ds_read) is NOT gated: it re-issues the same
               4 B load into a cycled VGPR each copy.  MFMA op_sel
               picks the right K byte per copy (see emit_mfma).

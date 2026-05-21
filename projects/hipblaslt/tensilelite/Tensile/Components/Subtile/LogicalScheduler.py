@@ -533,6 +533,34 @@ class LogicalScheduler:
         # Track placed K-prefetch LRs across partitions (for dedup).
         placed = set()
 
+        # Decouple-scale-DU symmetric MXSA placement (R>1 + numPartitionsN>1):
+        #   When the partition grid splits the N-axis (numPartitionsN>1) but
+        #   leaves the M-axis whole (numPartitionsM=1), MXSB naturally gets
+        #   a partition-0 LR (its first half of N-tiles), while MXSA's M-axis
+        #   range is identical across partitions and the loaded_ranges dedup
+        #   suppresses any partition-0 MXSA LR (the partition-1 mt=1 LR alone
+        #   covers MXSA's data via carry_active).  Under R>1 PGR>0,
+        #   insert_gr_lr_inc rewrites scale lr_inc into a postOp on the last
+        #   pre-MT-transition LR (the partition-0 anchor); without a
+        #   partition-0 MXSA LR there is no MT transition to detect for SA,
+        #   and the fallback puts MXSA's lr_inc as a preOp on the partition-1
+        #   mt=1 LR — which empirically produces wrong reads at the M=64 /
+        #   partition-1 boundary for MT256x256x128 MXFP8 K>=512.
+        #
+        #   Force-place an MXSA partition-0 LR mirroring MXSB so the MT
+        #   transition is symmetric and insert_gr_lr_inc anchors MXSA's
+        #   lr_inc postOp on the partition-0 LR.  The extra ds_reads are
+        #   functionally redundant (MXSA's M-range is full under
+        #   numPartitionsM=1) but cost a small constant number of LDS reads
+        #   per outer iter in exchange for a symmetric R>1 schedule.
+        #   Strictly gated to R>1 + numPartitionsN>1 + hasScale so R==1 and
+        #   single-partition schedules stay bit-identical.
+        force_sa_partition0 = (
+            cfg.scaleSchedulingPeriod > 1
+            and cfg.numPartitionsN > 1
+            and cfg.hasScale
+        )
+
         partitions = []
         for pi in range(numP):
             cur, nxt = part_ranges[pi], part_ranges[(pi + 1) % numP]
@@ -542,7 +570,9 @@ class LogicalScheduler:
             for side in ('A', 'B'):
                 load[side] = is_last or nxt[side] not in loaded_ranges[side]
 
-            slots = self._place_LRs_for_partition(cur, nxt, is_last, load, placed)
+            force_sa = force_sa_partition0 and pi == 0
+            slots = self._place_LRs_for_partition(
+                cur, nxt, is_last, load, placed, force_sa=force_sa)
             for slot in slots:
                 for lr in slot.lrs:
                     lr.partition = pi
@@ -612,8 +642,16 @@ class LogicalScheduler:
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
                                   is_last: bool,
                                   load: dict,
-                                  placed: set) -> List[SubIterKSlot]:
-        """Place MFMAs and LRs for one partition."""
+                                  placed: set,
+                                  force_sa: bool = False) -> List[SubIterKSlot]:
+        """Place MFMAs and LRs for one partition.
+
+        ``force_sa`` (Decouple-scale-DU symmetric MXSA, see place_LRs comment):
+        when True, treat MXSA as if its side were loading on wrapping chunks
+        even if ``load['A']`` is False.  Used in partition 0 under R>1 +
+        numPartitionsN>1 to give MXSA a partition-0 LR mirroring MXSB so the
+        Round-3 scale lr_inc postOp anchors symmetrically.
+        """
         cfg = self.config
         numK = cfg.numSubIterK
         multi_part = cfg.numPartitions > 1
@@ -641,9 +679,13 @@ class LogicalScheduler:
                 # loading so that slot assignment reflects active tensors.
                 # A and B always participate (their wrapping is gated inside
                 # the loop) to keep slot indices stable for their k_gran group.
+                # Under force_sa, also keep MXSA so the symmetric partition-0
+                # anchor gets placed even when load['A'] is False.
                 if is_wrap and multi_part:
                     group = [(t, g) for t, g in group_all
-                             if t in ('A', 'B') or load['A' if t in ('A', 'SA') else 'B']]
+                             if t in ('A', 'B')
+                             or load['A' if t in ('A', 'SA') else 'B']
+                             or (t == 'SA' and force_sa)]
                 else:
                     group = group_all
 
@@ -670,7 +712,10 @@ class LogicalScheduler:
                         # Wrapping: use load dict. Non-wrapping: use placed set.
                         if is_wrap and multi_part:
                             if not load[side_key]:
-                                continue
+                                # force_sa overrides the side-load skip only
+                                # for MXSA, keeping every other gate intact.
+                                if not (tensor == 'SA' and force_sa):
+                                    continue
                         else:
                             lr_key = (tensor, lr_k_start, lr_k_end, ts, te)
                             if lr_key in placed:
@@ -1851,12 +1896,28 @@ class LogicalScheduler:
                             Dep(ref=last_gr, mt_offset=0)]
 
                 # ── Phase 4: Consolidate MFMA deps ──
-                # After chaining, MFMA only needs the tail of its dep chain.
+                # After Phase 1 the LRs form a linear chain B→…→tail; MFMA
+                # must depend on the chain TAIL (last_lr) so the chain orders
+                # before MFMA without producing fan-out (two children sharing
+                # a parent).  This matters when an LR carries a postOp: its
+                # placement_tail_id resolves to the postOp module, and if
+                # MFMA's same-slot LR dep points at that intermediate LR
+                # while the next LR in the chain ALSO chains through it,
+                # both wait_lr (from MFMA's preOp) and the next LR end up
+                # with the same `before` predecessor — which trips the
+                # uniqueness assertion in InstructionScheduler.extractPathsFromBeforeDeps.
+                # Consolidating to last_lr is a no-op when MFMA already
+                # depends on the tail and keeps single-LR slots bit-identical.
                 if slot.mfma and last_lr is not None:
                     slot_lr_set = set(id(lr) for lr in ordered_lrs)
                     lr_deps = [d for d in slot.mfma.deps
                                if id(d.ref) in slot_lr_set]
-                    if len(lr_deps) > 1:
+                    needs_consolidate = (
+                        len(lr_deps) > 1
+                        or (len(lr_deps) == 1
+                            and id(lr_deps[0].ref) != id(last_lr))
+                    )
+                    if needs_consolidate:
                         other_deps = [d for d in slot.mfma.deps
                                       if id(d.ref) not in slot_lr_set]
                         slot.mfma.deps = other_deps + [
