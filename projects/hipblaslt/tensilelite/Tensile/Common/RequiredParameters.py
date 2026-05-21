@@ -29,6 +29,7 @@ from .ValidParameters import validParameters
 def getRequiredParametersFull() -> set:
     return frozenset(validParameters.keys())
 
+
 @lru_cache
 def getRequiredParametersMin() -> set:
     return frozenset({
