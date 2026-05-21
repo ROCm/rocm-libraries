@@ -360,25 +360,18 @@ class InstructionEmitter:
         return list(module.flatitems())
 
     def emit_mask_k(self, source):
-        """Per-lane K-mask for one subIterK.
+        """Per-lane K-mask for one subIterK, applied to A/B tiles via V_AND_B32.
 
-        Uses the shared diff = rem - laneK_0 staged in emit_mask_k_init.
-        For subIterK=n the effective per-lane diff is `diff - n*MatrixInstK`,
-        which we fold into the cmp immediates (no per-call sub).
+        Uses diff = rem - laneK_0 from emit_mask_k_init. For subIterK=n the
+        effective per-lane diff is diff - n*MatrixInstK, folded into the
+        cmp immediates (no per-call sub).
 
-        A/B tiles get per-vgpr V_AND_B32 with a mask vgpr. For BF16
-        (stride = 2 K positions per vgpr), vgpr `i` in subIterK `n` uses a
-        3-state mask:
-            kOff = i*2 + n*MatrixInstK
-            mask = (diff < kOff+1) ? 0
-                 : (diff < kOff+2) ? 0x0000FFFF
-                                   : 0xFFFFFFFF
-        Non-BF16 (e.g. FP4) uses a single 2-state mask shared across all i:
-            mask = (diff < n*MatrixInstK + 1) ? 0 : 0xFFFFFFFF
-        This assumes rem aligns to the per-lane K stride per vgpr (true for
-        rem=32 with FP4 MIK=128, 8 K/vgpr × 4 vgprs). A boundary inside a
-        non-BF16 vgpr would need per-byte/nibble handling.
-        MXSA/MXSB keep the whole-vgpr CNDMASK -> 0 path.
+        BF16 (kStride=2 K positions per vgpr) builds a per-vgpr 3-state mask
+        from the precomputed boundary masks (full / boundary[i] / zero).
+        Non-BF16 (e.g. FP4) builds a single 2-state mask shared across all
+        vgprs, assuming rem aligns to the per-lane K stride (true for
+        rem=32 with FP4 MIK=128). A boundary inside a non-BF16 vgpr would
+        need per-byte/nibble handling.
         """
         assert self._tail_vDiff is not None, \
             "emit_mask_k_init must run before emit_mask_k"
@@ -386,8 +379,7 @@ class InstructionEmitter:
         writer = self.writer
         kernel = self.kernel
         subIterK = source.subIterK
-        matrixInstK = kernel["MatrixInstK"]
-        kBaseConst = subIterK * matrixInstK
+        kBaseConst = subIterK * kernel["MatrixInstK"]
 
         laneSGPRCount = writer.states.laneSGPRCount
         isBF16 = kernel["ProblemType"]["DataTypeA"].isBFloat16()
@@ -399,94 +391,51 @@ class InstructionEmitter:
             m = source.vgpr_tile_map.get(key, [{}])[0]
             return sorted(set(m.values()))
 
-        # All A/B tiles in this subIterK have the same vgprs-per-lane count
-        # and the same K layout across vgprs, so the i-th vgpr of every tile
-        # gets the same mask. Compute the masks once and reuse across all tiles.
-        vgprPerInUnroll = 0
-        for ids, tilesDict in ((_unique_ids('A'), self.vgprTilesA),
-                               (_unique_ids('B'), self.vgprTilesB)):
-            if ids:
-                vgprPerInUnroll = len(list(tilesDict[ids[0]]))
-                break
-
-        # BF16 allocates one mask per i (boundary may land inside any vgpr).
-        # Non-BF16 builds a single 2-state mask and replicates the index across
-        # all i, since the boundary aligns to a vgpr edge.
-        if isBF16:
-            maskVgprs = [writer.vgprPool.checkOut(1, f"mask_k_msk{i}_k{subIterK}")
-                         for i in range(vgprPerInUnroll)]
-        else:
-            sharedMask = writer.vgprPool.checkOut(1, f"mask_k_msk_k{subIterK}")
-            maskVgprs = [sharedMask] * vgprPerInUnroll
+        aIds, bIds = _unique_ids('A'), _unique_ids('B')
+        # All A/B tiles share the same vgprs-per-lane count and K layout,
+        # so the i-th vgpr of every tile gets the same mask.
+        refTiles = self.vgprTilesA if aIds else self.vgprTilesB
+        refIds = aIds or bIds
+        vgprPerInUnroll = len(list(refTiles[refIds[0]])) if refIds else 0
 
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
-            # Compare for non-BF16: laneK_n >= rem ⟺ diff <= n*MatrixInstK ⟺
-            # diff < kBaseConst+1. Predicate is reused by MXSA/MXSB below (whole
-            # -vgpr cndmask) and by the v_and mask vgpr we build next.
-            # BF16 doesn't need this here — the isBF16 block below ends with
-            # sZero (= diff <= kBaseConst) in maskSgpr, which MXSA/MXSB reuses.
-            if not isBF16:
-                literal = kBaseConst + 1
+            def _emit_cmp(cmpCls, literal, comment):
+                # VOPC inline range is -16..64; stage out-of-range via scratch sgpr
+                # (e.g. BF16 MI_K=32 subIterK>=2, or FP4 MI_K=128 subIterK>=1).
                 if -16 <= literal <= 64:
-                    module.add(VCmpLtI32(
+                    module.add(cmpCls(
                         dst=sgpr(maskSgpr, laneSGPRCount),
                         src0=vgpr(self._tail_vDiff), src1=literal,
-                        comment=f"mask: diff < {literal} (laneK_{subIterK} >= rem)"))
+                        comment=comment))
                 else:
-                    # VOPC inline-constant range is -16..64; stage larger
-                    # literals via a scratch sgpr (e.g. FP4 MI_K=128, subIterK>=1).
                     with writer.allocTmpSgpr(1) as litSgprInfo:
                         litSgpr = litSgprInfo.idx
                         module.add(SMovB32(
                             dst=sgpr(litSgpr), src=hex(literal),
                             comment=f"stage literal {literal} (non-inline)"))
-                        module.add(VCmpLtI32(
-                            dst=sgpr(maskSgpr, laneSGPRCount),
-                            src0=vgpr(self._tail_vDiff), src1=sgpr(litSgpr),
-                            comment=f"mask: diff < {literal} (laneK_{subIterK} >= rem)"))
-                # Build the 2-state mask vgpr: predicate ? 0 : -1.
-                module.add(VCndMaskB32(
-                    dst=vgpr(sharedMask),
-                    src0=-1, src1=0,
-                    src2=sgpr(maskSgpr, laneSGPRCount),
-                    comment=f"mask = (diff < {literal}) ? 0 : -1"))
-
-            if isBF16:
-                # 3-way classifier per (lane, subIterK):
-                #   sFull = effective_diff_n >= 8  → mask = -1
-                #   sZero = effective_diff_n <= 0  → mask = 0
-                #   else                           → mask = boundaryMask[i] (precomputed)
-                # Only 2 cmps per subIterK (shared across all i), vs 8 in the
-                # per-i version, because the boundary pattern is baked in.
-                fullLit = kBaseConst + 7
-                zeroLit = kBaseConst
-                def _emit_cmp(cmpCls, literal, comment):
-                    # VOPC inline-constant range is -16..64; stage out-of-range
-                    # literals via a scratch sgpr (e.g. BF16 MI_K=32, subIterK>=2).
-                    if -16 <= literal <= 64:
                         module.add(cmpCls(
                             dst=sgpr(maskSgpr, laneSGPRCount),
-                            src0=vgpr(self._tail_vDiff), src1=literal,
+                            src0=vgpr(self._tail_vDiff), src1=sgpr(litSgpr),
                             comment=comment))
-                    else:
-                        with writer.allocTmpSgpr(1) as litSgprInfo:
-                            litSgpr = litSgprInfo.idx
-                            module.add(SMovB32(
-                                dst=sgpr(litSgpr), src=hex(literal),
-                                comment=f"stage literal {literal} (non-inline)"))
-                            module.add(cmpCls(
-                                dst=sgpr(maskSgpr, laneSGPRCount),
-                                src0=vgpr(self._tail_vDiff), src1=sgpr(litSgpr),
-                                comment=comment))
+
+            if isBF16:
+                # 3-way per (lane, subIterK), 2 cmps shared across all i:
+                #   sFull = effective_diff_n >= numMIInUnroll → -1
+                #   sZero = effective_diff_n <= 0            → 0
+                #   else                                     → boundary[i]
+                numMIInUnroll = vgprPerInUnroll * kStride
+                fullLit = kBaseConst + numMIInUnroll - 1
+                zeroLit = kBaseConst
+                maskVgprs = [writer.vgprPool.checkOut(1, f"mask_k_msk{i}_k{subIterK}")
+                             for i in range(vgprPerInUnroll)]
                 _emit_cmp(VCmpGTI32, fullLit,
-                          f"sFull: diff > {fullLit} (effective_diff_{subIterK} >= 8)")
+                          f"sFull: diff > {fullLit} (effective_diff_{subIterK} >= {numMIInUnroll})")
                 for i in range(vgprPerInUnroll):
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]),
-                        src0=vgpr(self._tail_boundaryMask[i]),
-                        src1=-1,
+                        src0=vgpr(self._tail_boundaryMask[i]), src1=-1,
                         src2=sgpr(maskSgpr, laneSGPRCount),
                         comment=f"mask[{i}] = sFull ? full : boundary[{i}]"))
                 _emit_cmp(VCmpLeI32, zeroLit,
@@ -496,26 +445,25 @@ class InstructionEmitter:
                         dst=vgpr(maskVgprs[i]), src0=vgpr(maskVgprs[i]), src1=0,
                         src2=sgpr(maskSgpr, laneSGPRCount),
                         comment=f"mask[{i}] = sZero ? 0 : prev"))
+            else:
+                # 2-state shared mask: diff < kBaseConst+1 → 0, else -1.
+                literal = kBaseConst + 1
+                sharedMask = writer.vgprPool.checkOut(1, f"mask_k_msk_k{subIterK}")
+                maskVgprs = [sharedMask] * vgprPerInUnroll
+                _emit_cmp(VCmpLtI32, literal,
+                          f"mask: diff < {literal} (laneK_{subIterK} >= rem)")
+                module.add(VCndMaskB32(
+                    dst=vgpr(sharedMask), src0=-1, src1=0,
+                    src2=sgpr(maskSgpr, laneSGPRCount),
+                    comment=f"mask = (diff < {literal}) ? 0 : -1"))
 
-            def _mask_all_whole(tile_vgprs, label):
-                for v in tile_vgprs:
-                    module.add(VCndMaskB32(
-                        dst=vgpr(v), src0=vgpr(v), src1=0,
-                        src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment=f"zero {label} if laneK >= rem"))
-
-            def _mask_all_partial(tile_vgprs, label):
-                for i, v in enumerate(tile_vgprs):
-                    module.add(VAndB32(
-                        dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
-                        comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
-
-        # Only Mask A and B
-            for tid in _unique_ids('A'):
-                _mask_all_partial(list(self.vgprTilesA[tid]), "A")
-            for tid in _unique_ids('B'):
-                _mask_all_partial(list(self.vgprTilesB[tid]), "B")
-
+            for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
+                                          ("B", bIds, self.vgprTilesB)):
+                for tid in ids:
+                    for i, v in enumerate(list(tilesDict[tid])):
+                        module.add(VAndB32(
+                            dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
+                            comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
         for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)
