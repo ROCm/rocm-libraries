@@ -778,7 +778,16 @@ struct CShuffleEpilogue
             }
         }();
 
+        // [OPT-A+B] Removed redundant s_wait_tensorcnt_barrier() on non-TDM archs.
+        // On gfx950 (no TDM), s_wait_tensorcnt_barrier reduces to a bare s_barrier
+        // that is immediately followed by block_sync_lds() at the loop entry
+        // (line below) — producing a back-to-back `s_barrier / lgkmcnt(0) / s_barrier`
+        // sequence in the ISA. The loop's first `block_sync_lds()` is a stronger
+        // sync (drains lgkmcnt + barrier) and is sufficient on its own. Keep the
+        // tensor-count drain for TDM archs that have outstanding tensor ops.
+#if CK_TILE_ENABLE_TDM_FEATURE
         s_wait_tensorcnt_barrier();
+#endif
 
         static_for<0, num_access, 1>{}([&](auto iAccess) {
             block_sync_lds();

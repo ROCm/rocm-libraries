@@ -759,8 +759,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     }
                 });
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
-            s_waitcnt< // vmcnt
-                Bload_num + ScaleAload_num + ScaleBload_num>();
+            // [OPT-D/E] vmcnt drain relaxed to kMaxVmCnt (effective no-op). The B
+            // pong + Scale loads at this site are NOT needed before the barrier —
+            // they are consumed by the *next* GEMM (after a long sched hint window).
+            // The following block_sync_lds() still drains lgkmcnt(0) for the LDS
+            // double-buffer hand-off, which is the only sync actually required here.
+            s_waitcnt<waitcnt_arg::kMaxVmCnt>();
             block_sync_lds();
 
             // Prefetch A(2i+2)
@@ -849,8 +853,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     }
                 });
             // barrier as ds_load A(2i + 1) and buffer_load_lds A(2i + 2) finished
-            s_waitcnt< // vmcnt
-                Bload_num + ScaleAload_num + ScaleBload_num>();
+            // [OPT-D/E] vmcnt drain relaxed to kMaxVmCnt (effective no-op). The B
+            // pong + Scale loads at this site are NOT needed before the barrier —
+            // they are consumed by the *next* GEMM (after a long sched hint window).
+            // The following block_sync_lds() still drains lgkmcnt(0) for the LDS
+            // double-buffer hand-off, which is the only sync actually required here.
+            s_waitcnt<waitcnt_arg::kMaxVmCnt>();
             block_sync_lds();
 
             // Prefetch A(2i+3)
@@ -943,8 +951,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     }
                 });
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
-            s_waitcnt< // vmcnt
-                Bload_num + ScaleAload_num + ScaleBload_num>();
+            // [OPT-D/E] vmcnt drain relaxed to kMaxVmCnt (effective no-op). The B
+            // pong + Scale loads at this site are NOT needed before the barrier —
+            // they are consumed by the *next* GEMM (after a long sched hint window).
+            // The following block_sync_lds() still drains lgkmcnt(0) for the LDS
+            // double-buffer hand-off, which is the only sync actually required here.
+            s_waitcnt<waitcnt_arg::kMaxVmCnt>();
             block_sync_lds();
 
             // preload A(2i+1)

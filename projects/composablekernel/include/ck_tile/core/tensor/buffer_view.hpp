@@ -1087,12 +1087,9 @@ struct buffer_view<address_space_enum::lds,
             constexpr index_t load_elts = scalar_per_t_vector * scalar_per_x_vector;
             if constexpr(load_elts == 12 && sizeof(typename X::value_type) == 1)
             {
-                auto rtn = reinterpret_cast<const int32_t*>(p_data_) +
-                           (i + linear_offset + static_offset) / 4;
-                struct
-                {
-                    int32_t x, y, z;
-                } tmp = {rtn[0], rtn[1], rtn[2]};
+                const auto* src = &p_data_[i + linear_offset + static_offset];
+                struct { int32_t x, y, z; } tmp;
+                __builtin_memcpy(&tmp, src, 12);
                 return bit_cast<X>(tmp);
             }
             else

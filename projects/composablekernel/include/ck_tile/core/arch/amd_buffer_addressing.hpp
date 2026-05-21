@@ -850,6 +850,7 @@ namespace impl {
 template<index_t N, typename T> struct smem_load_trait;
 
 template<typename T> struct smem_load_trait<16, T> { using payload_t = fp32x4_t; };
+template<typename T> struct smem_load_trait<12, T> { using payload_t = int32x3_t; }; // ds_read_b96 (12B), used by FP6
 template<typename T> struct smem_load_trait<8 , T> { using payload_t = fp32x2_t; };
 template<typename T> struct smem_load_trait<4 , T> { using payload_t = float; };
 template<typename T> struct smem_load_trait<2 , T> { using payload_t = float; };
@@ -871,6 +872,23 @@ struct smem_load<16>
         static_assert(sizeof(T) == 16);
         using mbuf_t = typename impl::smem_load_trait<16, T>::payload_t;
         asm volatile("ds_read_b128 %0, %1 offset:%2"
+                     : "=v"(reinterpret_cast<mbuf_t&>(value)) // ! direct write
+                     : "v"(v_offset), "n"(i_offset)
+                     : "memory");
+    }
+};
+
+template <>
+struct smem_load<12>
+{
+    // Single-instruction 12-byte LDS read (ds_read_b96). Used by FP6 (pk_fp6x16_t,
+    // sizeof = 12) so the compiler emits one b96 instead of b32 + ds_read2_b32.
+    template <typename T>
+    CK_TILE_DEVICE void operator()(T& value, index_t v_offset, index_t i_offset)
+    {
+        static_assert(sizeof(T) == 12);
+        using mbuf_t = typename impl::smem_load_trait<12, T>::payload_t;
+        asm volatile("ds_read_b96 %0, %1 offset:%2"
                      : "=v"(reinterpret_cast<mbuf_t&>(value)) // ! direct write
                      : "v"(v_offset), "n"(i_offset)
                      : "memory");
