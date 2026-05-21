@@ -14,12 +14,12 @@
 
 namespace ck_tile::core::arch::mma {
 
-// NOTE: At this point forward, we are specializing amdgcn_mma for each target id as needed.
-// This is because some built-ins are only available on certain target ids.
-// We can also do things such add some padding specializations for when we need to use
-// smaller values of K that aren't directly supported by the built-ins.
-// For flexibility, it is recommended that for each backend wrapper it supports at least
-// one packed register for each input to be able to process smaller K values by padding.
+// // NOTE: At this point forward, we are specializing amdgcn_mma for each target id as needed.
+// // This is because some built-ins are only available on certain target ids.
+// // We can also do things such add some padding specializations for when we need to use
+// // smaller values of K that aren't directly supported by the built-ins.
+// // For flexibility, it is recommended that for each backend wrapper it supports at least
+// // one packed register for each input to be able to process smaller K values by padding.
 
 /**
  * @struct amdgcn_mma
@@ -39,17 +39,17 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 32u, 64u, 1u, CtrlFlags, CompilerTarge
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x1f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x1f32(bit_cast<fp32_t>(aVec),
-                                                     bit_cast<fp32_t>(bVec),
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x1f32(bit_cast<fp32_t>(aVec),
+//                                                      bit_cast<fp32_t>(bVec),
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
 /**
  * @struct amdgcn_mma
@@ -69,17 +69,17 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 32u, 1u, CtrlFlags, CompilerTarge
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x1f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x1f32(bit_cast<fp32_t>(aVec),
-                                                     bit_cast<fp32_t>(bVec),
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x1f32(bit_cast<fp32_t>(aVec),
+//                                                      bit_cast<fp32_t>(bVec),
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
 /**
  * @struct amdgcn_mma
@@ -99,257 +99,257 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 64u, 1u, CtrlFlags, CompilerTarge
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x1f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_16x16x1f32(bit_cast<fp32_t>(aVec),
-                                                     bit_cast<fp32_t>(bVec),
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_16x16x1f32(bit_cast<fp32_t>(aVec),
+//                                                      bit_cast<fp32_t>(bVec),
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 16u, 1u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 16u, 1u, 64u, 1, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x1f32";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar |
+// struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 16u, 1u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 16u, 1u, 64u, 1, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x1f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_16x16x1f32(bit_cast<fp32_t>(aVec),
-                                                     bit_cast<fp32_t>(bVec),
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_16x16x1f32(bit_cast<fp32_t>(aVec),
+//                                                      bit_cast<fp32_t>(bVec),
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize  |AParams  |BPar |CPar |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 4u, 64u, 1u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 4u, 64u, 1u, 64u, 1, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x1f32";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize  |AParams  |BPar |CPar |
+// struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 4u, 64u, 1u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 4u, 64u, 1u, 64u, 1, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x1f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_4x4x1f32(bit_cast<fp32_t>(aVec),
-                                                   bit_cast<fp32_t>(bVec),
-                                                   cVec,
-                                                   static_cast<int>(CtrlFlags::Cbsz),
-                                                   static_cast<int>(CtrlFlags::Abid),
-                                                   static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_4x4x1f32(bit_cast<fp32_t>(aVec),
+//                                                    bit_cast<fp32_t>(bVec),
+//                                                    cVec,
+//                                                    static_cast<int>(CtrlFlags::Cbsz),
+//                                                    static_cast<int>(CtrlFlags::Abid),
+//                                                    static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize  |AParams |BPar  |CPar |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 4u, 1u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 4u, 1u, 64u, 1, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x1f32";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize  |AParams |BPar  |CPar |
+// struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 4u, 1u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 4u, 1u, 64u, 1, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x1f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_4x4x1f32(bit_cast<fp32_t>(aVec),
-                                                   bit_cast<fp32_t>(bVec),
-                                                   cVec,
-                                                   static_cast<int>(CtrlFlags::Cbsz),
-                                                   static_cast<int>(CtrlFlags::Abid),
-                                                   static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_4x4x1f32(bit_cast<fp32_t>(aVec),
+//                                                    bit_cast<fp32_t>(bVec),
+//                                                    cVec,
+//                                                    static_cast<int>(CtrlFlags::Cbsz),
+//                                                    static_cast<int>(CtrlFlags::Abid),
+//                                                    static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar  |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 32u, 32u, 2u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 32u, 32u, 2u, 64u, 1, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x2f32";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar  |
+// struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 32u, 32u, 2u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 32u, 32u, 2u, 64u, 1, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x2f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x2f32(bit_cast<fp32_t>(aVec),
-                                                     bit_cast<fp32_t>(bVec),
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x2f32(bit_cast<fp32_t>(aVec),
+//                                                      bit_cast<fp32_t>(bVec),
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, 64u, 1, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f32";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp32_t, fp32_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar |
+// struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, 64u, 1, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f32";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_16x16x4f32(bit_cast<fp32_t>(aVec),
-                                                     bit_cast<fp32_t>(bVec),
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_16x16x4f32(bit_cast<fp32_t>(aVec),
+//                                                      bit_cast<fp32_t>(bVec),
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar  |
-struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 64u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 64u, 4u, 64u, 4, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4f16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar  |
+// struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 64u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 64u, 4u, 64u, 4, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4f16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x4f16(aVec,
-                                                     bVec,
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x4f16(aVec,
+//                                                      bVec,
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar  |
-struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 64u, 32u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 64u, 32u, 4u, 64u, 4, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4f16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar  |
+// struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 64u, 32u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 64u, 32u, 4u, 64u, 4, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4f16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x4f16(aVec,
-                                                     bVec,
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x4f16(aVec,
+//                                                      bVec,
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX9
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar |
-struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 64u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
-: amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 64u, 4u, 64u, 4, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX9
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx9I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize   |AParams |BPar |CPar |
+// struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 64u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
+// : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 64u, 4u, 64u, 4, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_16x16x4f16(aVec,
-                                                     bVec,
-                                                     cVec,
-                                                     static_cast<int>(CtrlFlags::Cbsz),
-                                                     static_cast<int>(CtrlFlags::Abid),
-                                                     static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_16x16x4f16(aVec,
+//                                                      bVec,
+//                                                      cVec,
+//                                                      static_cast<int>(CtrlFlags::Cbsz),
+//                                                      static_cast<int>(CtrlFlags::Abid),
+//                                                      static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
 /**
  * @struct amdgcn_mma
@@ -1553,184 +1553,184 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX950
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
-struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_f16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX950
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
+// struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+// : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_f16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_16x16x32_f16(aVec,
-                                                       bVec,
-                                                       cVec,
-                                                       static_cast<int>(CtrlFlags::Cbsz),
-                                                       static_cast<int>(CtrlFlags::Abid),
-                                                       static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_16x16x32_f16(aVec,
+//                                                        bVec,
+//                                                        cVec,
+//                                                        static_cast<int>(CtrlFlags::Cbsz),
+//                                                        static_cast<int>(CtrlFlags::Abid),
+//                                                        static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX950
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
-struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_bf16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX950
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
+// struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+// : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_bf16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_16x16x32_bf16(aVec,
-                                                        bVec,
-                                                        cVec,
-                                                        static_cast<int>(CtrlFlags::Cbsz),
-                                                        static_cast<int>(CtrlFlags::Abid),
-                                                        static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_16x16x32_bf16(aVec,
+//                                                         bVec,
+//                                                         cVec,
+//                                                         static_cast<int>(CtrlFlags::Cbsz),
+//                                                         static_cast<int>(CtrlFlags::Abid),
+//                                                         static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX950
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar  |
-struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_f16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX950
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar  |
+// struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+// : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_f16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x16_f16(aVec,
-                                                       bVec,
-                                                       cVec,
-                                                       static_cast<int>(CtrlFlags::Cbsz),
-                                                       static_cast<int>(CtrlFlags::Abid),
-                                                       static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x16_f16(aVec,
+//                                                        bVec,
+//                                                        cVec,
+//                                                        static_cast<int>(CtrlFlags::Cbsz),
+//                                                        static_cast<int>(CtrlFlags::Abid),
+//                                                        static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX950
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar  |
-struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_bf16";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX950
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar  |
+// struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+// : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_bf16";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_f32_32x32x16_bf16(aVec,
-                                                        bVec,
-                                                        cVec,
-                                                        static_cast<int>(CtrlFlags::Cbsz),
-                                                        static_cast<int>(CtrlFlags::Abid),
-                                                        static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_f32_32x32x16_bf16(aVec,
+//                                                         bVec,
+//                                                         cVec,
+//                                                         static_cast<int>(CtrlFlags::Cbsz),
+//                                                         static_cast<int>(CtrlFlags::Abid),
+//                                                         static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX950
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes       | MNK + WaveSize    |AParams  |BPar |CPar |
-struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<int8_t, int8_t, int32_t, 16u, 16u, 64u, 64u, 16, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x64_i8";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX950
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes       | MNK + WaveSize    |AParams  |BPar |CPar |
+// struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+// : amdgcn_mma_base<int8_t, int8_t, int32_t, 16u, 16u, 64u, 64u, 16, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x64_i8";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_i32_16x16x64_i8(bit_cast<int32x4_t>(aVec),
-                                                      bit_cast<int32x4_t>(bVec),
-                                                      cVec,
-                                                      static_cast<int>(CtrlFlags::Cbsz),
-                                                      static_cast<int>(CtrlFlags::Abid),
-                                                      static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_i32_16x16x64_i8(bit_cast<int32x4_t>(aVec),
+//                                                       bit_cast<int32x4_t>(bVec),
+//                                                       cVec,
+//                                                       static_cast<int>(CtrlFlags::Cbsz),
+//                                                       static_cast<int>(CtrlFlags::Abid),
+//                                                       static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX950
- * architecture.
- * @tparam CtrlFlags Control flags for the MFMA operation
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CtrlFlags, typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes       | MNK + WaveSize    |AParams  |BPar |CPar  |
-struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<int8_t, int8_t, int32_t, 32u, 32u, 32u, 64u, 16, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x32_i8";
+// /**
+//  * @struct amdgcn_mma
+//  * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX950
+//  * architecture.
+//  * @tparam CtrlFlags Control flags for the MFMA operation
+//  * @tparam CompilerTarget Current compiler target
+//  */
+// // TODO: c++20 template <CtrlFlagsGfx950I CtrlFlags, amdgcn_target CompilerTarget>
+// // TODO: c++20 requires
+// template <typename CtrlFlags, typename CompilerTarget>
+// // clang-format off
+// //               | A B C DataTypes       | MNK + WaveSize    |AParams  |BPar |CPar  |
+// struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+// : amdgcn_mma_base<int8_t, int8_t, int32_t, 32u, 32u, 32u, 64u, 16, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// // clang-format on
+// {
+//     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x32_i8";
 
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_mfma_i32_32x32x32_i8(bit_cast<int32x4_t>(aVec),
-                                                      bit_cast<int32x4_t>(bVec),
-                                                      cVec,
-                                                      static_cast<int>(CtrlFlags::Cbsz),
-                                                      static_cast<int>(CtrlFlags::Abid),
-                                                      static_cast<int>(CtrlFlags::Blgp))};
-    }
-};
+//     CK_TILE_DEVICE static CVecType
+//     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+//     {
+//         return {__builtin_amdgcn_mfma_i32_32x32x32_i8(bit_cast<int32x4_t>(aVec),
+//                                                       bit_cast<int32x4_t>(bVec),
+//                                                       cVec,
+//                                                       static_cast<int>(CtrlFlags::Cbsz),
+//                                                       static_cast<int>(CtrlFlags::Abid),
+//                                                       static_cast<int>(CtrlFlags::Blgp))};
+//     }
+// };
 
 } // namespace ck_tile::core::arch::mma
