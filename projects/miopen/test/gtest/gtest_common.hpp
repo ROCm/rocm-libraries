@@ -378,20 +378,3 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_TUNING_ITERATIONS_MAX)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP16_ALT_IMPL)
 
 } // namespace wa
-
-class CommandLineArgs
-{
-public:
-    [[maybe_unused]] static CommandLineArgs& GetInstance(int argc                = 0,
-                                                         const char* const* argv = nullptr);
-    const std::vector<std::string>& GetArgs() const noexcept;
-
-    CommandLineArgs(const CommandLineArgs&)                = delete;
-    CommandLineArgs(CommandLineArgs&&) noexcept            = delete;
-    CommandLineArgs& operator=(const CommandLineArgs&)     = delete;
-    CommandLineArgs& operator=(CommandLineArgs&&) noexcept = delete;
-
-private:
-    CommandLineArgs(int argc, const char* const* argv);
-    std::vector<std::string> m_Args;
-};

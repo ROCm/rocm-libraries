@@ -156,16 +156,3 @@ bool IsTestSupportedByDevice(Gpu supported_devs)
     }
     return false;
 }
-
-CommandLineArgs& CommandLineArgs::GetInstance(int argc, const char* const* const argv)
-{
-    static CommandLineArgs instance(argc, argv);
-    return instance;
-}
-
-CommandLineArgs::CommandLineArgs(int argc, const char* const* const argv)
-    : m_Args(argv, argv + argc)
-{
-}
-
-const std::vector<std::string>& CommandLineArgs::GetArgs() const noexcept { return m_Args; }

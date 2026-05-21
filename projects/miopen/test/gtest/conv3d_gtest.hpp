@@ -22,6 +22,7 @@ using Conv3DBaseTestCase =
                          NamedParameter<size_t>,              // vector_length
                          NamedParameter<std::string>,         // output_type
                          NamedParameter<bool>,                // int8_vectorize
+                         NamedParameter<double>,              // tolerance,
                          TParams...>;
 
 template <typename T, ConvApi api = ConvApi::Find_1_0>
@@ -38,15 +39,7 @@ struct Conv3DBaseTestParameters
           filter_dims(generate_data_limited(ct::get_3d_filter_dims(), 2, {3, 3, 3}, !smoke_test)),
           pads_strides_dilations(
               generate_data_limited(ct::get_3d_pads_strides_dilations(), 2, !smoke_test)),
-          trans_output_pads(generate_data_limited(ct::get_3d_trans_output_pads(), 1, !smoke_test)),
-          in_layout({std::string{"NCDHW"}}),
-          fil_layout({std::string{"NCDHW"}}),
-          out_layout({std::string{"NCDHW"}}),
-          deterministic({false}),
-          tensor_vect({0}),
-          vector_length({1}),
-          output_type({std::string{"int32"}}),
-          int8_vectorize({false})
+          trans_output_pads(generate_data_limited(ct::get_3d_trans_output_pads(), 1, !smoke_test))
     {
     }
 
@@ -58,14 +51,15 @@ struct Conv3DBaseTestParameters
     std::vector<std::vector<size_t>> filter_dims;
     std::vector<std::vector<int>> pads_strides_dilations;
     std::vector<std::vector<int>> trans_output_pads;
-    std::vector<std::string> in_layout;
-    std::vector<std::string> fil_layout;
-    std::vector<std::string> out_layout;
-    std::vector<bool> deterministic;
-    std::vector<size_t> tensor_vect;
-    std::vector<size_t> vector_length;
-    std::vector<std::string> output_type;
-    std::vector<bool> int8_vectorize;
+    std::vector<std::string> in_layout{std::string{"NCHW"}};
+    std::vector<std::string> fil_layout{std::string{"NCHW"}};
+    std::vector<std::string> out_layout{std::string{"NCHW"}};
+    std::vector<bool> deterministic{false};
+    std::vector<size_t> tensor_vect{0};
+    std::vector<size_t> vector_length{1};
+    std::vector<std::string> output_type{std::string{"int32"}};
+    std::vector<bool> int8_vectorize{false};
+    std::vector<double> tolerance{80.0f};
 };
 
 template <typename T, typename TestCase = Conv3DBaseTestCase<>, ConvApi api = ConvApi::Find_1_0>
@@ -91,6 +85,7 @@ struct conv3d_test_base : public conv_test<T, TestCase, api>
                                                    this->vector_length,
                                                    this->output_type,
                                                    this->int8_vectorize,
+                                                   this->tolerance,
                                                    params...);
     }
 
@@ -128,6 +123,7 @@ struct conv3d_test_base : public conv_test<T, TestCase, api>
                                                             conv3dBaseParams.output_type),
             MakeNamedParameterCollectionValues<bool>("int8_vectorize",
                                                      conv3dBaseParams.int8_vectorize),
+            MakeNamedParameterCollectionValues<double>("tolerance", conv3dBaseParams.tolerance),
             std::forward<TParams>(params)...);
     }
 };

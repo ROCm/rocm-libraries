@@ -1,12 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
 #include <cstdlib>
 #include <string_view>
-
-#include "gtest_common.hpp"
 
 // This test event listener ensures that HIP errors are cleaned up after every test, and will flag
 // tests that don't clean up their own errors
@@ -50,12 +49,6 @@ int main(int argc, char** argv)
     }
 
     testing::InitGoogleTest(&argc, argv);
-
-    // Do not move or delete the line below!
-    // It must be called after testing::InitGoogleTest() and before RUN_ALL_TESTS()
-    // to ensure that the correct command line arguments are available to tests via
-    // CommandLineArgs::GetInstance().GetArgs().
-    CommandLineArgs::GetInstance(argc, argv);
 
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new HIPErrorHandler);

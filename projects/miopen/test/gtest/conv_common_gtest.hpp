@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <iostream>
-
 #include <miopen/algorithm.hpp>
 #include <miopen/any_solver.hpp>
 #include <miopen/conv/tensors.hpp>
@@ -12,23 +10,15 @@
 #include <miopen/convolution.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/tensor_ops.hpp>
-#include <sstream>
 
-#include "args.hpp"
 #include "compare_helper.hpp"
 #include "cpu_conv.hpp"
 #include "get_handle.hpp"
 #include "gpu_conv.hpp"
-#include "gtest_common.hpp"
 #include "miopen/find_db.hpp"
 #include "tensor_holder.hpp"
 #include "test_parameter_name_generator.hpp"
 #include "workspace.hpp"
-
-template <typename T>
-concept ISStreamable = requires(std::istringstream& iss, T value) {
-    { iss >> value } -> std::same_as<std::istream&>;
-};
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
 
@@ -1976,14 +1966,7 @@ struct conv_test : public testing::TestWithParam<TestCase>
     bool deterministic       = false;
     bool preallocate         = false;
 
-    double tolerance                 = 80.0f;
-    miopenDataType_t input_data_type = miopenFloat;
-
-    // The following two members are used to discard the values stored in
-    // 'input_dims' and 'weight_tensor_dims' when empty vectors should be supplied instead.
-    // This is necessary as GTest does not support empty parameter vectors.
-    bool use_input_dims         = true;
-    bool use_weight_tensor_dims = true;
+    double tolerance = 80.0f;
 
     const std::unordered_map<std::string, miopenConvolutionMode_t> cmode_lookup{
         {"CONV", miopenConvolution},
@@ -1996,78 +1979,6 @@ struct conv_test : public testing::TestWithParam<TestCase>
         {"SAME", miopenPaddingSame},
         {"VALID", miopenPaddingValid},
         {"DEFAULT", miopenPaddingDefault}};
-
-    static const args::string_map& get_commandline_args()
-    {
-        static const args::string_map cmdline_args =
-            args::parse(CommandLineArgs::GetInstance().GetArgs(),
-                        [](const std::string& x) { return x.starts_with("--"); });
-        return cmdline_args;
-    }
-
-    static bool has_commandline_arg(const std::string& arg_name)
-    {
-        return get_commandline_args().contains(arg_name);
-    }
-
-    template <typename V>
-        requires ISStreamable<V>
-    static V get_commandline_arg_as_value(const std::string& arg_name, const V& default_value = V{})
-    {
-        const auto& cmdline_args = get_commandline_args();
-        auto it                  = cmdline_args.find(arg_name);
-
-        if(it != cmdline_args.end())
-        {
-            std::istringstream iss(it->second[0]);
-            V value;
-            iss >> value;
-
-            if(iss.fail())
-            {
-                MIOPEN_FRIENDLY_FAIL("Failed to parse command line argument: \""
-                                     << arg_name << "\" with value: \"" << it->second[0] << "\"");
-            }
-
-            return value;
-        }
-
-        return default_value;
-    }
-
-    template <typename V>
-        requires ISStreamable<V>
-    static std::vector<V> get_commandline_arg_as_vector(const std::string& arg_name,
-                                                        const std::vector<V>& default_value = {})
-    {
-        const auto& cmdline_args = get_commandline_args();
-        auto it                  = cmdline_args.find(arg_name);
-
-        if(it != cmdline_args.end())
-        {
-            std::vector<V> values;
-            values.reserve(it->second.size());
-
-            for(const auto& val_str : it->second)
-            {
-                std::istringstream iss(val_str);
-                V value;
-                iss >> value;
-
-                if(iss.fail())
-                {
-                    MIOPEN_FRIENDLY_FAIL("Failed to parse command line argument: \""
-                                         << arg_name << "\" with value: \"" << val_str << "\"");
-                }
-
-                values.emplace_back(value);
-            }
-
-            return values;
-        }
-
-        return default_value;
-    }
 
     static std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
 
@@ -2211,16 +2122,6 @@ struct conv_test : public testing::TestWithParam<TestCase>
                  enable_fdb,
                  preallocate,
                  params...) = this->GetParam();
-
-        if(!use_input_dims)
-        {
-            input_dims.clear();
-        }
-
-        if(!use_weight_tensor_dims)
-        {
-            weight_tensor_dims.clear();
-        }
     }
 
     void run()
