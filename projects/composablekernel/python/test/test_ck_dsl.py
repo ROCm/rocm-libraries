@@ -548,6 +548,41 @@ class TestHelpers(unittest.TestCase):
         # `qq_bias_stride_0` is the very last kernel param.
         self.assertIn("i32 %qq_bias_stride_0", ll)
 
+    def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
+        """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
+        from ck_dsl.instances import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=0,
+            has_softcap=False,
+            num_seqs=284,
+            num_warps=4,
+            waves_per_eu=2,
+            tile_size=64,
+            block_m_per_warp=32,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_transposed_scalar_state=True,
+            use_transposed_mask_once=True,
+            use_transposed_half_local_pv=True,
+        )
+        k = build_unified_attention_2d_tiled(spec)
+        ll = lower_kernel_to_llvm(k)
+        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
+        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.bf16", ll)
+        self.assertIn("_s1_", k.name)
+        self.assertIn("_mask1_", k.name)
+        self.assertIn("_hlpv", k.name)
+
     def test_unified_attention_2d_tiled_alibi_qq_bias(self):
         """ALiBi/QQ-bias variants emit sitofp + masked global load with clamp."""
         from ck_dsl.instances import (
