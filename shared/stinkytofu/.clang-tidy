@@ -57,6 +57,6 @@ Checks: >
   performance-*,
   -performance-enum-size
 
-WarningsAsErrors: ''
+WarningsAsErrors: '*'
 
 HeaderFilterRegex: 'include/stinkytofu/.*'
