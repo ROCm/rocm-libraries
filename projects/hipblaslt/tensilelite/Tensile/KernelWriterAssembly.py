@@ -2325,6 +2325,19 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.kernel["WavefrontSize"] == 32:
         moduleRegInit.add(SMovB32(dst=VCC(setHi=True), src=0, comment="Ensure hi bits are zero"))
 
+      # Initialize WaveIdx whenever TDM is enabled, independent of WorkGroupIdFromTTM.
+      # TDM helpers (initTDMDescriptor*, tdmGlobalOffset*, tdmSetupIncrement*,
+      # TensorDataMover wave-separated paths) read sgpr("WaveIdx") unconditionally,
+      # so it must be initialized for every TDM kernel.
+      tdmA: bool = kernel["enableTDMA"]
+      tdmB: bool = kernel["enableTDMB"]
+      if tdmA or tdmB:
+        with self.allocTmpSgpr(1) as tmpSgprRes:
+          wavelen: int = kernel["WavefrontSize"]
+          sgprIdx: int = tmpSgprRes.idx
+          moduleRegInit.add(VReadfirstlaneB32(sgpr(sgprIdx), vgpr("Serial"), "first tId"))
+          moduleRegInit.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(sgprIdx), "wId=fTid // wavelen"))
+
       # init workgroup id from ttmp
       if self.states.archCaps["WorkGroupIdFromTTM"]:
         enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
@@ -2390,16 +2403,6 @@ class KernelWriterAssembly(KernelWriter):
                                src1=sgpr(sTmp+4), \
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
-
-        tdmA: bool = kernel["enableTDMA"]
-        tdmB: bool = kernel["enableTDMB"]
-        # WaveIdx is allocated when TDM is enabled
-        if tdmA or tdmB:
-          with self.allocTmpSgpr(1) as tmpSgprRes:
-            wavelen: int = kernel["WavefrontSize"]
-            sgprIdx: int = tmpSgprRes.idx
-            moduleRegInit.add(VReadfirstlaneB32(sgpr(sgprIdx), vgpr("Serial"), "first tId"))
-            moduleRegInit.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(sgprIdx), "wId=fTid // wavelen"))
 
         if kernel["Multicast"]:
           moduleRegInit.addComment0("Calculate multicast mask")
