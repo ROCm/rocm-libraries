@@ -4,6 +4,7 @@
 set(BATCHED_GEMM_DATATYPE "fp16" CACHE STRING "List of datatypes for batched GEMM (semicolon-separated)")
 set(BATCHED_GEMM_LAYOUT "rcr" CACHE STRING "List of layouts for batched GEMM (semicolon-separated)")
 set(BATCHED_GEMM_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(BATCHED_GEMM_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 
 set(BATCHED_GEMM_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
@@ -94,6 +95,19 @@ function(build_individual_batched_gemm_targets datatype layout)
 
     file(MAKE_DIRECTORY ${working_path})
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${BATCHED_GEMM_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${BATCHED_GEMM_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -u ${BATCHED_GEMM_SOURCE_DIR}/batched_gemm_instance_builder.py
                 --working_path ${working_path}
@@ -102,13 +116,23 @@ function(build_individual_batched_gemm_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target "${BATCHED_GEMM_GPU_TARGETS}"
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${BATCHED_GEMM_SOURCE_DIR}
         RESULT_VARIABLE ret
+        OUTPUT_VARIABLE list_output
         ERROR_VARIABLE list_error
     )
 
     if(NOT ret EQUAL 0)
         message(FATAL_ERROR "Failed to list kernels for ${datatype} ${layout}: ${list_error}")
+    endif()
+
+    if(EXISTS ${working_path}/batched_gemm_kernel_count.txt)
+        file(READ ${working_path}/batched_gemm_kernel_count.txt kernel_count)
+        string(STRIP "${kernel_count}" kernel_count)
+        message(VERBOSE "  Found ${kernel_count} kernel configurations")
+    else()
+        message(FATAL_ERROR "Kernel count file not found")
     endif()
 
     if(EXISTS ${working_path}/batched_gemm_kernel_list.txt)

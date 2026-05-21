@@ -89,9 +89,9 @@ class GemmKernelBuilder:
         flat_items = []
         for k in kernel_list:
             flat = dict(k["tile_config"])
-            pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = k[
-                "trait_combo"
-            ]
+            pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
+                self._normalize_trait_combo(k["trait_combo"])
+            )
             flat.update(
                 {
                     "pipeline": pipeline,
@@ -100,9 +100,10 @@ class GemmKernelBuilder:
                     "pad_m": pad_m,
                     "pad_n": pad_n,
                     "pad_k": pad_k,
-                    "persistent": persistent,
                 }
             )
+            if self._uses_persistent_trait():
+                flat["persistent"] = persistent
             flat_items.append(flat)
 
         selected, method, selected_indices = sample_feasible_set(
