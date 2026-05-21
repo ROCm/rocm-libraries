@@ -33,7 +33,13 @@ namespace ck_dsl_provider {
 class CompileServiceBridge {
    public:
     CompileServiceBridge();
-    ~CompileServiceBridge() noexcept = default;
+
+    /// Releases the held py::module_ with the GIL held. Plain
+    /// `= default` here would let pybind11 dec_ref a PyObject* on
+    /// whatever thread tears the container down — at process exit that
+    /// thread does not hold the GIL, which is undefined behaviour and
+    /// asserts in CPython debug builds.
+    ~CompileServiceBridge() noexcept;
 
     CompileServiceBridge(const CompileServiceBridge&) = delete;
     CompileServiceBridge& operator=(const CompileServiceBridge&) = delete;
@@ -62,6 +68,17 @@ class CompileServiceBridge {
     /// Prepend a single path to sys.path iff it is not already present.
     /// Caller must hold the GIL. Returns true if the path was newly
     /// inserted, false if it was already on sys.path.
+    ///
+    /// Idempotence is exact-string-equality only; no normalisation,
+    /// no symlink resolution. The CMake-baked literals never change
+    /// at runtime, so this is sufficient for the current call sites.
+    /// If a future caller passes paths from env/user input, normalise
+    /// first.
+    ///
+    /// Thread safety: not designed for concurrent construction of
+    /// multiple bridges; the container's per-process singleton model
+    /// makes that irrelevant. If that ever changes, this scan-then-
+    /// insert needs an external mutex.
     static bool prependSysPathIdempotent(pybind11::module_& sys, std::string_view path);
 
     pybind11::module_ _module;
