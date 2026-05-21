@@ -19,56 +19,92 @@ coverage:
         flags: [composable_kernel]
         target: 80%
       hipBLAS:
+        paths:
+        - projects/hipblas/
         flags: [hipBLAS]
         target: 80%
       hipBLASLt:
+        paths:
+        - projects/hipblaslt/
         flags: [hipBLASLt]
         target: 80%
       TensileLite:
+        paths:
+        - projects/hipblaslt/tensilelite
         flags: [TensileLite]
         target: 80%
       hipCUB:
+        paths:
+        - projects/hipcub
         flags: [hipCUB]
         target: 80%
       hipSPARSE:
+        paths:
+        - projects/hipsparse
         flags: [hipSPARSE]
         target: 80%
       hipSPARSELt:
+        paths:
+        - projects/hipsparselt
         flags: [hipSPARSELt]
         target: 80%
       rocBLAS:
+        paths:
+        - projects/rocblas
         flags: [rocBLAS]
         target: 80%
       rocRAND:
+        paths:
+        - projects/rocrand
         flags: [rocRAND]
         target: 80%
       hipRAND:
+        paths:
+        - projects/hiprand
         flags: [hipRAND]
         target: 80%
       hipDNN:
+        paths:
+        - projects/hipdnn
         flags: [hipDNN]
         target: 80%
       rocRoller:
+        paths:
+        - shared/rocroller
         flags: [rocRoller]
         target: 80%
       rocSPARSE:
+        paths:
+        - projects/rocsparse
         flags: [rocSPARSE]
         target: 80%
       rocThrust:
+        paths:
+        - projects/rocthrust
         flags: [rocThrust]
         target: 80%
       hipFFT:
+        paths:
+        - projects/hipfft
         flags: [hipFFT]
         target: 80%
       rocFFT:
+        paths:
+        - projects/rocfft
         flags: [rocFFT]
         target: 80%
       Tensile:
+        paths:
+        - shared/tensile
         flags: [Tensile]
         target: 80%
       hipSOLVER:
+        paths:
+        - projects/hipsolver
         flags: [hipSOLVER]
         target: 80%
       rocSOLVER:
+        paths:
+        - projects/rocsolver
         flags: [rocSOLVER]
         target: 80%
