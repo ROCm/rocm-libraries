@@ -801,18 +801,6 @@ elseif(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
 endif()
 
 include(ClangTidy)
-set(MIOPEN_TIDY_EXTRA_ARGS
-    -DMIOPEN_USE_CLANG_TIDY
-    -D__builtin_elementwise_exp10=__builtin_elementwise_exp
-)
-set(_MIOPEN_TIDY_ROCM_PATH "${ROCM_PATH}")
-if(NOT _MIOPEN_TIDY_ROCM_PATH AND ROCM_CMAKE_PATH)
-    set(_MIOPEN_TIDY_ROCM_PATH "${ROCM_CMAKE_PATH}")
-endif()
-if(_MIOPEN_TIDY_ROCM_PATH)
-    list(APPEND MIOPEN_TIDY_EXTRA_ARGS --rocm-path=${_MIOPEN_TIDY_ROCM_PATH})
-endif()
-unset(_MIOPEN_TIDY_ROCM_PATH)
 enable_clang_tidy(
     CHECKS
         ${MIOPEN_TIDY_CHECKS}
@@ -820,7 +808,8 @@ enable_clang_tidy(
     HEADER_FILTER
         "\.hpp$"
     EXTRA_ARGS
-        ${MIOPEN_TIDY_EXTRA_ARGS}
+        -DMIOPEN_USE_CLANG_TIDY
+        -D__builtin_elementwise_exp10=__builtin_elementwise_exp
 )
 
 include(CppCheck)
