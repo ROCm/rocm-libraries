@@ -59,11 +59,6 @@ namespace TensileLite
             if(mxBlock == 0)
                 return false;
             auto dt = tensor.dataType();
-            if(dt == rocisa::DataType::Float6 or
-                    dt == rocisa::DataType::BFloat6)
-            {
-                 throw std::runtime_error("Float6 and BFloat6 currently are not supported");
-            }
             return dt == rocisa::DataType::Float4
                 || dt == rocisa::DataType::Float8
                 || dt == rocisa::DataType::BFloat8;

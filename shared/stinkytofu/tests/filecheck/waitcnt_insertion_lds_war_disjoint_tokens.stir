@@ -1,0 +1,21 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS negative test.
+# Two ds_load_b64 with token 1 are followed by a tensor_load_to_lds with
+# token 0. No reads share a token with the writer, so the WAR set is empty,
+# memOpDependencies stays empty, and no waitcnt should be emitted.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_disjoint_tokens
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_lds_war_disjoint_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}
