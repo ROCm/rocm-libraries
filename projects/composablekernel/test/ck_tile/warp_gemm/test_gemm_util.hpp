@@ -7,6 +7,7 @@
 
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/core/numeric/mxfp_scale.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
 namespace ck_tile::test::warp_gemm {
@@ -14,30 +15,27 @@ namespace ck_tile::test::warp_gemm {
 template <typename A,
           typename B,
           typename Acc,
-          index_t M,
-          index_t N,
-          index_t K,
           bool TransposeC,
           bool SwizzleA              = false,
           bool UseStructuredSparsity = false,
-          WGAttrNumAccessEnum NA     = WGAttrNumAccessEnum::Single,
-          bool UseScale              = true>
+          WGAttrNumAccessEnum NA     = WGAttrNumAccessEnum::Single>
 struct WGDispCase
 {
     using AType                              = A;
     using BType                              = B;
     using AccType                            = Acc;
-    static constexpr index_t MPerWave        = M;
-    static constexpr index_t NPerWave        = N;
-    static constexpr index_t KPerWave        = K;
     static constexpr bool kTransposeC        = TransposeC;
     static constexpr bool kSwizzleA          = SwizzleA;
     static constexpr bool kUSS               = UseStructuredSparsity;
     static constexpr WGAttrNumAccessEnum kNA = NA;
-    static constexpr bool kUseScale          = UseScale;
 };
 
-template <typename Case>
+template <typename Case,
+          index_t MPerWave,
+          index_t NPerWave,
+          index_t KPerWave,
+          bool UseScale  = true,
+          bool IsScale16 = false>
 struct WarpGemmKernel
 {
     static constexpr int kBlockSize = 64;
@@ -46,31 +44,33 @@ struct WarpGemmKernel
         using WarpGemm = ck_tile::WarpGemmDispatcher<typename Case::AType,
                                                      typename Case::BType,
                                                      typename Case::AccType,
-                                                     Case::MPerWave,
-                                                     Case::NPerWave,
-                                                     Case::KPerWave,
+                                                     MPerWave,
+                                                     NPerWave,
+                                                     KPerWave,
                                                      Case::kTransposeC,
                                                      Case::kSwizzleA,
                                                      Case::kUSS,
-                                                     Case::kNA>;
+                                                     Case::kNA,
+                                                     Case::kNA,
+                                                     IsScale16>;
 
         const auto a_view = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
             static_cast<typename Case::AType*>(A),
-            ck_tile::make_tuple(Case::MPerWave, Case::KPerWave),
-            ck_tile::make_tuple(Case::KPerWave, ck_tile::number<1>{}),
-            ck_tile::number<Case::KPerWave>{},
+            ck_tile::make_tuple(MPerWave, KPerWave),
+            ck_tile::make_tuple(KPerWave, ck_tile::number<1>{}),
+            ck_tile::number<KPerWave>{},
             ck_tile::number<1>{});
         const auto b_view = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
             static_cast<typename Case::BType*>(B),
-            ck_tile::make_tuple(Case::NPerWave, Case::KPerWave),
-            ck_tile::make_tuple(Case::KPerWave, ck_tile::number<1>{}),
-            ck_tile::number<Case::KPerWave>{},
+            ck_tile::make_tuple(NPerWave, KPerWave),
+            ck_tile::make_tuple(KPerWave, ck_tile::number<1>{}),
+            ck_tile::number<KPerWave>{},
             ck_tile::number<1>{});
         const auto c_view = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
             static_cast<typename Case::AccType*>(C),
-            ck_tile::make_tuple(Case::MPerWave, Case::NPerWave),
-            ck_tile::make_tuple(Case::NPerWave, ck_tile::number<1>{}),
-            ck_tile::number<Case::NPerWave>{},
+            ck_tile::make_tuple(MPerWave, NPerWave),
+            ck_tile::make_tuple(NPerWave, ck_tile::number<1>{}),
+            ck_tile::number<NPerWave>{},
             ck_tile::number<1>{});
 
         using AWarpTensor = typename WarpGemm::AWarpTensor;
@@ -94,14 +94,39 @@ struct WarpGemmKernel
         ck_tile::load_tile(b_tile, b_win);
 
         const auto c_tile = [&]() {
-            if constexpr(Case::kUseScale)
+            if constexpr(UseScale)
             {
-                const auto scale_a =
-                    static_cast<int32_t>(static_cast<ck_tile::e8m0_t*>(ScaleA)[0].get());
-                const auto scale_b =
-                    static_cast<int32_t>(static_cast<ck_tile::e8m0_t*>(ScaleB)[0].get());
+                using ScaleType           = std::conditional_t<IsScale16, int64_t, int32_t>;
+                const auto scale_a        = static_cast<ck_tile::e8m0_t*>(ScaleA)[0];
+                const auto scale_b        = static_cast<ck_tile::e8m0_t*>(ScaleB)[0];
+                const auto packed_scale_a = [&]() -> ScaleType {
+                    if constexpr(IsScale16)
+                    {
+                        Packed8Scale_E8M0 pkscale(
+                            scale_a, scale_a, scale_a, scale_a, scale_a, scale_a, scale_a, scale_a);
+                        return static_cast<ScaleType>(pkscale);
+                    }
+                    else
+                    {
+                        Packed4Scale_E8M0 pkscale(scale_a, scale_a, scale_a, scale_a);
+                        return static_cast<ScaleType>(pkscale);
+                    }
+                }();
+                const auto packed_scale_b = [&]() -> ScaleType {
+                    if constexpr(IsScale16)
+                    {
+                        Packed8Scale_E8M0 pkscale(
+                            scale_b, scale_b, scale_b, scale_b, scale_b, scale_b, scale_b, scale_b);
+                        return static_cast<ScaleType>(pkscale);
+                    }
+                    else
+                    {
+                        Packed4Scale_E8M0 pkscale(scale_b, scale_b, scale_b, scale_b);
+                        return static_cast<ScaleType>(pkscale);
+                    }
+                }();
                 return WarpGemm{}.template operator()<OpSelA<0>, OpSelB<0>>(
-                    a_tile, b_tile, scale_a, scale_b);
+                    a_tile, b_tile, packed_scale_a, packed_scale_b);
             }
             else
             {
@@ -115,7 +140,12 @@ struct WarpGemmKernel
     }
 };
 
-template <typename Case>
+template <typename Case,
+          index_t MPerWave,
+          index_t NPerWave,
+          index_t KPerWave,
+          bool UseScale  = true,
+          bool IsScale16 = false>
 void RunWarpGemmCase(const ck_tile::HostTensor<typename Case::AType>& A,
                      const ck_tile::HostTensor<typename Case::BType>& B,
                      const ck_tile::HostTensor<ck_tile::e8m0_t>& ScaleA,
@@ -125,30 +155,37 @@ void RunWarpGemmCase(const ck_tile::HostTensor<typename Case::AType>& A,
     ck_tile::DeviceMem Ad(A), Bd(B), Cd(C), SAd(ScaleA), SBd(ScaleB);
     dim3 grid(1), block{64};
 
-    (void)ck_tile::launch_kernel(ck_tile::stream_config{nullptr, true, 0, 0, 1},
-                                 ck_tile::make_kernel(WarpGemmKernel<Case>{},
-                                                      grid,
-                                                      block,
-                                                      0,
-                                                      Ad.GetDeviceBuffer(),
-                                                      Bd.GetDeviceBuffer(),
-                                                      Cd.GetDeviceBuffer(),
-                                                      SAd.GetDeviceBuffer(),
-                                                      SBd.GetDeviceBuffer()));
+    (void)ck_tile::launch_kernel(
+        ck_tile::stream_config{nullptr, true, 0, 0, 1},
+        ck_tile::make_kernel(
+            WarpGemmKernel<Case, MPerWave, NPerWave, KPerWave, UseScale, IsScale16>{},
+            grid,
+            block,
+            0,
+            Ad.GetDeviceBuffer(),
+            Bd.GetDeviceBuffer(),
+            Cd.GetDeviceBuffer(),
+            SAd.GetDeviceBuffer(),
+            SBd.GetDeviceBuffer()));
 
     Cd.FromDevice(C.mData.data());
 }
 
-template <typename Case>
+template <typename Case,
+          index_t MPerWave,
+          index_t NPerWave,
+          index_t KPerWave,
+          bool UseScale  = true,
+          bool IsScale16 = false>
 void RunCompareDispatcherAndReference()
 {
     using AType = typename Case::AType;
     using BType = typename Case::BType;
     using CType = typename Case::AccType;
 
-    constexpr index_t M = Case::MPerWave;
-    constexpr index_t N = Case::NPerWave;
-    constexpr index_t K = Case::KPerWave;
+    constexpr index_t M = MPerWave;
+    constexpr index_t N = NPerWave;
+    constexpr index_t K = KPerWave;
 
     const auto ScaleA = ck_tile::e8m0_t{2.f};
     const auto ScaleB = ck_tile::e8m0_t{4.f};
@@ -165,12 +202,12 @@ void RunCompareDispatcherAndReference()
     ck_tile::FillConstant<ck_tile::e8m0_t>{ScaleA}(sA);
     ck_tile::FillConstant<ck_tile::e8m0_t>{ScaleB}(sB);
 
-    RunWarpGemmCase<Case>(A, B, sA, sB, C);
+    RunWarpGemmCase<Case, MPerWave, NPerWave, KPerWave, UseScale, IsScale16>(A, B, sA, sB, C);
 
     ck_tile::HostTensor<CType> C_ref({M, N});
     C_ref.SetZero();
 
-    if constexpr(Case::kUseScale)
+    if constexpr(UseScale)
     {
         ck_tile::reference_mx_gemm<AType, BType, ck_tile::e8m0_t, ck_tile::e8m0_t, CType, CType>(
             A, B.transpose(), C_ref, sA, sB.transpose());
