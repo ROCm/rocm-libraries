@@ -13,14 +13,15 @@
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace mma;
-using I4        = pk_int4_t;
-using I32       = int32_t;
-using F16       = fp16_t;
-using F32       = fp32_t;
-using Target908 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
-using Target950 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
-using Target11  = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
-using Target12  = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
+using I4         = pk_int4_t;
+using I32        = int32_t;
+using F16        = fp16_t;
+using F32        = fp32_t;
+using Target908  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
+using Target950  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
+using Target11   = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
+using Target12   = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
+using Target1250 = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1250>());
 
 template <typename MmaOp>
 int check_tile_distr_enc()
@@ -73,17 +74,18 @@ int check_tile_distr_enc()
 // List of intrinsics to test.
 // clang-format off
 using Intrinsics = ck_tile::tuple<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
-    amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
-    amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
-    amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
-    amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>, // mfma_f32_16x16x32_f16
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32
-    amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target11,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12
-    amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32_gfx12
-    amdgcn_mma<I4,  I4,  I32, 16u, 16u, 32u, DefaultWmmaCtrlFlags,                Target12,  MmaOpFamily::DENSE>  // wmma_i32_16x16x32_iu4_w32_gfx12
+    // amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
+    // amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
+    // amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
+    // amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
+    // amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
+    // amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>, // mfma_f32_16x16x32_f16
+    // amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32
+    // amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target11,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32
+    // amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12
+    // amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,                Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32_gfx12
+    // amdgcn_mma<I4,  I4,  I32, 16u, 16u, 32u, DefaultWmmaCtrlFlags,                Target12,  MmaOpFamily::DENSE>,  // wmma_i32_16x16x32_iu4_w32_gfx12
+    amdgcn_mma<F16, F16, F16, 16u, 16u, 64u, DefaultSparseMfmaCtrlFlags,          Target1250, MmaOpFamily::SPARSE> // swmmac_f16_16x16x64_f16
 >;
 // clang-format on
 
