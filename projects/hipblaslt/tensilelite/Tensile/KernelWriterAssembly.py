@@ -14973,12 +14973,12 @@ class KernelWriterAssembly(KernelWriter):
     #################
     # Free after final vgpr calculation
     # Only free locally-allocated guard SGPRs, not permanent ones (SubtileMGuard).
+    if self.states.subtileTotalMOffsetSgpr is not None:
+      self.sgprPool.checkIn(self.states.subtileTotalMOffsetSgpr)
+      self.states.subtileTotalMOffsetSgpr = None
     if self.states.subtileM32ValidBlocksSgpr is not None and "SubtileMGuard" not in self.sgprs:
       self.sgprPool.checkIn(self.states.subtileM32ValidBlocksSgpr)
       self.sgprPool.checkIn(self.states.subtileN16ValidBlocksSgpr)
-      if self.states.subtileTotalMOffsetSgpr is not None:
-        self.sgprPool.checkIn(self.states.subtileTotalMOffsetSgpr)
-        self.states.subtileTotalMOffsetSgpr = None
       self.states.subtileM32ValidBlocksSgpr = None
       self.states.subtileN16ValidBlocksSgpr = None
       self.states.subtileMBlockSize = 0
