@@ -637,7 +637,9 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      if prod(kernel["MIWaveGroup"]) > 1:
+      # Upstream parity model aliases B→A for multi-wave.
+      # Subtile uses separate descriptors (SGPRs are per-wave).
+      if not kernel["UseSubtileImpl"] and prod(kernel["MIWaveGroup"]) > 1:
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
         if kernel["ProblemType"]["MXBlockB"]:
@@ -17176,6 +17178,8 @@ class KernelWriterAssembly(KernelWriter):
     #TODO: temp hack
     numWaves: int = prod(kernel["MIWaveGroup"])
     wavelen: int = kernel["WavefrontSize"]
+    wgM, wgN = kernel["MIWaveGroup"]
+    numWavesThisAxis: int = wgM if ti == 0 else wgN
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
@@ -17264,6 +17268,8 @@ class KernelWriterAssembly(KernelWriter):
     bpe: float = tP["bpeGR"]
     numWaves: int = prod(kernel["MIWaveGroup"])
     wavelen: int = kernel["WavefrontSize"]
+    wgM, wgN = kernel["MIWaveGroup"]
+    numWavesThisAxis: int = wgM if ti == 0 else wgN
 
     # Use subtile LDS offsets from writer state (not kernel["LdsOffset{tc}"])
     ldsOffsetMap = {
@@ -17292,13 +17298,21 @@ class KernelWriterAssembly(KernelWriter):
         waveOffsetSgprIdx: int = tmpSgprRes.idx
         mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
         mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+        # Decompose wave ID to axis component for multi-wave
+        if numWavesThisAxis < numWaves:
+          if ti == 0 and wgN > 1:
+            mod.add(SAndB32(dst=sgpr(waveOffsetSgprIdx), src0=sgpr(waveOffsetSgprIdx), src1=wgM - 1,
+                             comment=f"waveIdM = waveId %% {wgM}"))
+          elif ti == 1 and wgM > 1:
+            mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
+                                     shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
         if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-          tileBytes = round(mt // numWaves * du * bpe)
+          tileBytes = round(mt // numWavesThisAxis * du * bpe)
           padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
           mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
                   f"woffset = wId * ({tileBytes}+{padBytes})"))
         else:
-          mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe),
+          mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWavesThisAxis * du * bpe),
                   "woffset = wId * (mt // numWaves * du * bpe)"))
         mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
                 f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
@@ -17323,7 +17337,7 @@ class KernelWriterAssembly(KernelWriter):
 
     sizeShifterTile = sizeShifter
     mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifterTile))
-    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, self))
+    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWavesThisAxis, self))
     mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
     return mod
 
@@ -17489,6 +17503,65 @@ class KernelWriterAssembly(KernelWriter):
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
+
+  def tdmGlobalOffsetSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
+    """Axis-aware per-wave global address for subtile TDM."""
+    tc = tP["tensorChar"]
+    ti = tP["idx"]
+    bpe = tP["bpeGR"]
+    tlu = tP["tlu"]
+    mt = kernel[f"MacroTile{ti}"]
+    wavelen = kernel["WavefrontSize"]
+    wgM, wgN = kernel["MIWaveGroup"]
+    numWavesThisAxis = wgM if ti == 0 else wgN
+    mod = Module(f"TDM Global Offset Subtile {tc}")
+
+    with self.allocTmpSgpr(3) as tmpSgprRes:
+      tmp = tmpSgprRes.idx
+      waveOff = tmpSgprRes.idx + 2
+
+      tileStride = self.strideRef(tc, ti)
+      mod.add(SMulI32(dst=sgpr(tmp), src0=tileStride, src1=int(mt * bpe),
+                       comment=f"stride * MT({mt}) * bpe({bpe})"))
+      mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
+                       comment="*= wgId"))
+
+      if numWavesThisAxis > 1:
+        mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"), comment="first tId"))
+        mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                                 shiftHex=hex(int(ceil(log2(wavelen)))), comment=f"wId = tId / {wavelen}"))
+        if ti == 0 and wgN > 1:
+          mod.add(SAndB32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=wgM - 1,
+                           comment=f"waveIdM = waveId %% {wgM}"))
+        elif ti == 1 and wgM > 1:
+          mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                                   shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+        tileStrideSep = self.strideRef(tc, 3) if tlu else self.strideRef(tc, ti)
+        mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=int(mt // numWavesThisAxis * bpe),
+                         comment=f"waveOff = waveId_axis * {mt // numWavesThisAxis} * {bpe}"))
+        mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=tileStrideSep,
+                         comment="waveOff *= stride"))
+        mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff), comment="+= waveOff"))
+
+      mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(f"Address{tc}"), src1=sgpr(tmp),
+                       comment=f"+= offset(lo)"))
+      mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=0,
+                        comment=f"+= offset(hi)"))
+
+      if kernel["ProblemType"]["Batched"] and kernel["ProblemType"]["StridedBatched"]:
+        ia = tP["ia"]
+        batchStrideName = f"Stride{tc}{self.states.indexChars[ia[2]]}"
+        mod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmp), sgpr(tmp+1),
+                                                     sgpr(batchStrideName), sgpr("WorkGroup2"),
+                                                     comment="Batch: Stride*WG"))
+        mod.add(SLShiftLeftB64(dst=sgpr(tmp, 2), src=sgpr(tmp, 2),
+                                shiftHex=int(log2(bpe)), comment="scale by bpe"))
+        mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(tmp), src1=sgpr(f"Address{tc}"),
+                         comment="+= batch(lo)"))
+        mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(tmp+1), src1=sgpr(f"Address{tc}+1"),
+                          comment="+= batch(hi)"))
+
+    return mod
 
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     mod = Module("TDM Global Offset Wave Separated")

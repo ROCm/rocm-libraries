@@ -13,6 +13,7 @@
 ################################################################################
 
 from functools import singledispatch
+from math import prod
 
 from rocisa.code import Module
 from rocisa.container import DSModifiers, EXEC, vgpr, sgpr
@@ -416,7 +417,38 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   tc = tileInfo.tc
 
   # TDM handles wave partitioning via descriptors
+  # For single-wave, TDM puts all data at the wave's LDS base -- no partition needed.
+  # For multi-wave, each wave's TDM writes to a different LDS region, so LR
+  # offsets must include a per-wave partition offset.
   if kernel["enableTDM%s" % tc]:
+    numWaves = prod(kernel["MIWaveGroup"])
+    if numWaves == 1:
+      return
+    # Multi-wave TDM: add per-wave LDS offset based on axis position
+    wgM, wgN = kernel["MIWaveGroup"]
+    numWavesThisAxis = wgM if tc == 'A' else wgN
+    if numWavesThisAxis <= 1:
+      return  # this tensor's axis is not split
+    wavesize = kernel["WavefrontSize"]
+    du = kernel["DepthU"]
+    mt = kernel["MacroTile0"] if tc == 'A' else kernel["MacroTile1"]
+    bpe = tileInfo.bpe
+    waveId = writer.vgprPool.checkOut(1)
+    module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="waveId"))
+    # Decompose to axis component
+    if tc == 'A' and wgN > 1:
+      module.add(VAndB32(dst=vgpr(waveId), src0=hex(wgM - 1), src1=vgpr(waveId), comment="waveIdM = waveId %% %d" % wgM))
+    elif tc == 'B' and wgM > 1:
+      module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wgM.bit_length()-1), src=vgpr(waveId), comment="waveIdN = waveId / %d" % wgM))
+    # LDS offset per wave = waveId_axis * (mt / numWavesThisAxis * du * bpe)
+    ldsPerWave = int(mt // numWavesThisAxis * du * bpe)
+    tmpSgpr = writer.sgprPool.checkOut(1)
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(ldsPerWave), comment="LDS bytes per wave for %s" % tc))
+    module.add(VMulLOU32(dst=vgpr(waveId), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment="waveOffset"))
+    for vgprId in range(len(tileInfo.sharedVgprLROffset)):
+      module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(waveId), comment="%s: TDM wave partition LR offset" % tc))
+    writer.vgprPool.checkIn(waveId)
+    writer.sgprPool.checkIn(tmpSgpr)
     return
 
   if tileInfo.loadRatioGR >= 2.0:

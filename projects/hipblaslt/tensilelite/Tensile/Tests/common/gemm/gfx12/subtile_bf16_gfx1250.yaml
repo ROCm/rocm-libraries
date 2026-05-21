@@ -39,6 +39,10 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 2, 2,  1, 1]  # MT 32x32
           - [16, 16, 32, 1,  1, 4, 4,  1, 1]  # MT 64x64
+          - [16, 16, 32, 1,  1, 2, 2,  4, 1]  # MT 128x32
+          - [16, 16, 32, 1,  1, 2, 2,  1, 4]  # MT 32x128
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]  # MT 64x64
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
         - DepthU: [64]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
@@ -60,4 +64,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [64, 64, 1, 64]
           - Exact: [128, 128, 1, 128]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 256]

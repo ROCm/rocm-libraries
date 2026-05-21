@@ -169,23 +169,15 @@ class InstructionEmitter:
         tensor = placement.tensor
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
-            # TDM aliased descriptors: reprogram before each tensor load (multi-wave only)
+            # Update TDM descriptor before each tensor_load_to_lds
             if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
-                numWaves = reduce(mul, self.kernel["MIWaveGroup"], 1)
-                if numWaves > 1:
-                    module.add(SWaitTensorcnt(tensorcnt=0, comment="drain TDM before aliased descriptor reprogram"))
-                    tensorParams = self.writer.tPA if tensor == 'A' else self.writer.tPB
-                    module.add(self.writer.initTDMDescriptorSubtile(self.kernel, tensorParams, setLds=False))
-                else:
-                    # Single-wave separate descriptors: just update global addr from Address{tc}
-                    group0 = f"tdm{tensor}Group0"
-                    module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tensor}", 2),
-                                       comment=f"update TDM {tensor} descriptor global addr"))
-                    module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=hex(2 << 30),
-                                      comment="restore type field to 2(image)"))
-                    # Update LDS addr from tracking SGPR (maintained by globalReadLDSBufferSwap)
-                    module.add(SMovB32(dst=sgpr(f"{group0}+1"), src=sgpr(f"tdmLdsAddr{tensor}"),
-                                       comment=f"update TDM {tensor} descriptor LDS addr"))
+                group0 = f"tdm{tensor}Group0"
+                module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tensor}", 2),
+                                   comment=f"update TDM {tensor} global addr"))
+                module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=hex(2 << 30),
+                                  comment="restore type field"))
+                module.add(SMovB32(dst=sgpr(f"{group0}+1"), src=sgpr(f"tdmLdsAddr{tensor}"),
+                                   comment=f"update TDM {tensor} LDS addr"))
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):

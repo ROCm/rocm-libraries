@@ -4416,15 +4416,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # TDM descriptor init for gfx1250 subtile
     if hasTDM:
-      if prod(kernel["MIWaveGroup"]) > 1:
-        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-      else:
-        # 1-wave separate descriptors: init all tensors
-        module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
-        module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
-        module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
-        module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersB))
+      module.add(self.tdmGlobalOffsetSubtile(kernel, tensorParametersA))
+      module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
+      module.add(self.tdmGlobalOffsetSubtile(kernel, tensorParametersB))
+      module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersB))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
@@ -9546,6 +9541,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def tdmApplyStreamKOffsetSubtile(self, kernel, tP) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmGlobalOffsetSubtile(self, kernel, tP) -> Module:
     assert False, "Should be overrided"
 
   def tdmIncrementAB(self, kernel, tP) -> Module:
