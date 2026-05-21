@@ -16,13 +16,14 @@ if(NOT CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
     if(WIN32)
         set(_AMDCLANGXX "${_AMDCLANGXX}.exe")
     endif()
-    if(NOT EXISTS "${_AMDCLANGXX}")
-        message(FATAL_ERROR
-            "amdclang++ not found at ${_AMDCLANGXX}\n"
-            "Either install the ROCm SDK, set ROCM_PATH (e.g. ROCM_PATH=$(rocm-sdk path --root)),"
-            " or set CXX/CMAKE_CXX_COMPILER to your compiler.")
+    if(EXISTS "${_AMDCLANGXX}")
+        set(CMAKE_CXX_COMPILER "${_AMDCLANGXX}")
+        message(STATUS "Using amdclang++ from ROCm: ${_AMDCLANGXX}")
+    else()
+        message(STATUS
+            "amdclang++ not found at ${_AMDCLANGXX}; using default C++ compiler "
+            "(set CXX/CMAKE_CXX_COMPILER or ROCM_PATH to override)")
     endif()
-    set(CMAKE_CXX_COMPILER "${_AMDCLANGXX}")
 endif()
 
 # --- C compiler ---
@@ -31,13 +32,14 @@ if(NOT CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
     if(WIN32)
         set(_AMDCLANG "${_AMDCLANG}.exe")
     endif()
-    if(NOT EXISTS "${_AMDCLANG}")
-        message(FATAL_ERROR
-            "amdclang not found at ${_AMDCLANG}\n"
-            "Either install the ROCm SDK, set ROCM_PATH (e.g. ROCM_PATH=$(rocm-sdk path --root)),"
-            " or set CC/CMAKE_C_COMPILER to your compiler.")
+    if(EXISTS "${_AMDCLANG}")
+        set(CMAKE_C_COMPILER "${_AMDCLANG}")
+        message(STATUS "Using amdclang from ROCm: ${_AMDCLANG}")
+    else()
+        message(STATUS
+            "amdclang not found at ${_AMDCLANG}; using default C compiler "
+            "(set CC/CMAKE_C_COMPILER or ROCM_PATH to override)")
     endif()
-    set(CMAKE_C_COMPILER "${_AMDCLANG}")
 endif()
 
 unset(_ROCM_PATH)

@@ -3,8 +3,21 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# Resolve symlinks so ../../cmake/modules reaches the monorepo root when
+# configuring via a shortcut path to shared/stinkytofu.
+get_filename_component(_STINKYTOFU_REAL_DIR "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
+get_filename_component(_ROCM_LIBRARIES_ROOT "${_STINKYTOFU_REAL_DIR}/../.." REALPATH)
+set(STINKYTOFU_ROCM_LIBRARIES_CMAKE_MODULES "${_ROCM_LIBRARIES_ROOT}/cmake/modules")
+unset(_STINKYTOFU_REAL_DIR)
+unset(_ROCM_LIBRARIES_ROOT)
+
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
+    set(_default_amdclang "${STINKYTOFU_ROCM_LIBRARIES_CMAKE_MODULES}/default_amdclang.cmake")
+    if(NOT EXISTS "${_default_amdclang}")
+        message(FATAL_ERROR "default_amdclang.cmake not found at ${_default_amdclang}")
+    endif()
+    include("${_default_amdclang}")
+    unset(_default_amdclang)
 endif()
 
 project(stinkytofu)
@@ -248,9 +261,11 @@ install(FILES
 # clang-tidy
 # --------------------------------------------------------------------------- #
 option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
-include(ClangTidy)
-add_clang_tidy_custom_target()
+if(ENABLE_CLANG_TIDY)
+    list(APPEND CMAKE_MODULE_PATH "${STINKYTOFU_ROCM_LIBRARIES_CMAKE_MODULES}")
+    include(ClangTidy)
+    add_clang_tidy_custom_target()
+endif()
 
 # Build-tree export so find_package() works without installing.
 export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
