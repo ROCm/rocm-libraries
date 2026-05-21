@@ -79,7 +79,7 @@ jobs:
               "projects/miopen/cmake/ClangTidy.cmake",
               "projects/miopen/.clang-tidy"
             ],
-            checkout_paths: ["projects/miopen"]
+            checkout_paths: ["projects/miopen", "shared/ctest"]
           }'))
 
           # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
