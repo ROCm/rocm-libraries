@@ -8,6 +8,8 @@
 
 #include <string_view>
 
+#include "../runtime/KernelArtifact.hpp"
+
 namespace ck_dsl_provider {
 
 /// Owns the embedded interpreter's view of the provider-local
@@ -50,6 +52,19 @@ class CompileServiceBridge {
     /// the resulting dict. Acquires the GIL internally and translates
     /// any Python error into a HipdnnPluginException.
     pybind11::dict noopSmoke();
+
+    /// Invoke ck_dsl_provider.compile_service.compile_smoke() and
+    /// translate the returned dict into a KernelArtifact ready to hand
+    /// to HipModule. Acquires the GIL internally; any
+    /// py::error_already_set is translated via PythonError::raise.
+    ///
+    /// The smoke artifact is a gfx950 elementwise-copy HSACO (see
+    /// the Python side's compile_smoke docstring) -- enough to prove
+    /// the round-trip from compile-service to hipModuleLaunchKernel
+    /// without depending on any per-op adapter logic. Production
+    /// compiles will land via I-7's ``compile(op_kind, payload)`` on
+    /// the same bridge.
+    KernelArtifact compileSmoke();
 
     /// Test-only access to the imported compile_service module. Allows
     /// the unit suite to exercise the PythonError translation path by

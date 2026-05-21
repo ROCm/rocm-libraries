@@ -15,6 +15,7 @@ add_executable(
     main.cpp
     CompileServiceBridgeTest.cpp
     EmbeddedInterpreterTest.cpp
+    HipModuleSmokeTest.cpp
 )
 
 target_link_libraries(
