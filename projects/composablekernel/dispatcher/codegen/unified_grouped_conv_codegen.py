@@ -312,6 +312,10 @@ class GroupedConvKernelConfig:
             if sk.streamk_persistent:
                 name += "_persistent"
 
+        # Large tensor (split image) suffix
+        if tr.split_image:
+            name += "_large_tensor"
+
         # Padding suffix (only if not all enabled)
         if not (tr.pad_m and tr.pad_n and tr.pad_k):
             name += f"_pad{int(tr.pad_m)}{int(tr.pad_n)}{int(tr.pad_k)}"

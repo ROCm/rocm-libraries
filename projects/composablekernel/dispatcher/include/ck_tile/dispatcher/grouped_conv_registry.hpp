@@ -89,6 +89,9 @@ struct GroupedConvKernelKey
     // Convolution specialization (e.g., "default", "filter1x1_stride1_pad0")
     std::string specialization = "default";
 
+    // Large tensor (split image) support
+    bool large_tensor = false;
+
     // Stream-K configuration
     bool streamk_enabled = false;
     std::string streamk_reduction = "none"; // "none", "tree", "linear"
@@ -111,6 +114,7 @@ struct GroupedConvKernelKey
                num_wave_groups == other.num_wave_groups &&
                num_groups_to_merge == other.num_groups_to_merge &&
                specialization == other.specialization &&
+               large_tensor == other.large_tensor &&
                streamk_enabled == other.streamk_enabled &&
                streamk_reduction == other.streamk_reduction &&
                streamk_persistent == other.streamk_persistent && arch == other.arch;
@@ -153,9 +157,10 @@ struct GroupedConvKernelKeyHash
         h ^= std::hash<std::string>{}(key.pipeline) << 11;
         h ^= std::hash<std::string>{}(key.arch) << 12;
         h ^= std::hash<std::string>{}(key.specialization) << 13;
-        h ^= std::hash<bool>{}(key.streamk_enabled) << 14;
-        h ^= std::hash<std::string>{}(key.streamk_reduction) << 15;
-        h ^= std::hash<bool>{}(key.streamk_persistent) << 16;
+        h ^= std::hash<bool>{}(key.large_tensor) << 14;
+        h ^= std::hash<bool>{}(key.streamk_enabled) << 15;
+        h ^= std::hash<std::string>{}(key.streamk_reduction) << 16;
+        h ^= std::hash<bool>{}(key.streamk_persistent) << 17;
         return h;
     }
 };
