@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
+#include "python/CompileServiceBridge.hpp"
 #include "python/EmbeddedInterpreter.hpp"
 
 namespace ck_dsl_provider {
@@ -67,6 +69,14 @@ CkDslContainer::CkDslContainer() {
     // the right hook for the per-process singleton.
     ck_dsl_provider::EmbeddedInterpreter::ensureInitialized();
 
+    // Bring up the Python compile-service bridge before any engines are
+    // registered. Per plan §3.1 the bridge is the single boundary
+    // through which the JIT pipeline calls into ck_dsl; constructing it
+    // here means the import + sys.path injection happen exactly once
+    // per process and any failure surfaces with a clear container-ctor
+    // stack trace rather than deep inside an engine call.
+    _compileServiceBridge = std::make_unique<CompileServiceBridge>();
+
     _engineManager = std::make_unique<
         hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>>();
 
@@ -86,6 +96,15 @@ CkDslContainer::~CkDslContainer() noexcept {
 hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>&
 CkDslContainer::getEngineManager() {
     return *_engineManager;
+}
+
+CompileServiceBridge& CkDslContainer::compileServiceBridge() {
+    if (!_compileServiceBridge) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED,
+            "CkDslContainer::compileServiceBridge() called before construction completed");
+    }
+    return *_compileServiceBridge;
 }
 
 }  // namespace ck_dsl_provider
