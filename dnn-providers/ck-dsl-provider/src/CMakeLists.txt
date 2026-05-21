@@ -11,6 +11,8 @@ add_library(
     CkDslContainer.cpp
     CkDslHandle.cpp
     CkDslPluginPublic.cpp
+    adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.cpp
+    adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
     python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
