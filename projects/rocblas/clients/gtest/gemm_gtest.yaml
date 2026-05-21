@@ -3587,8 +3587,8 @@ Tests:
   api: [ C_64 ]
   os_flags: LINUX
 
-- name: gemm_PyTorch_offset_overflow
-  category: known_bugs
+- name: gemm_PyTorch_offset_overflow_CI_TEST
+  category: pre_checkin
   function:
     - gemm: *single_precision
   matrix_size:
