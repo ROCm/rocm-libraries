@@ -106,7 +106,8 @@ struct MmaDefaultSelector<ADataType,
                                                                 CDataType,
                                                                 16u,
                                                                 16u,
-                                                                WaveTileK,
+                                                                32u, // TODO: Add iterative K size
+                                                                     // search starting at WaveTileK
                                                                 CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through
@@ -118,19 +119,21 @@ struct MmaDefaultSelector<ADataType,
                                                          1u,
                                                          CompilerTarget>::SelectedOp;
 
+    static_assert(MmaOpTraits<CandidateOp16x16>::IsSupported);
+
     // Check if each candidate is supported for the given WaveTile sizes
     // For this case, we require the WaveTile sizes to be multiples of the WMMA shape
     static constexpr bool IsSupported16x16 =
-        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM % CandidateOp16x16::kM == 0u) &&
-        (WaveTileN % CandidateOp16x16::kN == 0u) && (WaveTileK % CandidateOp16x16::kK == 0u);
+        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM == CandidateOp16x16::kM) &&
+        (WaveTileN == CandidateOp16x16::kN) && (WaveTileK % CandidateOp16x16::kK == 0u);
 
     public:
     // Select the largest supported WMMA operation for the given WaveTile shape
     using SelectedOp = std::conditional_t<IsSupported16x16, CandidateOp16x16, DefaultOp>;
 
     // TODO: Do not allow M / N composition for now.
-    static_assert(SelectedOp::kM == WaveTileM);
-    static_assert(SelectedOp::kN == WaveTileN);
+    static_assert(!MmaOpTraits<SelectedOp>::IsSupported || SelectedOp::kM == WaveTileM);
+    static_assert(!MmaOpTraits<SelectedOp>::IsSupported || SelectedOp::kN == WaveTileN);
 };
 
 } // namespace ck_tile::core::arch::mma

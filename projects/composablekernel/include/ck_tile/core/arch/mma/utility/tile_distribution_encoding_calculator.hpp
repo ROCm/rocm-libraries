@@ -19,13 +19,17 @@ namespace ck_tile::core::arch::mma {
  * @tparam AttrNumAccessAV Requested NumAccess for the A matrix. Must be multiple of "fundamental"
  *                         NumAccess for intrinsic. See details in amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Requested NumAccess for the B matrix.
+ * @tparam UncompressedA   Give an uncompressed (full) layout for A instead. This is used at the
+ *                         pipeline level, whereas the MmaOp level deals with pre-compressed A
+ *                         matrices.
  */
 template <typename MmaOp,
           bool CTranspose         = false,
           index_t SFactor         = 1,
           index_t kIter           = 1,
           index_t AttrNumAccessAV = MmaOp::kAKNumAccess,
-          index_t AttrNumAccessBV = MmaOp::kBKNumAccess>
+          index_t AttrNumAccessBV = MmaOp::kBKNumAccess,
+          bool UncompressedA      = false>
 struct TileDistrEncCalc
 {
     private:
@@ -92,7 +96,8 @@ struct TileDistrEncCalc
         }
     }
 
-    using AEnc_ = ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, MmaOp::kCompressionRatio>;
+    static constexpr index_t compressionRatioA = UncompressedA ? 1 : MmaOp::kCompressionRatio;
+    using AEnc_ = ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>;
     using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB>;
 
     public:
@@ -107,7 +112,8 @@ struct TileDistrEncCalc
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_lanes == MmaOp::WaveSize);
 
     static_assert(TileDistrEncRegMap<AWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::AVecType>::vector_size * kIter);
+                  vector_traits<typename MmaOp::AVecType>::vector_size * kIter *
+                      MmaOp::kCompressionRatio / compressionRatioA);
     static_assert(TileDistrEncRegMap<BWarpDstrEncoding>::num_vector_items ==
                   vector_traits<typename MmaOp::BVecType>::vector_size * kIter);
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_vector_items ==

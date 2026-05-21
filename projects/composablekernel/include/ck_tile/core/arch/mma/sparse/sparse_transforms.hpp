@@ -139,7 +139,7 @@ template <index_t CompressionRatio>
 struct SparseCompressTransform
 {
     template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType& v)
+    CK_TILE_DEVICE static decltype(auto) execOld(VecType& v)
     {
         using VecTraits                         = vector_traits<remove_cvref_t<VecType>>;
         using ScalarT                           = typename VecTraits::scalar_type;
@@ -155,6 +155,30 @@ struct SparseCompressTransform
         auto idx = sparse::detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
         return std::tuple<VecCompressed&, IdxType>(*ck_tile::bit_cast<VecCompressed*>(&v), idx);
+    }
+
+    // TODO: We're going to get a static distributed tensor here and previously it was a big vec?
+    template <typename ATensor>
+    CK_TILE_DEVICE static decltype(auto) exec(ATensor& a_tensor)
+    {
+        using ADataType        = typename ATensor::DataType;
+        constexpr index_t VecN = ATensor::get_thread_buffer_size();
+        using VecType          = ext_vector_t<ADataType, VecN>;
+
+        auto& a_ext_v = a_tensor.get_thread_buffer().template get_as<VecType>().template at<0>();
+
+        static constexpr index_t CompressedSize = VecN / CompressionRatio;
+        using VecCompressed                     = ext_vector_t<ADataType, CompressedSize>;
+        using IdxType =
+            sparse::detail::SparseIdxPack<sparse::detail::idx_words_needed<CompressedSize>>;
+
+        static_assert(VecN % CompressionRatio == 0, "VecN must be divisible by CompressionRatio");
+        static_assert(CompressedSize > 0, "CompressedSize must be > 0");
+
+        auto idx = sparse::detail::compress_a_impl<ADataType, CompressedSize>(a_ext_v);
+
+        return std::tuple<VecCompressed&, IdxType>(*ck_tile::bit_cast<VecCompressed*>(&a_ext_v),
+                                                   idx);
     }
 };
 
