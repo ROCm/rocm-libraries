@@ -68,6 +68,11 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
     // determined by scale shuffle pattern
     constexpr int BlockedXDLN_PerWarp = MXFlatmmArchTraits::BlockedXDLN_PerWarp;
 
+    // [Task #39] Enable epilogue ping/pong LDS for FP6 (halves epilogue barrier count).
+    // FP4/FP8 keep the default (false) — their epilogue LDS doesn't dominate either,
+    // but no measured win was confirmed for them yet, so scope to FP6 only.
+    constexpr bool kUsePingPongLds = std::is_same_v<ComputeDataType, ck_tile::pk_fp6x16_t>;
+
     using MXPipelineProblem = ck_tile::MXFlatmmPipelineProblem<ADataType,
                                                                BDataType,
                                                                AccDataType,
@@ -123,7 +128,9 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                                                    FlatmmConfig::NumWaveGroups,
                                                                    false, // FixedVectorSize
                                                                    1,     // VectorSizeC
-                                                                   BlockedXDLN_PerWarp>>>;
+                                                                   BlockedXDLN_PerWarp>,
+                                  /*Policy=*/void,
+                                  /*UsePingPongLds=*/kUsePingPongLds>>;
 
     using Kernel = ck_tile::MXFlatmmKernel<TilePartitioner, MXFlatmmPipeline, GemmEpilogue>;
 

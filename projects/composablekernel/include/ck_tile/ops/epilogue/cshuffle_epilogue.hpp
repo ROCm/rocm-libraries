@@ -70,7 +70,14 @@ struct CShuffleEpilogueProblem
                   "The size of DsDataType and DsLayout should be the same");
 };
 
-template <typename Problem_, typename Policy_ = void>
+// [Task #39] UsePingPongLds: when true, the LDS shuffle tile is double-buffered.
+// Eliminates the WAR barrier between successive iters (each iter writes to a
+// different LDS region, so iter N's writes don't conflict with iter N-1's reads
+// that already happened on the OTHER region). Halves per-iter barrier count.
+// Doubles epilogue LDS footprint; safe when kernel's pipeline LDS dominates
+// the max() in kernel-level GetSmemSize (FP6 case: 49 KB pipeline vs ~5 KB
+// epilogue, so doubling epilogue stays within the 49 KB ceiling).
+template <typename Problem_, typename Policy_ = void, bool UsePingPongLds = false>
 struct CShuffleEpilogue
 {
     using Problem          = remove_cvref_t<Problem_>;
@@ -554,7 +561,11 @@ struct CShuffleEpilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
-        return lds_block_desc.get_element_space_size() * sizeof(ODataType);
+        constexpr index_t base_bytes  = lds_block_desc.get_element_space_size() * sizeof(ODataType);
+        // [Task #39] Double the epilogue LDS footprint when ping/pong enabled.
+        // Kernel-level GetSmemSize takes max(pipeline, epilogue), so this only grows
+        // total LDS if epilogue would otherwise be the max — for FP6 it isn't.
+        return UsePingPongLds ? (2 * base_bytes) : base_bytes;
     }
 
     template <index_t iAccess, typename LdsTile, typename ScaleM, typename ScaleN>
@@ -710,19 +721,38 @@ struct CShuffleEpilogue
         auto lds_tile = make_static_distributed_tensor<AccDataType>(LdsTileDistr);
 
         constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
-        auto o_lds_block              = make_tensor_view<address_space_enum::lds>(
+        // [Task #39] When UsePingPongLds, allocate two LDS regions back-to-back.
+        // The pong region starts at offset = base_elems from p_smem.
+        constexpr index_t base_lds_elems = lds_block_desc.get_element_space_size();
+        auto o_lds_block_ping            = make_tensor_view<address_space_enum::lds>(
             static_cast<ODataType*>(p_smem), lds_block_desc);
+        auto o_lds_block_pong = make_tensor_view<address_space_enum::lds>(
+            static_cast<ODataType*>(p_smem) + (UsePingPongLds ? base_lds_elems : 0),
+            lds_block_desc);
 
-        auto in_lds_window = make_tile_window(
-            o_lds_block,
+        auto in_lds_window_ping = make_tile_window(
+            o_lds_block_ping,
+            make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
+            {0, 0},
+            LdsTileDistr);
+        auto in_lds_window_pong = make_tile_window(
+            o_lds_block_pong,
             make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
             {0, 0},
             LdsTileDistr);
 
-        auto out_lds_window = make_tile_window(
-            o_lds_block,
+        auto out_lds_window_ping = make_tile_window(
+            o_lds_block_ping,
             make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
             {0, 0});
+        auto out_lds_window_pong = make_tile_window(
+            o_lds_block_pong,
+            make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
+            {0, 0});
+
+        // Aliases preserved for the original (non-ping-pong) path below.
+        auto& in_lds_window  = in_lds_window_ping;
+        auto& out_lds_window = out_lds_window_ping;
 
         constexpr index_t num_access = SFC::get_num_of_access();
 
@@ -789,24 +819,66 @@ struct CShuffleEpilogue
         s_wait_tensorcnt_barrier();
 #endif
 
-        static_for<0, num_access, 1>{}([&](auto iAccess) {
-            block_sync_lds();
-            slice_acc_tile<iAccess>(o_acc_tile, lds_tile);
+        if constexpr(UsePingPongLds)
+        {
+            // [Task #39] Ping/Pong LDS: each iter writes to a different LDS region,
+            // so the WAR barrier between iter N-1's read and iter N's write is no
+            // longer needed (iter N writes to the OTHER region). Only the RAW
+            // barrier (sync all waves' writes before reads) remains.
+            //
+            // Per-iter barrier count: 2 → 1.
+            // Total barrier reduction: num_access (was 2*num_access barriers).
+            static_for<0, num_access, 1>{}([&](auto iAccess) {
+                slice_acc_tile<iAccess>(o_acc_tile, lds_tile);
 
-            if constexpr(has_scales)
-            {
-                scale_tile<iAccess>(lds_tile, scale_m_window, scale_n_window);
-            }
+                if constexpr(has_scales)
+                {
+                    scale_tile<iAccess>(lds_tile, scale_m_window, scale_n_window);
+                }
 
-            cast_lds_tile(lds_tile, in_lds_window);
-            block_sync_lds();
+                if constexpr(iAccess.value % 2 == 0)
+                {
+                    cast_lds_tile(lds_tile, in_lds_window_ping);
+                    block_sync_lds(); // RAW: all waves' writes to ping → reads
+                    auto c_out_tensor =
+                        load_tile(make_tile_window(out_lds_window_ping, dram_tile_distribution));
+                    apply_d_tensors(d_dram_windows, c_out_tensor);
+                    store_to_dram(out_dram_window, c_out_tensor);
+                }
+                else
+                {
+                    cast_lds_tile(lds_tile, in_lds_window_pong);
+                    block_sync_lds(); // RAW: all waves' writes to pong → reads
+                    auto c_out_tensor =
+                        load_tile(make_tile_window(out_lds_window_pong, dram_tile_distribution));
+                    apply_d_tensors(d_dram_windows, c_out_tensor);
+                    store_to_dram(out_dram_window, c_out_tensor);
+                }
+                move_windows<iAccess>(out_dram_window, d_dram_windows);
+            });
+        }
+        else
+        {
+            static_for<0, num_access, 1>{}([&](auto iAccess) {
+                block_sync_lds();
+                slice_acc_tile<iAccess>(o_acc_tile, lds_tile);
 
-            auto c_out_tensor = load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
+                if constexpr(has_scales)
+                {
+                    scale_tile<iAccess>(lds_tile, scale_m_window, scale_n_window);
+                }
 
-            apply_d_tensors(d_dram_windows, c_out_tensor);
-            store_to_dram(out_dram_window, c_out_tensor);
-            move_windows<iAccess>(out_dram_window, d_dram_windows);
-        });
+                cast_lds_tile(lds_tile, in_lds_window);
+                block_sync_lds();
+
+                auto c_out_tensor =
+                    load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
+
+                apply_d_tensors(d_dram_windows, c_out_tensor);
+                store_to_dram(out_dram_window, c_out_tensor);
+                move_windows<iAccess>(out_dram_window, d_dram_windows);
+            });
+        }
     }
 };
 } // namespace ck_tile

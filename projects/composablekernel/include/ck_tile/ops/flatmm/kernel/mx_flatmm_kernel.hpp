@@ -457,10 +457,28 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                                                       num_loop,
                                                       smem_ptr);
 
+        // [Task #38] FP6 example always passes k_batch=1 (hardcoded in mx_flatmm.cpp:57).
+        // The atomic_add branch is compiled-but-never-executed dead code that costs
+        // I-cache + register-allocator pressure. For pk_fp6x16_t, compile out the atomic
+        // branch entirely. FP4/FP8 paths keep the runtime if/else to preserve split-K
+        // capability for any future caller.
+        constexpr bool kFp6SkipAtomic = std::is_same_v<ADataType, pk_fp6x16_t>;
+
         // Run Epilogue Pipeline with split_k dispatch
         if constexpr(DoEpiScale)
         {
-            if(kargs.k_batch == 1)
+            if constexpr(kFp6SkipAtomic)
+            {
+                auto e_block_window = MakeEBlockWindow<memory_operation_enum::set>(
+                    e_ptr, kargs, block_idx_m, block_idx_n);
+                EpiloguePipeline{}(e_block_window,
+                                   c_block_tile,
+                                   ds_block_window,
+                                   smem_ptr,
+                                   kargs.scale_m_ptr + block_idx_m,
+                                   kargs.scale_n_ptr + block_idx_n);
+            }
+            else if(kargs.k_batch == 1)
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::set>(
                     e_ptr, kargs, block_idx_m, block_idx_n);
@@ -485,7 +503,13 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
         }
         else if(UseDefaultScheduler || (get_warp_id() == 0))
         {
-            if(kargs.k_batch == 1)
+            if constexpr(kFp6SkipAtomic)
+            {
+                auto e_block_window = MakeEBlockWindow<memory_operation_enum::set>(
+                    e_ptr, kargs, block_idx_m, block_idx_n);
+                EpiloguePipeline{}(e_block_window, c_block_tile, ds_block_window, smem_ptr);
+            }
+            else if(kargs.k_batch == 1)
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::set>(
                     e_ptr, kargs, block_idx_m, block_idx_n);
