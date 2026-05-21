@@ -205,12 +205,49 @@ using MXFlatmm_GFX950_FP4FP4_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXfp4_FlatmmConfig16>;
 using MXFlatmm_GFX950_FP8FP8_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
-using MXFlatmm_GFX950_FP6FP6_Traits =
-    MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
 using MXFlatmm_GFX950_FP8FP4_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
 using MXFlatmm_GFX950_FP4FP8_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
+
+// =====================================================================
+// MXFP6-dedicated arch traits — Phase-2 split off from MXFlatmmArchTraits.
+//
+// The only difference from the base template is the MXFlatmmPipeline alias,
+// which routes to MXFp6FlatmmPipelineV1 instead of the shared
+// MXFlatmmPipelineAGmemBGmemCRegV1. Host-side shuffle helpers are forwarded
+// to the base trait so they stay shared with FP4/FP8.
+// =====================================================================
+template <ck_tile::core::arch::TargetId Arch, typename FlatmmConfig>
+struct MXFp6FlatmmArchTraits
+{
+    static constexpr int BlockedXDLN_PerWarp = 2; // determined by scale shuffle pattern
+
+    using Config = FlatmmConfig;
+
+    template <typename MXPipelineProblem>
+    using MXFlatmmPipeline = ck_tile::MXFp6FlatmmPipelineV1<MXPipelineProblem>;
+
+    static constexpr int GetNLane() { return Config::N_Warp_Tile; }
+
+    // Forward host-side weight shuffle to the base trait (identical layout for FP6).
+    template <typename dtype>
+    static auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
+    {
+        return MXFlatmmArchTraits<Arch, FlatmmConfig>::template preShuffleWeight<dtype>(src);
+    }
+
+    // Forward host-side scale shuffle to the base trait (identical layout for FP6).
+    template <bool KLast, typename dtype>
+    static auto preShuffleScale(ck_tile::HostTensor<dtype>& src)
+    {
+        return MXFlatmmArchTraits<Arch, FlatmmConfig>::template preShuffleScale<KLast, dtype>(src);
+    }
+};
+
+// Route FP6×FP6 on gfx950 to the new dedicated pipeline.
+using MXFlatmm_GFX950_FP6FP6_Traits =
+    MXFp6FlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFp6FlatmmConfigBase16>;
 
 template <ck_tile::core::arch::TargetId Arch, typename FlatmmConfig>
 struct MXFlatmmTDMArchTraits;
