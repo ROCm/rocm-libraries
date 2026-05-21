@@ -49,6 +49,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - UseSubtileImpl: [1]
         - StreamK: [3]
+        - TDMInst: [3]
         - StaggerU: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
