@@ -1601,7 +1601,8 @@ class TestBuildPreloop:
 class TestBuildNGLL:
 
     def test_256x256_fp4(self):
-        """NGLL removes GR(n+2) and gr_inc. LR and MFMA preserved."""
+        """NGLL removes GR(n+2). LR, MFMA, and gr_inc preserved (gr_inc
+        still needed to swap LW for tail entry)."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -1615,14 +1616,20 @@ class TestBuildNGLL:
 
         assert 'mfma' in all_ops
         assert 'lr' in all_ops
-        # NGLL should not have gr_inc
-        assert 'gr_inc' not in all_ops
+        # NGLL must drop GR(n+2) loads
+        for partition in ngll:
+            for group in partition:
+                for em in group:
+                    if em.opType == 'gr':
+                        assert em.source.mtIteration != 2, \
+                            "NGLL should not contain GR(n+2)"
 
 
 class TestBuildNLL:
 
     def test_256x256_fp4(self):
-        """NLL removes GRs, LR(n+1), increments. Only MFMA remains."""
+        """NLL removes GRs, LR(n+1), and (PGR=2) gr_inc. LR(n), MFMA, and
+        lr_inc remain — lr_inc is required to swap LR base for the next MT."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -1635,10 +1642,16 @@ class TestBuildNLL:
                    for group in partition for em in group]
 
         assert 'mfma' in all_ops
-        # NLL should not have gr or gr_inc or lr_inc
+        # NLL drops global loads and (under PGR=2) gr_inc
         assert 'gr' not in all_ops
         assert 'gr_inc' not in all_ops
-        assert 'lr_inc' not in all_ops
+        # LR(n+1) must be gone — only LR(n) remains
+        for partition in nll:
+            for group in partition:
+                for em in group:
+                    if em.opType == 'lr':
+                        assert em.source.mtIteration == 0, \
+                            "NLL should only contain LR(n)"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2504,8 +2517,9 @@ class TestBuildNll:
                 for em in emitted:
                     src = em.source
                     assert em.opType != 'gr', "NLL should have no GR ops"
+                    # PGR=2 (default): gr_inc dropped; lr_inc kept to swap LR
+                    # base for the next MT iteration on tail entry.
                     assert em.opType != 'gr_inc', "NLL should have no gr_inc ops"
-                    assert em.opType != 'lr_inc', "NLL should have no lr_inc ops"
                     if em.opType == 'lr' and isinstance(src, LRPlacement):
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
