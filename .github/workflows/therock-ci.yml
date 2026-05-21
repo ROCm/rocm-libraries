@@ -41,8 +41,12 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      docker_image: ${{ steps.ci-env.outputs.docker-image }}
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
+      linux_build_runs_on: ${{ steps.linux_projects.outputs.build_runs_on }}
       windows_projects: ${{ steps.windows_projects.outputs.windows_projects }}
+      windows_build_runs_on: ${{ steps.windows_projects.outputs.build_runs_on }}
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -54,12 +58,18 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 2
 
+      # Loads shared CI constants (TheRock ref, Docker image, runner labels)
+      # from the ci-env composite action so they are defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 70a6335b27d48f3781ba07eab89269f75a00f527 # 2026-05-03 commit
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -136,11 +146,14 @@ jobs:
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
+      docker_image: ${{ needs.setup.outputs.docker_image }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
+      build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
 
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
@@ -157,11 +170,13 @@ jobs:
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
     with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
+      build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
   therock_ci_summary:
     name: TheRock CI Summary

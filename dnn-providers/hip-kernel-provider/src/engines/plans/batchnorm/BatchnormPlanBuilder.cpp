@@ -430,14 +430,14 @@ bool BatchnormPlanBuilder::isApplicable(
         const auto& node0 = opGraph.getNodeWrapper(0);
         const auto& node1 = opGraph.getNodeWrapper(1);
 
-        bool isFwdInferenceFirst
+        const bool isFwdInferenceFirst
             = node0.attributesType()
               == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
-        bool isFwdInferenceWithVarianceFirst
+        const bool isFwdInferenceWithVarianceFirst
             = node0.attributesType()
               == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                   BatchnormInferenceAttributesVarianceExt;
-        bool isPointwiseSecond
+        const bool isPointwiseSecond
             = node1.attributesType()
               == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
