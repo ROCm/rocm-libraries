@@ -165,6 +165,8 @@ class device_adjacent_difference_benchmark : public primbench::benchmark_interfa
                                                 stream);
         };
 
+        HIP_CHECK(launch());
+
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
 
         state.set_items(size);
