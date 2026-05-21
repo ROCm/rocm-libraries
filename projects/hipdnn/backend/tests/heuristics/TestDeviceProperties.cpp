@@ -253,7 +253,10 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesWithLongArchitectureName)
 class TestGpuDeviceProperties : public ::testing::Test
 {
 protected:
-    void SetUp() override { SKIP_IF_NO_DEVICES(); }
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+    }
 };
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesSucceeds)
