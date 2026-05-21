@@ -960,8 +960,8 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
-    # 0  : MB and MBSK generate different assembly code
-    # 1  : MB and MBSK generate same assembly code
+    # 0  : disable
+    # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
