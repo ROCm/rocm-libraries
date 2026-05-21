@@ -98,24 +98,24 @@ protected:
 // Test cases
 // ============================================================================
 
+// "Pure" = input, output, scale, compute all matching (scale/compute always FP32);
+// "Upcast" = input is FP16/BFP16 but output widens to FP32.
+
 // 1. Input: FP32, Scale: FP32, Output: FP32, Compute: FP32
-using IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32
-    = RMSNormForwardTraining<float, float, float, float>;
+using IntegrationGpuRMSnormForwardPureFp32 = RMSNormForwardTraining<float, float, float, float>;
 
 // 2. Input: FP16, Scale: FP32, Output: FP16, Compute: FP32
-using IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32
-    = RMSNormForwardTraining<half, float, half, float>;
+using IntegrationGpuRMSnormForwardPureFp16 = RMSNormForwardTraining<half, float, half, float>;
 
 // 3. Input: BFP16, Scale: FP32, Output: BFP16, Compute: FP32
-using IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32
+using IntegrationGpuRMSnormForwardPureBfp16
     = RMSNormForwardTraining<bfloat16, float, bfloat16, float>;
 
 // 4. Input: FP16, Scale: FP32, Output: FP32, Compute: FP32
-using IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32
-    = RMSNormForwardTraining<half, float, float, float>;
+using IntegrationGpuRMSnormForwardUpcastFp16 = RMSNormForwardTraining<half, float, float, float>;
 
 // 5. Input: BFP16, Scale: FP32, Output: FP32, Compute: FP32
-using IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32
+using IntegrationGpuRMSnormForwardUpcastBfp16
     = RMSNormForwardTraining<bfloat16, float, float, float>;
 }
 
@@ -123,28 +123,33 @@ using IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32
 // Test Registrations
 // ============================================================================
 
-// Register tests with different data types and layouts
-#define REGISTER_RMS_TEST(TestCase)                                                               \
-    /* --- NCHW --- */                                                                            \
-    using TestCase##NCHW = TestCase;                                                              \
-    TEST_P(TestCase##NCHW, Correctness)                                                           \
-    {                                                                                             \
-        runGraphTest(TensorLayout::NCHW);                                                         \
-    }                                                                                             \
-    INSTANTIATE_TEST_SUITE_P(Smoke, TestCase##NCHW, testing::ValuesIn(getRMSnormTestCases()));    \
-    INSTANTIATE_TEST_SUITE_P(Full, TestCase##NCHW, testing::ValuesIn(getRMSnormFullTestCases())); \
-    /* --- NCDHW --- */                                                                           \
-    using TestCase##NCDHW = TestCase;                                                             \
-    TEST_P(TestCase##NCDHW, Correctness)                                                          \
-    {                                                                                             \
-        runGraphTest(TensorLayout::NCDHW);                                                        \
-    }                                                                                             \
-    INSTANTIATE_TEST_SUITE_P(Smoke, TestCase##NCDHW, testing::ValuesIn(getRMSnorm3dTestCases()));
+// Register tests with different data types and layouts. The macro inserts the
+// layout token between the base alias and the trailing datatype keyword so the
+// final suite name keeps the datatype as the suffix (test-name-validator rule).
+#define REGISTER_RMS_TEST(BaseAlias, Datatype)                                          \
+    /* --- Nchw --- */                                                                  \
+    using BaseAlias##Nchw##Datatype = BaseAlias##Datatype;                              \
+    TEST_P(BaseAlias##Nchw##Datatype, Correctness)                                      \
+    {                                                                                   \
+        runGraphTest(TensorLayout::NCHW);                                               \
+    }                                                                                   \
+    INSTANTIATE_TEST_SUITE_P(                                                           \
+        Smoke, BaseAlias##Nchw##Datatype, testing::ValuesIn(getRMSnormTestCases()));    \
+    INSTANTIATE_TEST_SUITE_P(                                                           \
+        Full, BaseAlias##Nchw##Datatype, testing::ValuesIn(getRMSnormFullTestCases())); \
+    /* --- Ncdhw --- */                                                                 \
+    using BaseAlias##Ncdhw##Datatype = BaseAlias##Datatype;                             \
+    TEST_P(BaseAlias##Ncdhw##Datatype, Correctness)                                     \
+    {                                                                                   \
+        runGraphTest(TensorLayout::NCDHW);                                              \
+    }                                                                                   \
+    INSTANTIATE_TEST_SUITE_P(                                                           \
+        Smoke, BaseAlias##Ncdhw##Datatype, testing::ValuesIn(getRMSnorm3dTestCases()));
 
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardPure, Fp32);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardPure, Fp16);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardPure, Bfp16);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardUpcast, Fp16);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardUpcast, Bfp16);
 
 } // namespace hip_kernel_provider::rmsnorm::test
