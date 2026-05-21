@@ -86,6 +86,7 @@ enum struct amd_buffer_coherence_enum
     glc     = DEVICE_NT,
     slc     = SYSTEM_NT,
     glc_slc = DEVICE_NT | SYSTEM_NT,
+    glc_dlc = 0, // TODO hack
 
 // gfx94: bit 0 = sc0, bit 1 = nt, bit 3 = swz, bit 4 = sc1
 // SC[1:0] System Cache level: 0=wave, 1=group, 2=device, 3=system
@@ -112,6 +113,19 @@ enum struct amd_buffer_coherence_enum
     glc     = DEVICE_NT1,
     slc     = SYSTEM_NT1,
     glc_slc = DEVICE_NT1 | SYSTEM_NT1,
+    glc_dlc = 0, // TODO hack
+#elif defined(__gfx11__)
+    glc     = 1,
+    slc     = 2,
+    dlc     = 4,
+    glc_dlc = glc | dlc,
+    // TODO, temporary hack
+    DEVICE_NT0 = 0,
+    SYSTEM_NT0 = 0,
+    DEVICE_NT1 = glc,
+    SYSTEM_NT1 = slc,
+    DEVICE     = glc,
+    glc_slc    = 0,
 #else
     glc     = 1,
     slc     = 2,
@@ -123,6 +137,7 @@ enum struct amd_buffer_coherence_enum
     DEVICE_NT1 = glc,
     SYSTEM_NT1 = slc,
     DEVICE     = glc, // TODO: temporary hack for StreamKCoherency
+    glc_dlc    = 0,   // TODO: temporary hack for StreamKCoherency
 #endif
 };
 

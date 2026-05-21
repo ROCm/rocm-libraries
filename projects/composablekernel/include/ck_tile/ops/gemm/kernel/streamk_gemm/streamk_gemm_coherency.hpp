@@ -43,4 +43,14 @@ struct StreamKCoherency<
     static constexpr amd_buffer_coherence_enum BUFFER_COHERENCE = amd_buffer_coherence_enum::DEVICE;
 };
 
+template <typename CompilerTarget>
+struct StreamKCoherency<
+    CompilerTarget,
+    core::arch::enable_if_target_family_id_t<CompilerTarget,
+                                             core::arch::amdgcn_target_family_id::GFX11>>
+{
+    static constexpr amd_buffer_coherence_enum BUFFER_COHERENCE =
+        amd_buffer_coherence_enum::glc_dlc;
+};
+
 } // namespace ck_tile
