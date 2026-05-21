@@ -144,8 +144,11 @@ class InstructionEmitter:
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
-                    subtileK = k // self.subtileShapeK
-                    subIterK_within = k % self.subtileShapeK
+                    subtileShapeK   = ti.subtileShape[1]              # FIX: per-tensor, not A-only
+                    subtileK = k // subtileShapeK
+                    subIterK_within = k % subtileShapeK
+                    #subtileK = k // self.subtileShapeK
+                    #subIterK_within = k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile))
@@ -180,7 +183,9 @@ class InstructionEmitter:
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
-                    subtileK = k // self.subtileShapeK
+                    subtileShapeK = ti.subtileShape[1]                # FIX: per-tensor, not A-only
+                    subtileK = k // subtileShapeK
+                    #subtileK = k // self.subtileShapeK
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
