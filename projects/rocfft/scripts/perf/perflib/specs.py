@@ -71,7 +71,16 @@ class MachineSpecs:
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return p.stdout.decode('ascii')
+    return p.stdout.decode('utf-8', errors='replace')
+
+
+def parse_amdsmi_json(text):
+    # amd-smi may prepend non-JSON warnings (e.g. permission notices) to
+    # stdout. Strip anything before the first '{' so json.loads succeeds.
+    idx = text.find('{')
+    if idx < 0:
+        return {}
+    return json.loads(text[idx:])
 
 
 def search(pattern, string):
@@ -136,13 +145,16 @@ def get_machine_specs(devicenum, type='default'):
         metric_entry = None
         if amd_smi_found:
             try:
-                static_data = json.loads(run([
-                    'amd-smi', 'static', '--vbios', '--vram', '--board',
-                    '--asic', '--json'
-                ]))
-                metric_data = json.loads(run([
-                    'amd-smi', 'metric', '--clock', '--perf-level', '--json'
-                ]))
+                static_data = parse_amdsmi_json(
+                    run([
+                        'amd-smi', 'static', '--vbios', '--vram', '--board',
+                        '--asic', '--json'
+                    ]))
+                metric_data = parse_amdsmi_json(
+                    run([
+                        'amd-smi', 'metric', '--clock', '--perf-level',
+                        '--json'
+                    ]))
                 for entry in static_data.get('gpu_data', []):
                     if entry.get('gpu') == devicenum:
                         static_entry = entry
@@ -154,19 +166,35 @@ def get_machine_specs(devicenum, type='default'):
             except (json.JSONDecodeError, ValueError, KeyError):
                 pass
 
+        # Conversion factors from amd-smi size units to GiB. Tolerates the
+        # MB/MiB (and KB/KiB, GB/GiB) ambiguity in amd-smi output by treating
+        # them as equivalent powers of 2.
+        unit_to_gib = {
+            'KB': 1 / 1024**2,
+            'KiB': 1 / 1024**2,
+            'MB': 1 / 1024,
+            'MiB': 1 / 1024,
+            'GB': 1.0,
+            'GiB': 1.0,
+            'TB': 1024.0,
+            'TiB': 1024.0,
+        }
+
         if static_entry is not None:
             vbios = static_entry.get('ifwi', {}).get('part_number',
                                                     'no amd-smi')
             gpuid = static_entry.get('asic', {}).get('device_id', 'no amd-smi')
             deviceinfo = static_entry.get('asic', {}).get(
                 'market_name', 'no amd-smi')
-            vram_mb = static_entry.get('vram',
-                                       {}).get('size', {}).get('value', 0)
+            vram_size = static_entry.get('vram', {}).get('size', {})
+            vram_value = vram_size.get('value', 0)
+            vram_unit = vram_size.get('unit', 'MB')
+            vram_gib = float(vram_value) * unit_to_gib.get(vram_unit, 0)
         else:
             vbios = 'no amd-smi'
             gpuid = 'no amd-smi'
             deviceinfo = 'no amd-smi'
-            vram_mb = 0
+            vram_gib = 0
 
         if metric_entry is not None:
             perflevel = metric_entry.get('perf_level', 'no amd-smi')
@@ -186,7 +214,7 @@ def get_machine_specs(devicenum, type='default'):
             mclk = 0
             sclk = 0
 
-        vram = '{:.2f} GiB'.format(float(vram_mb) / 1024 if vram_mb else 0)
+        vram = '{:.2f} GiB'.format(vram_gib)
 
         if gpuid == '0x66af':
             # radeon7: float: 13.8 TFLOPs, double: 3.46 TFLOPs, 1024 GB/s
