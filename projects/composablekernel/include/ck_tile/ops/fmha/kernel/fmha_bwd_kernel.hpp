@@ -66,10 +66,10 @@ struct FmhaBwdWorkspaceManager
     //   — per-batch offset array
 
     // [OPTIONAL, only for deterministic group mode persistent]
-    // index_t prefix_batch[batch+1]
-    //   — prefix sum of nhead * num_chunks[b] * seqlen_q[b] across batches
-    // index_t cu_start_ibatch[num_cus]
-    //   — first batch index that overlaps each CU's workload interval
+    // FmhaBwdGroupPersistentCuState cu_state[num_cus]
+    //   — per-CU packed dispatch state (ibatch, isplit, head_start, c_start, w_lo)
+    // FmhaBwdBatchState batch_state[batch]
+    //   — per-batch precomputed sq / nc / nsplits
 
     // GPU WORKSPACE BELOW (read & written by kernels):
 
@@ -99,12 +99,6 @@ struct FmhaBwdWorkspaceManager
             (kIsGroupMode && kIsDeterministic) ? static_cast<size_t>(batch + 1) : 0;
         return integer_least_multiple(sizeof(long_index_t) * dqAccOffsetsElems, ALIGNMENT);
     }
-    CK_TILE_HOST static size_t GetPrefixBatchSize(const int batch)
-    {
-        if constexpr(kIsGroupMode && kIsDeterministic)
-            return integer_least_multiple(sizeof(index_t) * (batch + 1), ALIGNMENT);
-        return 0;
-    }
     // cu_state[num_cus]: per-CU persistent state packed into one array (group det only).
     CK_TILE_HOST static size_t GetCuStateSize(const int num_cus)
     {
@@ -127,8 +121,8 @@ struct FmhaBwdWorkspaceManager
         if constexpr(kUseQrQtrDorPipeline)
             return 0;
         const size_t raw = GetDqAccSplitsSize<kUseQrQtrDorPipeline>(batch) +
-                           GetDqAccOffsetsSize(batch) + GetPrefixBatchSize(batch) +
-                           GetCuStateSize(get_num_cus()) + GetBatchStateSize(batch);
+                           GetDqAccOffsetsSize(batch) + GetCuStateSize(get_num_cus()) +
+                           GetBatchStateSize(batch);
         // Pad to 4K so dq_acc buffer always starts on a page-aligned boundary.
         return integer_least_multiple(raw, static_cast<size_t>(4096));
     }
@@ -139,13 +133,9 @@ struct FmhaBwdWorkspaceManager
     {
         return GetDqAccSplitsSize<kUseQrQtrDorPipeline>(batch);
     }
-    CK_TILE_HOST static size_t GetPrefixBatchOffset(const int batch)
-    {
-        return GetDqAccSplitsSize<false>(batch) + GetDqAccOffsetsSize(batch);
-    }
     CK_TILE_HOST static size_t GetCuStateOffset(const int batch)
     {
-        return GetPrefixBatchOffset(batch) + GetPrefixBatchSize(batch);
+        return GetDqAccSplitsSize<false>(batch) + GetDqAccOffsetsSize(batch);
     }
     CK_TILE_HOST static size_t GetBatchStateOffset(const int batch)
     {
@@ -197,12 +187,11 @@ struct FmhaBwdWorkspaceManager
         }
         else if constexpr(kIsGroupMode)
         { // deterministic group mode (persistent)
-            // Step 1: compute prefix_batch and target_w using per-batch seqlens
+            // Step 1: compute prefix_batch and target_w using per-batch seqlens.
+            // prefix_batch[b] = sum_{i<b}(nhead * nc[i] * sq_work[i]); drives CU partition.
             const index_t num_cus = get_num_cus();
-            auto* prefix_batch    = reinterpret_cast<index_t*>(reinterpret_cast<char*>(cpu_ws) +
-                                                            GetDqAccSplitsSize<false>(batch_size) +
-                                                            GetDqAccOffsetsSize(batch_size));
-            auto* cu_states_out   = reinterpret_cast<FmhaBwdGroupPersistentCuState*>(
+            std::vector<index_t> prefix_batch(batch_size + 1);
+            auto* cu_states_out = reinterpret_cast<FmhaBwdGroupPersistentCuState*>(
                 reinterpret_cast<char*>(cpu_ws) + GetCuStateOffset(batch_size));
             auto* batch_states = reinterpret_cast<FmhaBwdBatchState*>(
                 reinterpret_cast<char*>(cpu_ws) + GetBatchStateOffset(batch_size));
@@ -385,9 +374,10 @@ struct FmhaBwdWorkspaceManager
     CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
     {
         constexpr bool kUsePersistent = !kUseQrQtrDorPipeline && kIsDeterministic;
-        // Group + persistent + deterministic: kernel pre-zeroes its owned slots
-        // in-kernel (avoids host memset over the workspace upper bound, which can
-        // be ~20x larger than the actual region for large seqlen_k).
+        // Group + persistent + deterministic: dq_acc is zeroed by a separate
+        // DqAccPrezeroKernel (see kNeedsKernelPrezeroDqAcc) launched before this
+        // kernel, avoiding the launcher memset over the workspace upper bound
+        // (~20x larger than the actual region for large seqlen_k).
         if constexpr(kUsePersistent && kIsGroupMode)
             return false;
         // Persistent (batch and group): uses atomic_add → buffer must start at zero
@@ -589,8 +579,9 @@ struct FmhaBwdDQDKDVKernel
         CK_TILE_DEVICE void operator()(Kargs kargs) const
         {
             // Total elements are float32 dq_acc counts; uint4 packs 4 floats.
-            const long_index_t n4 = (*kargs.total_elem_ptr) / 4;
-            uint4* p              = reinterpret_cast<uint4*>(kargs.dq_acc_ptr);
+            const long_index_t total = *kargs.total_elem_ptr;
+            const long_index_t n4    = total / 4;
+            uint4* p                 = reinterpret_cast<uint4*>(kargs.dq_acc_ptr);
             // per_block aligned to kBlockSize: keeps every non-tail iteration
             // full-warp and consecutive writes within one block share HBM rows.
             const long_index_t n_tiles = ck_tile::integer_divide_ceil(n4, kBlockSize);
@@ -600,6 +591,10 @@ struct FmhaBwdDQDKDVKernel
             const long_index_t end   = ck_tile::min(start + per_block, n4);
             for(long_index_t off = start + threadIdx.x; off < end; off += kBlockSize)
                 p[off] = uint4{0u, 0u, 0u, 0u};
+            // Tail: at most 3 floats if total isn't a multiple of 4.
+            const long_index_t tail = total % 4;
+            if(blockIdx.x == 0 && threadIdx.x < tail)
+                reinterpret_cast<float*>(kargs.dq_acc_ptr)[n4 * 4 + threadIdx.x] = 0.0f;
         }
     };
 
@@ -774,7 +769,6 @@ struct FmhaBwdDQDKDVKernel
         ck_tile::index_t batch;              // used for persistent kernel implementation
         const ck_tile::index_t* nsplits_ptr; // per-batch nsplits (group) or single scalar (batch)
         // group mode persistent scheduling tables (read from CPU workspace by GPU):
-        const ck_tile::index_t* prefix_batch_ptr; // prefix sum of nhead*hw[b], size [batch+1]
         const FmhaBwdGroupPersistentCuState* cu_state_ptr; // per-CU packed state, size [num_cus]
         const FmhaBwdBatchState* batch_state_ptr;          // per-batch sq/nc/nsplits, size [batch]
     };
@@ -1200,8 +1194,6 @@ struct FmhaBwdDQDKDVKernel
             kargs.batch       = batch;
             kargs.nsplits_ptr = reinterpret_cast<const ck_tile::index_t*>(
                 ws + WorkspaceManager::GetDqAccSplitsOffset(batch));
-            kargs.prefix_batch_ptr = reinterpret_cast<const ck_tile::index_t*>(
-                ws + WorkspaceManager::GetPrefixBatchOffset(batch));
             if constexpr(kIsGroupMode)
             {
                 kargs.cu_state_ptr = reinterpret_cast<const FmhaBwdGroupPersistentCuState*>(
