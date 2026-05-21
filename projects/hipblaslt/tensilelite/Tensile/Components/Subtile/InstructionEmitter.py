@@ -110,6 +110,14 @@ class InstructionEmitter:
                     scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
                     scaleAVgpr = next(iter(scaleATile))
                     scaleBVgpr = next(iter(scaleBTile))
+                    # Op_sel selects the byte of the 4-byte scale VGPR keyed
+                    # by (M-parity, K-position).  Under scaleSchedulingPeriod
+                    # (R) > 1 the scheduler has widened subIterK so that one
+                    # scheduler period spans R*numSubIterK_data K-slots, so
+                    # subIterK already ranges 0..R*numK_data-1 across the R
+                    # body copies that share the same scale VGPR.  The
+                    # supported configs all satisfy R*numK_data <= 2, so the
+                    # op_sel byte index (a%2 + 2*subIterK) stays in [0, 4).
                     sAsel = (a % 2) + 2 * subIterK
                     sBsel = (b % 2) + 2 * subIterK
                 else:
@@ -145,6 +153,19 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            # One ds_read_b32 per scale group loads the whole (2,2) LR subtile
+            # — 4 MMA scale tiles == 4 bytes per lane — into a single VGPR.
+            # dsOffset strides by lrSubtileSize in the M dimension only; the K
+            # position within the LR subtile is implicit because a single
+            # b32 load covers all K within the subtile.  With
+            # scaleSchedulingPeriod (R) > 1 the scheduler emits exactly one
+            # scale LR per period covering [0, R*numSubIterK_data) K-slots,
+            # which corresponds to one (2,2) LR subtile's K-extent under the
+            # supported configs (lrSubtileShape[1] == R*numSubIterK_data),
+            # so the existing dsOffset addressing stays valid.  The scale
+            # LDS region itself is R times larger (driven by _DepthUMXS{tc}
+            # widening in Solution.py); LR buffer-swap selects which half of
+            # that region this fetch reads from.
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn

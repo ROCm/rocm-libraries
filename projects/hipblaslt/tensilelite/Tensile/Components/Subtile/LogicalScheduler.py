@@ -31,6 +31,17 @@ import io
 import math
 
 
+def _gcd(a: int, b: int) -> int:
+    while b:
+        a, b = b, a % b
+    return a
+
+
+def _lcm(a: int, b: int) -> int:
+    """Least-common-multiple of two positive integers (used by R-period unroll)."""
+    return a * b // _gcd(a, b) if a and b else max(a, b)
+
+
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
 
@@ -126,10 +137,20 @@ class ReadGranularity:
 
 @dataclass
 class SchedulerConfig:
-    """Configuration for the MFMATile-based scheduler."""
+    """Configuration for the MFMATile-based scheduler.
+
+    scaleSchedulingPeriod (R): how many data body iters a single scale fetch
+    covers (ScaleDepthURatio).  R == 1 is the historical behavior; R > 1 is
+    used by the MXFP8 MT256x256/DU=128 path where the scale DepthU is 2x the
+    data DepthU.  When R > 1 the scheduler treats one "scheduler period" as
+    R body iters: data placements span R*numSubIterK_data K-slots, scale
+    placements fire exactly once over the same K-span.  The assembly then
+    emits R distinct body copies via the existing unroll_factor machinery
+    (see assign_vgpr_tiles below, which forces unroll_factor = lcm(.., R)).
+    """
     numMFMATilesM: int    # MFMA tiles in M dimension (for A)
     numMFMATilesN: int    # MFMA tiles in N dimension (for B)
-    numSubIterK: int      # subIterK steps within the macrotile
+    numSubIterK: int      # subIterK steps within the macrotile (per body iter — widened by R when scaleSchedulingPeriod>1)
     lrA: ReadGranularity
     lrB: ReadGranularity
     grA: ReadGranularity
@@ -141,6 +162,7 @@ class SchedulerConfig:
     numPartitionsM: int = 1   # partition grid in M dimension
     numPartitionsN: int = 1   # partition grid in N dimension
     pgr: int = 2              # Prefetch Global Read
+    scaleSchedulingPeriod: int = 1  # R: body iters per scale fetch (1 = original behavior)
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
@@ -149,6 +171,35 @@ class SchedulerConfig:
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+
+        # Decouple-scale-DU: validate R.  Must be >= 1 and a power of 2.
+        R = self.scaleSchedulingPeriod
+        assert R >= 1 and (R & (R - 1)) == 0, (
+            f"scaleSchedulingPeriod must be a positive power of 2, got {R}")
+        # Record the data-side subIterK before widening so consumers that need
+        # "one body iter's K count" can recover it (op_sel plumbing, LoopCounter
+        # decrement, body-iter slicing, etc.).
+        self.numSubIterK_data = self.numSubIterK
+        if R > 1:
+            assert self.hasScale, (
+                "scaleSchedulingPeriod>1 requires scale tensors (hasScale)")
+            # The scale LR/GR must fit exactly once into the R-period K span:
+            # one scale fetch covers R*numSubIterK_data K-slots and the scale
+            # LR k-granularity must divide that span evenly so the existing
+            # k_gran chunking emits exactly one scale LR per period.
+            assert (R * self.numSubIterK_data) % self.lrSA.k == 0, (
+                f"R*numSubIterK_data ({R}*{self.numSubIterK_data}) must be a "
+                f"multiple of lrSA.k ({self.lrSA.k})")
+            # Widen numSubIterK so one scheduler period = R body iters.  Data
+            # placements at k_gran=1 naturally fill R*numK_data K-slots (R body
+            # iters' worth of MFMAs/LRs/GRs); scale placements at k_gran=2 fire
+            # exactly (R*numK_data)//2 == 1 time per period (given the validity
+            # assertion above, R*numK_data == lrSA.k for the supported MXFP8
+            # configs).  Op_sel in InstructionEmitter.emit_mfma uses subIterK
+            # directly which now ranges 0..R*numK_data-1, so the existing
+            # formula `(a%2) + 2*subIterK` continues to address the correct
+            # byte of the scale VGPR across all R body copies.
+            self.numSubIterK = self.numSubIterK_data * R
 
     @property
     def hasScale(self) -> bool:
@@ -813,7 +864,94 @@ class LogicalScheduler:
         self.needs_unrolling = self.unroll_factor > 1
         self.tile_peaks = max_peaks
 
+        # Decouple-scale-DU: force unroll_factor to be a multiple of R so the
+        # mainloop emits whole R-periods only.  When R==1 lcm is a no-op and
+        # the output matches the pre-existing scheduler bit-for-bit; when R>1
+        # the additional copies share the natural cycle (we extend the unroll
+        # loop below to populate tile_maps for the extra iterations so each
+        # placement carries one tile_map per emitted copy).
+        R = self.config.scaleSchedulingPeriod
+        if R > 1 and (self.unroll_factor % R) != 0:
+            target_uf = _lcm(max(self.unroll_factor, 1), R)
+            self._extend_unroll_tile_maps(target_uf,
+                                          all_next_iters, carry_active,
+                                          pools, last_read, lr_grans, numK)
+            self.unroll_factor = target_uf
+            self.needs_unrolling = self.unroll_factor > 1
+
         self._completed.add(Pass.VGPR_TILES)
+
+    def _extend_unroll_tile_maps(self, target_uf, all_next_iters, carry_active,
+                                 pools, last_read, lr_grans, numK):
+        """Continue the assign_vgpr_tiles unroll loop until `target_uf` iters.
+
+        Used by the R-period (scaleSchedulingPeriod>1) path to force
+        unroll_factor to a multiple of R when natural convergence would have
+        stopped earlier.  Each extra iteration appends one tile_map entry to
+        every MFMA/LR placement, matching the per-ui populate cycling.  The
+        function is a faithful continuation of the loop body in
+        assign_vgpr_tiles (Phase 2) — it does NOT change semantics, only
+        extends the iteration count.
+        """
+        from collections import deque  # match Phase 2's import scope
+
+        # Resume from convergent state.  natural_uf is len(all_next_iters);
+        # we already wrote tile_maps for iters 0..natural_uf-1.
+        for extra_iter in range(self.unroll_factor, target_uf):
+            active = dict(carry_active)
+            for t in self.tensors:
+                pools[t].active_count = sum(1 for key in active if key[0] == t)
+            next_iter = {}
+
+            for pi, slots in enumerate(self._partitions):
+                for slot in slots:
+                    pos = pi * numK + slot.subIterK
+                    k = slot.subIterK
+
+                    if slot.mfma:
+                        for tensor in self.tensors:
+                            side = TENSOR_SIDE[tensor]
+                            tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
+                            gran = lr_grans[tensor]
+                            tile_map = {}
+                            for t in tileRange.tileId_list:
+                                group = (t // gran.mn) * gran.mn
+                                k_chunk = (k // gran.k) * gran.k
+                                key = (tensor, group, k_chunk)
+                                if key not in active:
+                                    active[key] = pools[tensor].alloc()
+                                tile_map[group] = active[key]
+                            slot.mfma.vgpr_tile_maps.setdefault(tensor, []).append(tile_map)
+
+                    for lr in slot.lrs:
+                        tensor = lr.tensor
+                        is_wrapping = lr.mtIteration != 0
+                        target = next_iter if is_wrapping else active
+                        gran = lr_grans[tensor]
+                        tile_map = {}
+                        seen_keys = set()
+                        for t in lr.tiles.tileId_list:
+                            group = (t // gran.mn) * gran.mn
+                            for lk in lr.tiles.subIterK_list:
+                                k_chunk = (lk // gran.k) * gran.k
+                                key = (tensor, group, k_chunk)
+                                if key in seen_keys:
+                                    continue
+                                seen_keys.add(key)
+                                if key in target:
+                                    pools[tensor].release(target[key])
+                                vid = pools[tensor].alloc()
+                                target[key] = vid
+                                tile_map[group] = vid
+                        lr.vgpr_tile_map.append(tile_map)
+
+                    to_release = [key for key, lr_pos in last_read.items()
+                                  if lr_pos == pos and key in active]
+                    for key in to_release:
+                        pools[key[0]].release(active[key])
+                        del active[key]
+
+            carry_active = next_iter
 
     # ── Place GRs ─────────────────────────────────────────
 
@@ -2213,7 +2351,14 @@ class LogicalScheduler:
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "")
 
-        exitValue = self.config.pgr
+        # Decouple-scale-DU: with scaleSchedulingPeriod=R, one emit copy spans
+        # an R-period worth of data body iters (the scheduler placed R copies
+        # of data MFMAs/LRs/GRs and one scale fetch in the widened K span).
+        # LoopCounterL is the data body iter counter, so decrement by R per
+        # emit copy and reserve R*PGR body iters for the NGLL+NLL tail.
+        # For R==1 this collapses back to (decrement=1, exitValue=PGR).
+        R = self.config.scaleSchedulingPeriod
+        exitValue = self.config.pgr * R
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
@@ -2221,8 +2366,8 @@ class LogicalScheduler:
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
-                               src0=sgpr("LoopCounterL"), src1=1,
-                               comment=f"dec counterL (copy {ui})"))
+                               src0=sgpr("LoopCounterL"), src1=R,
+                               comment=f"dec counterL by {R} (copy {ui})"))
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
                                  comment=f"counterL == {exitValue}? (copy {ui} exit)"))
             if ui < uf - 1:
