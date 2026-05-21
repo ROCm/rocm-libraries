@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 """Get host/gpu specs."""
 
+import json
 import re
 import socket
 import subprocess
@@ -130,33 +131,62 @@ def get_machine_specs(devicenum, type='default'):
         rocmversion = rocm_info.strip()
 
     if type == 'device' or type == 'default':
-        rocm_smi_found = shutil.which('rocm-smi') != None
-        if rocm_smi_found:
-            rocm_smi = run([
-                'rocm-smi', '--showvbios', '--showid', '--showproductname',
-                '--showperflevel', '--showclocks', '--showmeminfo', 'vram'
-            ])
+        amd_smi_found = shutil.which('amd-smi') is not None
+        static_entry = None
+        metric_entry = None
+        if amd_smi_found:
+            try:
+                static_data = json.loads(run([
+                    'amd-smi', 'static', '--vbios', '--vram', '--board',
+                    '--asic', '--json'
+                ]))
+                metric_data = json.loads(run([
+                    'amd-smi', 'metric', '--clock', '--perf-level', '--json'
+                ]))
+                for entry in static_data.get('gpu_data', []):
+                    if entry.get('gpu') == devicenum:
+                        static_entry = entry
+                        break
+                for entry in metric_data.get('gpu_data', []):
+                    if entry.get('gpu') == devicenum:
+                        metric_entry = entry
+                        break
+            except (json.JSONDecodeError, ValueError, KeyError):
+                pass
+
+        if static_entry is not None:
+            vbios = static_entry.get('ifwi', {}).get('part_number',
+                                                    'no amd-smi')
+            gpuid = static_entry.get('asic', {}).get('device_id', 'no amd-smi')
+            deviceinfo = static_entry.get('asic', {}).get(
+                'market_name', 'no amd-smi')
+            vram_mb = static_entry.get('vram',
+                                       {}).get('size', {}).get('value', 0)
         else:
-            rocm_smi = ""
+            vbios = 'no amd-smi'
+            gpuid = 'no amd-smi'
+            deviceinfo = 'no amd-smi'
+            vram_mb = 0
 
-        device = rf'^GPU\[{devicenum}\]\s*: '
+        if metric_entry is not None:
+            perflevel = metric_entry.get('perf_level', 'no amd-smi')
+            if isinstance(perflevel, str):
+                perflevel = perflevel.replace('AMDSMI_DEV_PERF_LEVEL_',
+                                              '').lower()
+            mem_clk = metric_entry.get('clock',
+                                       {}).get('mem_0', {}).get('clk', {})
+            mclk = '{}{}'.format(mem_clk.get('value', 0),
+                                 mem_clk.get('unit', '')) if mem_clk else 0
+            gfx_clk = metric_entry.get('clock',
+                                       {}).get('gfx_0', {}).get('clk', {})
+            sclk = '{}{}'.format(gfx_clk.get('value', 0),
+                                 gfx_clk.get('unit', '')) if gfx_clk else 0
+        else:
+            perflevel = 'no amd-smi'
+            mclk = 0
+            sclk = 0
 
-        vbios = search(device + r'VBIOS version: (.*?)$',
-                       rocm_smi) if rocm_smi_found else "no rocm-smi"
-        gpuid = search(device + r'GPU ID: (.*?)$',
-                       rocm_smi) if rocm_smi_found else "no rocm-smi"
-        deviceinfo = search(device + r'Card series:\s*(.*?)$',
-                            rocm_smi) if rocm_smi_found else "no rocm-smi"
-        vram = search(device + r'.... Total Memory .B.: (\d+)$',
-                      rocm_smi) if rocm_smi_found else 0
-        perflevel = search(device + r'Performance Level: (.*?)$',
-                           rocm_smi) if rocm_smi_found else "no rocm-smi"
-        mclk = search(device +
-                      r'mclk.*\((.*?)\)$', rocm_smi) if rocm_smi_found else 0
-        sclk = search(device +
-                      r'sclk.*\((.*?)\)$', rocm_smi) if rocm_smi_found else 0
-
-        vram = '{:.2f} GiB'.format(float(vram) / 1024**3 if vram else 0)
+        vram = '{:.2f} GiB'.format(float(vram_mb) / 1024 if vram_mb else 0)
 
         if gpuid == '0x66af':
             # radeon7: float: 13.8 TFLOPs, double: 3.46 TFLOPs, 1024 GB/s
