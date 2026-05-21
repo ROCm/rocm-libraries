@@ -12,7 +12,9 @@ add_library(
     CkDslHandle.cpp
     CkDslPluginPublic.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
+    python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
+    python/PythonError.cpp
 )
 
 target_include_directories(ck_dsl_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
