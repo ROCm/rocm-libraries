@@ -9,6 +9,10 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cm
 
 project(hipdnn-integration-tests LANGUAGES CXX)
 
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -124,6 +128,7 @@ target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
 target_link_libraries(${INTEGRATION_TESTS_EXE}
     PRIVATE
         hip::host
+        hipdnn_gpu_ref
         hipdnn_test_sdk
         hipdnn_plugin_sdk
         GTest::gtest
