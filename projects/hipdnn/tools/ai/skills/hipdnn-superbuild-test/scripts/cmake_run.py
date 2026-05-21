@@ -1,33 +1,20 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Run `cmake --build` (or a test binary) with PATH and ROCM_PATH set for tests.
+"""Run `cmake --build` or a test binary with PATH and ROCM_PATH set for tests.
 
-Why this exists: provider tests on Windows link to ROCm DLLs (amdhip64_7.dll,
-MIOpen.dll, hipblas.dll) and to in-tree DLLs in <build>/bin. ctest spawns
-test executables via cmd.exe, which does not inherit a bash-set PATH, so
-running `cmake --build <target>-unit-check` from bash silently fails the
-loader with 0xc0000135. Setting PATH on Python's subprocess env block
-propagates through CreateProcessW to grandchildren (cmake -> ninja -> ctest
--> test.exe) and resolves the DLLs without any shell wrapper.
+Why this exists: provider tests on Windows link to ROCm DLLs such as
+amdhip64_7.dll, MIOpen.dll, and hipblas.dll, and to in-tree DLLs in
+<build>/bin. ctest spawns test executables via cmd.exe, which does not
+inherit a bash-set PATH in the form the Win32 loader needs. Setting PATH on
+Python's subprocess environment propagates through CreateProcessW to
+grandchildren (cmake -> ninja -> ctest -> test.exe) and avoids loader failures
+such as 0xc0000135.
 
-Why ROCM_PATH: providers that JIT-compile device kernels via hiprtc at
-runtime (e.g. hip-kernel-provider) need the HIP headers visible on
-hiprtc's include search path. hiprtc resolves these via ROCM_PATH; if
-it is unset the runtime kernel compile fails with
-"hip/hip_fp16.h file not found" and similar.
-
-Two modes:
-    --target <name>     Run `cmake --build <build-dir> --target <name>`.
-    --binary <path>     Run the test binary directly (use with --gtest-filter).
-
-Usage:
-    cmake_run.py --build-dir <path> --target <name> [--jobs N]
-                 [--rocm-path <path>] [--rocm-bin <path>]
-                 [--extra-bin <path> ...]
-    cmake_run.py --build-dir <path> --binary <path> [--gtest-filter <pat>]
-                 [--rocm-path <path>] [--rocm-bin <path>]
-                 [--extra-bin <path> ...]
+Why ROCM_PATH is set: providers that JIT-compile kernels through hiprtc need
+HIP headers visible at runtime. hiprtc resolves those headers through
+ROCM_PATH; if it is unset, runtime compilation can fail with errors such as
+"hip/hip_fp16.h file not found".
 """
 
 import argparse
@@ -65,29 +52,23 @@ def build_env(args):
 
 
 def main():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--build-dir", required=True, help="CMake build directory")
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--target", help="Ninja/cmake target name to build")
     mode.add_argument("--binary", help="Path to a test binary to run directly")
     p.add_argument("--jobs", type=int, help="Parallel job count for --target mode")
-    p.add_argument(
-        "--gtest-filter",
-        help="gtest filter pattern (--binary mode only)",
-    )
+    p.add_argument("--gtest-filter", help="gtest filter pattern (--binary mode only)")
     p.add_argument(
         "--rocm-path",
-        help="ROCm SDK root (sets ROCM_PATH in env). "
-        "Defaults to /opt/rocm on Linux; derived from --rocm-bin's parent on Windows.",
+        help="ROCm SDK root. Defaults to /opt/rocm on Linux.",
     )
     p.add_argument("--rocm-bin", help="Windows: ROCm bin directory to prepend to PATH")
     p.add_argument(
         "--extra-bin",
         action="append",
         default=[],
-        help="Windows: additional bin directory to prepend (repeatable)",
+        help="Windows: additional bin directory to prepend. Repeatable.",
     )
     args = p.parse_args()
 
@@ -95,7 +76,6 @@ def main():
         p.error("--gtest-filter requires --binary")
 
     env = build_env(args)
-
     if args.binary:
         cmd = [args.binary]
         if args.gtest_filter:

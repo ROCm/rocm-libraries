@@ -8,9 +8,7 @@ Outputs key=value lines to stdout so callers can parse them:
     CLANG_PATH=<forward-slash path>
     GPU_TARGETS=<arch>
 
-On Linux this is a no-op that just echoes any provided overrides.
-
-Exits non-zero on failure with diagnostics on stderr.
+On Linux this is a no-op that echoes any provided overrides.
 """
 
 import argparse
@@ -70,7 +68,7 @@ def main():
             if args.gpu_targets:
                 cmd.extend(["-GpuTarget", args.gpu_targets])
             print(f"Running wheel setup: {' '.join(cmd)}", file=sys.stderr)
-            r = subprocess.run(cmd, text=True)
+            r = subprocess.run(cmd, text=True, check=False)
             if r.returncode != 0:
                 print(
                     f"ERROR: wheel setup failed (exit {r.returncode})", file=sys.stderr
