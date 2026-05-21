@@ -51,7 +51,7 @@ What we cover today:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Any, Callable, Dict, List, Mapping, Tuple
 
 from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ..helpers.scan import (
@@ -399,11 +399,202 @@ def moe_sorting_workspace_bytes(spec: MoeSortingSpec) -> int:
     return 4 * spec.experts
 
 
+# ---------------------------------------------------------------------
+# CK-Tile-style chained launcher
+# ---------------------------------------------------------------------
+
+
+_PHASE_ORDER: Tuple[str, str, str] = ("histogram", "scan", "scatter")
+
+
+@dataclass
+class MoeSortingLauncher:
+    """Drive the 3-phase MoE sort as a CK-Tile-style chained launch.
+
+    Direct Python analogue of the C++ ``MOE_SORTING_MP_*`` macros at
+    ``example/ck_tile/15_fused_moe/instances/fused_moesorting_api.cpp``
+    lines 201-309: each phase becomes a closure produced by
+    :func:`~ck_dsl.runtime.launcher.make_kernel`, and
+    :func:`~ck_dsl.runtime.launcher.launch_kernel` submits all three
+    on a single HIP stream in declaration order. Same-stream FIFO
+    ordering is the only correctness primitive between phases (no
+    events, no host barriers).
+
+    Production usage::
+
+        spec = MoeSortingSpec(tokens=T, topk=K, experts=E, block_size=256)
+        launcher = MoeSortingLauncher(spec)
+        # Caller is responsible for pre-zeroing Hist (and Counter for
+        # phase 3); the launcher does not own workspace lifetime.
+        ms = launcher.run(
+            {
+                "histogram": {"TopkIds": ids, "Hist": hist,
+                              "num_pairs": T*K, "num_experts": E},
+                "scan":      {"Hist": hist, "Offsets": offsets,
+                              "Counts": counts, "num_experts": E},
+                "scatter":   {"TopkIds": ids, "TopkWeights": weights,
+                              "Offsets": offsets, "Counter": counter,
+                              "SortedTokenIds": sorted_tids,
+                              "SortedTopkIds": sorted_kids,
+                              "SortedWeights": sorted_weights,
+                              "tokens": T, "topk": K, "num_experts": E},
+            },
+            stream=stream,
+        )
+
+    Mirrors the design of :class:`ck_dsl.instances.FusedMoeLauncher`:
+    lazy compile + cache (each kernel built once on first
+    :meth:`run` / :meth:`make_callables` call), the cached
+    :class:`~ck_dsl.runtime.launcher.KernelLauncher` instances live
+    on ``self`` for the launcher's lifetime, and the chain submits
+    via :func:`launch_kernel` with closure callables.
+
+    Workspace contract
+    ------------------
+    The launcher does *not* manage ``Hist`` or ``Counter`` lifetime.
+    The caller pre-clears ``Hist`` to zero before the chain runs
+    (phase 1 atomic-adds into it), and either pre-clears ``Counter``
+    to zero between phase 2 and phase 3 or passes a separate
+    pre-zeroed ``Counter`` buffer (phase 3 atomic-adds into it). The
+    standard interleaving pattern in
+    :class:`ck_dsl.instances.FusedMoeForward` allocates two distinct
+    i32[experts] buffers via :class:`WorkspacePool` so no inter-phase
+    memset is needed.
+    """
+
+    spec: MoeSortingSpec
+    name_prefix: str = "moe_sorting"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_launchers", None)
+
+    def _stages(
+        self,
+    ) -> "list[tuple[str, KernelDef, Tuple[int, int, int], object]]":
+        s = self.spec
+        return [
+            (
+                "histogram",
+                build_moe_sort_histogram(s),
+                moe_sort_histogram_grid(s),
+                moe_sort_histogram_signature(s),
+            ),
+            (
+                "scan",
+                build_moe_sort_scan(s),
+                moe_sort_scan_grid(s),
+                moe_sort_scan_signature(s),
+            ),
+            (
+                "scatter",
+                build_moe_sort_scatter(s),
+                moe_sort_scatter_grid(s),
+                moe_sort_scatter_signature(s),
+            ),
+        ]
+
+    def plan(
+        self,
+    ) -> "list[tuple[str, KernelDef, Tuple[int, int, int], object]]":
+        """Pure descriptor: ``[(phase, kernel_def, grid, signature), ...]``."""
+        return self._stages()
+
+    def _ensure_launchers(self) -> Dict[str, Any]:
+        if self._launchers is not None:  # type: ignore[has-type]
+            return self._launchers  # type: ignore[has-type]
+        from ..helpers.compile import compile_kernel
+        from ..runtime.launcher import KernelLauncher
+
+        s = self.spec
+        out: Dict[str, Any] = {}
+        for phase, kernel_def, _grid, signature in self._stages():
+            artifact = compile_kernel(kernel_def, capture_ir_text=False)
+            out[phase] = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=signature,
+                cache_key=("moe_sorting", phase, s.kernel_name(phase)),
+            )
+        object.__setattr__(self, "_launchers", out)
+        return out
+
+    def make_callables(
+        self,
+        values: Mapping[str, Mapping[str, Any]],
+    ) -> List[Callable[[Any], None]]:
+        """Bake per-phase ``(values, grid, block, lds_bytes=0)`` into
+        three :func:`~ck_dsl.runtime.launcher.make_kernel` closures.
+        """
+        from ..runtime.launcher import make_kernel
+
+        missing = [p for p in _PHASE_ORDER if p not in values]
+        if missing:
+            raise KeyError(
+                f"MoeSortingLauncher.make_callables: missing values for "
+                f"phase(s) {missing!r}; expected keys {list(_PHASE_ORDER)!r}"
+            )
+        s = self.spec
+        block = (s.block_size, 1, 1)
+        launchers = self._ensure_launchers()
+        return [
+            make_kernel(
+                launchers["histogram"],
+                values["histogram"],
+                moe_sort_histogram_grid(s),
+                block,
+            ),
+            make_kernel(
+                launchers["scan"],
+                values["scan"],
+                moe_sort_scan_grid(s),
+                block,
+            ),
+            make_kernel(
+                launchers["scatter"],
+                values["scatter"],
+                moe_sort_scatter_grid(s),
+                block,
+            ),
+        ]
+
+    def run(
+        self,
+        values: Mapping[str, Mapping[str, Any]],
+        *,
+        stream: int = 0,
+        time_kernel: bool = False,
+        cold_niters: int = 3,
+        nrepeat: int = 10,
+        is_gpu_timer: bool = True,
+    ) -> float:
+        """Drive histogram -> scan -> scatter as a CK-Tile-style chain on
+        ``stream``. Returns ``0.0`` for non-timing dispatch and
+        per-iteration average ms for benchmark timing. Mirrors
+        :func:`launch_kernel` semantics; the C++ shape is exactly
+        ``ck_tile::launch_kernel(s, MOE_SORTING_MP_0_V1, MOE_SORTING_MP_1,
+        MOE_SORTING_MP_23)``.
+        """
+        from ..runtime.launcher import StreamConfig, launch_kernel
+
+        callables = self.make_callables(values)
+        return launch_kernel(
+            StreamConfig(
+                stream_id=int(stream),
+                time_kernel=bool(time_kernel),
+                cold_niters=int(cold_niters),
+                nrepeat=int(nrepeat),
+                is_gpu_timer=bool(is_gpu_timer),
+            ),
+            *callables,
+        )
+
+
 # Convenience: the underlying ``lds_zero_i32`` helper is re-exported
 # for callers building custom MoE pipelines that want to zero their
 # own LDS counters from the spec layer (rather than reaching into
 # ``ck_dsl.helpers`` directly).
 __all__ = [
+    "MoeSortingLauncher",
     "MoeSortingSpec",
     "build_moe_sort_histogram",
     "build_moe_sort_scan",

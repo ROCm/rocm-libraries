@@ -89,6 +89,7 @@ applies to ``gemm``, ``grouped_gemm``, ``conv``, and any future op.
 from __future__ import annotations
 
 import contextvars
+import time as _time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
@@ -102,8 +103,11 @@ __all__ = [
     "LaunchConfig",
     "LaunchSummary",
     "PipelineLauncher",
+    "StreamConfig",
     "WorkspaceSpec",
     "WorkspacePool",
+    "launch_kernel",
+    "make_kernel",
     "no_fence",
     "release_retained_for_stream",
     "synchronize_and_release",
@@ -214,6 +218,60 @@ class LaunchConfig:
     manager forces this off for any nested launcher call regardless
     of the per-call value.
     """
+
+
+@dataclass(frozen=True)
+class StreamConfig:
+    """CK-Tile-shaped stream configuration for :func:`launch_kernel`.
+
+    Field-for-field mirror of ``ck_tile::stream_config`` in
+    ``include/ck_tile/host/stream_config.hpp``: one stream handle
+    plus a small bag of timing knobs that select the
+    non-timing / GPU-event-timer / CPU-timer dispatch path inside
+    :func:`launch_kernel`.
+
+    Field semantics
+    ---------------
+    ``stream_id`` -- HIP stream handle (``int``). ``0`` (the default)
+    auto-resolves to ``int(torch.cuda.current_stream().cuda_stream)``
+    via :func:`resolve_stream` inside the closure produced by
+    :func:`make_kernel`, so torch's caching allocator sees the launch.
+    The handle is read at call time, not closure-construction time, so
+    a single closure can be replayed on different streams.
+
+    ``time_kernel`` -- when False, :func:`launch_kernel` is a thin
+    "submit each callable in order under :func:`no_fence`" wrapper and
+    returns ``0.0``. When True, the callables are run for
+    ``cold_niters`` warmup iterations followed by ``nrepeat`` timed
+    iterations, and :func:`launch_kernel` returns the average wall
+    time per iteration in milliseconds.
+
+    ``cold_niters`` / ``nrepeat`` -- analogous to CK Tile's
+    ``cold_niters_`` / ``nrepeat_``. Warmup iterations run the same
+    callable list under :func:`no_fence` but their wall time is not
+    measured.
+
+    ``is_gpu_timer`` -- when True (default), the timed loop is wrapped
+    by two :class:`Event` records on ``stream_id`` and the elapsed
+    time is computed via ``hipEventElapsedTime``. When False, an
+    end-to-end ``Runtime.wait_stream`` + :func:`time.perf_counter`
+    pair is used (CPU timer; less precise but does not require a
+    valid HIP context for the timer itself).
+
+    ``log_level`` and ``flush_cache`` are accepted for parity with
+    the C++ struct; v1 of this primitive ignores them. They are
+    documented here so callers writing portable benchmark drivers
+    can construct one ``StreamConfig`` for both the C++ and Python
+    paths without per-language massaging.
+    """
+
+    stream_id: int = 0
+    time_kernel: bool = False
+    log_level: int = 0
+    cold_niters: int = 3
+    nrepeat: int = 10
+    is_gpu_timer: bool = True
+    flush_cache: bool = False
 
 
 @dataclass(frozen=True)
@@ -701,3 +759,302 @@ def time_launches(
     # Drain the per-launch events accumulated during the timed loop.
     rt.wait_stream(resolved)
     return ms
+
+
+# ---------------------------------------------------------------------
+# CK-Tile-style multi-kernel launch primitive
+# ---------------------------------------------------------------------
+#
+# Python parity with ``ck_tile::make_kernel`` and
+# ``ck_tile::launch_kernel`` from
+# ``include/ck_tile/host/kernel_launch.hpp``. The C++ pattern bakes
+# everything (grid, block, LDS bytes, kernel args) into a closure
+# returned by ``make_kernel(K{}, grid, block, lds, kargs)``; the
+# variadic ``launch_kernel(stream_config, c0, c1, ...)`` then invokes
+# each closure on the same stream in order with optional timing.
+#
+# The Python equivalent provided here:
+#
+# - :func:`make_kernel` -- returns a ``Callable[[StreamConfig], None]``
+#   that, on call, dispatches one launch through a pre-built
+#   :class:`KernelLauncher` (no compile, no module load -- both
+#   already happened when the launcher was constructed). The closure
+#   reads ``stream_id`` from its :class:`StreamConfig` argument so the
+#   same closure can be replayed on different streams. The closure
+#   always launches with ``fence=False``: the only sync point is
+#   :func:`launch_kernel`'s timing-loop boundary (or the caller's
+#   external drain).
+#
+# - :func:`launch_kernel` -- variadic over the closure callables.
+#   With ``time_kernel=False``, runs each callable once on the stream
+#   under :func:`no_fence` and returns ``0.0``. With
+#   ``time_kernel=True``, runs ``cold_niters`` warmup iterations of
+#   the whole callable group, then ``nrepeat`` timed iterations, and
+#   returns the per-iteration average wall time in milliseconds. The
+#   timer is GPU-event by default (``is_gpu_timer=True``) or CPU-side
+#   :func:`time.perf_counter` between :meth:`Runtime.wait_stream`
+#   calls when ``is_gpu_timer=False``.
+#
+# Coexistence with :class:`PipelineLauncher`
+# ------------------------------------------
+# :class:`PipelineLauncher` is the higher-level cached form for hot
+# dispatch paths: it owns N pre-built :class:`KernelLauncher`\\s and
+# accepts ``values_per_stage`` + ``configs_per_stage`` arrays each
+# call. It enforces "only the last stage fences" because its callers
+# rely on the implicit final sync.
+#
+# :func:`launch_kernel` here is the low-level building block: callers
+# bake (values, grid, block, lds) into a closure via
+# :func:`make_kernel` and pass arbitrary callables (including bare
+# host lambdas, e.g. ``maybe_clear_workspace``). The closures never
+# fence, and :func:`launch_kernel` does not implicitly fence at the
+# end -- the caller is responsible for the final sync (or relying on
+# torch's stream-aware next-read sync). This is strictly more
+# flexible (a single timing event around the whole group is the
+# dominant case in benchmark drivers) but production callers
+# migrating from :class:`PipelineLauncher` MUST add an explicit
+# :func:`wait_stream_and_release` (or accept torch's next-read sync)
+# after :func:`launch_kernel` returns.
+#
+# Macro-style shorthand convention (for instance authors)
+# -------------------------------------------------------
+# CK Tile's ``MOE_SORTING_MP_*`` macros at
+# ``example/ck_tile/15_fused_moe/instances/fused_moesorting_api.cpp``
+# each expand to a self-invoking lambda that returns a
+# ``make_kernel`` closure. The Python equivalent for instance
+# authors is a per-phase factory function::
+#
+#     def moe_sort_histogram_callable(spec, args, *, launcher=None):
+#         if launcher is None:
+#             launcher = _get_or_build_hist_launcher(spec)
+#         grid  = moe_sort_histogram_grid(spec, args.num_tokens)
+#         block = (spec.block_size, 1, 1)
+#         return make_kernel(launcher, args.histogram_values(),
+#                            grid, block,
+#                            lds_bytes=moe_sort_histogram_lds(spec))
+#
+# Then a CK-style chained launch reads as::
+#
+#     launch_kernel(StreamConfig(stream_id=stream),
+#                   moe_sort_histogram_callable(spec, args),
+#                   moe_sort_scan_callable(spec, args),
+#                   moe_sort_scatter_callable(spec, args))
+
+
+def make_kernel(
+    launcher: "KernelLauncher",
+    values: Mapping[str, Any],
+    grid: Tuple[int, int, int],
+    block: Tuple[int, int, int],
+    *,
+    lds_bytes: int = 0,
+) -> Callable[["StreamConfig"], None]:
+    """Bake (values, grid, block, lds_bytes) into a CK-style launch closure.
+
+    Returns a ``Callable[[StreamConfig], None]`` that, on call,
+    dispatches one launch through ``launcher``. The returned closure:
+
+    - Reads ``stream_id`` from its :class:`StreamConfig` argument at
+      call time (not at closure construction time), so the same
+      closure can be replayed on different streams. This matches CK
+      Tile's ``ck_tile::make_kernel`` (the chevron launch in the
+      generated lambda references ``s.stream_id_``, not a captured
+      stream).
+    - Always uses ``fence=False`` regardless of any outer
+      :func:`no_fence` context. The only host-side sync points in
+      this primitive are:
+        * the timing-loop boundary inside :func:`launch_kernel` when
+          ``StreamConfig.time_kernel=True``;
+        * any explicit :func:`wait_stream_and_release` /
+          :func:`synchronize_and_release` that the caller issues
+          after :func:`launch_kernel` returns;
+        * torch's stream-aware next-read sync.
+    - Holds an immutable copy of ``values`` (via ``dict(values)``)
+      and ``(grid, block, lds_bytes)`` so the closure is stable
+      against caller mutations of the input dict.
+
+    Construct ``launcher`` once per (problem-shape, problem-dtype)
+    via the standard
+    ``compile_kernel(...)`` -> ``KernelLauncher(hsaco, kernel_name,
+    signature)`` flow and reuse the same launcher across every
+    :func:`make_kernel` call. There is no per-closure compile, no
+    per-closure module load.
+
+    Mirrors ``ck_tile::make_kernel`` at
+    ``include/ck_tile/host/kernel_launch.hpp`` lines 118-133.
+    """
+    captured_values = dict(values)
+    captured_grid = (int(grid[0]), int(grid[1]), int(grid[2]))
+    captured_block = (int(block[0]), int(block[1]), int(block[2]))
+    captured_lds = int(lds_bytes)
+
+    def _closure(s: "StreamConfig") -> None:
+        launcher(
+            captured_values,
+            config=LaunchConfig(
+                stream=int(s.stream_id),
+                grid=captured_grid,
+                block=captured_block,
+                shared_bytes=captured_lds,
+                fence=False,
+            ),
+        )
+
+    return _closure
+
+
+def _launch_and_check(
+    s: "StreamConfig",
+    callables: Sequence[Callable[["StreamConfig"], None]],
+) -> None:
+    """Run each callable on ``s`` in declaration order under ``no_fence``.
+
+    Mirrors ``ck_tile::launch_and_check`` at
+    ``include/ck_tile/host/kernel_launch.hpp`` lines 135-143. The C++
+    side does an explicit ``hipPeekAtLastError`` between callables and
+    short-circuits via a fold expression; the Python side relies on
+    :class:`Runtime` raising :class:`HipError` immediately when
+    ``hipModuleLaunchKernel`` returns non-success, which gives the
+    same short-circuit behavior (subsequent callables are not invoked
+    after a raise).
+    """
+    with no_fence():
+        for c in callables:
+            c(s)
+
+
+def _timing_loop(
+    s: "StreamConfig",
+    callables: Sequence[Callable[["StreamConfig"], None]],
+) -> float:
+    """Run ``callables`` for cold + timed iterations and return ms/iter.
+
+    Mirrors ``ck_tile::timing_loop_impl`` at
+    ``include/ck_tile/host/kernel_launch.hpp`` lines 204-236: a
+    ``cold_niters`` warmup pass over the whole callable group
+    followed by ``nrepeat`` timed passes, with the timer wrapping
+    only the timed region. ``s.is_gpu_timer`` selects between an
+    event-bracketed measurement (default; matches CK Tile's
+    ``gpu_timer``) and a CPU-side :func:`time.perf_counter` window
+    between :meth:`Runtime.wait_stream` syncs.
+    """
+    rt = _runtime()
+    resolved_stream = resolve_stream(int(s.stream_id))
+    cold = max(0, int(s.cold_niters))
+    iters = max(1, int(s.nrepeat))
+
+    with no_fence():
+        for _ in range(cold):
+            for c in callables:
+                c(s)
+
+        if s.is_gpu_timer:
+            # Drain any pending warmup work so the start event marks
+            # the first timed launch's submission, not warmup
+            # completion.
+            rt.wait_stream(resolved_stream)
+            e0 = rt.event()
+            e1 = rt.event()
+            e0.record(stream=resolved_stream)
+            for _ in range(iters):
+                for c in callables:
+                    c(s)
+            e1.record(stream=resolved_stream)
+            e1.synchronize()
+            ms_total = e0.elapsed_to(e1)
+            e0.destroy()
+            e1.destroy()
+        else:
+            rt.wait_stream(resolved_stream)
+            t0 = _time.perf_counter()
+            for _ in range(iters):
+                for c in callables:
+                    c(s)
+            rt.wait_stream(resolved_stream)
+            ms_total = (_time.perf_counter() - t0) * 1000.0
+
+    # Final drain: the timed-loop body ran under :func:`no_fence`
+    # which does not retain per-launch events, so the
+    # :attr:`Runtime._pending_args` bucket for this stream still
+    # holds args buffers + tensor refs from the timed launches. The
+    # ``e1.synchronize()`` above (or the trailing ``wait_stream`` in
+    # the CPU-timer branch) drained the GPU side; this drains the
+    # host bookkeeping.
+    rt.wait_stream(resolved_stream)
+    return float(ms_total) / iters
+
+
+def launch_kernel(
+    s: "StreamConfig",
+    *callables: Callable[["StreamConfig"], None],
+) -> float:
+    """CK-Tile-style multi-kernel launch.
+
+    Run each callable on ``s.stream_id`` in declaration order. With
+    ``s.time_kernel=False`` (default), the call is fire-and-forget on
+    the same stream and returns ``0.0`` -- the caller is responsible
+    for any final sync (via :func:`wait_stream_and_release` or
+    torch's stream-aware next-read). With ``s.time_kernel=True``,
+    runs ``s.cold_niters`` warmup iterations of the whole callable
+    group followed by ``s.nrepeat`` timed iterations, and returns the
+    per-iteration average in milliseconds.
+
+    Each callable must accept a :class:`StreamConfig` argument:
+
+    - The most common shape is the closure returned by
+      :func:`make_kernel`, which dispatches one
+      :class:`KernelLauncher` launch with baked
+      ``(values, grid, block, lds_bytes)``.
+    - Bare host lambdas are also accepted -- e.g. for a
+      ``maybe_clear_workspace`` step that issues a ``hipMemset`` on
+      the stream:
+      ``lambda sc: rt.memset(ws_ptr, 0, ws_bytes, stream=sc.stream_id)``.
+      This mirrors the C++ ``MOR_SORTING_MP_DISPATCH_`` form at
+      ``example/ck_tile/15_fused_moe/instances/fused_moesorting_api.cpp:481``.
+
+    Stream / sync model
+    -------------------
+    All callables share ``s.stream_id``. Same-stream FIFO ordering on
+    HIP guarantees callable ``i+1`` observes callable ``i``'s writes
+    -- no events, no host barriers between them. The closures
+    produced by :func:`make_kernel` always launch with ``fence=False``,
+    so :func:`launch_kernel` itself never inserts a per-callable
+    sync. In the timing path, the only sync points are the
+    :class:`Event` synchronize bracketing the timed iterations (or
+    :meth:`Runtime.wait_stream` for the CPU-timer path) plus a final
+    :meth:`Runtime.wait_stream` to drain
+    :attr:`Runtime._pending_args` bookkeeping. In the non-timing
+    path, there is no implicit sync at all.
+
+    Migration note for :class:`PipelineLauncher` callers
+    ----------------------------------------------------
+    Unlike :class:`PipelineLauncher` -- which honours ``cfg.fence``
+    on the *last* stage and therefore implicitly fences the host on
+    pipeline completion -- :func:`launch_kernel` never fences. Code
+    paths that returned a :class:`LaunchSummary` from
+    ``pipeline(...)`` and then immediately read an output tensor on
+    the host side relied on the last-stage fence; if you migrate
+    them to :func:`launch_kernel`, add an explicit
+    :func:`wait_stream_and_release` (or rely on torch's stream-aware
+    next-read sync) before the host read.
+
+    Returns
+    -------
+    Average per-iteration wall time in milliseconds when
+    ``s.time_kernel=True``; ``0.0`` otherwise. Matches the C++
+    ``ck_tile::launch_kernel`` at
+    ``include/ck_tile/host/kernel_launch.hpp`` lines 265-286.
+
+    Raises
+    ------
+    ValueError if no callables were supplied (parity with the C++
+    ``static_assert(sizeof...(callables) > 0)``).
+    """
+    if not callables:
+        raise ValueError("launch_kernel requires at least one callable")
+
+    if not s.time_kernel:
+        _launch_and_check(s, callables)
+        return 0.0
+
+    return _timing_loop(s, callables)

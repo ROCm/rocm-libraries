@@ -64,7 +64,7 @@ Limitations of v1 (tracked in the wave plan):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Any, Callable, Dict, List, Literal, Mapping, Tuple
 
 from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ..helpers.gather_scatter import (
@@ -84,12 +84,18 @@ __all__ = [
     "FusedMoeSpec",
     "build_moe_gather",
     "build_moe_silu_mul",
+    "build_moe_silu_mul_packed",
+    "build_moe_static_scatter_gather",
     "build_moe_topk_weighted_reduce",
     "is_valid_spec",
     "moe_gather_grid",
     "moe_gather_signature",
     "moe_silu_mul_grid",
+    "moe_silu_mul_packed_grid",
+    "moe_silu_mul_packed_signature",
     "moe_silu_mul_signature",
+    "moe_static_scatter_gather_grid",
+    "moe_static_scatter_gather_signature",
     "moe_topk_weighted_reduce_grid",
     "moe_topk_weighted_reduce_signature",
     "moe_fused_workspace_bytes",
@@ -381,6 +387,241 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
 
 
 # ---------------------------------------------------------------------
+# Stage (4'): silu_mul packed variant.
+# Mirrors AITER's "G1U1" gate-up packing: one (M, 2*I) input buffer
+# instead of two separate (M, I) buffers. Halves the global-memory
+# traffic vs the unpacked path (one B-tensor in the gate+up GEMM
+# instead of two; one fused output buffer here instead of two
+# separate gate / up buffers); pairs with a single batched GEMM
+# whose N axis = 2*I and W = concat(W_gate, W_up, dim=1).
+# ---------------------------------------------------------------------
+
+
+def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
+    """SwiGLU activation reading from a packed gate+up buffer.
+
+    ``Hidden[b, i] = silu(GateUp[b, i]) * GateUp[b, I + i]`` where
+    ``GateUp`` has shape ``(M, 2*I)`` row-major. The "G1U1" weight
+    packing convention: column slab ``[0, I)`` holds the gate output,
+    ``[I, 2*I)`` holds the up output. This kernel is the activation
+    half of the gate+up fusion -- the matching GEMM is one batched
+    GEMM with ``N = 2*I`` and ``W_gate_up = torch.cat([W_gate, W_up],
+    dim=1)`` (shape ``(E, 2*I, H)``).
+
+    Kernel signature::
+
+        (GateUp:    ptr<dtype, global>,   # (tokens*topk, 2*intermediate)
+         Hidden:    ptr<dtype, global>,   # (tokens*topk, intermediate)
+         total_pairs: i32,
+         intermediate: i32)
+
+    Grid: ``(total_pairs, 1, 1)``; one CTA per bucket row, each
+    thread handling ``elems_per_thread_inter`` consecutive
+    intermediate columns. Identical numerics to
+    :func:`build_moe_silu_mul` (sigmoid via
+    ``exp2(-x * log2(e))``, all compute in f32, truncate to dtype on
+    store) so parity tests can compare the two paths.
+    """
+    ok, why = is_valid_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid fused_moe spec: {why}")
+
+    I_DIM = spec.intermediate
+    BS = spec.block_size
+    EPT = spec.elems_per_thread_inter
+    dtype = spec.dtype
+
+    b = IRBuilder(spec.kernel_name("silu_mul_packed"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    ty = io_ir_type(dtype)
+    GateUp = b.param(
+        "GateUp", PtrType(ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Hidden = b.param(
+        "Hidden", PtrType(ty, "global"), noalias=True, writeonly=True, align=16
+    )
+    _total_pairs = b.param("total_pairs", I32)  # noqa: F841 - ABI
+    _inter = b.param("intermediate", I32)  # noqa: F841 - ABI
+
+    bid = b.block_id_x()
+    tid = b.thread_id_x()
+    # Row stride for the packed buffer is 2*I; row b's gate slab
+    # starts at b * 2*I, up slab starts at b * 2*I + I. Output row
+    # stride is I (Hidden is unpacked).
+    two_i = b.const_i32(2 * I_DIM)
+    i_const = b.const_i32(I_DIM)
+    gate_base = b.mul(bid, two_i)
+    up_base = b.add(gate_base, i_const)
+    out_base = b.mul(bid, i_const)
+
+    c_neg_log2e = b.const_f32(-1.4426950408889634)
+    one_f32 = b.const_f32(1.0)
+
+    for k in range(EPT):
+        i_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
+        in_i = b.cmp_lt(i_col, b.const_i32(I_DIM))
+        with b.scf_if(in_i):
+            g_off = b.add(gate_base, i_col)
+            u_off = b.add(up_base, i_col)
+            o_off = b.add(out_base, i_col)
+            g = load_scalar_as_f32(b, GateUp, g_off, dtype=dtype)
+            u = load_scalar_as_f32(b, GateUp, u_off, dtype=dtype)
+            sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+            silu = b.fmul(g, sig)
+            h = b.fmul(silu, u)
+            store_scalar_from_f32(b, Hidden, o_off, h, dtype=dtype)
+
+    return b.kernel
+
+
+def moe_silu_mul_packed_grid(spec: FusedMoeSpec) -> Tuple[int, int, int]:
+    return (spec.total_pairs, 1, 1)
+
+
+def moe_silu_mul_packed_signature(spec: FusedMoeSpec):
+    return (
+        SignatureBuilder()
+        .ptr("GateUp", spec.dtype)
+        .ptr("Hidden", spec.dtype)
+        .scalar("total_pairs", "i32")
+        .scalar("intermediate", "i32")
+        .build()
+    )
+
+
+# ---------------------------------------------------------------------
+# Static-mode scatter+gather fusion.
+# ---------------------------------------------------------------------
+
+
+def build_moe_static_scatter_gather(spec: FusedMoeSpec) -> KernelDef:
+    """Static-offset scatter and gather in one kernel.
+
+    This is the static-offset fast path's replacement for the separate
+    ``moe_sort_scatter`` and ``moe_gather`` kernels:
+
+    * read ``TopkIds[t, k]`` and ``TopkWeights[t, k]``;
+    * claim the next slot in expert ``eid`` via
+      ``atomic_add(Counter[eid], 1)``;
+    * write ``SortedTokenIds[slot] = t`` and
+      ``SortedWeights[slot] = weight``;
+    * copy ``X[t, :]`` directly into ``GroupedInput[slot, :]``.
+
+    Static slot layout is ``slot = eid * slot_size + local_off``. Padded
+    rows are initialized by the caller (``SortedTokenIds=-1``,
+    ``GroupedInput=0``) and untouched by this kernel.
+
+    Kernel signature::
+
+        (TopkIds: ptr<i32>, TopkWeights: ptr<f32>, Counter: ptr<i32>,
+         X: ptr<dtype>, SortedTokenIds: ptr<i32>, SortedWeights: ptr<f32>,
+         GroupedInput: ptr<dtype>,
+         tokens: i32, topk: i32, num_experts: i32,
+         hidden: i32, slot_size: i32)
+
+    Grid: ``(tokens * topk, 1, 1)``; one CTA per routed pair. Threads in
+    the CTA cooperatively copy the hidden row.
+    """
+    ok, why = is_valid_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid fused_moe spec: {why}")
+
+    H = spec.hidden
+    BS = spec.block_size
+    EPT = spec.elems_per_thread_hidden
+    dtype = spec.dtype
+
+    b = IRBuilder(spec.kernel_name("static_scatter_gather"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    ty = io_ir_type(dtype)
+    TopkIds = b.param(
+        "TopkIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+    )
+    TopkWeights = b.param(
+        "TopkWeights", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    Counter = b.param("Counter", PtrType(I32, "global"), align=4)
+    X = b.param("X", PtrType(ty, "global"), noalias=True, readonly=True, align=16)
+    SortedTokenIds = b.param(
+        "SortedTokenIds", PtrType(I32, "global"), writeonly=True, align=4
+    )
+    SortedWeights = b.param(
+        "SortedWeights", PtrType(F32, "global"), writeonly=True, align=4
+    )
+    GroupedInput = b.param(
+        "GroupedInput", PtrType(ty, "global"), writeonly=True, align=16
+    )
+    tokens = b.param("tokens", I32)
+    topk = b.param("topk", I32)
+    num_experts = b.param("num_experts", I32)
+    _hidden = b.param("hidden", I32)  # noqa: F841 - ABI compatibility
+    slot_size = b.param("slot_size", I32)
+
+    bid = b.block_id_x()
+    tid = b.thread_id_x()
+    out_row_slot = b.smem_alloc(I32, [1], name_hint="sg_out_row")
+    num_pairs = b.mul(tokens, topk)
+    in_bounds = b.cmp_lt(bid, num_pairs)
+
+    with b.scf_if(in_bounds):
+        eid = b.global_load_i32(TopkIds, bid)
+        valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
+        with b.scf_if(valid_e):
+            t_idx = b.div(bid, topk)
+            is_lead = b.cmp_eq(tid, b.const_i32(0))
+            with b.scf_if(is_lead):
+                local = b.global_atomic_add(Counter, eid, b.const_i32(1))
+                base = b.mul(eid, slot_size)
+                out_row_lead = b.add(base, local)
+                b.smem_store_vN(out_row_slot, [b.const_i32(0)], out_row_lead, n=1)
+
+                w = b.global_load_f32(TopkWeights, bid)
+                b.global_store(SortedTokenIds, out_row_lead, t_idx, align=4)
+                b.global_store(SortedWeights, out_row_lead, w, align=4)
+            b.sync()
+            out_row = b.vec_extract(
+                b.smem_load_vN(out_row_slot, b.const_i32(0), dtype=I32, n=1), 0
+            )
+
+            # Copy X[t_idx, :] -> GroupedInput[out_row, :].
+            for k in range(EPT):
+                h_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
+                in_h = b.cmp_lt(h_col, b.const_i32(H))
+                with b.scf_if(in_h):
+                    src = b.add(b.mul(t_idx, b.const_i32(H)), h_col)
+                    dst = b.add(b.mul(out_row, b.const_i32(H)), h_col)
+                    v = load_scalar_as_f32(b, X, src, dtype=dtype)
+                    store_scalar_from_f32(b, GroupedInput, dst, v, dtype=dtype)
+
+    return b.kernel
+
+
+def moe_static_scatter_gather_grid(spec: FusedMoeSpec) -> Tuple[int, int, int]:
+    return (spec.total_pairs, 1, 1)
+
+
+def moe_static_scatter_gather_signature(spec: FusedMoeSpec):
+    return (
+        SignatureBuilder()
+        .ptr("TopkIds", "i32")
+        .ptr("TopkWeights", "f32")
+        .ptr("Counter", "i32")
+        .ptr("X", spec.dtype)
+        .ptr("SortedTokenIds", "i32")
+        .ptr("SortedWeights", "f32")
+        .ptr("GroupedInput", spec.dtype)
+        .scalar("tokens", "i32")
+        .scalar("topk", "i32")
+        .scalar("num_experts", "i32")
+        .scalar("hidden", "i32")
+        .scalar("slot_size", "i32")
+        .build()
+    )
+
+
+# ---------------------------------------------------------------------
 # Stage (6): topk-weighted reduce. The MoE-specific final accumulate.
 # ---------------------------------------------------------------------
 
@@ -554,36 +795,89 @@ def moe_fused_workspace_bytes(spec: FusedMoeSpec) -> int:
 # ---------------------------------------------------------------------
 
 
+_PHASE_ORDER: Tuple[str, str, str] = ("gather", "silu_mul", "topk_reduce")
+
+
 @dataclass
 class FusedMoeLauncher:
-    """Documentation-grade launcher for the full fused-MoE forward.
+    """Launcher for the MoE-specific phases of the fused-MoE forward.
 
-    This class does not own any GPU memory or launch primitives; it
-    enumerates the *call graph* that a runtime driver should issue
-    to execute :class:`FusedMoeSpec` end-to-end. The intended use::
+    Drives the three MoE-specific kernels (gather, SwiGLU activation,
+    top-k weighted reduce) as a CK-Tile-style chained launch on a
+    single HIP stream. The call graph mirrors the C++ reference at
+    ``example/ck_tile/15_fused_moe`` but uses the
+    :func:`~ck_dsl.runtime.launcher.launch_kernel` /
+    :func:`~ck_dsl.runtime.launcher.make_kernel` primitive instead of
+    a hand-rolled launch loop. Same-stream FIFO ordering on HIP is
+    the only correctness primitive between phases -- no events, no
+    intermediate fences -- which matches both the CK Tile semantic
+    and the
+    ``ck_tile::launch_kernel(s, MOE_SORTING_MP_0, MOE_SORTING_MP_1,
+    MOE_SORTING_MP_23)`` macro pattern in the fused-MoE example
+    sorting dispatcher.
 
-    spec = FusedMoeSpec(tokens=..., experts=..., topk=...,
-    hidden=..., intermediate=..., dtype="f16")
-    launcher = FusedMoeLauncher(spec)
-    for phase, kernel_def, grid, signature in launcher.plan():
-    # ... dispatch via your KernelLauncher of choice ...
-    pass
+    Production usage::
 
-    The ``plan`` method yields the MoE-specific phases (sort, gather,
-    silu_mul, reduce). Per-expert GEMMs are *not* iterated by the
-    launcher (their grid depends on per-expert ``Counts[e]`` known
-    only after the sort completes); supply a separate
-    ``expert_gemm_fn(expert_idx, ...)`` callback at runtime and call
-    it inside the gather -> gemm -> silu loop.
+        spec = FusedMoeSpec(tokens=..., experts=..., topk=...,
+                            hidden=..., intermediate=..., dtype="f16")
+        launcher = FusedMoeLauncher(spec)
+        ms = launcher.run(
+            {
+                "gather":      {"X": X, "SortedTokenIds": sids,
+                                "GroupedInput": grouped, "tokens": T,
+                                "hidden": H},
+                "silu_mul":    {"GateOut": gate, "UpOut": up,
+                                "Hidden": hidden, "total_pairs": T*K,
+                                "intermediate": I},
+                "topk_reduce": {"DownOut": down, "SortedTokenIds": sids,
+                                "SortedWeights": weights, "Y": Y,
+                                "total_pairs": T*K, "hidden": H,
+                                "tokens": T},
+            },
+            stream=stream,
+        )
 
-    For a production launcher with per-expert dispatch + workspace
-    reuse, see the planned follow-on (the v1 launcher here is
-    intentionally a callgraph descriptor, not a runtime loop, to keep
-    the IR module pure-Python and import-time-safe).
+    The launcher is the v2 production runtime. It compiles each of
+    the three IR kernels lazily on first :meth:`run` /
+    :meth:`make_callables` call, caches the resulting
+    :class:`~ck_dsl.runtime.launcher.KernelLauncher` instances on
+    ``self`` (one HSACO + module + function per phase), and reuses
+    them across every subsequent dispatch. Construct one
+    :class:`FusedMoeLauncher` per :class:`FusedMoeSpec` and reuse it
+    for the lifetime of the problem.
+
+    Scope notes
+    -----------
+    The MoE forward also requires per-expert gate / up / down GEMMs
+    (block-scale or universal) and an optional smoothquant pass --
+    these are *not* iterated by the launcher because their per-expert
+    grids depend on ``Counts[e]`` (only known after the sort). The
+    caller composes them around the gather + silu_mul + topk_reduce
+    chain using the standard instance builders
+    (:func:`build_block_scale_gemm`, :func:`build_universal_gemm`,
+    :func:`build_moe_smoothquant`) and an
+    ``expert_gemm_fn(expert_idx, a_ptr, b_ptr, c_ptr, m, n, k)``
+    callback. The MoE sort phases (histogram / scan / scatter) live
+    in :mod:`ck_dsl.instances.moe_sorting` and chain analogously
+    through :func:`launch_kernel`.
+
+    The legacy :meth:`plan` method is preserved as a pure descriptor
+    -- it returns the list of ``(phase, kernel_def, grid, signature)``
+    tuples without compiling anything, for callers that want to
+    inspect the call graph or drive their own dispatch.
     """
 
     spec: FusedMoeSpec
     name_prefix: str = "fused_moe"
+
+    def __post_init__(self) -> None:
+        # Lazy KernelLauncher cache: built on first :meth:`run` /
+        # :meth:`make_callables` call, reused thereafter. Holds one
+        # HSACO + HIP module + kernel function handle per phase.
+        # Stored via ``object.__setattr__`` so dataclass-generated
+        # ``__repr__`` stays stable (the launchers are not part of
+        # the spec identity).
+        object.__setattr__(self, "_launchers", None)
 
     def plan(self) -> "list[tuple[str, KernelDef, Tuple[int, int, int], object]]":
         """Return ``[(phase_name, kernel_def, grid, signature), ...]``
@@ -593,6 +887,10 @@ class FusedMoeLauncher:
         are NOT included; the caller composes them via the standard
         instance builders (``build_block_scale_gemm``,
         ``build_universal_gemm``, ``build_moe_smoothquant``).
+
+        Pure descriptor: does not compile anything, does not allocate
+        :class:`KernelLauncher` instances. Use :meth:`make_callables`
+        or :meth:`run` for the runtime path.
         """
         s = self.spec
         return [
@@ -636,3 +934,130 @@ class FusedMoeLauncher:
 
     def workspace_bytes(self) -> int:
         return moe_fused_workspace_bytes(self.spec)
+
+    def _ensure_launchers(self) -> Dict[str, Any]:
+        """Compile the 3 MoE-specific kernels on first call and cache
+        one :class:`~ck_dsl.runtime.launcher.KernelLauncher` per
+        phase. Subsequent calls return the cached dict directly.
+
+        Imports the runtime helpers lazily to keep
+        :mod:`ck_dsl.instances.fused_moe` import-time-safe (the
+        module is exercised by static IR tests in environments
+        without a HIP runtime).
+        """
+        if self._launchers is not None:  # type: ignore[has-type]
+            return self._launchers  # type: ignore[has-type]
+        from ..helpers.compile import compile_kernel
+        from ..runtime.launcher import KernelLauncher
+
+        s = self.spec
+        out: Dict[str, Any] = {}
+        for phase, kernel_def, _grid, signature in self.plan():
+            artifact = compile_kernel(kernel_def, capture_ir_text=False)
+            out[phase] = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=signature,
+                cache_key=("fused_moe", phase, s.kernel_name(phase)),
+            )
+        object.__setattr__(self, "_launchers", out)
+        return out
+
+    def make_callables(
+        self,
+        values: Mapping[str, Mapping[str, Any]],
+    ) -> List[Callable[[Any], None]]:
+        """Bake per-phase ``(values, grid, block, lds_bytes=0)`` into
+        three :func:`~ck_dsl.runtime.launcher.make_kernel` closures,
+        ready for :func:`~ck_dsl.runtime.launcher.launch_kernel`.
+
+        ``values`` is a phase-keyed mapping with entries for each of
+        ``"gather"``, ``"silu_mul"``, ``"topk_reduce"`` matching the
+        per-phase signature returned by :func:`moe_gather_signature`,
+        :func:`moe_silu_mul_signature`, and
+        :func:`moe_topk_weighted_reduce_signature`. All three phases
+        use ``block=(spec.block_size, 1, 1)`` and ``lds_bytes=0``.
+
+        Returns the closures in declaration order (gather, silu_mul,
+        topk_reduce). Use this entry point if you want to interleave
+        :func:`make_kernel` closures with arbitrary host lambdas
+        (for example, a ``maybe_clear_workspace`` callable that
+        zeroes the output ``Y`` accumulator before topk_reduce
+        starts) before passing the full list to
+        :func:`launch_kernel`. For the simple case of "just run all
+        three on one stream", :meth:`run` is the one-call shortcut.
+        """
+        from ..runtime.launcher import make_kernel
+
+        missing = [p for p in _PHASE_ORDER if p not in values]
+        if missing:
+            raise KeyError(
+                f"FusedMoeLauncher.make_callables: missing values for phase(s) "
+                f"{missing!r}; expected keys {list(_PHASE_ORDER)!r}"
+            )
+        s = self.spec
+        block = (s.block_size, 1, 1)
+        launchers = self._ensure_launchers()
+        return [
+            make_kernel(
+                launchers["gather"],
+                values["gather"],
+                moe_gather_grid(s),
+                block,
+            ),
+            make_kernel(
+                launchers["silu_mul"],
+                values["silu_mul"],
+                moe_silu_mul_grid(s),
+                block,
+            ),
+            make_kernel(
+                launchers["topk_reduce"],
+                values["topk_reduce"],
+                moe_topk_weighted_reduce_grid(s),
+                block,
+            ),
+        ]
+
+    def run(
+        self,
+        values: Mapping[str, Mapping[str, Any]],
+        *,
+        stream: int = 0,
+        time_kernel: bool = False,
+        cold_niters: int = 3,
+        nrepeat: int = 10,
+        is_gpu_timer: bool = True,
+    ) -> float:
+        """Drive gather -> silu_mul -> topk_reduce as a CK-Tile-style
+        chained launch on ``stream``.
+
+        Returns ``0.0`` when ``time_kernel=False`` (production
+        dispatch) and the average per-iteration wall time in
+        milliseconds when ``time_kernel=True`` (benchmark loop with
+        ``cold_niters`` warmup iters + ``nrepeat`` timed iters
+        wrapping the whole 3-callable group; see
+        :func:`launch_kernel` for the full timing contract).
+
+        Production callers that read the output tensors on the host
+        immediately after :meth:`run` returns should add an explicit
+        :func:`~ck_dsl.runtime.launcher.wait_stream_and_release`
+        (or rely on torch's stream-aware next-read sync). The
+        primitive does not implicitly fence at the end of the
+        non-timing path; the timing path's outer
+        :class:`~ck_dsl.runtime.hip_module.Event` synchronize is the
+        only sync point.
+        """
+        from ..runtime.launcher import StreamConfig, launch_kernel
+
+        callables = self.make_callables(values)
+        return launch_kernel(
+            StreamConfig(
+                stream_id=int(stream),
+                time_kernel=bool(time_kernel),
+                cold_niters=int(cold_niters),
+                nrepeat=int(nrepeat),
+                is_gpu_timer=bool(is_gpu_timer),
+            ),
+            *callables,
+        )
