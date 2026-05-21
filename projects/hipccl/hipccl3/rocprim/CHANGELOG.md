@@ -108,6 +108,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
 
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
+
 ### Changed
 
 * Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
