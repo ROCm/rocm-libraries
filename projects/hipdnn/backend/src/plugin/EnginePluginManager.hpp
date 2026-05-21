@@ -75,6 +75,11 @@ protected:
         _engineIds.insert(engineIds.begin(), engineIds.end());
     }
 
+    void actionAfterClearing() override
+    {
+        _engineIds.clear();
+    }
+
     std::set<int64_t> _engineIds;
 };
 

@@ -129,14 +129,14 @@ void SdpaFwdPlan::execute(const HipKernelHandle& handle,
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
     unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
     unsigned int gridDimY = _params.numHeadsQ;
-    unsigned int gridDimZ = _params.batchSize;
+    const unsigned int gridDimZ = _params.batchSize;
 
     if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
     {
         std::swap(gridDimX, gridDimY);
     }
 
-    unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
+    const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 
     launchKernel("fwd",
                  _kernel.function(),

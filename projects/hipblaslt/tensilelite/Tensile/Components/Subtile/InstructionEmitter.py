@@ -25,6 +25,24 @@ from rocisa.container import vgpr, sgpr, DSModifiers
 from rocisa.code import Label
 
 
+class SWaitCntEx(SWaitCnt):
+    """SWaitCnt with adjustVmcnt flag for the instruction scheduler post-pass."""
+    def __init__(self, adjustVmcnt=True, **kwargs):
+        super().__init__(**kwargs)
+        self._adjustVmcnt = adjustVmcnt
+
+    @property
+    def adjustVmcnt(self):
+        return self._adjustVmcnt
+
+    def __deepcopy__(self, memo):
+        return SWaitCntEx(
+            adjustVmcnt=self._adjustVmcnt,
+            vlcnt=self.vlcnt, vscnt=self.vscnt,
+            dscnt=self.dscnt, kmcnt=self.kmcnt,
+            comment=self.comment)
+
+
 class InstructionEmitter:
     """Emits GPU instructions for each opType in the LogicalScheduler output.
 
@@ -172,8 +190,10 @@ class InstructionEmitter:
                  counts.B * grMap['B'] +
                  counts.SA * grMap['SA'] +
                  counts.SB * grMap['SB'])
-        return [SWaitCnt(vlcnt=grCnt, vscnt=-1,
-                         comment=f"Wait GR (per-subIterK): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+        swait = SWaitCntEx(vlcnt=grCnt, vscnt=-1,
+                           adjustVmcnt=source.adjustVmcnt,
+                           comment=f"Wait GR (per-subIterK): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
+        return [swait]
 
     def emit_wait_lr(self):
         return [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,

@@ -3,6 +3,10 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
+endif()
+
 project(stinkytofu)
 
 set(STINKYTOFU_VERSION "0.1.0")
@@ -237,6 +241,14 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
     DESTINATION lib/cmake/stinkytofu
 )
+# --------------------------------------------------------------------------- #
+# clang-tidy
+# --------------------------------------------------------------------------- #
+option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
+include(ClangTidy)
+add_clang_tidy_custom_target()
+
 # Build-tree export so find_package() works without installing.
 export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
