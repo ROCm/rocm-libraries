@@ -42,7 +42,7 @@ except ImportError:
     sys.path.append(os.path.join(os.path.dirname(__file__), "../../build/lib"))
     import stinkytofu  # noqa: E402
 
-from stinkytofu import Register, RegType, vgpr, sgpr, agpr  # noqa: E402
+from stinkytofu import Register, RegType, vgpr, sgpr, agpr, accvgpr, mgpr  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +105,25 @@ class TestConstructors:
         assert (v.reg_type, v.index, v.count) == (RegType.V, 0, 2)
         assert (s.reg_type, s.index, s.count) == (RegType.S, 7, 1)
         assert (a.reg_type, a.index, a.count) == (RegType.A, 3, 4)
+
+    def test_accvgpr_alias_of_agpr(self):
+        # accvgpr is an alias kept for rocisa-style call sites.
+        a = accvgpr(3, 4)
+        b = agpr(3, 4)
+        assert (a.reg_type, a.index, a.count) == (RegType.A, 3, 4)
+        assert a == b
+
+    def test_mgpr_helper(self):
+        # mgpr helper exists for the rocisa "m" register type
+        # (memory descriptor); required by the adapter's to_stinky()
+        # path for tensilelite kernels that emit MUBUF/FLAT addr pairs.
+        m = mgpr(2, 4)
+        assert m.is_register
+        assert (m.reg_type, m.index, m.count) == (RegType.M, 2, 4)
+
+    def test_mgpr_default_count(self):
+        m = mgpr(5)
+        assert (m.reg_type, m.index, m.count) == (RegType.M, 5, 1)
 
 
 # ---------------------------------------------------------------------------

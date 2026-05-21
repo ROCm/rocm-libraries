@@ -29,11 +29,10 @@ factory helpers (``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``,
 Done (real):
     - ``RegName``, ``RegisterContainer``                      (T2)
     - ``Holder``, ``HolderContainer``, ``replaceHolder``      (T2)
+    - ``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``            (T3)
+    - ``ContinuousRegister``                                  (T3)
 
 TODO (dummy):
-    - ``sgpr``, ``vgpr``                                      (T3)
-    - ``accvgpr``, ``mgpr``                                   (T3)
-    - ``ContinuousRegister``                                  (T4)
     - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (T4)
     - ``HWRegContainer``                                      (T4)
     - ``MemTokenData``                                        (T5)
@@ -48,7 +47,7 @@ import math
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
-from ._dummy import make_dummy_class, make_dummy_func
+from ._dummy import make_dummy_class
 
 _P = "rocisa.container"
 
@@ -566,7 +565,22 @@ class RegisterContainer:
         else:
             physical_idx = self.regIdx
 
-        reg = _stinky.Register(self.regType, physical_idx, self.regNum)
+        # Route through the rocisa-style helper that python_bindings.cpp
+        # exposes (vgpr/sgpr/accvgpr/mgpr). Keeps the emit boundary
+        # symmetric with the rocisa factory surface and avoids encoding
+        # the regType string twice.
+        helper = {
+            "v": _stinky.vgpr,
+            "s": _stinky.sgpr,
+            "acc": _stinky.accvgpr,
+            "m": _stinky.mgpr,
+        }.get(self.regType)
+        if helper is None:
+            raise NotImplementedError(
+                f"RegisterContainer.to_stinky: regType={self.regType!r} has "
+                "no stinkytofu helper. Add one in python_bindings.cpp first."
+            )
+        reg = helper(physical_idx, self.regNum)
 
         if self.isMinus:
             reg.set_minus(True)
@@ -989,13 +1003,162 @@ def replaceHolder(inst, dst: int):
 
 
 # ---------------------------------------------------------------------------
+# GPR factory functions -- vgpr / sgpr / accvgpr / mgpr.
+# ---------------------------------------------------------------------------
+#
+# Mirror of rocisa createGPR + the four type-specific factory wrappers.
+# Three dispatch forms per factory: Holder / int / str. Each form maps
+# to either a RegisterContainer (int / str) or a HolderContainer (Holder).
+def _create_gpr(
+    gpr_type: str,
+    arg,
+    reg_num: float,
+    *,
+    isMacro: bool = False,
+    isAbs: bool = False,
+    isOff: bool = False,
+) -> RegisterContainer:
+    """Internal dispatcher (rocisa::createGPR analogue).
+
+    Dispatches on ``arg`` type: ``Holder`` → ``HolderContainer``,
+    ``int`` → numeric ``RegisterContainer``, ``str`` → symbolic
+    ``RegisterContainer`` whose ``regIdx`` defaults to ``-1``.
+    """
+    if isinstance(arg, Holder):
+        if arg.idx == -1:
+            return HolderContainer(gpr_type, arg.name, reg_num)
+        return HolderContainer(gpr_type, arg.idx, reg_num)
+    if isinstance(arg, bool):
+        # bool is a subclass of int; reject so callers don't drift into
+        # the int overload by accident.
+        raise TypeError(
+            f"{gpr_type}gpr factory: positional arg must be Holder/int/str, not bool"
+        )
+    if isinstance(arg, int):
+        return RegisterContainer(gpr_type, None, arg, reg_num)
+    if isinstance(arg, str):
+        return RegisterContainer(
+            gpr_type,
+            _generateRegName(arg),
+            -1,
+            reg_num,
+            isAbs=isAbs,
+            isMacro=isMacro,
+            isOff=isOff,
+        )
+    raise TypeError(
+        f"{gpr_type}gpr factory: arg must be Holder/int/str, got {type(arg).__name__}"
+    )
+
+
+def vgpr(
+    arg,
+    regNum: float = 1.0,
+    isMacro: bool = False,
+    isAbs: bool = False,
+    isOff: bool = False,
+) -> RegisterContainer:
+    """Build a VGPR ``RegisterContainer`` (or ``HolderContainer``).
+
+    Three forms: ``vgpr(holder, regNum)``, ``vgpr(idx, regNum)``,
+    ``vgpr(name, regNum, isMacro, isAbs, isOff)``.
+    """
+    return _create_gpr("v", arg, regNum, isMacro=isMacro, isAbs=isAbs, isOff=isOff)
+
+
+def sgpr(arg, regNum: float = 1.0, isMacro: bool = False) -> RegisterContainer:
+    """Build an SGPR ``RegisterContainer`` (or ``HolderContainer``).
+
+    String form accepts ``isMacro`` only (rocisa signature parity:
+    ``sgpr(name, regNum, isMacro)`` -- no ``isAbs`` / ``isOff``).
+    """
+    return _create_gpr("s", arg, regNum, isMacro=isMacro)
+
+
+def accvgpr(arg, regNum: float = 1.0) -> RegisterContainer:
+    """Build an accumulator VGPR ``RegisterContainer`` (rocisa type ``"acc"``).
+
+    No modifier kwargs in rocisa signature.
+    """
+    return _create_gpr("acc", arg, regNum)
+
+
+def mgpr(arg, regNum: float = 1.0) -> RegisterContainer:
+    """Build an MGPR (memory descriptor) ``RegisterContainer``.
+
+    No modifier kwargs in rocisa signature.
+    """
+    return _create_gpr("m", arg, regNum)
+
+
+# ---------------------------------------------------------------------------
+# ContinuousRegister -- POD {idx, size} value object.
+# ---------------------------------------------------------------------------
+#
+# RegisterPool yields one of these from each allocTmpGpr / allocTmpVgpr
+# context; KernelWriter then reads .idx / .size off it. rocisa exposes
+# the fields as ``def_ro`` so the instance is effectively immutable;
+# we mirror that semantics in Python.
+class ContinuousRegister:
+    """Immutable ``{idx, size}`` register-range descriptor.
+
+    Constructor: ``ContinuousRegister(idx, size)`` (positional or
+    keyword). Both fields are read-only after construction; mutate by
+    building a fresh instance.
+    """
+
+    __slots__ = ("_idx", "_size", "_frozen")
+
+    def __init__(self, idx: int, size: int) -> None:
+        # bool is an int subclass; reject so True/False don't slip in.
+        if isinstance(idx, bool) or isinstance(size, bool):
+            raise TypeError("ContinuousRegister: idx/size must be int, not bool")
+        if not isinstance(idx, int) or not isinstance(size, int):
+            raise TypeError(
+                f"ContinuousRegister: idx/size must be int, got "
+                f"{type(idx).__name__}/{type(size).__name__}"
+            )
+        object.__setattr__(self, "_idx", idx)
+        object.__setattr__(self, "_size", size)
+        object.__setattr__(self, "_frozen", True)
+
+    @property
+    def idx(self) -> int:
+        return self._idx
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    def __setattr__(self, name: str, value) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"ContinuousRegister is read-only; cannot set {name!r}"
+            )
+        object.__setattr__(self, name, value)
+
+    def __repr__(self) -> str:
+        return f"ContinuousRegister(idx={self._idx}, size={self._size})"
+
+    def __copy__(self) -> "ContinuousRegister":
+        return ContinuousRegister(self._idx, self._size)
+
+    def __deepcopy__(self, memo: dict) -> "ContinuousRegister":
+        return ContinuousRegister(self._idx, self._size)
+
+    def __getstate__(self) -> Tuple[int, int]:
+        return (self._idx, self._size)
+
+    def __setstate__(self, state: Tuple[int, int]) -> None:
+        idx, size = state
+        object.__setattr__(self, "_idx", idx)
+        object.__setattr__(self, "_size", size)
+        object.__setattr__(self, "_frozen", True)
+
+
+# ---------------------------------------------------------------------------
 # Remaining surface kept as dummies (covered by later tasks).
 # ---------------------------------------------------------------------------
-
-vgpr = make_dummy_func(f"{_P}.vgpr")
-sgpr = make_dummy_func(f"{_P}.sgpr")
-accvgpr = make_dummy_func(f"{_P}.accvgpr")
-mgpr = make_dummy_func(f"{_P}.mgpr")
 
 Container = make_dummy_class(f"{_P}.Container")
 DSModifiers = make_dummy_class(f"{_P}.DSModifiers")
@@ -1013,4 +1176,3 @@ EXECHI = make_dummy_class(f"{_P}.EXECHI")
 VCC = make_dummy_class(f"{_P}.VCC")
 HWRegContainer = make_dummy_class(f"{_P}.HWRegContainer")
 MemTokenData = make_dummy_class(f"{_P}.MemTokenData")
-ContinuousRegister = make_dummy_class(f"{_P}.ContinuousRegister")

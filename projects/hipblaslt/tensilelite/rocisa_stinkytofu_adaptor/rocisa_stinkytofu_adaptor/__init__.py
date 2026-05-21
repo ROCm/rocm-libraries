@@ -59,8 +59,12 @@ Not yet done (dummy):
     - Interop hooks: ``isSupportedByStinkyTofu``, ``StinkyAsmModule``,
       ``toStinkyTofuModule`` — should delegate into compiled stinkytofu
       bindings once the dummy phase ends.
-    - Submodules still all-dummy: ``container``, ``code``, ``label``,
+    - Submodules still all-dummy: ``code``, ``label``,
       ``instruction``, ``functions``, ``asmpass``, ``macro``.
+    - ``container``: register-reference layer real (``RegName``,
+      ``RegisterContainer``, ``Holder`` family, ``vgpr`` / ``sgpr`` /
+      ``accvgpr`` / ``mgpr`` factories, ``ContinuousRegister``);
+      modifier / hardware-register types still dummy.
 """
 
 from __future__ import annotations

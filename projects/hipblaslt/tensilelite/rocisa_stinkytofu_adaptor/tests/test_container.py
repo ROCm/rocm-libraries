@@ -54,11 +54,16 @@ if _PKG_PARENT not in sys.path:
 
 from rocisa_stinkytofu_adaptor import rocIsa  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
+    ContinuousRegister,
     Holder,
     HolderContainer,
     RegisterContainer,
     RegName,
+    accvgpr,
+    mgpr,
     replaceHolder,
+    sgpr,
+    vgpr,
 )
 
 
@@ -788,12 +793,13 @@ class TestToStinky(unittest.TestCase):
 
 class TestKernelWriterScenarios(unittest.TestCase):
     def test_vgpr_factory_pattern(self):
-        # ``vgpr("ValuA", 1)`` call shape: RegName-wrapped, regNum=1.
-        rc = RegisterContainer("v", RegName("ValuA"), 0, 1)
+        # Real factory: vgpr("ValuA", 1) -> str-form RegisterContainer.
+        rc = vgpr("ValuA", 1)
         self.assertEqual(str(rc), "v[vgprValuA]")
-        # Used as a dict key in RegisterPool tracking.
+        # Used as a dict key in RegisterPool tracking. Two vgpr() calls
+        # with matching args must hash/compare equal for this to work.
         d = {rc: "tracked"}
-        self.assertEqual(d[RegisterContainer("v", RegName("ValuA"), 0, 1)], "tracked")
+        self.assertEqual(d[vgpr("ValuA", 1)], "tracked")
 
     def test_split_then_emit(self):
         rc = RegisterContainer("v", RegName("Acc"), 0, 4)
@@ -1339,6 +1345,298 @@ class TestReplaceHolderSWaitCnt(unittest.TestCase):
         # SWaitCnt branch raises explicitly (intentional gap).
         with self.assertRaises(RuntimeError):
             replaceHolder(_MockSWaitCnt(), 0)
+
+
+# ===========================================================================
+# Factory functions: vgpr / sgpr / accvgpr / mgpr
+# ===========================================================================
+#
+# Per rocisa::createGPR + the type-specific wrappers in container.cpp.
+# Three dispatch arms each (Holder / int / str); plus type-tagging,
+# regNum rounding (delegated to RegisterContainer), and modifier-kwarg
+# acceptance matching the C++ signatures.
+
+
+class TestVgprFactory(unittest.TestCase):
+    def test_int_arg_makes_numeric_register(self):
+        rc = vgpr(5)
+        self.assertIsInstance(rc, RegisterContainer)
+        self.assertNotIsInstance(rc, HolderContainer)
+        self.assertEqual(rc.regType, "v")
+        self.assertIsNone(rc.regName)
+        self.assertEqual(rc.regIdx, 5)
+        self.assertEqual(rc.regNum, 1)
+
+    def test_int_arg_with_regnum(self):
+        rc = vgpr(8, 4)
+        self.assertEqual(rc.regIdx, 8)
+        self.assertEqual(rc.regNum, 4)
+
+    def test_str_arg_makes_symbolic_register(self):
+        rc = vgpr("ValuA")
+        self.assertEqual(rc.regType, "v")
+        self.assertEqual(rc.regIdx, -1)
+        self.assertIsNotNone(rc.regName)
+        self.assertEqual(rc.regName.name, "ValuA")
+        self.assertEqual(rc.regName.offsets, [])
+
+    def test_str_arg_with_offsets_parsed(self):
+        rc = vgpr("Foo+1+2", 1)
+        self.assertEqual(rc.regName.name, "Foo")
+        self.assertEqual(rc.regName.offsets, [1, 2])
+
+    def test_str_arg_passes_modifier_kwargs(self):
+        rc = vgpr("Foo", 1, isMacro=True, isAbs=True, isOff=True)
+        self.assertTrue(rc.isMacro)
+        self.assertTrue(rc.isAbs)
+        self.assertTrue(rc.isOff)
+
+    def test_holder_int_makes_typed_holdercontainer(self):
+        h = Holder(idx=3)
+        hc = vgpr(h, 2)
+        self.assertIsInstance(hc, HolderContainer)
+        self.assertEqual(hc.regType, "v")
+        self.assertEqual(hc.holderIdx, 3)
+        self.assertEqual(hc.holderType, 0)
+        self.assertEqual(hc.regNum, 2)
+
+    def test_holder_str_makes_named_holdercontainer(self):
+        h = Holder(name="ValuC")
+        hc = vgpr(h, 1)
+        self.assertIsInstance(hc, HolderContainer)
+        self.assertEqual(hc.regType, "v")
+        self.assertEqual(hc.holderName, "ValuC")
+        self.assertEqual(hc.holderType, 1)
+
+    def test_bool_rejected(self):
+        with self.assertRaises(TypeError):
+            vgpr(True)
+        with self.assertRaises(TypeError):
+            vgpr(False, 1)
+
+    def test_unsupported_type_rejected(self):
+        with self.assertRaises(TypeError):
+            vgpr(3.14)
+        with self.assertRaises(TypeError):
+            vgpr(None)
+
+    def test_regnum_rounded_up_by_container(self):
+        # vgpr delegates rounding semantics to RegisterContainer.__init__.
+        rc = vgpr(0, 1.5)
+        self.assertEqual(rc.regNum, 2)
+
+
+class TestSgprFactory(unittest.TestCase):
+    def test_int_arg(self):
+        rc = sgpr(2)
+        self.assertEqual(rc.regType, "s")
+        self.assertIsNone(rc.regName)
+        self.assertEqual(rc.regIdx, 2)
+
+    def test_str_arg_default(self):
+        rc = sgpr("AddressA")
+        self.assertEqual(rc.regType, "s")
+        self.assertEqual(rc.regName.name, "AddressA")
+        self.assertFalse(rc.isMacro)
+        self.assertFalse(rc.isAbs)
+        self.assertFalse(rc.isOff)
+
+    def test_str_arg_isMacro_only(self):
+        rc = sgpr("Foo", 1, isMacro=True)
+        self.assertTrue(rc.isMacro)
+        self.assertFalse(rc.isAbs)
+        self.assertFalse(rc.isOff)
+
+    def test_str_arg_rejects_isAbs_isOff(self):
+        # sgpr has no isAbs / isOff in the rocisa signature.
+        with self.assertRaises(TypeError):
+            sgpr("Foo", 1, isAbs=True)
+        with self.assertRaises(TypeError):
+            sgpr("Foo", 1, isOff=True)
+
+    def test_holder_dispatch(self):
+        hc = sgpr(Holder(idx=4), 1)
+        self.assertIsInstance(hc, HolderContainer)
+        self.assertEqual(hc.regType, "s")
+        self.assertEqual(hc.holderIdx, 4)
+
+
+class TestAccvgprFactory(unittest.TestCase):
+    def test_int_arg(self):
+        rc = accvgpr(7)
+        self.assertEqual(rc.regType, "acc")
+        self.assertEqual(rc.regIdx, 7)
+
+    def test_str_arg(self):
+        rc = accvgpr("Acc")
+        self.assertEqual(rc.regType, "acc")
+        self.assertEqual(rc.regName.name, "Acc")
+
+    def test_holder_dispatch(self):
+        hc = accvgpr(Holder(name="Acc"), 1)
+        self.assertIsInstance(hc, HolderContainer)
+        self.assertEqual(hc.regType, "acc")
+        self.assertEqual(hc.holderName, "Acc")
+
+    def test_rejects_modifier_kwargs(self):
+        with self.assertRaises(TypeError):
+            accvgpr("Acc", 1, isMacro=True)
+
+
+class TestMgprFactory(unittest.TestCase):
+    def test_int_arg(self):
+        rc = mgpr(0)
+        self.assertEqual(rc.regType, "m")
+        self.assertEqual(rc.regIdx, 0)
+
+    def test_str_arg(self):
+        rc = mgpr("Mdesc")
+        self.assertEqual(rc.regType, "m")
+        self.assertEqual(rc.regName.name, "Mdesc")
+
+    def test_holder_dispatch(self):
+        hc = mgpr(Holder(idx=1), 4)
+        self.assertIsInstance(hc, HolderContainer)
+        self.assertEqual(hc.regType, "m")
+        self.assertEqual(hc.holderIdx, 1)
+        self.assertEqual(hc.regNum, 4)
+
+    def test_rejects_modifier_kwargs(self):
+        with self.assertRaises(TypeError):
+            mgpr("Mdesc", 1, isMacro=True)
+
+
+class TestFactoryEquivalentToDirectConstruction(unittest.TestCase):
+    """Factories must produce containers indistinguishable from
+    ``RegisterContainer(...)`` / ``HolderContainer(...)`` direct calls."""
+
+    def test_vgpr_int_matches_manual_construction(self):
+        from_factory = vgpr(5, 2)
+        manual = RegisterContainer("v", None, 5, 2)
+        self.assertEqual(from_factory.regType, manual.regType)
+        self.assertEqual(from_factory.regIdx, manual.regIdx)
+        self.assertEqual(from_factory.regNum, manual.regNum)
+        self.assertEqual(from_factory.regName, manual.regName)
+
+    def test_vgpr_holder_matches_manual_construction(self):
+        h = Holder(idx=3)
+        from_factory = vgpr(h, 1)
+        manual = HolderContainer("v", 3, 1)
+        self.assertEqual(from_factory.regType, manual.regType)
+        self.assertEqual(from_factory.holderIdx, manual.holderIdx)
+        self.assertEqual(from_factory.holderType, manual.holderType)
+
+
+# ===========================================================================
+# ContinuousRegister
+# ===========================================================================
+#
+# rocisa::ContinuousRegister is a POD with read-only {idx, size}.
+# The Python shim mirrors that surface; no equality or hashing in the
+# C++ binding either.
+
+
+class TestContinuousRegisterConstruction(unittest.TestCase):
+    def test_positional_ctor(self):
+        cr = ContinuousRegister(4, 2)
+        self.assertEqual(cr.idx, 4)
+        self.assertEqual(cr.size, 2)
+
+    def test_keyword_ctor(self):
+        cr = ContinuousRegister(idx=8, size=4)
+        self.assertEqual(cr.idx, 8)
+        self.assertEqual(cr.size, 4)
+
+    def test_zero_ok(self):
+        cr = ContinuousRegister(0, 0)
+        self.assertEqual(cr.idx, 0)
+        self.assertEqual(cr.size, 0)
+
+    def test_negative_ok(self):
+        # rocisa stores raw ints; -1 is a common sentinel.
+        cr = ContinuousRegister(-1, 0)
+        self.assertEqual(cr.idx, -1)
+
+    def test_rejects_bool(self):
+        with self.assertRaises(TypeError):
+            ContinuousRegister(True, 1)
+        with self.assertRaises(TypeError):
+            ContinuousRegister(1, False)
+
+    def test_rejects_non_int(self):
+        with self.assertRaises(TypeError):
+            ContinuousRegister(1.0, 2)
+        with self.assertRaises(TypeError):
+            ContinuousRegister("a", 2)
+
+
+class TestContinuousRegisterReadOnly(unittest.TestCase):
+    def test_idx_is_read_only(self):
+        cr = ContinuousRegister(4, 2)
+        with self.assertRaises(AttributeError):
+            cr.idx = 5  # type: ignore[misc]
+
+    def test_size_is_read_only(self):
+        cr = ContinuousRegister(4, 2)
+        with self.assertRaises(AttributeError):
+            cr.size = 9  # type: ignore[misc]
+
+    def test_extra_attribute_blocked(self):
+        cr = ContinuousRegister(4, 2)
+        with self.assertRaises(AttributeError):
+            cr.something = 1  # type: ignore[attr-defined]
+
+
+class TestContinuousRegisterRepr(unittest.TestCase):
+    def test_repr_contains_fields(self):
+        cr = ContinuousRegister(4, 2)
+        r = repr(cr)
+        self.assertIn("4", r)
+        self.assertIn("2", r)
+        self.assertIn("ContinuousRegister", r)
+
+
+class TestContinuousRegisterCopyPickle(unittest.TestCase):
+    def test_copy_returns_equal_state(self):
+        cr = ContinuousRegister(4, 2)
+        c = copy.copy(cr)
+        self.assertIs(type(c), ContinuousRegister)
+        self.assertEqual(c.idx, 4)
+        self.assertEqual(c.size, 2)
+        self.assertIsNot(c, cr)
+
+    def test_deepcopy_returns_equal_state(self):
+        cr = ContinuousRegister(4, 2)
+        c = copy.deepcopy(cr)
+        self.assertIs(type(c), ContinuousRegister)
+        self.assertEqual(c.idx, 4)
+        self.assertEqual(c.size, 2)
+
+    def test_pickle_roundtrip(self):
+        cr = ContinuousRegister(4, 2)
+        c = pickle.loads(pickle.dumps(cr))
+        self.assertEqual(c.idx, 4)
+        self.assertEqual(c.size, 2)
+        # Pickled copy is still read-only.
+        with self.assertRaises(AttributeError):
+            c.idx = 0  # type: ignore[misc]
+
+
+class TestContinuousRegisterNoEqualityOrHash(unittest.TestCase):
+    """Mirror rocisa C++: ContinuousRegister has no eq/hash binding."""
+
+    def test_eq_is_identity(self):
+        a = ContinuousRegister(4, 2)
+        b = ContinuousRegister(4, 2)
+        self.assertNotEqual(a, b)  # identity-only equality
+        self.assertEqual(a, a)
+
+    def test_hashable_via_identity(self):
+        # Default object.__hash__ is identity-based; we only assert that
+        # hashing does not raise (rocisa exposes no __hash__ override).
+        a = ContinuousRegister(4, 2)
+        hash(a)
+        self.assertEqual(hash(a), hash(a))
 
 
 if __name__ == "__main__":

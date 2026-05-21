@@ -415,6 +415,11 @@ NB_MODULE(_stinkytofu, m) {
         "Create an accumulator VGPR register (alias for agpr)");
 
     m.def(
+        "mgpr", [](int index, int count) { return StinkyRegister("m", index, count); },
+        nb::arg("index"), nb::arg("count") = 1,
+        "Create an MGPR (Memory descriptor) register");
+
+    m.def(
         "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
         "Create a float literal");
 
