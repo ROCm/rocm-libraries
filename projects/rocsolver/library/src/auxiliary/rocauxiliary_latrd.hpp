@@ -2323,18 +2323,97 @@ auto rocsolver_latrd_forsytrd_getWorkItems(rocblas_handle handle,
     return work_items;
 }
 
+// ---------------------------------------------------------------------------
+// DPP helpers — AMDGCN GFX8+ only (register-to-register, no crossbar)
+// ---------------------------------------------------------------------------
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
+    && !defined(__GFX7__)
+
+template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl, typename T>
+__device__ inline T move_dpp_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "move_dpp_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_mov_dpp(src[w], dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+    return out;
+}
+
+template <int swizzle_mask, typename T>
+__device__ inline T ds_swizzle_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "ds_swizzle_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_ds_swizzle(src[w], swizzle_mask);
+    return out;
+}
+
+// Word-wise __shfl broadcast — works for any T whose size is a multiple of 4 bytes.
+template <typename T>
+__device__ inline T shfl_bcast_T(T v, int src_lane)
+{
+    static_assert(sizeof(T) % 4 == 0, "shfl_bcast_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __shfl(src[w], src_lane);
+    return out;
+}
+
+#endif // AMDGCN GFX8+
+
 template <std::int32_t WDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val)
 {
-    /* assert(WDIM == warpSize); */
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
+    && !defined(__GFX7__)
+    // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
+    // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
 
+    // Steps 1–4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
+    val += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
+    val += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
+    val += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
+    else
+        val += ds_swizzle_T<0x1e0>(val); // GFX11 equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
+
+    // Result is in the last lane; broadcast to lane 0 so callers using lane_id==0 are unchanged.
+    val = shfl_bcast_T(val, warpSize - 1);
+
+#else
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
 #pragma unroll
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
-    {
         val += shift_left(val, r);
-    }
-
-    /* val = __shfl(val, 0); */
+#endif
 }
 
 template <std::int32_t BDIM = 0, typename S>
