@@ -61,10 +61,9 @@ Not yet done (dummy):
       bindings once the dummy phase ends.
     - Submodules still all-dummy: ``code``, ``label``,
       ``instruction``, ``functions``, ``asmpass``, ``macro``.
-    - ``container``: register-reference layer real (``RegName``,
-      ``RegisterContainer``, ``Holder`` family, ``vgpr`` / ``sgpr`` /
-      ``accvgpr`` / ``mgpr`` factories, ``ContinuousRegister``);
-      modifier / hardware-register types still dummy.
+    - ``container``: register-reference layer + ``Container`` ABC and
+      hardware tokens (``VCC`` / ``EXEC`` / ``EXECLO`` / ``EXECHI`` /
+      ``HWRegContainer``); ``*Modifiers`` / ``MemTokenData`` still dummy.
 """
 
 from __future__ import annotations

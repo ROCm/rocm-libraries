@@ -54,11 +54,17 @@ if _PKG_PARENT not in sys.path:
 
 from rocisa_stinkytofu_adaptor import rocIsa  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
+    Container,
     ContinuousRegister,
+    EXEC,
+    EXECLO,
+    EXECHI,
+    HWRegContainer,
     Holder,
     HolderContainer,
     RegisterContainer,
     RegName,
+    VCC,
     accvgpr,
     mgpr,
     replaceHolder,
@@ -1637,6 +1643,107 @@ class TestContinuousRegisterNoEqualityOrHash(unittest.TestCase):
         a = ContinuousRegister(4, 2)
         hash(a)
         self.assertEqual(hash(a), hash(a))
+
+
+# ===========================================================================
+# Container ABC + hardware tokens (T4)
+# ===========================================================================
+
+
+class _WavefrontTestCase(unittest.TestCase):
+    """Pin ``rocIsa`` kernel wavefront for EXEC/VCC ``toString`` branches."""
+
+    def setUp(self):
+        self._saved = rocIsa.getInstance().getKernel()
+        rocIsa.getInstance().setKernel((12, 5, 0), 64)
+
+    def tearDown(self):
+        info = self._saved
+        if info.isa is not None:
+            rocIsa.getInstance().setKernel(info.isa, info.wavefrontSize)
+        else:
+            rocIsa.getInstance()._kernel_info = info
+
+
+class TestContainerABC(unittest.TestCase):
+    def test_not_instantiable(self):
+        with self.assertRaises(TypeError):
+            Container()
+
+    def test_subclasses_are_container(self):
+        self.assertIsInstance(EXEC(), Container)
+        self.assertIsInstance(VCC(), Container)
+        self.assertIsInstance(EXECLO(), Container)
+        self.assertIsInstance(EXECHI(), Container)
+        self.assertIsInstance(HWRegContainer("r", [1]), Container)
+
+    def test_register_container_is_container(self):
+        rc = RegisterContainer("v", None, 0, 1)
+        self.assertIsInstance(rc, Container)
+        hc = HolderContainer("v", 3, 1)
+        self.assertIsInstance(hc, Container)
+        self.assertIsInstance(hc, RegisterContainer)
+
+
+class TestHWRegContainer(_WavefrontTestCase):
+    def test_to_string(self):
+        self.assertEqual(str(HWRegContainer("reg", [1, 1])), "hwreg(reg,1,1)")
+        self.assertEqual(
+            HWRegContainer("26", [4, 1]).toString(), "hwreg(26,4,1)"
+        )
+
+    def test_value_list_copied(self):
+        raw = [1, 2]
+        h = HWRegContainer("r", raw)
+        raw.append(3)
+        self.assertEqual(h.value, [1, 2])
+
+    def test_clone_and_pickle(self):
+        h = HWRegContainer("reg", [1, 1])
+        self.assertEqual(str(h.clone()), str(h))
+        self.assertEqual(str(copy.deepcopy(h)), str(h))
+        self.assertEqual(str(pickle.loads(pickle.dumps(h))), str(h))
+
+
+class TestEXECLOEXECHI(unittest.TestCase):
+    def test_exec_lo_hi_tokens(self):
+        self.assertEqual(str(EXECLO()), "exec_lo")
+        self.assertEqual(str(EXECHI()), "exec_hi")
+        self.assertIsInstance(EXECLO(), Container)
+
+    def test_copy_pickle(self):
+        self.assertEqual(str(copy.deepcopy(EXECLO())), "exec_lo")
+        self.assertEqual(str(pickle.loads(pickle.dumps(EXECHI()))), "exec_hi")
+
+
+class TestEXECWavefront(_WavefrontTestCase):
+    def test_wavefront_64(self):
+        self.assertEqual(str(EXEC()), "exec")
+        self.assertEqual(str(EXEC(True)), "exec")
+
+    def test_wavefront_32(self):
+        rocIsa.getInstance().setKernel((12, 5, 0), 32)
+        self.assertEqual(str(EXEC()), "exec_lo")
+        self.assertEqual(str(EXEC(True)), "exec_lo")
+
+    def test_clone_matches_str(self):
+        e = EXEC(True)
+        self.assertEqual(str(e.clone()), str(e))
+        self.assertEqual(str(pickle.loads(pickle.dumps(e))), "exec")
+
+
+class TestVCCWavefront(_WavefrontTestCase):
+    def test_wavefront_64(self):
+        self.assertEqual(str(VCC()), "vcc")
+        self.assertEqual(str(VCC(True)), "vcc")
+
+    def test_wavefront_32(self):
+        rocIsa.getInstance().setKernel((12, 5, 0), 32)
+        self.assertEqual(str(VCC()), "vcc_lo")
+        self.assertEqual(str(VCC(True)), "vcc_hi")
+
+    def test_to_string_alias(self):
+        self.assertEqual(VCC().toString(), str(VCC()))
 
 
 if __name__ == "__main__":

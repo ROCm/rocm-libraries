@@ -27,29 +27,56 @@ factory helpers (``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``,
 (``VCC``, ``EXEC``, ``HWRegContainer``), and small value objects.
 
 Done (real):
-    - ``RegName``, ``RegisterContainer``                      (T2)
+    - ``Container`` ABC (``toString`` / ``clone``)
+    - ``RegName``, ``RegisterContainer`` (:class:`Container`)   (T2)
+    - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (T4)
+    - ``HWRegContainer``                                      (T4)
     - ``Holder``, ``HolderContainer``, ``replaceHolder``      (T2)
     - ``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``            (T3)
     - ``ContinuousRegister``                                  (T3)
 
 TODO (dummy):
-    - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (T4)
-    - ``HWRegContainer``                                      (T4)
     - ``MemTokenData``                                        (T5)
     - Modifier classes (``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/
       VOP3P/True16Modifiers``) — deferred to instruction-emit phase.
-    - ``Container`` base class.
 """
 
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
 from ._dummy import make_dummy_class
 
 _P = "rocisa.container"
+
+
+# ---------------------------------------------------------------------------
+# Container ABC -- polymorphic base (rocisa::Container).
+# ---------------------------------------------------------------------------
+#
+# C++ ``rocisa::Container`` exposes pure ``clone()`` / ``toString()``; nanobind
+# subclasses inherit through it (``RegisterContainer``, modifiers, EXEC/VCC, …).
+# Python mirrors that hierarchy via this ABC.
+#
+# Note: native rocisa can ``Container()`` via a nanobind trampoline
+# (``PyContainer``); this ABC is not constructible, which matches the C++
+# abstract type more closely than the binding quirk.
+class Container(ABC):
+    """Abstract base matching ``rocisa::Container`` (clone + toString)."""
+
+    @abstractmethod
+    def toString(self) -> str:
+        """Return the asm operand / modifier token string."""
+
+    def clone(self) -> "Container":
+        """Deep copy (C++ ``clone()`` returns ``shared_ptr<Container>``)."""
+        return deepcopy(self)
+
+    def __str__(self) -> str:
+        return self.toString()
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +188,7 @@ class RegName:
 #     the single source of truth.
 #   * Lazy to_stinky avoids the build cost (and the unknown-regtype
 #     validation) for wrappers that never reach emit.
-class RegisterContainer:
+class RegisterContainer(Container):
     """Reference to one or more architectural registers.
 
     Optional kwargs ``isAbs`` / ``isMacro`` / ``isOff`` mirror the
@@ -1156,11 +1183,157 @@ class ContinuousRegister:
         object.__setattr__(self, "_frozen", True)
 
 
+def _kernel_wavefront_size() -> int:
+    """Current kernel wavefront from ``rocIsa.getInstance().getKernel()``."""
+    from . import rocIsa  # lazy: avoid import cycle at module load
+
+    return int(rocIsa.getInstance().getKernel().wavefrontSize)
+
+
+# ---------------------------------------------------------------------------
+# Hardware register tokens (T4) -- EXEC / VCC / HWRegContainer family.
+# ---------------------------------------------------------------------------
+
+
+class EXEC(Container):
+    """Execution mask token; ``toString()`` depends on wavefront size."""
+
+    __slots__ = ("setHi",)
+
+    def __init__(self, setHi: bool = False) -> None:
+        self.setHi = bool(setHi)
+
+    def toString(self) -> str:
+        if _kernel_wavefront_size() == 64:
+            return "exec"
+        return "exec_lo"
+
+    def __repr__(self) -> str:
+        return f"EXEC(setHi={self.setHi!r})"
+
+    def __copy__(self) -> "EXEC":
+        return EXEC(self.setHi)
+
+    def __deepcopy__(self, memo: dict) -> "EXEC":
+        return EXEC(self.setHi)
+
+    def __getstate__(self) -> Tuple[bool]:
+        return (self.setHi,)
+
+    def __setstate__(self, state: Tuple[bool]) -> None:
+        self.setHi = state[0]
+
+
+class EXECLO(Container):
+    """Low half of EXEC (32-lane wavefronts)."""
+
+    __slots__ = ()
+
+    def toString(self) -> str:
+        return "exec_lo"
+
+    def __repr__(self) -> str:
+        return "EXECLO()"
+
+    def __copy__(self) -> "EXECLO":
+        return EXECLO()
+
+    def __deepcopy__(self, memo: dict) -> "EXECLO":
+        return EXECLO()
+
+    def __getstate__(self) -> Tuple[()]:
+        return ()
+
+    def __setstate__(self, state: Tuple[()]) -> None:
+        pass
+
+
+class EXECHI(Container):
+    """High half of EXEC (32-lane wavefronts)."""
+
+    __slots__ = ()
+
+    def toString(self) -> str:
+        return "exec_hi"
+
+    def __repr__(self) -> str:
+        return "EXECHI()"
+
+    def __copy__(self) -> "EXECHI":
+        return EXECHI()
+
+    def __deepcopy__(self, memo: dict) -> "EXECHI":
+        return EXECHI()
+
+    def __getstate__(self) -> Tuple[()]:
+        return ()
+
+    def __setstate__(self, state: Tuple[()]) -> None:
+        pass
+
+
+class VCC(Container):
+    """Vector condition code token; ``toString()`` depends on wavefront / setHi."""
+
+    __slots__ = ("setHi",)
+
+    def __init__(self, setHi: bool = False) -> None:
+        self.setHi = bool(setHi)
+
+    def toString(self) -> str:
+        if _kernel_wavefront_size() == 64:
+            return "vcc"
+        return "vcc_hi" if self.setHi else "vcc_lo"
+
+    def __repr__(self) -> str:
+        return f"VCC(setHi={self.setHi!r})"
+
+    def __copy__(self) -> "VCC":
+        return VCC(self.setHi)
+
+    def __deepcopy__(self, memo: dict) -> "VCC":
+        return VCC(self.setHi)
+
+    def __getstate__(self) -> Tuple[bool]:
+        return (self.setHi,)
+
+    def __setstate__(self, state: Tuple[bool]) -> None:
+        self.setHi = state[0]
+
+
+class HWRegContainer(Container):
+    """Hardware register immediate bundle for ``SSetRegIMM32B32`` operands."""
+
+    __slots__ = ("reg", "value")
+
+    def __init__(self, reg: str, value: List[int]) -> None:
+        self.reg = reg
+        self.value = list(value)
+
+    def toString(self) -> str:
+        parts = ",".join(str(v) for v in self.value)
+        return f"hwreg({self.reg},{parts})"
+
+    def __repr__(self) -> str:
+        return f"HWRegContainer(reg={self.reg!r}, value={self.value!r})"
+
+    def __copy__(self) -> "HWRegContainer":
+        return HWRegContainer(self.reg, self.value)
+
+    def __deepcopy__(self, memo: dict) -> "HWRegContainer":
+        return HWRegContainer(self.reg, list(self.value))
+
+    def __getstate__(self) -> Tuple[str, List[int]]:
+        return (self.reg, list(self.value))
+
+    def __setstate__(self, state: Tuple[str, List[int]]) -> None:
+        self.reg, self.value = state[0], list(state[1])
+
+
 # ---------------------------------------------------------------------------
 # Remaining surface kept as dummies (covered by later tasks).
 # ---------------------------------------------------------------------------
 
-Container = make_dummy_class(f"{_P}.Container")
 DSModifiers = make_dummy_class(f"{_P}.DSModifiers")
 FLATModifiers = make_dummy_class(f"{_P}.FLATModifiers")
 GLOBALModifiers = make_dummy_class(f"{_P}.GLOBALModifiers")
@@ -1170,9 +1343,4 @@ SDWAModifiers = make_dummy_class(f"{_P}.SDWAModifiers")
 DPPModifiers = make_dummy_class(f"{_P}.DPPModifiers")
 VOP3PModifiers = make_dummy_class(f"{_P}.VOP3PModifiers")
 True16Modifiers = make_dummy_class(f"{_P}.True16Modifiers")
-EXEC = make_dummy_class(f"{_P}.EXEC")
-EXECLO = make_dummy_class(f"{_P}.EXECLO")
-EXECHI = make_dummy_class(f"{_P}.EXECHI")
-VCC = make_dummy_class(f"{_P}.VCC")
-HWRegContainer = make_dummy_class(f"{_P}.HWRegContainer")
 MemTokenData = make_dummy_class(f"{_P}.MemTokenData")
