@@ -227,6 +227,20 @@ class UnifiedAttention2DTiledSpec:
     # K-axis mostly lives in registers. This flag tracks that orientation
     # independently while it is brought up.
     use_transposed_qk_32x32: bool = False
+    # Transposed 32x32 softmax has one online-softmax state per query lane,
+    # not one per output-dimension accumulator register. Keep a single m/l
+    # loop-carried state and broadcast alpha across the 16 output regs.
+    use_transposed_scalar_state: bool = False
+    # Hoist query-row invariants used by the transposed 32x32 score/mask path
+    # out of the per-reg/per-tile score loop.
+    use_transposed_invariant_hoist: bool = False
+    # Compute query-row mask invariants once per KV iteration for the
+    # transposed 32x32 path, instead of once per score register.
+    use_transposed_mask_once: bool = False
+    # Experiment: orient PV so each 32-lane half consumes only P rows it owns
+    # and read matching V rows through two half-local transpose LDS reads. This
+    # targets the transposed path's lane^32 P fetches.
+    use_transposed_half_local_pv: bool = False
 
     def __post_init__(self):
         if self.num_warps not in (1, 2, 4, 8):
@@ -263,6 +277,22 @@ class UnifiedAttention2DTiledSpec:
                 )
         if self.use_transposed_qk_32x32 and not self.use_mfma_32x32:
             raise ValueError("use_transposed_qk_32x32 requires use_mfma_32x32")
+        if self.use_transposed_scalar_state and not self.use_transposed_qk_32x32:
+            raise ValueError(
+                "use_transposed_scalar_state requires use_transposed_qk_32x32"
+            )
+        if self.use_transposed_invariant_hoist and not self.use_transposed_qk_32x32:
+            raise ValueError(
+                "use_transposed_invariant_hoist requires use_transposed_qk_32x32"
+            )
+        if self.use_transposed_mask_once and not self.use_transposed_qk_32x32:
+            raise ValueError(
+                "use_transposed_mask_once requires use_transposed_qk_32x32"
+            )
+        if self.use_transposed_half_local_pv and not self.use_transposed_qk_32x32:
+            raise ValueError(
+                "use_transposed_half_local_pv requires use_transposed_qk_32x32"
+            )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -373,6 +403,10 @@ class UnifiedAttention2DTiledSpec:
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
             "mfma32" if self.use_mfma_32x32 else "",
             "stqk" if self.use_transposed_qk_32x32 else "",
+            "s1" if self.use_transposed_scalar_state else "",
+            "mask1" if self.use_transposed_mask_once else "",
+            "hoist" if self.use_transposed_invariant_hoist else "",
+            "hlpv" if self.use_transposed_half_local_pv else "",
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
@@ -525,6 +559,10 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    TRANSPOSED_SCALAR_STATE = spec.use_transposed_scalar_state
+    TRANSPOSED_INVARIANT_HOIST = spec.use_transposed_invariant_hoist
+    TRANSPOSED_MASK_ONCE = spec.use_transposed_mask_once
+    TRANSPOSED_HALF_LOCAL_PV = spec.use_transposed_half_local_pv
     # FP8 K/V cache: when set, K/V cache pointers are ``ptr<fp8e4m3, global>``
     # (one byte per element), the async DMA path is disabled, and a sync
     # per-thread load + ``cvt_fp8_to_f32 * k_scale -> cast<bf16>`` chain
@@ -574,6 +612,9 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # atom (rows ``lane_rg*4..lane_rg*4+3``); stacking ``M_ATOMS_PER_WARP``
     # atoms gives ``4 * M_ATOMS_PER_WARP`` slots per lane per N-tile.
     REGS_PER_LANE = spec.regs_per_lane  # 4 for M=16, 8 for M=32
+    SOFTMAX_STATE_SLOTS = (
+        1 if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_SCALAR_STATE else REGS_PER_LANE
+    )
 
     name = spec.kernel_name()
     b = IRBuilder(name)
@@ -1079,8 +1120,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
 
     if USE_SINKS:
         m_inits = []
-        for r in range(REGS_PER_LANE):
-            row = b.add(wave_row_base, _state_row(r))
+        if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_SCALAR_STATE:
+            row = b.add(wave_row_base, lane_col32)
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
@@ -1088,9 +1129,19 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
             m_inits.append(b.select(qh_in, sink_f, neg_inf))
+        else:
+            for r in range(REGS_PER_LANE):
+                row = b.add(wave_row_base, _state_row(r))
+                qh = b.add(
+                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
+                )
+                qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+                sink_h = b.global_load(sinks, qh, dtype, align=2)
+                sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+                m_inits.append(b.select(qh_in, sink_f, neg_inf))
     else:
-        m_inits = [neg_inf for _ in range(REGS_PER_LANE)]
-    l_inits = [one_f for _ in range(REGS_PER_LANE)]
+        m_inits = [neg_inf for _ in range(SOFTMAX_STATE_SLOTS)]
+    l_inits = [one_f for _ in range(SOFTMAX_STATE_SLOTS)]
 
     # Acc storage. Old path: one vec_f32(4) per (N-tile, M-atom).
     # 32x32 path: one vec_f32(16) per 32-column output N-tile; each warp
@@ -1105,7 +1156,7 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         return n * ACC_M_ATOMS + atom
 
     iter_args = []
-    for r in range(REGS_PER_LANE):
+    for r in range(SOFTMAX_STATE_SLOTS):
         iter_args.append((f"m{r}", m_inits[r]))
         iter_args.append((f"l{r}", l_inits[r]))
     for n in range(ACC_N_TILES):
@@ -1978,13 +2029,30 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     else:
         hoist_alibi = None
 
+    if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_INVARIANT_HOIST:
+        st_q_row = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+        st_qp = b.add(qb_start_pos, b.div(st_q_row, b.const_i32(NQK)))
+        st_qh = b.add(
+            b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(st_q_row, b.const_i32(NQK))
+        )
+        st_row_ok = b.land(
+            b.cmp_lt(st_qp, cur_batch_q_len), b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        )
+        st_causal_lim = b.add(context_len, st_qp)
+    else:
+        st_q_row = None
+        st_qp = None
+        st_qh = None
+        st_row_ok = None
+        st_causal_lim = None
+
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
     )
     with kvloop as (kv_tile_iv, carry):
-        m_vals = [carry[2 * r] for r in range(REGS_PER_LANE)]
-        l_vals = [carry[2 * r + 1] for r in range(REGS_PER_LANE)]
-        ml_count = 2 * REGS_PER_LANE
+        m_vals = [carry[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
+        l_vals = [carry[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+        ml_count = 2 * SOFTMAX_STATE_SLOTS
         acc_vals = [
             carry[ml_count + n * ACC_M_ATOMS + a]
             for n in range(ACC_N_TILES)
@@ -1998,6 +2066,23 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
+
+        if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_MASK_ONCE:
+            st_q_row_iter = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+            st_qp_iter = b.add(qb_start_pos, b.div(st_q_row_iter, b.const_i32(NQK)))
+            st_qh_iter = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)),
+                b.mod(st_q_row_iter, b.const_i32(NQK)),
+            )
+            st_row_ok_iter = b.land(
+                b.cmp_lt(st_qp_iter, cur_batch_q_len),
+                b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+            )
+            st_causal_lim_iter = b.add(context_len, st_qp_iter)
+        else:
+            st_qp_iter = None
+            st_row_ok_iter = None
+            st_causal_lim_iter = None
 
         # Prepare the clamped tile index for the next-K prefetch we will issue
         # after QK. The final iteration intentionally prefetches the current
@@ -2102,18 +2187,30 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                             b.const_i32(n * 32),
                             _mfma_32x32_c_row(b, lane, reg),
                         )
-                        q_row_t = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
-                        qp_r = b.add(qb_start_pos, b.div(q_row_t, b.const_i32(NQK)))
-                        qh_r = b.add(
-                            b.mul(kv_head_idx, b.const_i32(NQK)),
-                            b.mod(q_row_t, b.const_i32(NQK)),
-                        )
-                        row_ok = b.land(
-                            b.cmp_lt(qp_r, cur_batch_q_len),
-                            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
-                        )
+                        if TRANSPOSED_INVARIANT_HOIST:
+                            qp_r = st_qp
+                            row_ok = st_row_ok
+                            causal_lim = st_causal_lim
+                        elif TRANSPOSED_MASK_ONCE:
+                            qp_r = st_qp_iter
+                            row_ok = st_row_ok_iter
+                            causal_lim = st_causal_lim_iter
+                        else:
+                            q_row_t = b.add(
+                                wave_row_base, _mfma_32x32_c_col(b, lane, 0)
+                            )
+                            qp_r = b.add(qb_start_pos, b.div(q_row_t, b.const_i32(NQK)))
+                            qh_r = b.add(
+                                b.mul(kv_head_idx, b.const_i32(NQK)),
+                                b.mod(q_row_t, b.const_i32(NQK)),
+                            )
+                            row_ok = b.land(
+                                b.cmp_lt(qp_r, cur_batch_q_len),
+                                b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                            )
                         col_abs = b.add(tile_off, k_local)
-                        causal_lim = b.add(context_len, qp_r)
+                        if not (TRANSPOSED_INVARIANT_HOIST or TRANSPOSED_MASK_ONCE):
+                            causal_lim = b.add(context_len, qp_r)
                         causal_ok = b.cmp_le(col_abs, causal_lim)
                         in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                         m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
@@ -2151,8 +2248,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 # state per query column. The alpha = exp2(m_old - m_new) and
                 # full ``l_new = alpha * l_old + l_sum`` updates are applied
                 # by that shared downstream block, not here.
-                m_new = [st_m_new for _ in range(REGS_PER_LANE)]
-                l_local = [st_l_sum for _ in range(REGS_PER_LANE)]
+                m_new = [st_m_new for _ in range(SOFTMAX_STATE_SLOTS)]
+                l_local = [st_l_sum for _ in range(SOFTMAX_STATE_SLOTS)]
                 # In the transposed orientation we already have masked /
                 # scaled / softcapped scores in ``st_scores`` and softmax
                 # probabilities in ``PT32_n``. We must NOT recompute
@@ -2456,10 +2553,12 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 l_local.append(_warp_xor_reduce_sum(b, sum_p))
 
         # alpha and L update (still per-lane registers; matches FA-2 paper)
-        alpha_regs = [b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(REGS_PER_LANE)]
+        alpha_regs = [
+            b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(SOFTMAX_STATE_SLOTS)
+        ]
         new_l_vals = [
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r])
-            for r in range(REGS_PER_LANE)
+            for r in range(SOFTMAX_STATE_SLOTS)
         ]
         if KV_FP8:
             # FP8 sync loader has no in-flight async work (the sync loader
@@ -2510,12 +2609,67 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 for n in range(ACC_N_TILES):
                     scaled = []
                     old_acc = _acc_get(n, 0)
+                    alpha_t = alpha_regs[0]
                     for reg in range(REGS_PER_LANE):
                         e = b.vec_extract(old_acc, reg)
-                        scaled.append(b.fmul(e, alpha_regs[reg]))
+                        scaled.append(
+                            b.fmul(
+                                e,
+                                alpha_t if TRANSPOSED_SCALAR_STATE else alpha_regs[reg],
+                            )
+                        )
                     acc32 = b.vec_pack(scaled, F32)
                     v_dim32 = b.add(b.const_i32(n * 32), lane_col32)
                     for k in range(T // 16):
+                        if TRANSPOSED_HALF_LOCAL_PV:
+                            # Half-local K orientation. Each 32-lane half
+                            # consumes only the P rows already local to that
+                            # half: half0 -> {0..3, 8..11}, half1 ->
+                            # {4..7, 12..15}. Use matching half-local
+                            # transpose LDS reads for V so V and P share the
+                            # same permuted K order.
+                            col_group16 = b.mul(
+                                b.div(lane_col32, b.const_i32(16)), b.const_i32(16)
+                            )
+                            tr_col32 = b.add(
+                                col_group16,
+                                b.mul(b.mod(lane_col32, b.const_i32(4)), b.const_i32(4)),
+                            )
+                            tr_row_base32 = b.add(
+                                b.add(
+                                    b.const_i32(k * 16),
+                                    b.mul(lane_half32, b.const_i32(4)),
+                                ),
+                                b.mod(b.div(lane_col32, b.const_i32(4)), b.const_i32(4)),
+                            )
+                            A_r0 = b.ds_read_tr16_b64(
+                                V_lds,
+                                v_buf,
+                                tr_row_base32,
+                                b.add(b.const_i32(n * 32), tr_col32),
+                                dtype=dtype,
+                            )
+                            A_r1 = b.ds_read_tr16_b64(
+                                V_lds,
+                                v_buf,
+                                b.add(tr_row_base32, b.const_i32(8)),
+                                b.add(b.const_i32(n * 32), tr_col32),
+                                dtype=dtype,
+                            )
+                            A_v_t = b.vec_concat(A_r0, A_r1)
+                            b_p_elems = []
+                            for kk in range(8):
+                                local_in_group = kk % 4
+                                band = kk // 4
+                                p_tile = (k * 16 + band * 8 + local_in_group) // 32
+                                row_static = (k * 16 + band * 8 + local_in_group) % 32
+                                preg = (row_static // 8) * 4 + (row_static % 4)
+                                b_p_elems.append(
+                                    b.cast_f32_to(PT32_n[p_tile][preg], dtype)
+                                )
+                            B_p_t = b.vec_pack(b_p_elems, dtype)
+                            acc32 = _mfma_32x32x16(b, dtype, A_v_t, B_p_t, acc32)
+                            continue
                         # Issue all 8 V scalar loads first so the LDS port
                         # can pipeline them back-to-back (the compiler is
                         # free to interleave the address compute, but the
@@ -2790,7 +2944,7 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 new_acc[n * M_ATOMS_PER_WARP + atom] = acc_per_atom[atom]
 
         yields = []
-        for r in range(REGS_PER_LANE):
+        for r in range(SOFTMAX_STATE_SLOTS):
             yields.append(m_new[r])
             yields.append(new_l_vals[r])
         for n in range(ACC_N_TILES):
@@ -2810,8 +2964,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     b.sync()
 
     final = kvloop.results
-    l_final = [final[2 * r + 1] for r in range(REGS_PER_LANE)]
-    ml_count_final = 2 * REGS_PER_LANE
+    l_final = [final[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+    ml_count_final = 2 * SOFTMAX_STATE_SLOTS
     # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
         final[ml_count_final + n * ACC_M_ATOMS + atom]
@@ -2823,8 +2977,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         return acc_final[n * ACC_M_ATOMS + atom]
 
     # Per-row reciprocal of L (computed once, reused across stripes).
-    rcp_l = [b.rcp(l_final[r]) for r in range(REGS_PER_LANE)]
-    l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(REGS_PER_LANE)]
+    rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
+    l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
 
     if USE_MFMA_32X32:
         if TRANSPOSED_QK_32X32:

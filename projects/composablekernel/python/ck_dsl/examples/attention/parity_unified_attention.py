@@ -44,8 +44,16 @@ else:
             sys.path.insert(0, str(candidate))
             break
 
-import aiter.ops.triton.attention.unified_attention as _uam  # noqa: E402
-from aiter.ops.triton.attention.unified_attention import unified_attention  # noqa: E402
+try:
+    import aiter.ops.triton.attention.unified_attention as _uam  # noqa: E402
+    from aiter.ops.triton.attention.unified_attention import (  # noqa: E402
+        unified_attention,
+    )
+    _AITER_IMPORT_ERROR = None
+except Exception as e:  # pragma: no cover - optional for CK-only runs
+    _uam = None
+    unified_attention = None
+    _AITER_IMPORT_ERROR = e
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +68,13 @@ from aiter.ops.triton.attention.unified_attention import unified_attention  # no
 # ---------------------------------------------------------------------------
 
 
-_ORIG_USE_2D = _uam.use_2d_kernel
+_ORIG_USE_2D = _uam.use_2d_kernel if _uam is not None else None
 _LAST_TRITON_PATH = {"path": None}
+
+
+def _require_triton_attention():
+    if _uam is None or unified_attention is None:
+        raise NotImplementedError(f"AITER/Triton unavailable: {_AITER_IMPORT_ERROR!r}")
 
 
 def _force_triton_path(path: str):
@@ -71,6 +84,7 @@ def _force_triton_path(path: str):
     default heuristic but also records which kernel the heuristic actually
     picked in `_LAST_TRITON_PATH["path"]`.
     """
+    _require_triton_attention()
     if path == "2d":
         _uam.use_2d_kernel = lambda *a, **kw: _record_path("2d", True)
     elif path == "3d":
@@ -750,6 +764,17 @@ def creative_scenarios() -> List[Scenario]:
             block_size=16,
             dtype=torch.float16,
         ),
+        Scenario(
+            name="creative_r1r4_bf16_d64_sinks",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.bfloat16,
+            use_sinks=True,
+            num_blocks=1024,
+        ),
         # --- head_size=256 with bf16 ---
         Scenario(
             name="creative_d256_bf16_decode",
@@ -989,6 +1014,7 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     with the shared HIP-event timer recording on the same stream, so
     the measurement is directly comparable to the CK DSL lane.
     """
+    _require_triton_attention()
     output = torch.empty_like(data["query"])
     window_size = (s.sliding_window - 1, 0) if s.sliding_window else (-1, -1)
     _force_triton_path(path)
@@ -1072,6 +1098,123 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     )
 
     hip_stream = _bench_stream_handle()
+
+    if path in ("auto", "2d"):
+        from ck_dsl import compile_kernel
+        from ck_dsl.instances import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+            supports_tiled_2d,
+        )
+        from ck_dsl.instances.attention_unified import (
+            _attn_signature,
+            _attn_values,
+            _select_2d_compile_backend,
+        )
+        from ck_dsl.runtime import KernelLauncher, LaunchConfig
+
+        ok, reason = supports_tiled_2d(
+            head_size=s.head_size,
+            block_size=s.block_size,
+            dtype=dtype_str,
+            num_queries_per_kv=problem.num_queries_per_kv,
+            use_alibi=problem.use_alibi,
+            use_qq_bias=problem.use_qq_bias,
+            use_fp8=problem.use_fp8,
+            q_dtype=problem.q_dtype,
+            num_warps=4,
+            kv_storage_dtype=None,
+            tile_size=2 * s.block_size,
+        )
+        if not ok:
+            raise NotImplementedError(reason)
+
+        def use_hlpv_variant() -> bool:
+            if dtype_str != "bf16":
+                return False
+            if s.head_size != 64 or s.block_size != 32:
+                return False
+            if s.num_query_heads != 64 or s.num_kv_heads != 8:
+                return False
+            if s.softcap > 0 or problem.use_fp8 or problem.use_alibi or problem.use_qq_bias:
+                return False
+            if data["max_query_len"] <= 256:
+                return False
+            # The half-local PV path regresses on the high-num-seq SW tail.
+            if (s.sliding_window or 0) > 0 and len(s.seq_lens) >= 450:
+                return False
+            return True
+
+        use_hlpv = use_hlpv_variant()
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=s.head_size,
+            block_size=s.block_size,
+            num_query_heads=s.num_query_heads,
+            num_kv_heads=s.num_kv_heads,
+            dtype=dtype_str,
+            use_sinks=data["sinks"] is not None,
+            sliding_window=s.sliding_window or 0,
+            has_softcap=s.softcap > 0,
+            use_alibi=data["alibi_slopes"] is not None,
+            use_qq_bias=qq_bias is not None,
+            num_seqs=len(s.seq_lens),
+            num_warps=4,
+            waves_per_eu=2,
+            tile_size=2 * s.block_size,
+            block_m_per_warp=32,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_transposed_scalar_state=use_hlpv,
+            use_transposed_mask_once=use_hlpv,
+            use_transposed_half_local_pv=use_hlpv,
+        )
+        kernel = build_unified_attention_2d_tiled(spec)
+        if _select_2d_compile_backend(problem) == "hipcc":
+            from ck_dsl.helpers.compile import compile_kernel_via_hipcc
+
+            artifact = compile_kernel_via_hipcc(kernel)
+        else:
+            artifact = compile_kernel(kernel, capture_ir_text=False)
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=_attn_signature(
+                dtype_str, include_bt_stride=True, include_qq_bias_stride=True
+            ),
+            cache_key=("r4_hlpv_parity", spec.kernel_name()),
+        )
+        vals = _attn_values(
+            problem=problem,
+            q=q,
+            k=data["key_cache"],
+            v=data["value_cache"],
+            out=output,
+            cu_seqlens_q=data["cu_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=data["scale"],
+            block_table=data["block_tables"],
+            softcap=float(s.softcap),
+            sinks=data["sinks"],
+            bt_stride=int(data["block_tables"].stride(0)),
+            include_bt_stride=True,
+            alibi_slopes=data["alibi_slopes"],
+            qq_bias=qq_bias,
+            qq_bias_stride_0=qq_bias_stride_0,
+            include_qq_bias_stride=True,
+        )
+        block_q = spec.block_q
+        total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)
+        cfg = LaunchConfig(
+            grid=(int(s.num_kv_heads), int(total_num_q_blocks), 1),
+            block=(64 * spec.num_warps, 1, 1),
+            stream=hip_stream,
+        )
+
+        def call_once():
+            launcher(vals, config=cfg)
+
+        ms = _time_lane_ms(call_once, warmup=warmup, attempts=attempts, stream=hip_stream)
+        return output, ms
 
     def call_once():
         run_unified_attention_torch(
@@ -1211,6 +1354,11 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--skip-ck", action="store_true")
+    parser.add_argument(
+        "--skip-triton",
+        action="store_true",
+        help="only run CK DSL lanes; useful when AITER/Triton deps are unavailable",
+    )
     # Which apples-to-apples lanes to run. Default: all four.
     parser.add_argument(
         "--paths",
@@ -1300,22 +1448,28 @@ def main() -> int:
 
             # Reference Triton "natural" path. This is what unified_attention()
             # picks via its own use_2d_kernel selector.
-            t_auto, err = _safe_run(
-                lambda: _run_triton(
-                    s,
-                    data,
-                    path="auto",
-                    warmup=args.warmup,
-                    attempts=args.attempts,
+            t_auto = None
+            if args.skip_triton:
+                row["triton_auto_status"] = ("skip", "disabled by --skip-triton")
+            else:
+                t_auto, err = _safe_run(
+                    lambda: _run_triton(
+                        s,
+                        data,
+                        path="auto",
+                        warmup=args.warmup,
+                        attempts=args.attempts,
+                    )
                 )
-            )
-            if t_auto:
-                t_auto_out, t_auto_ms = t_auto
-                row["triton_auto_ms"] = t_auto_ms
-                row["triton_auto_vs_ref"] = compare(ref_out, t_auto_out)
-                row["triton_natural_path"] = _LAST_TRITON_PATH["path"]
-            _row_print("triton-auto", t_auto, ref_out, None)
-            _isolate_benchmark_lane()
+                if t_auto:
+                    t_auto_out, t_auto_ms = t_auto
+                    row["triton_auto_ms"] = t_auto_ms
+                    row["triton_auto_vs_ref"] = compare(ref_out, t_auto_out)
+                    row["triton_natural_path"] = _LAST_TRITON_PATH["path"]
+                elif err:
+                    row["triton_auto_status"] = err
+                _row_print("triton-auto", t_auto, ref_out, None)
+                _isolate_benchmark_lane()
 
             # Lane 2/3: forced 2D and 3D on both Triton and CK DSL.
             for path in requested_paths:
@@ -1347,18 +1501,23 @@ def main() -> int:
                     continue
 
                 # Force-path: Triton on `path`, CK DSL on `path`.
-                _isolate_benchmark_lane()
-                t_p, err_t = _safe_run(
-                    lambda p=path: _run_triton(
-                        s,
-                        data,
-                        path=p,
-                        warmup=args.warmup,
-                        attempts=args.attempts,
+                t_p = None
+                err_t = None
+                if args.skip_triton:
+                    err_t = ("skip", "disabled by --skip-triton")
+                else:
+                    _isolate_benchmark_lane()
+                    t_p, err_t = _safe_run(
+                        lambda p=path: _run_triton(
+                            s,
+                            data,
+                            path=p,
+                            warmup=args.warmup,
+                            attempts=args.attempts,
+                        )
                     )
-                )
-                _row_print(f"triton-{path}", t_p, ref_out, None)
-                _isolate_benchmark_lane()
+                    _row_print(f"triton-{path}", t_p, ref_out, None)
+                    _isolate_benchmark_lane()
 
                 if not args.skip_ck:
                     _isolate_benchmark_lane()
