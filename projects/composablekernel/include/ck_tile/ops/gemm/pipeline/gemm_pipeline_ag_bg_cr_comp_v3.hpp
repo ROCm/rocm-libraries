@@ -23,23 +23,17 @@ struct BaseGemmPipelineAgBgCrCompV3
 
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
-        if constexpr(Problem::BlockGemmShape::NumWarps == 8)
-            return num_loop > 3;
-        else
-            return num_loop > PrefetchStages;
+        return num_loop > PrefetchStages;
     }
 
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
-        if(BlockHasHotloop(num_loop) || num_loop == 3)
-            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
-                return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
-            else
-                return TailNumber::Odd;
+        if(BlockHasHotloop(num_loop))
+            return TailNumber::Odd;
         else if(num_loop == 2)
             return TailNumber::Even;
         else
-            return (Problem::BlockGemmShape::NumWarps == 8) ? TailNumber::One : TailNumber::Odd;
+            return TailNumber::Odd;
     }
 
     template <size_t I = 0, typename RunFunction>
@@ -53,22 +47,11 @@ struct BaseGemmPipelineAgBgCrCompV3
         const bool has_hot_loop_first_lane      = amd_wave_read_first_lane(has_hot_loop);
         const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
 
-        constexpr auto scenarios = []() {
-            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
-                return std::array<std::pair<bool, ck_tile::TailNumber>, 5>{
-                    std::make_pair(false, TailNumber::One),  // 1 loop
-                    std::make_pair(false, TailNumber::Even), // 2 loop
-                    std::make_pair(false, TailNumber::Odd),  // 3
-                    std::make_pair(true, TailNumber::Even),  // 4 / 6 / 8 / ... loops
-                    std::make_pair(true, TailNumber::Odd),   // 5 / 7 / 9 / ... loops
-                };
-            else
-                return std::array<std::pair<bool, ck_tile::TailNumber>, 3>{
-                    std::make_pair(true, TailNumber::Odd),
-                    std::make_pair(false, TailNumber::Odd),
-                    std::make_pair(false, TailNumber::Even),
-                };
-        }();
+        constexpr auto scenarios = std::array<std::pair<bool, ck_tile::TailNumber>, 3>{
+            std::make_pair(true, TailNumber::Odd),
+            std::make_pair(false, TailNumber::Odd),
+            std::make_pair(false, TailNumber::Even),
+        };
         if(has_hot_loop_first_lane == scenarios[I].first &&
            tail_number_first_lane == scenarios[I].second)
             return run_func(bool_constant<scenarios[I].first>{}, constant<scenarios[I].second>{});
@@ -86,6 +69,71 @@ struct BaseGemmPipelineAgBgCrCompV3
         __builtin_unreachable();
 #else
         // If execution reaches here, it's an invalid combination of arguments.
+        throw std::logic_error("Invalid TailNumber value: must be "
+                               "TailNumber::Odd or TailNumber::Even");
+#endif
+    }
+};
+
+// Tail/hot-loop handling for the EightWaves blockscale pipeline family.
+//
+// The EightWaves pipeline body (see gemm_pipeline_ag_bg_cr_eight_waves_base.hpp)
+// has a different control structure than the standard CompV3 body: when there
+// is a hot loop it ping-pongs two K-tiles per iteration, so the loop runs
+// num_loop/2 - 1 times and the tail must finish the remaining 2 or 3 tiles.
+// That requires the tail to encode parity (Even vs Odd) even when a hot loop
+// is present, which is unsafe for the standard CompV3 body (it would double
+// the trailing MFMA and produce wrong results), so this logic lives in its
+// own helper here and is only mixed into the EightWaves pipeline.
+template <typename Problem>
+struct BaseGemmPipelineAgBgCrCompV3EightWaves
+{
+    static constexpr index_t PrefetchStages = 2;
+
+    CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
+    {
+        return num_loop > 3;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
+    {
+        if(BlockHasHotloop(num_loop) || num_loop == 3)
+            return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
+        else if(num_loop == 2)
+            return TailNumber::Even;
+        else
+            return TailNumber::One;
+    }
+
+    template <size_t I = 0, typename RunFunction>
+    CK_TILE_HOST_DEVICE static auto
+    TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
+    {
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
+        const bool has_hot_loop_first_lane      = amd_wave_read_first_lane(has_hot_loop);
+        const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
+
+        constexpr auto scenarios = std::array<std::pair<bool, ck_tile::TailNumber>, 5>{
+            std::make_pair(false, TailNumber::One),  // 1 loop
+            std::make_pair(false, TailNumber::Even), // 2 loop
+            std::make_pair(false, TailNumber::Odd),  // 3
+            std::make_pair(true, TailNumber::Even),  // 4 / 6 / 8 / ... loops
+            std::make_pair(true, TailNumber::Odd),   // 5 / 7 / 9 / ... loops
+        };
+        if(has_hot_loop_first_lane == scenarios[I].first &&
+           tail_number_first_lane == scenarios[I].second)
+            return run_func(bool_constant<scenarios[I].first>{}, constant<scenarios[I].second>{});
+        else if constexpr(I + 1 < scenarios.size())
+            return TailHandler<I + 1>(run_func, has_hot_loop, tail_number);
+#else
+        ignore = has_hot_loop;
+        ignore = tail_number;
+        return run_func(bool_constant<true>{},
+                        integral_constant<TailNumber, ck_tile::TailNumber::Odd>{});
+#endif
+#if defined(__HIP_DEVICE_COMPILE__)
+        __builtin_unreachable();
+#else
         throw std::logic_error("Invalid TailNumber value: must be "
                                "TailNumber::Odd or TailNumber::Even");
 #endif

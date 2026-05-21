@@ -37,7 +37,8 @@ template <typename AsDataType_,
           bool DoubleSmemBuffer_       = false,
           typename AComputeDataType_   = void,
           typename BComputeDataType_   = void,
-          bool TilesPacked_            = false>
+          bool TilesPacked_            = false,
+          bool EightWavePipeline_      = false>
 struct CShuffleEpilogueProblem
 {
     using AsDataType                             = remove_cvref_t<AsDataType_>;
@@ -66,6 +67,7 @@ struct CShuffleEpilogueProblem
     static constexpr index_t kNumWaveGroups      = kNumWaveGroups_;
     static constexpr index_t NumDTensor          = DsDataType::size();
     static constexpr bool TilesPacked            = TilesPacked_;
+    static constexpr bool EightWavePipeline      = EightWavePipeline_;
     static_assert(NumDTensor == DsLayout::size(),
                   "The size of DsDataType and DsLayout should be the same");
 };
@@ -135,8 +137,15 @@ struct CShuffleEpilogue
     static constexpr bool FixedVectorSize  = Problem::FixedVectorSize;
     static constexpr bool TiledMMAPermuteN = Problem::TiledMMAPermuteN;
 
+    // EightWave selects the packed-N tile-layout variant used by the
+    // EightWaves blockscale/MX pipelines (block gemm produces NRepeat tiles
+    // contiguously per warp). It is opt-in via Problem::EightWavePipeline.
+    // Auto-detecting from "MWave * NWave == 8" is unsafe: standard CompV3
+    // configurations (e.g. M_Warp=4, N_Warp=2) also have 8 waves but their
+    // block gemm does NOT produce the packed-N layout, so applying this
+    // variant corrupts the output.
 #if defined(__gfx9__)
-    static constexpr bool EightWave = (MWave * NWave == 8);
+    static constexpr bool EightWave = Problem::EightWavePipeline;
 #else
     static constexpr bool EightWave = false;
 #endif

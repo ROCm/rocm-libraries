@@ -20,7 +20,20 @@ template <typename Problem, typename Policy = MXGemmPipelineAgBgCrCompAsyncEight
 struct MXGemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCompV3<Problem>
 {
     using Base             = BaseGemmPipelineAgBgCrCompV3<Problem>;
+    using TailBase         = BaseGemmPipelineAgBgCrCompV3EightWaves<Problem>;
     using PipelineImplBase = GemmPipelineAgBgCrEightWavesImplBase<Problem, Policy>;
+
+    // Shadow Base's tail logic with the EightWaves-specific variant. External
+    // kernels invoke these via GemmPipeline::BlockHasHotloop / GetBlockLoopTailNum,
+    // so they must resolve to the EightWaves logic for this pipeline.
+    CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
+    {
+        return TailBase::BlockHasHotloop(num_loop);
+    }
+    CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
+    {
+        return TailBase::GetBlockLoopTailNum(num_loop);
+    }
 
     using AsDataType     = remove_cvref_t<typename Problem::AsDataTypeTuple>;
     using BsDataType     = remove_cvref_t<typename Problem::BsDataTypeTuple>;
@@ -230,8 +243,8 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCo
                                    index_t num_loop,
                                    void* p_smem) const
     {
-        const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
-        const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
+        const bool has_hot_loop = TailBase::BlockHasHotloop(num_loop);
+        const auto tail_number  = TailBase::GetBlockLoopTailNum(num_loop);
         const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {
             return PipelineImpl<Scheduler>{}.template operator()<hot_loop_.value, tail_num_.value>(
                 a_dram_block_window_tmp,
@@ -244,7 +257,7 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCo
                 p_smem);
         };
 
-        return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+        return TailBase::TailHandler(RunPipeline, has_hot_loop, tail_number);
     }
 
     template <typename AsDramBlockWindowTmp,
@@ -261,8 +274,8 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCo
                                    index_t num_loop,
                                    void* p_smem) const
     {
-        const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
-        const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
+        const bool has_hot_loop = TailBase::BlockHasHotloop(num_loop);
+        const auto tail_number  = TailBase::GetBlockLoopTailNum(num_loop);
         const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {
             return PipelineImpl<Scheduler>{}.template operator()<hot_loop_.value, tail_num_.value>(
                 a_dram_block_window_tmp,
@@ -275,7 +288,7 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCo
                 p_smem);
         };
 
-        return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+        return TailBase::TailHandler(RunPipeline, has_hot_loop, tail_number);
     }
 };
 

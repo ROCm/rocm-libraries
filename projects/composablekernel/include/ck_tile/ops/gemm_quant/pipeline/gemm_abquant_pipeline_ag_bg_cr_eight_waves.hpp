@@ -10,6 +10,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_eight_waves_base.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_v3.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_eight_waves_policy.hpp"
 #include "ck_tile/host/concat.hpp"
 
@@ -25,7 +26,20 @@ template <typename Problem, typename Policy = GemmABQuantPipelineAgBgCrAsyncPoli
 struct ABQuantGemmPipelineAgBgCrEightWaves : public BaseGemmPipelineAgBgCrCompV3<Problem>
 {
     using Base             = BaseGemmPipelineAgBgCrCompV3<Problem>;
+    using TailBase         = BaseGemmPipelineAgBgCrCompV3EightWaves<Problem>;
     using PipelineImplBase = GemmPipelineAgBgCrEightWavesImplBase<Problem, Policy>;
+
+    // Shadow Base's tail logic with the EightWaves-specific variant. External
+    // kernels invoke these via GemmPipeline::BlockHasHotloop / GetBlockLoopTailNum,
+    // so they must resolve to the EightWaves logic for this pipeline.
+    CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
+    {
+        return TailBase::BlockHasHotloop(num_loop);
+    }
+    CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
+    {
+        return TailBase::GetBlockLoopTailNum(num_loop);
+    }
 #if defined(__gfx950__)
     static constexpr bool kIsAvailable = true;
 #else
@@ -305,7 +319,7 @@ struct ABQuantGemmPipelineAgBgCrEightWaves : public BaseGemmPipelineAgBgCrCompV3
                 bq_dram_block_window_tmp,
                 num_loop);
         };
-        return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+        return TailBase::TailHandler(RunPipeline, has_hot_loop, tail_number);
 #else
         ignore = a_dram_block_window_tmp;
         ignore = b_dram_block_window_tmp;
