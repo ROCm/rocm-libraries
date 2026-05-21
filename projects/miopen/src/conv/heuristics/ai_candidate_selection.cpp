@@ -433,28 +433,149 @@ std::vector<float> EngineerCandidateSelectionInputFeatures(
     return engineered;
 }
 
-MIOPEN_INTERNALS_EXPORT
-std::vector<float>
-EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features)
+namespace {
+
+std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& metadata)
 {
-    std::vector<float> engineered;
-
-    // TODO: Implement kernel-config feature engineering to match the training pipeline.
-    // raw_config_features holds non-constant output_params encodings (16 for gfx950 fwd).
-    engineered = raw_config_features;
-
-    if(engineered.size() < kCandidateSelectionKernelConfigEncoderInputSize)
+    std::vector<std::string> active;
+    active.reserve(metadata.output_params().size());
+    for(const auto& param_name : metadata.output_params())
     {
-        MIOPEN_LOG_I2("EngineerCandidateSelectionKernelConfigFeatures: padding "
-                      << (kCandidateSelectionKernelConfigEncoderInputSize - engineered.size())
-                      << " placeholder features (implement feature engineering)");
-        engineered.resize(kCandidateSelectionKernelConfigEncoderInputSize, 0.0f);
+        if(!metadata.GetOutputConstant(param_name).has_value())
+            active.push_back(param_name);
     }
-    else if(engineered.size() > kCandidateSelectionKernelConfigEncoderInputSize)
+    return active;
+}
+
+bool ParamNameEndsWith(const std::string& param_name, const std::string& suffix)
+{
+    return param_name.size() >= suffix.size() &&
+           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
+                                const std::vector<std::string>& active_params,
+                                const std::string& suffix,
+                                float missing_token)
+{
+    for(std::size_t i = 0; i < active_params.size(); ++i)
     {
-        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: got "
-                     + std::to_string(engineered.size()) + " features, expected "
-                     + std::to_string(kCandidateSelectionKernelConfigEncoderInputSize));
+        if(ParamNameEndsWith(active_params[i], suffix))
+            return raw_config_features[i];
+    }
+    return missing_token;
+}
+
+bool IsMissingConfigValue(float value, float missing_token)
+{
+    return value == missing_token || std::isnan(value);
+}
+
+float SafeConfigValueForDerived(float value, float missing_token)
+{
+    return value == missing_token ? 1.0f : value;
+}
+
+void AppendKernelConfigOneHot(std::vector<float>& engineered,
+                              float encoded_value,
+                              const std::map<std::string, int>& encoding_map,
+                              float missing_token)
+{
+    const std::size_t num_categories = encoding_map.size();
+    if(IsMissingConfigValue(encoded_value, missing_token))
+    {
+        engineered.insert(engineered.end(), num_categories, 0.0f);
+        return;
+    }
+
+    const int index = static_cast<int>(encoded_value);
+    for(std::size_t c = 0; c < num_categories; ++c)
+        engineered.push_back(c == static_cast<std::size_t>(index) ? 1.0f : 0.0f);
+}
+
+} // namespace
+
+MIOPEN_INTERNALS_EXPORT
+std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
+    const std::vector<float>& raw_config_features, const CandidateSelectionMetadata& metadata)
+{
+    const auto active_params     = ActiveOutputParams(metadata);
+    const auto& sequence_encodings = metadata.sequence_encodings();
+    const float missing_token    = metadata.GetMissingValueToken();
+
+    if(raw_config_features.size() != active_params.size())
+    {
+        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected "
+                     + std::to_string(active_params.size()) + " raw features, got "
+                     + std::to_string(raw_config_features.size()));
+    }
+
+    std::vector<float> engineered;
+    engineered.reserve(kCandidateSelectionKernelConfigEncoderInputSize);
+
+    // 1. One-hot encoding for categorical output params (ConvKernConfigPreprocessor.forward).
+    for(std::size_t i = 0; i < active_params.size(); ++i)
+    {
+        const auto& param_name = active_params[i];
+        const auto enc_it      = sequence_encodings.find(param_name);
+        if(enc_it == sequence_encodings.end())
+            continue;
+
+        AppendKernelConfigOneHot(
+            engineered, raw_config_features[i], enc_it->second, missing_token);
+    }
+
+    // 2. Raw numerical features (non-categorical active params).
+    for(std::size_t i = 0; i < active_params.size(); ++i)
+    {
+        if(sequence_encodings.find(active_params[i]) == sequence_encodings.end())
+            engineered.push_back(raw_config_features[i]);
+    }
+
+    // 3. Derived features (ConvKernConfigPreprocessor.compute_derived_features).
+    constexpr float kEps = 1e-8f;
+
+    const auto get_param = [&](const std::string& suffix) {
+        return GetRawConfigParamBySuffix(raw_config_features, active_params, suffix, missing_token);
+    };
+    const auto safe_param = [&](const std::string& suffix) {
+        return SafeConfigValueForDerived(get_param(suffix), missing_token);
+    };
+
+    const float block_size  = safe_param("BlockSize");
+    const float m_per_block = safe_param("MPerBlock");
+    const float n_per_block = safe_param("NPerBlock");
+    const float k_per_block = safe_param("KPerBlock");
+    const float m_per_xdl   = safe_param("MPerXDL");
+    const float n_per_xdl   = safe_param("NPerXDL");
+    const float m_xdl_wave  = safe_param("MXdlPerWave");
+    const float n_xdl_wave  = safe_param("NXdlPerWave");
+    const float a_block_vec = safe_param("ABlockTransferSrcScalarPerVector");
+    const float b_block_vec = safe_param("BBlockTransferSrcScalarPerVector");
+
+    // Block-level work distribution.
+    engineered.push_back((m_per_block * n_per_block) / (block_size + kEps));
+    engineered.push_back(m_per_block / (n_per_block + kEps));
+    engineered.push_back(std::log1pf(block_size));
+
+    // XDL utilization.
+    engineered.push_back(m_xdl_wave * n_xdl_wave);
+    engineered.push_back((m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
+    engineered.push_back((n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
+    engineered.push_back(block_size / 64.0f);
+
+    // Memory transfer efficiency.
+    engineered.push_back(a_block_vec / (b_block_vec + kEps));
+    engineered.push_back(a_block_vec + b_block_vec);
+
+    // K-dimension.
+    engineered.push_back(std::log1pf(k_per_block));
+
+    if(engineered.size() != kCandidateSelectionKernelConfigEncoderInputSize)
+    {
+        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected "
+                     + std::to_string(kCandidateSelectionKernelConfigEncoderInputSize)
+                     + " features, got " + std::to_string(engineered.size()));
     }
 
     return engineered;
@@ -508,7 +629,8 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     engineered_candidates.reserve(encoded_candidates.size());
     for(const auto& candidate : encoded_candidates)
     {
-        engineered_candidates.push_back(EngineerCandidateSelectionKernelConfigFeatures(candidate));
+        engineered_candidates.push_back(
+            EngineerCandidateSelectionKernelConfigFeatures(candidate, metadata_));
     }
     return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
 }

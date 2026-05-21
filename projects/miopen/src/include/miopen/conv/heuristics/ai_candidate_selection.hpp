@@ -38,6 +38,8 @@ namespace ai {
 namespace tuning {
 namespace candidate_selection {
 
+class CandidateSelectionMetadata;
+
 // Forward declarations for the helpers implemented in ai_heuristics.cpp
 std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
                                                 const std::string& arch,
@@ -57,9 +59,10 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionInputFeatur
     const std::map<std::string, float>& features_by_name);
 
 /// Expands metadata-ordered encoded kernel params into the vector consumed by the
-/// kernel_config_encoder submodel.
+/// kernel_config_encoder submodel (one-hot + raw numerical + derived features).
+/// Matches ConvKernConfigPreprocessor in models.py.
 MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
-    const std::vector<float>& raw_config_features);
+    const std::vector<float>& raw_config_features, const CandidateSelectionMetadata& metadata);
 
 using ValidationFunc = std::function<bool(int, int)>;
 
