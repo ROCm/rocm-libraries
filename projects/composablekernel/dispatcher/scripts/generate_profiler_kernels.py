@@ -6,7 +6,7 @@
 #
 # This script:
 # 1. Reads JSON config files
-# 2. Calls unified_grouped_conv_codegen.py --config-file for each JSON
+# 2. Calls load_configs_from_json + UnifiedGroupedConvCodegen.generate_all() for each JSON
 # 3. Generates include_all_grouped_conv_<variant>_kernels.hpp
 # 4. Generates chunked register_*_chunk_N.cpp files + register_all_grouped_conv_kernels.cpp
 #
@@ -20,7 +20,6 @@
 #     [--config-set tests|profiler]
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -57,24 +56,25 @@ VARIANT_CONFIG = {
 }
 
 
-def generate_kernels_from_config(codegen_script, config_file, output_dir, arch):
-    """Run unified_grouped_conv_codegen.py --config-file for a single JSON config."""
-    cmd = [
-        sys.executable,
-        str(codegen_script),
-        "--config-file", str(config_file),
-        "--arch", arch,
-        "--output", str(output_dir),
-    ]
+def generate_kernels_from_config(config_file, output_dir, arch):
+    """Generate kernels for a single JSON config via direct Python API."""
+    import json
+    from unified_grouped_conv_codegen import UnifiedGroupedConvCodegen, load_configs_from_json
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"ERROR generating from {config_file}:", file=sys.stderr)
-        print(result.stderr, file=sys.stderr)
+    try:
+        configs = load_configs_from_json(config_file, arch=arch)
+        # Extract datatype from JSON config (matches old --config-file behavior)
+        with open(config_file, "r") as f:
+            config_data = json.load(f)
+        datatype = config_data["datatype"]
+        # The JSON configs are valid for all architectures.
+        # Hence, disable the arch_filter.
+        codegen = UnifiedGroupedConvCodegen(output_dir=output_dir, gpu_target=arch, enable_arch_filter=False)
+        codegen.generate_all(configs, datatypes=[datatype])
+        return True
+    except Exception as e:
+        print(f"ERROR generating from {config_file}: {e}", file=sys.stderr)
         return False
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    return True
 
 
 def collect_kernel_headers(output_dir, glob_pattern):
@@ -116,15 +116,18 @@ def main():
     cfg = VARIANT_CONFIG[args.variant]
 
     config_dir = Path(args.config_dir) / args.config_set
-    codegen = Path(args.codegen)
+    codegen_path = Path(args.codegen)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Add the codegen directory to sys.path so unified_grouped_conv_codegen
+    # and its siblings are importable regardless of working directory.
+    codegen_dir = str(codegen_path.parent.resolve())
+    if codegen_dir not in sys.path:
+        sys.path.insert(0, codegen_dir)
+
     if not config_dir.exists():
         print(f"ERROR: Config directory not found: {config_dir}", file=sys.stderr)
-        sys.exit(1)
-    if not codegen.exists():
-        print(f"ERROR: Codegen script not found: {codegen}", file=sys.stderr)
         sys.exit(1)
 
     json_configs = sorted(config_dir.glob("*.json"))
@@ -137,7 +140,7 @@ def main():
     success = True
     for config_file in json_configs:
         print(f"Generating from {config_file.name}...")
-        if not generate_kernels_from_config(codegen, config_file, output_dir, args.arch):
+        if not generate_kernels_from_config(config_file, output_dir, args.arch):
             success = False
 
     if not success:
