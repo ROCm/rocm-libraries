@@ -666,13 +666,15 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                  const std::array<long_index_t, NDimSpatial>& input_right_pads,
                  const AElementwiseOperation& a_element_op,
                  const BElementwiseOperation& b_element_op,
-                 const CDEElementwiseOperation& cde_element_op)
+                 const CDEElementwiseOperation& cde_element_op,
+                 bool stride_overflow_in = false)
             : num_group_{static_cast<index_t>(a_g_n_c_wis_lengths[0])},
               compute_ptr_offset_of_groups_{},
               compute_ptr_offset_of_n_{},
               a_element_op_{a_element_op},
               b_element_op_{b_element_op},
               cde_element_op_{cde_element_op},
+              stride_overflow_{stride_overflow_in},
               a_g_n_c_wis_lengths_{a_g_n_c_wis_lengths},
               a_g_n_c_wis_strides_{a_g_n_c_wis_strides},
               b_g_k_c_xs_lengths_{b_g_k_c_xs_lengths},
@@ -871,6 +873,7 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
         AElementwiseOperation a_element_op_;
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation cde_element_op_;
+        bool stride_overflow_;
 
         // for checking IsSupportedArgument()
         std::array<long_index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_;
@@ -956,6 +959,9 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow_)
+            return false;
+
         namespace ctc = tensor_layout::convolution;
 
         const long_index_t K = arg.b_g_k_c_xs_lengths_[I1];
@@ -1299,6 +1305,19 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                  const BElementwiseOperation& b_element_op,
                  const CDEElementwiseOperation& cde_element_op)
     {
+        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
+            for(auto s : strides)
+                if(s > TwoGB)
+                    return true;
+            return false;
+        };
+        bool ds_stride_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_k_wos_strides[d]);
+        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_c_wis_strides) ||
+                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
+                                any_stride_exceeds_2gb(e_g_n_k_wos_strides) || ds_stride_ovf;
         return Argument{p_a,
                         p_b,
                         p_ds,
@@ -1317,7 +1336,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                         input_right_pads,
                         a_element_op,
                         b_element_op,
-                        cde_element_op};
+                        cde_element_op,
+                        stride_ovf};
     }
 
     static auto MakeInvoker() { return Invoker{}; }
@@ -1419,6 +1439,19 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                         const BElementwiseOperation& b_element_op,
                         const CDEElementwiseOperation& cde_element_op) override
     {
+        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
+            for(auto s : strides)
+                if(s > TwoGB)
+                    return true;
+            return false;
+        };
+        bool ds_stride_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_k_wos_strides[d]);
+        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_c_wis_strides) ||
+                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
+                                any_stride_exceeds_2gb(e_g_n_k_wos_strides) || ds_stride_ovf;
         return std::make_unique<Argument>(p_a,
                                           p_b,
                                           p_ds,
@@ -1437,7 +1470,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                                           input_right_pads,
                                           a_element_op,
                                           b_element_op,
-                                          cde_element_op);
+                                          cde_element_op,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override

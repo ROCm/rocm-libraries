@@ -2086,7 +2086,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
                                                 sizeof(BDataType) <=
                                             TwoGB;
                 const bool c_small_enough =
-                    arg.c_grid_desc_m_n_.GetElementSpaceSize() * sizeof(EDataType) <= TwoGB;
+                    arg.ce_grid_desc_m_n_.GetElementSpaceSize() * sizeof(EDataType) <= TwoGB;
                 if(!(a_small_enough && b_small_enough && c_small_enough))
                 {
                     return false;

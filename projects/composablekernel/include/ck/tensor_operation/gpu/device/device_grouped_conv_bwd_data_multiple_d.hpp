@@ -85,56 +85,7 @@ struct DeviceGroupedConvBwdDataMultipleD : public BaseOperator
                         const AElementwiseOperation& a_element_op,
                         const BElementwiseOperation& b_element_op,
                         const CDEElementwiseOperation& cde_element_op,
-                        const ck::index_t split_k = 1)
-    {
-        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
-        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
-        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
-        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
-        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_k_wos_lengths_i32;
-        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_k_wos_strides_i32;
-        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_i32;
-        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_strides_i32;
-        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
-        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
-        std::array<index_t, NDimSpatial> input_left_pads_i32;
-        std::array<index_t, NDimSpatial> input_right_pads_i32;
-        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
-        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
-        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
-        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
-        for(index_t d = 0; d < NumDTensor; d++)
-        {
-            array_convert(ds_g_n_k_wos_lengths_i32[d], ds_g_n_k_wos_lengths[d]);
-            array_convert(ds_g_n_k_wos_strides_i32[d], ds_g_n_k_wos_strides[d]);
-        }
-        array_convert(e_g_n_c_wis_lengths_i32, e_g_n_c_wis_lengths);
-        array_convert(e_g_n_c_wis_strides_i32, e_g_n_c_wis_strides);
-        array_convert(conv_filter_strides_i32, conv_filter_strides);
-        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
-        array_convert(input_left_pads_i32, input_left_pads);
-        array_convert(input_right_pads_i32, input_right_pads);
-        return MakeArgumentPointer(p_a,
-                                   p_b,
-                                   p_ds,
-                                   p_e,
-                                   a_g_n_k_wos_lengths_i32,
-                                   a_g_n_k_wos_strides_i32,
-                                   b_g_k_c_xs_lengths_i32,
-                                   b_g_k_c_xs_strides_i32,
-                                   ds_g_n_k_wos_lengths_i32,
-                                   ds_g_n_k_wos_strides_i32,
-                                   e_g_n_c_wis_lengths_i32,
-                                   e_g_n_c_wis_strides_i32,
-                                   conv_filter_strides_i32,
-                                   conv_filter_dilations_i32,
-                                   input_left_pads_i32,
-                                   input_right_pads_i32,
-                                   a_element_op,
-                                   b_element_op,
-                                   cde_element_op,
-                                   split_k);
-    }
+                        const ck::index_t split_k = 1) = 0;
 
     virtual std::unique_ptr<BaseInvoker> MakeInvokerPointer() = 0;
 };
