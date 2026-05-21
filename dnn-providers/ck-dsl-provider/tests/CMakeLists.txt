@@ -20,6 +20,7 @@ add_executable(
     GraphSignatureTest.cpp
     HipModuleSmokeTest.cpp
     JitCacheTest.cpp
+    PerfMeasurementTest.cpp
 )
 
 target_link_libraries(
