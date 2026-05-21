@@ -59,11 +59,6 @@ namespace TensileLite
             if(mxBlock == 0)
                 return false;
             auto dt = tensor.dataType();
-            if(dt == rocisa::DataType::Float6 or
-                    dt == rocisa::DataType::BFloat6)
-            {
-                 throw std::runtime_error("Float6 and BFloat6 currently are not supported");
-            }
             return dt == rocisa::DataType::Float4
                 || dt == rocisa::DataType::Float8
                 || dt == rocisa::DataType::BFloat8;
@@ -921,6 +916,28 @@ namespace TensileLite
                                    m_groupedOffsets,
                                    *m_currentGemmProblem,
                                    hipMemcpyDeviceToDevice);
+                        // Sync cpuInput.current from cpuInput.valid for MX
+                        // tensors so the CPU reference reads the regenerated
+                        // data that matches what the GPU received.
+                        for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                      ContractionProblemGemm::TENSOR::B,
+                                      ContractionProblemGemm::TENSOR::MXSA,
+                                      ContractionProblemGemm::TENSOR::MXSB})
+                        {
+                            auto& desc = m_currentGemmProblem->tensors()[ti];
+                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                            if(it == m_vdata[ti].pristine.end())
+                                continue;
+                            auto& p = it->second;
+                            if(p.cpuInput.valid && p.cpuInput.current)
+                            {
+                                size_t bytes = multiplyElementSize(
+                                    p.maxElements, desc.elementBytes());
+                                std::memcpy(p.cpuInput.current.get(),
+                                            p.cpuInput.valid.get(),
+                                            bytes);
+                            }
+                        }
                     }
                 }
             }

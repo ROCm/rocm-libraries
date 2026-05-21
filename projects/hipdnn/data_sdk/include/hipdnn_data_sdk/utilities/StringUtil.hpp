@@ -93,7 +93,7 @@ inline void copyMaxSizeWithNullTerminator(char* destination, const char* source,
 
 inline std::string toLower(const std::string& str)
 {
-    std::string lowerStr = str;
+    std::string lowerStr = str; // NOLINT(misc-const-correctness)
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
     return lowerStr;
 }
@@ -111,7 +111,7 @@ inline std::string trim(const std::string& str)
 
 inline std::string removeNewlines(const std::string& str)
 {
-    std::string result = str;
+    std::string result = str; // NOLINT(misc-const-correctness)
     result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
     result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
     return result;
