@@ -17,6 +17,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
 * Added the first tested example program for `device_search`, which is linked in the documentation.
 
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
+
 ### Changed
 
 * Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
