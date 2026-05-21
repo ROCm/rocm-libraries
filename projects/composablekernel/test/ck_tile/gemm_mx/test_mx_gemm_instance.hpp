@@ -76,14 +76,15 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          GemmConfig::N_Warp_Tile,
                                          GemmConfig::K_Warp_Tile,
                                          MXPipelineProblem::TransposeC,
-                                         1,         // kNumWaveGroups_ (Default)
-                                         false,     // FixedVectorSize_ (Default)
-                                         1,         // VectorSizeC_ (Default)
-                                         1,         // BlockedXDLN_PerWarp_ (Default)
-                                         false,     // DoubleSmemBuffer_ (Default)
-                                         ADataType, // AComputeDataType
-                                         BDataType, // BComputeDataType
-                                         true>>;    // TilesPacked_ (because of packed scales)
+                                         1,             // kNumWaveGroups_ (Default)
+                                         false,         // FixedVectorSize_ (Default)
+                                         1,             // VectorSizeC_ (Default)
+                                         1,             // BlockedXDLN_PerWarp_ (Default)
+                                         false,         // DoubleSmemBuffer_ (Default)
+                                         ADataType,     // AComputeDataType
+                                         BDataType,     // BComputeDataType
+                                         true,          // TilesPacked_ (because of packed scales)
+                                         IsEightWave>>; // EightWavePipeline_
 
     using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 

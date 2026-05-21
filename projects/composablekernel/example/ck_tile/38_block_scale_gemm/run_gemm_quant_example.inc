@@ -209,55 +209,55 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
             printf(
                 "TiledPermuteN: %d (QuantGroupSize::kN=%d)\n", TiledPermuteN, BQuantGroupSize::kN);
         }
-        using GemmEpilogue = std::conditional_t<
-            TiledPermuteN,
-            ck_tile::PermuteNEpilogue<
-                ck_tile::PermuteNEpilogueProblem<typename PipelineProblem::AComputeDataType,
-                                                 typename PipelineProblem::BComputeDataType,
-                                                 ck_tile::tuple<>,
-                                                 typename TypeConfig::AccDataType,
-                                                 typename TypeConfig::CDataType,
-                                                 ck_tile::tuple<>,
-                                                 CLayout,
-                                                 CDEElementWise,
-                                                 TilePartitioner::MPerBlock,
-                                                 TilePartitioner::NPerBlock,
-                                                 GemmConfig::M_Warp,
-                                                 GemmConfig::N_Warp,
-                                                 GemmConfig::M_Warp_Tile,
-                                                 GemmConfig::N_Warp_Tile,
-                                                 GemmConfig::K_Warp_Tile,
-                                                 transpose_c,
-                                                 false,
-                                                 1>>,
-            ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
-                typename PipelineProblem::AComputeDataType,
-                typename PipelineProblem::BComputeDataType,
-                ck_tile::tuple<>,
-                typename TypeConfig::AccDataType,
-                typename TypeConfig::CDataType,
-                ck_tile::tuple<>,
-                CLayout,
-                CDEElementWise,
-                TilePartitioner::MPerBlock,
-                TilePartitioner::NPerBlock,
-                GemmConfig::M_Warp,
-                GemmConfig::N_Warp,
-                GemmConfig::M_Warp_Tile,
-                GemmConfig::N_Warp_Tile,
-                GemmConfig::K_Warp_Tile,
-                transpose_c,
-                1,     // kNumWaveGroups_
-                false, // FixedVectorSize_
-                1,     // VectorSizeC_
-                1,     // BlockedXDLN_PerWarp_
-                false, // DoubleSmemBuffer_
-                void,  // AComputeDataType_
-                void,  // BComputeDataType_
-                false, // TilesPacked_
-                // EightWaves blockscale block gemm produces packed-N tile layout
-                (GemmConfig::M_Warp * GemmConfig::N_Warp == 8) // EightWavePipeline_
-                >>>;
+        using GemmEpilogue =
+            std::conditional_t<TiledPermuteN,
+                               ck_tile::PermuteNEpilogue<ck_tile::PermuteNEpilogueProblem<
+                                   typename PipelineProblem::AComputeDataType,
+                                   typename PipelineProblem::BComputeDataType,
+                                   ck_tile::tuple<>,
+                                   typename TypeConfig::AccDataType,
+                                   typename TypeConfig::CDataType,
+                                   ck_tile::tuple<>,
+                                   CLayout,
+                                   CDEElementWise,
+                                   TilePartitioner::MPerBlock,
+                                   TilePartitioner::NPerBlock,
+                                   GemmConfig::M_Warp,
+                                   GemmConfig::N_Warp,
+                                   GemmConfig::M_Warp_Tile,
+                                   GemmConfig::N_Warp_Tile,
+                                   GemmConfig::K_Warp_Tile,
+                                   transpose_c,
+                                   false,
+                                   1>>,
+                               ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
+                                   typename PipelineProblem::AComputeDataType,
+                                   typename PipelineProblem::BComputeDataType,
+                                   ck_tile::tuple<>,
+                                   typename TypeConfig::AccDataType,
+                                   typename TypeConfig::CDataType,
+                                   ck_tile::tuple<>,
+                                   CLayout,
+                                   CDEElementWise,
+                                   TilePartitioner::MPerBlock,
+                                   TilePartitioner::NPerBlock,
+                                   GemmConfig::M_Warp,
+                                   GemmConfig::N_Warp,
+                                   GemmConfig::M_Warp_Tile,
+                                   GemmConfig::N_Warp_Tile,
+                                   GemmConfig::K_Warp_Tile,
+                                   transpose_c,
+                                   1,     // kNumWaveGroups_
+                                   false, // FixedVectorSize_
+                                   1,     // VectorSizeC_
+                                   1,     // BlockedXDLN_PerWarp_
+                                   false, // DoubleSmemBuffer_
+                                   void,  // AComputeDataType_
+                                   void,  // BComputeDataType_
+                                   false, // TilesPacked_
+                                   // EightWaves blockscale block gemm produces packed-N tile layout
+                                   eight_waves // EightWavePipeline_
+                                   >>>;
         using Kernel =
             ck_tile::QuantGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue, QuantMode>;
 

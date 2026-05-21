@@ -334,6 +334,10 @@ class TestCkTileGemmPipeline : public ::testing::Test
         using GemmPipeline =
             typename GemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
 
+        // The EightWaves block gemm produces packed-N tile layout; the epilogue
+        // needs the EightWavePipeline_ flag to match that layout.
+        constexpr bool IsEightWaves = PipelineType == GemmPipelineType::CompAsyncEightWaves;
+
         using GemmEpilogue = typename GemmEpilogueTypeSelector<
             PipelineType,
             ck_tile::CShuffleEpilogueProblem<ADataType,
@@ -358,7 +362,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              1,                /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType /*BComputeDataType_*/>>::epilogue;
+                                             BComputeDataType, /*BComputeDataType_*/
+                                             false,            /*TilesPacked_*/
+                                             IsEightWaves /*EightWavePipeline_*/>>::epilogue;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
         auto kargs   = Kernel::MakeKernelArgs(args);
