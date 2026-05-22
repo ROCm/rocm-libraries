@@ -181,9 +181,10 @@ struct ScalePipelineKernel
 
         if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
         {
-            // Each int32_t packs 4 E8M0 scale bytes, one per K-group.
-            // Replicate the scale byte across all 4 positions so every K-group
-            // receives the same scaling factor.
+            // Each lane has a single 8-bit E8M0 scale that applies to all
+            // 32 A/B elements in that lane.  The byte's position within the
+            // VGPR is selected by opsel.  Replicating the byte to all 4
+            // positions makes the value opsel-independent.
             // scale_a byte = 126 → 2^(126-127) = 2^-1 = 0.5
             // scale_b byte = 129 → 2^(129-127) = 2^2  = 4.0
             // Combined scale factor = 0.5 * 4.0 = 2.0
@@ -334,9 +335,10 @@ struct ScaleWaveWisePipelineKernel
 
         if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
         {
-            // Each int32_t packs 4 E8M0 scale bytes, one per K-group.
-            // Replicate the scale byte across all 4 positions so every K-group
-            // receives the same scaling factor.
+            // Each lane has a single 8-bit E8M0 scale that applies to all
+            // 32 A/B elements in that lane.  The byte's position within the
+            // VGPR is selected by opsel.  Replicating the byte to all 4
+            // positions makes the value opsel-independent.
             // scale_a byte = 126 → 2^(126-127) = 2^-1 = 0.5
             // scale_b byte = 129 → 2^(129-127) = 2^2  = 4.0
             // Combined scale factor = 0.5 * 4.0 = 2.0
