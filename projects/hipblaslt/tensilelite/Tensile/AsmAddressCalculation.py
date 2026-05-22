@@ -62,10 +62,10 @@ class AddrCalculation:
         self.newCoord1 = newCoord1 # vgpr that stores newCoord1
         self.vectorDataTypes = vectorDataTypes
 
-        self.biasOffset = [0, 0]
+        self.biasOffset = [0, 0, 0]
         self.scaleAVecOffset = 0
         self.scaleBVecOffset = 0
-        self.scaleAlphaVecOffset = [0, 0]
+        self.scaleAlphaVecOffset = [0, 0, 0]
         if ss.optSingleColVgpr:
             # optimized stores use the load offset for coordOffset0 calculations.
             self.biasOffset[0]   = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.bias(0).ldsOffset

@@ -239,8 +239,8 @@ class SignatureDefault(Signature):
 
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
             signature.addArg("AddressScaleAlphaVec", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
-            if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
-                userArgumentsInfo.factorDimSize =4
+            if kernel["ProblemType"]["UseScaleAlphaVec"] >= 3:
+                userArgumentsInfo.factorDimSize = 4
 
         userArgumentsInfo.scaleAlphaVecSize += 8
 

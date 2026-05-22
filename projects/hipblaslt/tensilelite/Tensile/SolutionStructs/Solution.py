@@ -4552,13 +4552,14 @@ class Solution(collections.abc.Mapping):
     vecDT.bias(0).turn = maxTurn
     vecDT.bias(1).turn = maxTurn
 
-    # Calc LDS for SAV
+    # Calc LDS for SAV (use bitfield: bit0=M-vector, bit1=N-vector, bit2=device scalar)
     maxTurn = 0
-    if savDim == 1:
+    savVecBits = savDim & 3
+    if savVecBits == 1:
       maxTurn = calcEpilogueTurns([0])
-    elif savDim == 2:
+    elif savVecBits == 2:
       maxTurn = calcEpilogueTurns([1])
-    elif savDim == 3:
+    elif savVecBits == 3:
       maxTurn = calcEpilogueTurns([0, 1])
     vecDT.scaleAlpha(0).turn = maxTurn
     vecDT.scaleAlpha(1).turn = maxTurn

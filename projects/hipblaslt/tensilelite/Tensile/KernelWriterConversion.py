@@ -136,7 +136,7 @@ class KernelWriterConversion(KernelWriterBase):
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
       scaleAlphaVecPtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
       kStr += "  " + scaleAlphaVecPtrStr + " * " + "ScaleAlphaVec;" + self.endLine
-      if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
+      if self.state["ProblemType"]["UseScaleAlphaVec"] >= 3:
         enableFactorDim = True
 
     # alpha & beta
@@ -690,10 +690,13 @@ class KernelWriterConversion(KernelWriterBase):
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
       kStr += "  if(arg.ScaleAlphaVec != nullptr){" + self.endLine
 
-      if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
+      if self.state["ProblemType"]["UseScaleAlphaVec"] >= 3:
         kStr += "    if(arg.factorDim == 0){" + self.endLine
         for vIdx in range(self.num_dword_load):
           kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[id0+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+        kStr += "    }else if(arg.factorDim == 2){" + self.endLine
+        for vIdx in range(self.num_dword_load):
+          kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[0];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
         kStr += "    }else{" + self.endLine
         for vIdx in range(self.num_dword_load):
           kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)

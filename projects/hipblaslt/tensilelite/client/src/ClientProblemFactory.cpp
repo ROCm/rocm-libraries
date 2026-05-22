@@ -274,7 +274,7 @@ namespace TensileLite
             int biasSize       = std::max(1, (int)m_biasTypeArgs.size());
             int activationSize = std::max(1, (int)m_activationEnumArg.size());
             int factorDimSize  = std::max(
-                1, m_useScaleAlphaVec == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
+                1, m_useScaleAlphaVec >= 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
             rv.reserve(m_problemSizes.size() * activationSize * biasSize * factorDimSize);
 
             std::vector<size_t> aStrides, bStrides, cStrides, dStrides, eStrides, biasStrides;
@@ -325,7 +325,7 @@ namespace TensileLite
 
                             int factorDim = (m_useScaleAlphaVec == 1 || m_useBias == 1)   ? 0
                                             : (m_useScaleAlphaVec == 2 || m_useBias == 2) ? 1
-                                            : (m_useScaleAlphaVec == 3 || m_useBias == 3)
+                                            : (m_useScaleAlphaVec >= 3 || m_useBias == 3)
                                                 ? m_factorDimArgs[l]
                                                 : 0;
                             rv.push_back(ContractionProblemGemm::FromIndexSizes(

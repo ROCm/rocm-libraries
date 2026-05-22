@@ -7362,7 +7362,7 @@ class KernelWriterAssembly(KernelWriter):
             loadList.append([-1, 0, extArgOffset])  # Need to start a new loadAllKernArg cause the argument is not consecutively anymore.
 
         extArgOffset += self.states.userArgsInfo.factorDimSize
-        if self.states.FactorDim == 3:
+        if self.states.FactorDim >= 3:
           if loadList[-1][0] == -1:
             loadList[-1][0] = self.sgprs["FactorDim"]
           loadList[-1][1] += self.states.userArgsInfo.factorDimSize
@@ -7461,8 +7461,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("s", "sgprSrdScaleA", self.sgprs["SrdScaleA"]))
       module.add(RegSet("s", "sgprSrdScaleB", self.sgprs["SrdScaleB"]))
     if kernel["ProblemType"]["UseScaleAlphaVec"]:
-      self.defineSgpr("SrdScaleAlphaVec", 4, 4)
-      module.add(RegSet("s", "sgprSrdScaleAlphaVec", self.sgprs["SrdScaleAlphaVec"]))
+      self.defineSgpr("SrdDeviceAlpha", 4, 4)
+      module.add(RegSet("s", "sgprSrdDeviceAlpha", self.sgprs["SrdDeviceAlpha"]))
+    if kernel["ProblemType"]["UseScaleAlphaVec"] & 4:
+      self.defineSgpr("SgprDeviceAlphaScalar", 1)
+      module.add(RegSet("s", "sgprSgprDeviceAlphaScalar", self.sgprs["SgprDeviceAlphaScalar"]))
     if self.states.useBias != DataDirection.NONE:
       self.defineSgpr("SrdBias", 4, 4)
       module.add(RegSet("s", "sgprSrdBias", self.sgprs["SrdBias"]))
@@ -8850,7 +8853,7 @@ class KernelWriterAssembly(KernelWriter):
         skipOptNLL = Label("OptNLL_End", "")
         with self.allocTmpSgpr(4) as tmpSgprInfo:
           tmpSgpr = tmpSgprInfo.idx
-          placeHolder="skipOptNLL_placeholder" if self.states.FactorDim == 3 else None
+          placeHolder="skipOptNLL_placeholder" if self.states.FactorDim >= 3 else None
           module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, skipOptNLL, isLongBranch=isLongBranch, placeHolder=placeHolder, posNeg=1))
 
           # check alpha
@@ -8915,7 +8918,7 @@ class KernelWriterAssembly(KernelWriter):
               module.add(skipOptNLLModule)
             module.addSpaceLine()
 
-          placeHolder = "skipOptNLL_scc1_placeholder" if self.states.FactorDim == 3 else None
+          placeHolder = "skipOptNLL_scc1_placeholder" if self.states.FactorDim >= 3 else None
           module.add(self.checkIsEdge(kernel, tmpSgprInfo, skipOptNLL, kernel["MacroTile0"], isLongBranch=isLongBranch, placeHolder=placeHolder))
           module.add(self.checkIsEdge(kernel, tmpSgprInfo, skipOptNLL, kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch, placeHolder=placeHolder))
           module.addSpaceLine()
@@ -13527,12 +13530,20 @@ class KernelWriterAssembly(KernelWriter):
         currentInstLength += 1
 
       # If module, checking factorDim is zero
-      if len(factorDims) == 2:
+      # Note: both inserts use pos=0, so the LAST inserted ends up FIRST in the stream.
+      # Insert order: checkIsFactorDimZero first, then checkFactorDimScalar, so at runtime
+      # the factorDim==2 check executes before the factorDim!=0 check.
+      if len(factorDims) >= 2:
         isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
         with self.allocTmpSgpr(3) as tmpSgprInfo:
-          checkIsFactorDimZero = betaModule.add(self.checkIsFactorDimZero(kernel, tmpSgprInfo, \
-            writeLabels[beta][factorDims[1]][globalWriteMode]["Label"], isLongBranch=isLongBranch), pos=0)
-          currentInstLength += countInstruction(checkIsFactorDimZero)
+          if len([fd for fd in factorDims if fd < 2]) >= 2:
+            checkIsFactorDimZero = betaModule.add(self.checkIsFactorDimZero(kernel, tmpSgprInfo, \
+              writeLabels[beta][factorDims[1]][globalWriteMode]["Label"], isLongBranch=isLongBranch), pos=0)
+            currentInstLength += countInstruction(checkIsFactorDimZero)
+          if 2 in factorDims:
+            checkFactorDimScalar = betaModule.add(self.checkFactorDimValue(kernel, tmpSgprInfo, 2, \
+              writeLabels[beta][2][globalWriteMode]["Label"], isLongBranch=isLongBranch), pos=0)
+            currentInstLength += countInstruction(checkFactorDimScalar)
 
       # Beta label
       betaModule.add(writeLabels[beta][globalWriteMode]["Label"], pos=0)
@@ -13907,6 +13918,23 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+  # checkFactorDimValue
+  # Branch to targetLabel if factorDim == value
+  ##############################################################################
+  def checkFactorDimValue(self, kernel, tmpSgprInfo, value, targetLabel, isLongBranch=False, posNeg: int=0):
+    module = Module("checkFactorDimValue %u label %s"%(value, targetLabel))
+    assert(isinstance(targetLabel, Label))
+    targetLabelName = targetLabel.getLabelName()
+    if kernel["ProblemType"]["UseBias"] or kernel["ProblemType"]["UseScaleAlphaVec"]:
+      module.add(self.getSCMPKInstruction("EQU32", "FactorDim", value, comment="FactorDim == %u"%value))
+      if isLongBranch:
+        module.add(self.longBranchScc1(targetLabel, posNeg, tmpSgprInfo))
+      else:
+        module.add(SCBranchSCC1(labelName=targetLabelName, comment="Branch if FactorDim == %u"%value))
+    module.addSpaceLine()
+    return module
+
+  ##############################################################################
   # Global Write Elements
   ##############################################################################
   class BF16CVTVgprStruct(NamedTuple): # class for bf16 vgprs
@@ -14096,7 +14124,7 @@ class KernelWriterAssembly(KernelWriter):
               module.add(self.setSgprToInUseState("SrdScaleB"))
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
           module.add(self.setSgprToInUseState("AddressScaleAlphaVec"))
-          module.add(self.setSgprToInUseState("SrdScaleAlphaVec"))
+          module.add(self.setSgprToInUseState("SrdDeviceAlpha"))
 
       isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') or kernel["StreamK"] > 0
       # Issue read scale A/B value for later use
@@ -14134,28 +14162,54 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SLoadB32(dst=sgpr(sgprScaleC), base=sgpr("AddressScaleC",2), soffset=0, comment="load scaleC"))
         module.add(label)
 
-      factorDims = [0]
-      if self.states.FactorDim == 3:
-        factorDims.append(1)
-      elif self.states.FactorDim == 2:
+      useScaleAlphaVec = kernel["ProblemType"]["UseScaleAlphaVec"]
+      useBias = kernel["ProblemType"]["UseBias"]
+      needDim0 = (useScaleAlphaVec & 1) or (useBias & 1)
+      needDim1 = (useScaleAlphaVec & 2) or (useBias & 2)
+      if needDim0 and needDim1:
+        factorDims = [0, 1]
+      elif needDim1:
         factorDims = [1]
+      else:
+        factorDims = [0]
+      if useScaleAlphaVec & 4:
+        factorDims.append(2)
 
       vectorDataTypes = VectorDataTypes()
       if (kernel["ProblemType"]["UseScaleAlphaVec"]) and isSingleKernel:
         labelStr = self.labels.getNameInc("ScaleAlphaVec")
-        if self.states.FactorDim == 3:
+        useScaleAlphaVec = kernel["ProblemType"]["UseScaleAlphaVec"]
+        if (useScaleAlphaVec & 4) and (useScaleAlphaVec & 3):
+          scaleAlphaScalarLabel = Label(self.labels.getNameInc("ScaleAlphaVec_Scalar"), "")
+          scaleAlphaVecSrdEndLabel = Label(self.labels.getNameInc("ScaleAlphaVec_SrdEnd"), "")
+          module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 2, comment="FactorDim == 2 (scalar)?"))
+          module.add(SCBranchSCC1(scaleAlphaScalarLabel.getLabelName(), comment="Branch to scalar path"))
+        if (useScaleAlphaVec & 3) == 3:
           with self.allocTmpSgpr(1,1) as tmpSgprRes:
             tmpSgpr = tmpSgprRes.idx
             module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 0, comment="FactorDim == 0"))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
-            module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
-        elif self.states.FactorDim == 2:
-          module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeJ")))
-        else:
-          module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
-        module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
+            module.add(self.allocPostLoopSrdSuppressRaw("DeviceAlpha", "ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
+        elif (useScaleAlphaVec & 3) == 2:
+          module.add(self.allocPostLoopSrdSuppressRaw("DeviceAlpha", "ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeJ")))
+        elif (useScaleAlphaVec & 3) == 1:
+          module.add(self.allocPostLoopSrdSuppressRaw("DeviceAlpha", "ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
+        if useScaleAlphaVec & 3:
+          module.add(SMulI32(dst=sgpr("SrdDeviceAlpha+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdDeviceAlpha+2"), comment="ScaleAlphaVec scaled by BPE"))
+        if useScaleAlphaVec & 4:
+          if useScaleAlphaVec & 3:
+            module.add(SBranch(labelName=scaleAlphaVecSrdEndLabel.getLabelName(), comment="Skip scalar path"))
+            module.add(scaleAlphaScalarLabel)
+          labelStrScalar = self.labels.getNameInc("ScaleAlphaVecScalar")
+          module.add(self.allocPostLoopSrdSuppressRaw("DeviceAlpha", "ScaleAlphaVec", labelStrScalar, sgprLength=1))
+          module.add(SMulI32(dst=sgpr("SrdDeviceAlpha+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdDeviceAlpha+2"), comment="ScaleAlphaVec scaled by BPE"))
+          module.add(SLoadB32(dst=sgpr("SgprDeviceAlphaScalar"), base=sgpr("AddressScaleAlphaVec",2), soffset=0, comment="load device alpha scalar"))
+          module.add(SWaitCnt(kmcnt=0, comment="wait for device alpha scalar load"))
+          if useScaleAlphaVec & 3:
+            module.add(scaleAlphaVecSrdEndLabel)
         for d in range(len(factorDims)):
-          vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
+          if factorDims[d] < 2:
+            vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
 
       # Add ScaleABVec support here
       # Issue read scale A/B vector value for later use
@@ -14185,7 +14239,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr("WorkGroup2"), src1=hex(1)))
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("BiasStride"), src1=sgpr(tmpSgpr), comment="stride * (wg+1)"))
           module.add(SCmpEQU32(sgpr(tmpSgpr), 0, comment="bias stride = 0?"))
-          if self.states.FactorDim == 3:
+          if self.states.FactorDim >= 3 and kernel["ProblemType"]["UseBias"] == 3:
             module.add(SCBranchSCC0(set_bs_label.getLabelName()))
             module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 0, comment="FactorDim == 0"))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
@@ -14198,7 +14252,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.allocPostLoopSrdSuppress("Bias", labelStr, sgprLength=sgpr(tmpSgpr)))
 
         loadBiasEndLabel = Label(self.labels.getNameInc("Load_Bias_End"), "")
-        if self.states.FactorDim == 3:
+        if self.states.FactorDim >= 3 and kernel["ProblemType"]["UseBias"] == 3:
           module.add(factorDim0Label)
           module.add(self.getSCMPKInstruction("LGU32", "FactorDim", 0, comment="FactorDim != 0"))
           module.add(SCBranchSCC1(factorDim1Label.getLabelName(), "Branch if true"))
@@ -14308,24 +14362,38 @@ class KernelWriterAssembly(KernelWriter):
           ssslist.append("Bias")
           useSize.append(True)
 
+      vectorFactorDims = [fd for fd in factorDims if fd < 2]
       if vectorDataTypes.isValid() and (not isLdsLoaded):
-        if self.states.FactorDim == 3:
+        if self.states.FactorDim >= 3 and len(vectorFactorDims) >= 2:
           module.add(factorDim0Label)
+          if kernel["ProblemType"]["UseScaleAlphaVec"] & 4:
+            factorDimScalarLabel = Label(self.labels.getNameInc("Load_FactorDim_Scalar"), "")
+            module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 2, comment="FactorDim == 2 (scalar)?"))
+            module.add(SCBranchSCC1(factorDimScalarLabel.getLabelName(), "Branch to scalar path"))
           module.add(self.getSCMPKInstruction("LGU32", "FactorDim", 0, comment="FactorDim != 0"))
           module.add(SCBranchSCC1(factorDim1Label.getLabelName(), "Branch if true"))
+        elif kernel["ProblemType"]["UseScaleAlphaVec"] & 4 and len(vectorFactorDims) >= 1:
+          module.add(factorDim0Label)
+          factorDimScalarLabel = Label(self.labels.getNameInc("Load_FactorDim_Scalar"), "")
+          module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 2, comment="FactorDim == 2 (scalar)?"))
+          module.add(SCBranchSCC1(factorDimScalarLabel.getLabelName(), "Branch to scalar path"))
         labelDimEnd = Label(self.labels.getNameInc("MultiDimEnd"), "")
-        for d in range(len(factorDims)):
-          totalTmpVgpr = self.getNumOfTempVgprs(vectorDataTypes, kernel, 1, factorDims[d])
+        for d in range(len(vectorFactorDims)):
+          totalTmpVgpr = self.getNumOfTempVgprs(vectorDataTypes, kernel, 1, vectorFactorDims[d])
           tmpVgpr      = self.vgprPool.checkOutAligned(totalTmpVgpr, 2, "store tmps")
           tmpVgprRes   = ContinuousRegister(idx=tmpVgpr, size=4)
           offsetVgpr  = self.vgprPool.checkOut(1)
           if d == 1:
             module.add(factorDim1Label)
-          module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpVgprRes, factorDims[d]))
-          if self.states.FactorDim == 3 and d == 0:
+          module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpVgprRes, vectorFactorDims[d]))
+          if len(vectorFactorDims) > 1 and d == 0:
             module.add(SBranch(labelName=labelDimEnd.getLabelName(), comment="Branch to load end"))
           self.vgprPool.checkIn(offsetVgpr)
           self.vgprPool.checkIn(tmpVgpr)
+        if kernel["ProblemType"]["UseScaleAlphaVec"] & 4:
+          if len(vectorFactorDims) > 0:
+            module.add(SBranch(labelName=labelDimEnd.getLabelName(), comment="Branch to load end"))
+          module.add(factorDimScalarLabel)
         if len(factorDims) > 1:
           module.add(labelDimEnd)
 
@@ -14342,7 +14410,7 @@ class KernelWriterAssembly(KernelWriter):
               module.add(self.setSgprToFreeState("SrdScaleB"))
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
           module.add(self.setSgprToFreeState("AddressScaleAlphaVec"))
-          module.add(self.setSgprToFreeState("SrdScaleAlphaVec"))
+          module.add(self.setSgprToFreeState("SrdDeviceAlpha"))
       else:
         if kernel["ProblemType"]["UseScaleAB"]:
           if not self.states.preloadScaleA:
@@ -14355,7 +14423,7 @@ class KernelWriterAssembly(KernelWriter):
               module.add(self.undefineSgpr("SrdScaleB"))
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
           module.add(self.undefineSgpr("AddressScaleAlphaVec"))
-          module.add(self.undefineSgpr("SrdScaleAlphaVec"))
+          module.add(self.undefineSgpr("SrdDeviceAlpha"))
 
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
@@ -14424,7 +14492,20 @@ class KernelWriterAssembly(KernelWriter):
       if edge == False and len(vectorWidths) > 1:
         edge = True
       if factorDims is None:
-        factorDims = [0, 1] if self.states.FactorDim == 3 else [1] if self.states.FactorDim == 2 else [0]
+        if self.states.FactorDim >= 4:
+          factorDims = []
+          useScaleAlphaVec = kernel["ProblemType"]["UseScaleAlphaVec"]
+          useBias = kernel["ProblemType"]["UseBias"]
+          needDim0 = (useScaleAlphaVec & 1) or (useBias & 1) or (not (useScaleAlphaVec | useBias))
+          needDim1 = (useScaleAlphaVec & 2) or (useBias & 2)
+          if needDim0 or (not needDim1 and not (useScaleAlphaVec & 4)):
+            factorDims.append(0)
+          if needDim1:
+            factorDims.append(1)
+          if useScaleAlphaVec & 4:
+            factorDims.append(2)
+        else:
+          factorDims = [0, 1] if self.states.FactorDim == 3 else [1] if self.states.FactorDim == 2 else [0]
       writeLabels = {}
       for beta in betas:
         writeLabels[beta] = {}
@@ -14738,7 +14819,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB32(dst=sgpr("Alpha"), src=sgpr(oldAlpha), comment="Restore alpha value"))
         self.sgprPool.checkIn(oldAlpha)
 
-      if self.states.FactorDim == 3 or hasMultipleGlobalWriteModes:
+      if self.states.FactorDim >= 3 or hasMultipleGlobalWriteModes:
         self.updateBranchPlaceHolder(module, ["end_placeholder"], [endLabel.label], ["SBranch"])
       self.vgprPool.checkIn(tmpVgpr.idx)
       if cvtVgpr is not None:
@@ -15786,7 +15867,7 @@ class KernelWriterAssembly(KernelWriter):
     tmpVgpr1      = tmpVgpr1Res.idx + dstOffset
     turn, divisor = self.getTurn(kernel, gwvw, dim)
     addr0         = vgpr(offsetVgpr)
-    addr1         = sgpr("Srd%s"%srdName, 4)
+    addr1         = sgpr("Srd%s" % srdName, 4)
     offset        = (divisor * gwvw) * bpe
 
     for i in range(turn):
@@ -15797,14 +15878,15 @@ class KernelWriterAssembly(KernelWriter):
       tmpVgpr1 += 1
     return module
 
-  def addVectorLocalStore(self, kernel, addressStr: str, offsetVgpr, shiftOffset, dataType, gwvw, tmpVgpr1Res: ContinuousRegister, srcOffset, subGroupOffset, dim, setToOne=False, comment=""):
+  def addVectorLocalStore(self, kernel, addressStr: str, offsetVgpr, shiftOffset, dataType, gwvw, tmpVgpr1Res: ContinuousRegister, srcOffset, subGroupOffset, dim, setToOne=False, comment="", srdName: str=None):
     module        = Module("")
+    srdStr        = srdName if srdName else addressStr
     tmpVgpr1      = tmpVgpr1Res.idx + srcOffset
     turn, divisor = self.getTurn(kernel, gwvw, dim)
     offset        = (divisor * gwvw) * self.states.bpeCinternal
 
     if setToOne:
-      module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+      module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%srdStr), src1=0, comment=" == 0 ?"))
       # Set maskConst to 1.0 or 1
       if kernel["ProblemType"]["ComputeDataType"].isSingle():
         maskConst = 1.0
@@ -15969,7 +16051,7 @@ class KernelWriterAssembly(KernelWriter):
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "Bias", biasOffsetVgpr, biasShiftOffset, biasDataType, biasBpe, gwvw, tmpVgpr1Res, biasDstVgpr, dim))
     if scaleAlphaDataType:
       scaleAlphaShiftOffset = self.getGlobalShiftOffset(kernel, scaleAlphaDataType, gwvw)
-      globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleAlphaVec", scaleAlphaOffsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, scaleAlphaBpe, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, dim))
+      globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "DeviceAlpha", scaleAlphaOffsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, scaleAlphaBpe, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, dim))
     if scaleADataType:
       scaleAShiftOffset = self.getGlobalShiftOffset(kernel, scaleADataType, gwvw)
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleA", scaleAOffsetVgpr, scaleAShiftOffset, scaleADataType, scaleABpe, gwvw, tmpVgpr1Res, scaleADstVgpr, 0))
@@ -16005,7 +16087,7 @@ class KernelWriterAssembly(KernelWriter):
       subGroupOffset[0] += kernel["NumThreads"] * int(kernel["ProblemType"]["ComputeDataType"].numBytes()) * vectorDataTypes.bias(dim).turn
     if scaleAlphaDataType:
       vectorDataTypes.scaleAlpha(dim).ldsOffset = subGroupOffset[0]
-      storeModules.add(self.addVectorLocalStore(kernel, "ScaleAlphaVec", offsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, subGroupOffset, dim, setToOne=True, comment="store scaleAlpha"))
+      storeModules.add(self.addVectorLocalStore(kernel, "ScaleAlphaVec", offsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, subGroupOffset, dim, setToOne=True, comment="store scaleAlpha", srdName="DeviceAlpha"))
       subGroupOffset[0] += kernel["NumThreads"] * int(kernel["ProblemType"]["ComputeDataType"].numBytes()) * vectorDataTypes.scaleAlpha(dim).turn
     if scaleADataType:
       vectorDataTypes.scaleA.ldsOffset = subGroupOffset[0]

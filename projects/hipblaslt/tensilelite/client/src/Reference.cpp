@@ -1438,7 +1438,11 @@ namespace TensileLite
                                     }
                                     if(useScaleAlphaVec)
                                     {
-                                        if(factorDim == 1)
+                                        if(factorDim == 2)
+                                        {
+                                            alpha *= shadowAlphaVec[0];
+                                        }
+                                        else if(factorDim == 1)
                                         {
                                             alpha *= shadowAlphaVec[global_n];
                                         }
@@ -1830,7 +1834,9 @@ namespace TensileLite
                 if(problem.useScaleAlphaVec())
                 {
                     int pos = 0;
-                    if(problem.getParams().factorDim())
+                    if(problem.getParams().factorDim() == 2)
+                        pos = 0;
+                    else if(problem.getParams().factorDim())
                         pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
                     else
                         pos = int(dNum % problem.d().sizes()[0]);

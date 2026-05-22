@@ -223,10 +223,10 @@ class StoreState:
             self.useBias = DataDirection.NONE
 
         isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or (kernel["StreamK"] > 0 and not isWorkspace)
-        self.referenceVgprDim = [[], []]
+        self.referenceVgprDim = [[], [], []]
         if self.useBias == DataDirection.READ:
-            self.referenceVgprDim[self.factorDim].append("Bias")
-        if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+            self.referenceVgprDim[min(self.factorDim, 1)].append("Bias")
+        if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel and self.factorDim < 2:
             self.referenceVgprDim[self.factorDim].append("ScaleAlpha")
         if (kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
             self.referenceVgprDim[0].append("ScaleA")

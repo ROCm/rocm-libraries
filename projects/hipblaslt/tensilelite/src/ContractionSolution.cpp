@@ -902,7 +902,7 @@ namespace TensileLite
             }
         }
 
-        if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
+        if(problemType.useScaleAlphaVec >= 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
                                            static_cast<uint32_t>(problem.getParams().factorDim()));
@@ -1853,7 +1853,7 @@ namespace TensileLite
         if(problemType.useScaleAlphaVec && sizeMapping.globalAccumulation == 0)
         {
             rv.args.append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
-            if(problemType.useScaleAlphaVec == 3)
+            if(problemType.useScaleAlphaVec >= 3)
                 enableFactorDim = true;
         }
 
@@ -2507,6 +2507,8 @@ namespace TensileLite
                 name += ("_FDN");
             else if(factorDim == 3)
                 name += ("_FDMN");
+            else if(factorDim >= 4)
+                name += ("_FD" + std::to_string(factorDim));
         }
 
         if(problemType.useE)

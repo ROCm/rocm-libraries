@@ -3650,7 +3650,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=False, isOptNLL=isOptNLL, isNGLL=isNGLL, \
                                           isNotLast=(NLLindex<(NLLnum-1)), tailloopInNll=useTailloopInNll, remainPgr=remainPgr))
 
-    if self.states.FactorDim == 3:
+    if self.states.FactorDim >= 3:
       self.updateBranchPlaceHolder(module, ["skipOptNLL_placeholder", "skipOptNLL_scc1_placeholder"] , ["OptNLL_End", "OptNLL_End"], ["SCBranchSCC0", "SCBranchSCC1"])
     return module
 
@@ -8886,7 +8886,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("AddressScaleAlphaVec")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)
         self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
-        if self.states.FactorDim == 3:
+        if self.states.FactorDim >= 3:
           enableFactorDim = True
     if self.states.useBias != DataDirection.NONE:
       # Does not support atomic yet
