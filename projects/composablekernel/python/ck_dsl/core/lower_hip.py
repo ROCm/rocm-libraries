@@ -944,12 +944,13 @@ class _Lowerer:
         lo = f"{nice}_lo"
         hi = f"{nice}_hi"
         res_t = _type_to_hip(op.result.type)
+        pair_t = _type_to_hip(VectorType(op.result.type.elem, 2))
         self._emit(
             f"unsigned int {packed}; "
             f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
         )
-        self._emit(f"float2 {lo} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, false);")
-        self._emit(f"float2 {hi} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, true);")
+        self._emit(f"{pair_t} {lo} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, false);")
+        self._emit(f"{pair_t} {hi} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, true);")
         self._emit(f"{res_t} {nice};")
         self._emit(f"{nice}[0] = {lo}.x;")
         self._emit(f"{nice}[1] = {lo}.y;")
@@ -964,12 +965,13 @@ class _Lowerer:
         lo = f"{nice}_lo"
         hi = f"{nice}_hi"
         res_t = _type_to_hip(op.result.type)
+        pair_t = _type_to_hip(VectorType(op.result.type.elem, 2))
         self._emit(
             f"unsigned int {packed}; "
             f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
         )
-        self._emit(f"float2 {lo} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, false);")
-        self._emit(f"float2 {hi} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, true);")
+        self._emit(f"{pair_t} {lo} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, false);")
+        self._emit(f"{pair_t} {hi} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, true);")
         self._emit(f"{res_t} {nice};")
         self._emit(f"{nice}[0] = {lo}.x;")
         self._emit(f"{nice}[1] = {lo}.y;")

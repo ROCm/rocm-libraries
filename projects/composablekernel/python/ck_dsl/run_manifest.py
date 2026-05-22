@@ -243,7 +243,15 @@ def _conv_problem(
     rng = np.random.default_rng(1234)
     A = (rng.random((N, H, W, C), dtype=np.float32) * 0.04 - 0.02).astype(np.float16)
     B = (rng.random((K, R, S, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np.float16)
-    D = np.empty((N, H, W, K), dtype=np.float16)
+    # Output spatial dims account for stride / dilation per the conv
+    # forward formula: ``Ho = (H + 2*pH - dH*(R-1) - 1) // sH + 1`` and
+    # symmetric for ``Wo``. The historical ``D = np.empty((N, H, W, K))``
+    # silently assumed ``Ho = H`` (only valid when ``sH == sW == 1``
+    # AND padding cancels the dilation tail), corrupting the parity
+    # gate on stride > 1 / dilation > 1 conv shapes.
+    Ho = (H + 2 * pH - dH * (R - 1) - 1) // sH + 1
+    Wo = (W + 2 * pW - dW * (S - 1) - 1) // sW + 1
+    D = np.empty((N, Ho, Wo, K), dtype=np.float16)
 
     if "grid_explicit" in manifest:
         gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
@@ -283,11 +291,24 @@ def _conv_problem(
             return 0.0, 0, D.size
         rt.memcpy_d2h(_as_u8_buffer(D), ptrs[2], _nbytes(D))
         # Vectorized grouped conv reference, fp32 accumulation then fp16 output.
+        # ``Ap[:, r*dH : r*dH + Ho*sH : sH, s*dW : s*dW + Wo*sW : sW, :]``
+        # is the ``(N, Ho, Wo, C)`` slice that contributes to the (r, s)
+        # filter tap. The historical form
+        # ``Ap[:, r : r + H*sH : sH, ...]`` was wrong on dilation>1
+        # (missing the ``*dH`` start offset) and on stride>1 (used H
+        # instead of Ho for the slice size).
         Ap = np.pad(A, ((0, 0), (pH, pH), (pW, pW), (0, 0)), mode="constant")
         ref = np.zeros_like(D, dtype=np.float32)
         for r in range(R):
             for s in range(S):
-                x = Ap[:, r : r + H * sH : sH, s : s + W * sW : sW, :]
+                row_start = r * dH
+                col_start = s * dW
+                x = Ap[
+                    :,
+                    row_start : row_start + Ho * sH : sH,
+                    col_start : col_start + Wo * sW : sW,
+                    :,
+                ]
                 for g in range(groups):
                     xs = x[..., g * cpg : (g + 1) * cpg].astype(np.float32)
                     ws = B[g * kpg : (g + 1) * kpg, r, s, :].astype(np.float32)

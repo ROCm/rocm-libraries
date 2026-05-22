@@ -117,6 +117,12 @@ class VsaSparseSpec:
     block_k: int = 64
     max_blocks_per_q: int = 32
     name: str = "ck_dsl_vsa_sparse_attn"
+    # P89: when ``max_blocks_per_q <= wave_size = 64``, the scatter
+    # pass can use a single uniform ``wave_ballot`` + LDS write per
+    # chunk instead of the per-chunk ``scf.if``. Defaults to True
+    # because most VSA workloads stay below the wave cap; falls back
+    # to the legacy chunked form when ``max_blocks_per_q > 64``.
+    use_wave_ballot_scatter: bool = True
 
     @property
     def num_q_blocks(self) -> int:
