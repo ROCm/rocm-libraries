@@ -127,6 +127,7 @@ from .mfma_gemm_inner import (
     load_b_col_strided_scalars,
     mfma_atom_for_dtype,
     mfma_k_loop,
+    mfma_k_loop_dynamic_K,
     store_acc_to_global,
 )
 from .distribution import (
@@ -139,6 +140,7 @@ from .distribution import (
     make_static_distributed_tensor,
     make_static_tile_distribution,
     store_tile,
+    store_tile_cshuffle,
 )
 from .epilogues import CShuffleEpilogue, DirectEpilogue
 from .fuse import (
@@ -215,12 +217,16 @@ from .io import (
     load_vec,
     load_vec_as_f32,
     pack_f32_to,
+    pack_quant_chunk_f32,
+    store_packed_chunk,
     store_scalar,
     store_scalar_from_f32,
     store_vec,
+    vector_row_copy,
 )
 from .layouts import LdsLayout, TransposeLdsReader
 from .loads import (
+    AsyncPingPongLoader,
     AsyncTileLoader,
     AsyncTileLoaderSlot,
     CoalescedTileLoader,
@@ -303,10 +309,21 @@ from .quant import (
     quant_max_abs,
     quantize_scalar_f32,
 )
-from .reduction import ReduceCombine, block_lds_reduce
+from .reduction import (
+    ReduceCombine,
+    block_lds_reduce,
+    block_lds_reduce_pair,
+    block_lds_reduce_with_wave_prologue,
+    welford_block_reduce,
+)
+from .mfma_attention_bwd import (
+    mfma_attention_bwd_dot_do_o_inner_body,
+    mfma_attention_bwd_dq_dk_dv_inner_body,
+)
 from .scan import (
     block_exclusive_scan_i32,
     block_histogram_i32,
+    block_two_level_scan_i32,
     lds_zero_i32,
 )
 from .schedule import SchedulePolicy
@@ -315,6 +332,8 @@ from .streamk import (
     StreamKReductionStrategy,
     compute_streamk_grid_size,
     emit_streamk_decode,
+    emit_streamk_partial_load_accumulate,
+    emit_streamk_partial_store,
     streamk_num_macro_tiles,
 )
 from .spec import (
@@ -384,6 +403,7 @@ __all__ = [
     "load_b_col_strided_scalars",
     "mfma_atom_for_dtype",
     "mfma_k_loop",
+    "mfma_k_loop_dynamic_K",
     "store_acc_to_global",
     # MFMA attention inner helper
     "MFMA_ATTN_BLOCK_K",
@@ -424,6 +444,7 @@ __all__ = [
     # Loads
     "LdsLayout",
     "TransposeLdsReader",
+    "AsyncPingPongLoader",
     "AsyncTileLoader",
     "AsyncTileLoaderSlot",
     "CoalescedTileLoader",
@@ -519,6 +540,7 @@ __all__ = [
     "make_static_distributed_tensor",
     "make_static_tile_distribution",
     "store_tile",
+    "store_tile_cshuffle",
     # Sweep iteration
     "RowChunkSweepResult",
     "pass2_row_chunks",
@@ -530,15 +552,22 @@ __all__ = [
     "load_vec",
     "load_vec_as_f32",
     "pack_f32_to",
+    "pack_quant_chunk_f32",
+    "store_packed_chunk",
     "store_scalar",
     "store_scalar_from_f32",
     "store_vec",
+    "vector_row_copy",
     # Reductions
     "ReduceCombine",
     "block_lds_reduce",
+    "block_lds_reduce_pair",
+    "block_lds_reduce_with_wave_prologue",
+    "welford_block_reduce",
     # Block-wide scan + histogram + LDS zero-init ( MoE infra)
     "block_exclusive_scan_i32",
     "block_histogram_i32",
+    "block_two_level_scan_i32",
     "lds_zero_i32",
     # Persistent-kernel pattern ( MoE / StreamK shared)
     "build_persistent_counter_init",
@@ -554,6 +583,10 @@ __all__ = [
     "StreamKReductionStrategy",
     "compute_streamk_grid_size",
     "emit_streamk_decode",
+    "emit_streamk_partial_load_accumulate",
+    "emit_streamk_partial_store",
+    "mfma_attention_bwd_dot_do_o_inner_body",
+    "mfma_attention_bwd_dq_dk_dv_inner_body",
     "streamk_num_macro_tiles",
     # Quantisation (f32 <-> {i8, fp8e4m3, bf8e5m2})
     "QDType",

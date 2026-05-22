@@ -28,8 +28,10 @@ from .i4_dequant import unpack_i4_byte_to_pair_i32
 __all__ = [
     "apply_per_tensor_scale",
     "codebook_lookup_i4_pair_to_bf8",
+    "codebook_lookup_i4_pair_to_f32",
     "codebook_lookup_i4_pair_to_fp8",
     "codebook_lookup_i8_to_bf8",
+    "codebook_lookup_i8_to_f32",
     "codebook_lookup_i8_to_fp8",
 ]
 
@@ -45,6 +47,64 @@ def _validate_codebook_ptr(codebook_ptr: Value, *, expected_entries: int) -> Non
         raise ValueError(
             f"unsupported codebook entry count {expected_entries}; expected 16 or 256"
         )
+
+
+def codebook_lookup_i8_to_f32(
+    b: IRBuilder,
+    codebook_ptr: Value,
+    i8_value_i32: Value,
+    *,
+    per_tensor_scale: Value | None = None,
+) -> Value:
+    """Direct i8 -> f32 codebook lookup (skips the ``cvt_f32_to_fp8``
+    round-trip the existing :func:`codebook_lookup_i8_to_fp8` does).
+
+    The native MFMA i8/i4 attention path (P30) consumes f32 partials
+    directly; the round-trip through fp8 is unnecessary there. This
+    helper saves the ``cvt.f32.fp8`` per element while keeping the
+    same codebook semantics.
+    """
+    _validate_codebook_ptr(codebook_ptr, expected_entries=256)
+    if i8_value_i32.type.name != "i32":
+        raise ValueError(
+            f"codebook_lookup_i8_to_f32 expects i32 (sign-extended i8) input, "
+            f"got {i8_value_i32.type.name}"
+        )
+    idx = b.add(i8_value_i32, b.const_i32(128))
+    f32_v = b.global_load_f32(codebook_ptr, idx)
+    if per_tensor_scale is not None:
+        f32_v = b.fmul(f32_v, per_tensor_scale)
+    return f32_v
+
+
+def codebook_lookup_i4_pair_to_f32(
+    b: IRBuilder,
+    codebook_ptr: Value,
+    packed_byte_i8: Value,
+    *,
+    per_tensor_scale: Value | None = None,
+) -> Tuple[Value, Value]:
+    """Direct i4-pair -> f32 codebook lookup (skips the fp8 round-trip).
+
+    Companion to :func:`codebook_lookup_i8_to_f32` for the 4-bit
+    variant of the native MFMA i4 attention path (P30).
+    """
+    _validate_codebook_ptr(codebook_ptr, expected_entries=16)
+    if packed_byte_i8.type.name != "i8":
+        raise ValueError(
+            f"codebook_lookup_i4_pair_to_f32 expects i8 input "
+            f"(load the packed byte via global_load(..., I8) first), "
+            f"got {packed_byte_i8.type.name}"
+        )
+    lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, packed_byte_i8)
+    lo_idx = b.add(lo_i32, b.const_i32(8))
+    hi_idx = b.add(hi_i32, b.const_i32(8))
+    lo_f = b.global_load_f32(codebook_ptr, lo_idx)
+    hi_f = b.global_load_f32(codebook_ptr, hi_idx)
+    if per_tensor_scale is not None:
+        lo_f = b.fmul(lo_f, per_tensor_scale)
+        hi_f = b.fmul(hi_f, per_tensor_scale)
+    return lo_f, hi_f
 
 
 def codebook_lookup_i8_to_fp8(

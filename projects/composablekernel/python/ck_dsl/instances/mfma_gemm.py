@@ -84,7 +84,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ..core.ir import F16, I32, IRBuilder, KernelDef, PtrType
+from ..core.ir import BF16, F16, I32, IRBuilder, KernelDef, PtrType
 from ..helpers.atoms import MfmaAtom
 from ..helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
@@ -97,7 +97,11 @@ from ..helpers.mfma_gemm_inner import (
 from ..helpers.spec import SignatureBuilder, kernel_name_join
 
 
-DType = Literal["f16"]
+# P53 + P88: bf16 lands via the same helper-side atom dispatch
+# (``mfma_atom_for_dtype``) plus a typed-pointer flip in the kernel
+# signature. fp8 / bf8 paths require more plumbing (lane-decode +
+# byte-wise A / B loads) and are tracked separately.
+DType = Literal["f16", "bf16"]
 
 
 # The two atom shapes shipped by v1. 16x16 keeps the small-CTA layout
@@ -172,9 +176,18 @@ class MfmaGemmSpec:
         )
 
 
+_SUPPORTED_DTYPES: Tuple[str, ...] = ("f16", "bf16")
+
+
 def is_valid_spec(spec: MfmaGemmSpec) -> Tuple[bool, str]:
-    if spec.dtype != "f16":
-        return False, f"v1 ships f16 only, got {spec.dtype!r}"
+    # P88 (partial) + P53: gate flip — accept bf16 in addition to f16.
+    # The atom dispatch in ``mfma_atom_for_dtype`` handles bf16 via
+    # the bf16 atom factory landed by P53. fp8 / bf8 require typed
+    # pointer plumbing + lane-decode rewiring; tracked separately.
+    if spec.dtype not in _SUPPORTED_DTYPES:
+        return False, (
+            f"mfma_gemm dtype must be one of {_SUPPORTED_DTYPES}, got {spec.dtype!r}"
+        )
     if (spec.tile_m, spec.tile_n) not in _SUPPORTED_ATOM_MN:
         return False, (
             f"tile_m x tile_n must be one of {_SUPPORTED_ATOM_MN}; "
@@ -190,10 +203,10 @@ def is_valid_spec(spec: MfmaGemmSpec) -> Tuple[bool, str]:
 
 
 def build_mfma_gemm(spec: MfmaGemmSpec) -> KernelDef:
-    """Build a one-atom-per-CTA f16 MFMA GEMM kernel.
+    """Build a one-atom-per-CTA MFMA GEMM kernel.
 
-    Kernel signature: ``(A: ptr<f16>, B: ptr<f16>, C: ptr<f16>,
-    M: i32, N: i32, K: i32)``.
+    Kernel signature: ``(A: ptr<dtype>, B: ptr<dtype>, C: ptr<dtype>,
+    M: i32, N: i32, K: i32)`` where ``dtype`` is ``f16`` or ``bf16``.
 
     Grid: ``(N // atom.n, M // atom.m, 1)``. Block: 64 threads
     (one wave64 warp).
@@ -208,9 +221,10 @@ def build_mfma_gemm(spec: MfmaGemmSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    C = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    elem_ir = BF16 if spec.dtype == "bf16" else F16
+    A = b.param("A", PtrType(elem_ir, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(elem_ir, "global"), noalias=True, readonly=True, align=16)
+    C = b.param("C", PtrType(elem_ir, "global"), noalias=True, writeonly=True, align=16)
     _M = b.param("M", I32)  # noqa: F841 - ABI
     _N = b.param("N", I32)  # noqa: F841 - ABI
     _K = b.param("K", I32)  # noqa: F841 - ABI
@@ -266,7 +280,7 @@ def build_mfma_gemm(spec: MfmaGemmSpec) -> KernelDef:
         n_tile_base=n_tile_base,
         acc=acc_final,
         N=spec.N,
-        out_dtype="f16",
+        out_dtype=spec.dtype,
     )
 
     b.ret()

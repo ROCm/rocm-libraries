@@ -173,6 +173,12 @@ class FusedMoeSpec:
     block_size: int = 256
     vec: int = 4
     name: str = "ck_dsl_fused_moe"
+    # P72: when True, ``build_moe_topk_weighted_reduce`` emits the
+    # bf16-accumulator path that uses
+    # :meth:`IRBuilder.global_atomic_add_pk_bf16` for halved atomic
+    # contention vs the f32 atomic. The output ``Y`` becomes bf16
+    # instead of f32. Real numerical change; callers gate on parity.
+    bf16_accumulator: bool = False
 
     @property
     def total_pairs(self) -> int:

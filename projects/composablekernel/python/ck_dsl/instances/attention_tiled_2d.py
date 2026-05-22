@@ -2048,6 +2048,25 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         st_row_ok = None
         st_causal_lim = None
 
+    # Transposed-32x32 ALiBi slope hoist. ``st_qh`` is per-lane (constant
+    # across reg/n), so the slope is per-lane too. We load it once outside
+    # the kvloop and reuse it for every (reg, n) inside the
+    # transposed-softmax block. When ``TRANSPOSED_INVARIANT_HOIST`` is
+    # off and ``TRANSPOSED_MASK_ONCE`` is on we recompute per-iter
+    # inside the kvloop instead.
+    if (
+        USE_ALIBI
+        and USE_MFMA_32X32
+        and TRANSPOSED_QK_32X32
+        and TRANSPOSED_INVARIANT_HOIST
+    ):
+        st_qh_ok = b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        st_alibi_slope = b.masked_global_load(
+            alibi_slopes_ptr, st_qh, st_qh_ok, b.const_f32(0.0), dtype=F32, align=4
+        )
+    else:
+        st_alibi_slope = None
+
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
     )
@@ -2081,10 +2100,23 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
+            if USE_ALIBI:
+                st_qh_iter_ok = b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH))
+                st_alibi_slope_iter = b.masked_global_load(
+                    alibi_slopes_ptr,
+                    st_qh_iter,
+                    st_qh_iter_ok,
+                    b.const_f32(0.0),
+                    dtype=F32,
+                    align=4,
+                )
+            else:
+                st_alibi_slope_iter = None
         else:
             st_qp_iter = None
             st_row_ok_iter = None
             st_causal_lim_iter = None
+            st_alibi_slope_iter = None
 
         # Prepare the clamped tile index for the next-K prefetch we will issue
         # after QK. The final iteration intentionally prefetches the current
@@ -2183,6 +2215,44 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 # previous 5-stage per-row 32-lane butterfly.
                 st_local_max = neg_inf
                 st_scores = {}
+                # Transposed-32x32 ALiBi/QQ-bias plumbing. ``slope`` is
+                # per-lane (depends on ``st_qh`` / ``st_qh_iter`` which is
+                # already invariant across (n, reg) in this lane); we
+                # reuse the hoisted ``st_alibi_slope`` (or the per-iter
+                # ``st_alibi_slope_iter``) so the computation is a single
+                # ``v_pk_mul_f32`` chain per (n, reg). Without this, the
+                # transposed-32x32 path skipped ALiBi / QQ-bias entirely
+                # — that was the root cause of the 2D regressions on
+                # ``alibi_decode_d128_b16``, ``alibi_mixed_d128_b16``, and
+                # ``qq_bias_prefill_d128_b16`` (max_abs values 2.113,
+                # 2.425, 0.2686 vs the fp16 ULP gate).
+                if USE_ALIBI:
+                    if TRANSPOSED_INVARIANT_HOIST:
+                        slope_for_lane = st_alibi_slope
+                    elif TRANSPOSED_MASK_ONCE:
+                        slope_for_lane = st_alibi_slope_iter
+                    else:
+                        # Fallback: load per-lane slope inline. Same shape
+                        # as the hoisted versions above; matches AITER
+                        # ``unified_attention.py:317``.
+                        q_row_t_alibi = b.add(
+                            wave_row_base, _mfma_32x32_c_col(b, lane, 0)
+                        )
+                        qh_t_alibi = b.add(
+                            b.mul(kv_head_idx, b.const_i32(NQK)),
+                            b.mod(q_row_t_alibi, b.const_i32(NQK)),
+                        )
+                        slope_for_lane = b.masked_global_load(
+                            alibi_slopes_ptr,
+                            qh_t_alibi,
+                            b.cmp_lt(qh_t_alibi, b.const_i32(NUM_QH)),
+                            b.const_f32(0.0),
+                            dtype=F32,
+                            align=4,
+                        )
+                else:
+                    slope_for_lane = None
+
                 for n in range(QK_N_TILES):
                     for reg in range(16):
                         k_local = b.add(
@@ -2226,6 +2296,33 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                                 _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
                             )
                         score = b.select(m_ok, s_scaled, neg_inf)
+                        if USE_ALIBI:
+                            # ``slope * (key_pos - context_len) * RCP_LN2``;
+                            # mirrors AITER ``unified_attention.py:317``.
+                            pos_off = b.sub(col_abs, context_len)
+                            pos_f = b.sitofp_f32(pos_off)
+                            add_term = b.fmul(b.fmul(slope_for_lane, pos_f), rcp_ln2)
+                            score = b.fadd(score, add_term)
+                        if USE_QQ_BIAS:
+                            # ``qq_bias[qp_r, key_pos - context_len]``;
+                            # mirrors AITER ``unified_attention.py:319-330``.
+                            krp = b.sub(col_abs, context_len)
+                            krp_ok = b.land(
+                                b.cmp_ge(krp, b.const_i32(0)),
+                                b.cmp_lt(krp, qq_bias_stride0_p),
+                            )
+                            qq_ok = b.land(row_ok, krp_ok)
+                            qp_safe = b.select(row_ok, qp_r, b.const_i32(0))
+                            qq_idx = b.add(b.mul(qp_safe, qq_bias_stride0_p), krp)
+                            qq_v = b.masked_global_load(
+                                qq_bias_ptr,
+                                qq_idx,
+                                qq_ok,
+                                b.const_f32(0.0),
+                                dtype=F32,
+                                align=4,
+                            )
+                            score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
                         st_scores[(n, reg)] = score
                         st_local_max = b.fmax(st_local_max, score)
                 st_remote_max = b.warp_shuffle_xor(st_local_max, 32)

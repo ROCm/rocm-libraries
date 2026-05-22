@@ -931,20 +931,26 @@ class _Lowerer:
 
         e4m3 sibling of :meth:`_op_arith_cvt_pk_f32_bf8x4`; mirrors the
         LLVM lowering's two-packed-cvt + concat shape but in HIP
-        builtin form so the debug source compiles with hipcc.
+        builtin form so the debug source compiles with hipcc. The
+        result-vector C++ type is taken from
+        :func:`_type_to_hip` (``f32x4``) — the historical
+        ``vec<f32x4>`` spelling was not a real C++ type and broke
+        ``hipcc --genco`` on the attention kernels that consume this
+        cvt (HIP_LOWERINGS_REPORT.md §4a).
         """
         (v,) = op.operands
         nice = _name(op.result)
         packed = f"{nice}_p"
         lo = f"{nice}_lo"
         hi = f"{nice}_hi"
+        res_t = _type_to_hip(op.result.type)
         self._emit(
             f"unsigned int {packed}; "
             f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
         )
         self._emit(f"float2 {lo} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, false);")
         self._emit(f"float2 {hi} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, true);")
-        self._emit(f"vec<f32x4> {nice};")
+        self._emit(f"{res_t} {nice};")
         self._emit(f"{nice}[0] = {lo}.x;")
         self._emit(f"{nice}[1] = {lo}.y;")
         self._emit(f"{nice}[2] = {hi}.x;")
@@ -957,13 +963,14 @@ class _Lowerer:
         packed = f"{nice}_p"
         lo = f"{nice}_lo"
         hi = f"{nice}_hi"
+        res_t = _type_to_hip(op.result.type)
         self._emit(
             f"unsigned int {packed}; "
             f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
         )
         self._emit(f"float2 {lo} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, false);")
         self._emit(f"float2 {hi} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, true);")
-        self._emit(f"vec<f32x4> {nice};")
+        self._emit(f"{res_t} {nice};")
         self._emit(f"{nice}[0] = {lo}.x;")
         self._emit(f"{nice}[1] = {lo}.y;")
         self._emit(f"{nice}[2] = {hi}.x;")
@@ -1129,19 +1136,91 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
+    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
+        """HIP debug shim for P15 MX MFMA scaled.
+
+        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
+        emit an inline-asm stub that documents the shape so kernel
+        authors can read the HIP source to sanity-check the data
+        flow. Production runs go through the LLVM path which has
+        the real intrinsic.
+        """
+        a, b, c, a_scale, b_scale = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
+            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
+            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
+        )
+
+    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
+            f"a={_name(a)} b={_name(b)}"
+        )
+
+    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
+            f"a={_name(a)} b={_name(b)}"
+        )
+
+    def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
+        """HIP debug shim for the P13 register permutation."""
+        (qk_c,) = op.operands
+        target = op.attrs["target_dtype"]
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(8):
+            self._emit(f"{nice}[{i}] = ({target}){_name(qk_c)}[{i}];")
+
+    def _op_memref_cooperative_global_store(self, op: Op) -> None:
+        """HIP debug shim for P14 cooperative global store."""
+        ptr, addrs, values = op.operands
+        n = int(op.attrs["vec"])
+        for i in range(n):
+            self._emit(f"{_name(ptr)}[{_name(addrs)}[{i}]] = {_name(values)}[{i}];")
+
+    def _op_tile_smem_store_distributed(self, op: Op) -> None:
+        """HIP debug shim for P42 distributed LDS publish."""
+        smem, values = op.operands
+        storage = smem.op.attrs.get("_storage")
+        if storage is None:
+            raise RuntimeError("smem_store_distributed before smem_alloc was lowered")
+        from ..core.ir import VectorType
+
+        n = values.type.count if isinstance(values.type, VectorType) else 1
+        for i in range(n):
+            self._emit(f"{storage}[{i}] = {_name(values)}[{i}];")
+
     def _op_tile_lds_atomic_add(self, op: Op) -> None:
         """Lower ``lds_atomic_add`` via HIP's ``atomicAdd`` on a
-        ``__shared__`` slot. The pointer is the LDS base + the rank-N
-        linear index; ``atomicAdd`` selects the ``ds_add_u32`` /
-        ``ds_pk_add_f32`` instruction at codegen.
+        ``__shared__`` slot. The pointer is the LDS storage array
+        + the rank-N linear index; ``atomicAdd`` selects the
+        ``ds_add_u32`` / ``ds_pk_add_f32`` instruction at codegen.
+
+        HIP_LOWERINGS_REPORT.md §4b: the historical implementation
+        passed ``_name(smem)`` (the SSA name like ``lds_hist6``)
+        rather than the actual ``__shared__`` array
+        (``lds_hist6_storage`` from ``smem.op.attrs["_storage"]``);
+        the resulting ``hipcc --compile-hip`` failed on
+        ``moe_sort_histogram`` with ``use of undeclared identifier
+        'lds_hist6'``. Every other smem op in this file routes
+        through ``smem.op.attrs["_storage"]`` (see e.g.
+        :meth:`_op_tile_smem_store`).
         """
         smem = op.operands[0]
         indices = list(op.operands[1:-1])
         val = op.operands[-1]
         cpp_t = _type_to_hip(val.type)
+        storage = smem.op.attrs.get("_storage")
+        if storage is None:
+            raise RuntimeError("lds_atomic_add before smem_alloc was lowered")
         idx_expr = "][".join(_name(i) for i in indices)
         self._emit(
-            f"{cpp_t} {_name(op.result)} = atomicAdd(&{_name(smem)}[{idx_expr}], "
+            f"{cpp_t} {_name(op.result)} = atomicAdd(&{storage}[{idx_expr}], "
             f"{_name(val)});"
         )
 

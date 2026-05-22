@@ -84,6 +84,20 @@ class MxGemmSpec:
     block_tile_m: int = 16
     block_tile_n: int = 16
     name: str = "ck_dsl_mx_gemm"
+    # P77: row-aware scale correctness mode. The historical
+    # ``per_input_row=True`` (default) loads ``AScale[m_in_atom +
+    # m_tile_base, kg]`` per lane and applies it to the lane's
+    # ``c_per_lane=4`` *output* cells. For ``k_blk > 0`` lanes
+    # (16-63), ``m_in_atom`` does not equal the output-row index so
+    # the scale doesn't correspond to any output cell — masked by
+    # parity tests using uniform per-row scales but mathematically
+    # wrong on real workloads. ``per_input_row=False`` switches to
+    # per-output-row scale broadcast: lane-broadcast via
+    # :func:`ck_dsl.helpers.mx_scale.load_and_decode_mx_scales_wave`
+    # so each lane sees the scale matching its actual output row.
+    # Defaults to True for backwards compatibility; flip to False
+    # on real per-row varying-scale workloads.
+    per_input_row: bool = True
 
     @property
     def atom(self) -> MfmaAtom:

@@ -171,6 +171,68 @@ class LdsLayout:
                 "use LdsLayout.xor_swizzled(...) to populate it"
             )
 
+    @classmethod
+    def cshuffle(
+        cls,
+        *,
+        atom_m: int,
+        atom_n: int,
+        warps_m: int,
+        warps_n: int,
+    ) -> "LdsLayout":
+        """CShuffle-style LDS layout (P42).
+
+        Places adjacent-same-lane registers at adjacent LDS addresses
+        so that the stage-1 LDS publish in the cshuffle epilogue can
+        coalesce into ``ds_write_b64`` / ``ds_write_b128`` instead of
+        the per-element ``ds_write_b16`` chain. The layout is
+        ``[warps_m * atom_m, warps_n * atom_n]`` with no swizzle —
+        the MFMA distribution itself provides the conflict-free
+        access pattern at the cost of a slightly larger LDS footprint
+        (one full warp tile vs the legacy half-overlap layout).
+
+        Reference: CK Tile ``cshuffle_epilogue.hpp:316-384, 661-759``.
+        """
+        return cls(
+            logical_cols=int(warps_n * atom_n),
+            k_pad=0,
+            swizzle=None,
+            requires_packed_async=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# P43: load_tile_transpose composition over P11/P12 transposed-LDS reads
+# ---------------------------------------------------------------------------
+
+
+def load_tile_transpose(
+    b: "IRBuilder",  # forward ref; helpers/layouts.py imports IRBuilder lazily
+    *,
+    smem: "Value",
+    base_indices,
+    rows_per_lane: int,
+    dtype,
+):
+    """High-level transposed-LDS read driven by a row-count.
+
+    P43: dispatches between the 4-row-per-lane :meth:`IRBuilder.
+    ds_read_tr16_b64` and the 8-row-per-lane
+    :meth:`IRBuilder.ds_read_tr16_b128` (P11) based on
+    ``rows_per_lane``. ``base_indices`` is the LDS coordinate of the
+    tile origin; the helper passes it through to whichever transpose
+    primitive matches.
+
+    Returns a per-lane ``<rows_per_lane x dtype>`` vector.
+    """
+    if rows_per_lane == 4:
+        return b.ds_read_tr16_b64(smem, *base_indices, dtype=dtype)
+    if rows_per_lane == 8:
+        return b.ds_read_tr16_b128(smem, *base_indices, dtype=dtype)
+    raise ValueError(
+        f"load_tile_transpose: rows_per_lane must be 4 or 8 (got {rows_per_lane})"
+    )
+
 
 # ---------------------------------------------------------------------------
 # CK Tile ``TransposeLDSLayout<M, K, B>`` lane formulas

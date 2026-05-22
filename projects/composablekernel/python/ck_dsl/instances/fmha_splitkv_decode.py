@@ -138,6 +138,17 @@ class FmhaFwdSplitKvDecodeSpec:
     batch: int
     num_segments: int
     name: str = "ck_dsl_fmha_fwd_splitkv_decode"
+    # P68: GQA-aware MFMA grid. When True, the segment kernel groups
+    # GQA heads into a BLOCK_M tile (BLOCK_Q = BLOCK_M /
+    # num_queries_per_kv Q-token rows per CTA) and runs the MFMA
+    # body on the (Q-token-bunch, kv_head) plane. Requires the spec's
+    # ``num_queries_per_kv`` field to evenly divide ``BLOCK_M = 16``.
+    use_mfma_body: bool = False
+    # P71: per-head sliding-window tile pruning. When True, the
+    # segment kernel computes ``first_allowed_key = context_len +
+    # qpos_lo - SLIDING_WINDOW + 1`` and short-circuits K-tiles
+    # outside the band. Requires ``common.sliding_window > 0``.
+    prune_sliding_window: bool = False
 
     def kernel_name(self, phase: str) -> str:
         s = self.common.shape

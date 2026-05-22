@@ -539,7 +539,18 @@ class TensorView:
             raise NotImplementedError(
                 f"buffer load_vec_at not wired for dtype {self.dtype.name}"
             )
-        if self.dtype.name in ("f16", "bf16"):
+        if self.addr_space == "lds":
+            # P46: LDS branch via the typed smem load. The base is a
+            # smem allocation token; we treat the elem_off as the
+            # flat row-major coordinate into the LDS region.
+            if self.dtype.name not in ("f16", "bf16", "f32", "i32"):
+                raise NotImplementedError(
+                    f"LDS load_vec_at not wired for dtype {self.dtype.name}"
+                )
+            if self.dtype.name == "f32":
+                return b.smem_load_vN_f32(self.base, elem_off, n=n)
+            return b.smem_load_vN(self.base, elem_off, dtype=self.dtype, n=n)
+        if self.dtype.name in ("f16", "bf16", "f32", "i32"):
             return b.global_load_vN(self.base, elem_off, self.dtype, n)
         raise NotImplementedError(
             f"load_vec_at not wired for {self.addr_space}/{self.dtype.name}"
@@ -570,11 +581,48 @@ class TensorView:
             raise NotImplementedError(
                 f"buffer load_scalar_at not wired for dtype {self.dtype.name}"
             )
+        if self.addr_space == "lds":
+            # P46: LDS scalar branch.
+            if self.dtype.name == "f32":
+                vec = b.smem_load_vN_f32(self.base, elem_off, n=1)
+            else:
+                vec = b.smem_load_vN(self.base, elem_off, dtype=self.dtype, n=1)
+            return b.vec_extract(vec, 0)
         if self.dtype.name == "f16":
             return b.global_load_f16(self.base, elem_off)
         if self.dtype.name == "bf16":
             return b.global_load_bf16(self.base, elem_off)
         return b.global_load(self.base, elem_off, dtype=self.dtype)
+
+    def load_vec_tr_at(
+        self,
+        b: IRBuilder,
+        *,
+        base_indices,
+        rows_per_lane: int = 4,
+    ) -> Value:
+        """Transposed-LDS vector load via :meth:`IRBuilder.ds_read_tr16_b64`
+        (4 rows/lane) or :meth:`IRBuilder.ds_read_tr16_b128` (8 rows/lane).
+
+        P47: wraps P11's transposed-read primitives so call sites get a
+        one-line transposed load. ``base_indices`` is a sequence of i32
+        SSA values addressing the tile origin in the LDS allocation;
+        ``rows_per_lane`` selects between the b64 and b128 variants
+        (4 vs 8 fp16/bf16 rows per lane).
+
+        Only supported on ``addr_space == "lds"``; raises for global.
+        """
+        if self.addr_space != "lds":
+            raise ValueError(
+                f"load_vec_tr_at requires addr_space='lds' (got {self.addr_space!r})"
+            )
+        if rows_per_lane == 4:
+            return b.ds_read_tr16_b64(self.base, *base_indices, dtype=self.dtype)
+        if rows_per_lane == 8:
+            return b.ds_read_tr16_b128(self.base, *base_indices, dtype=self.dtype)
+        raise ValueError(
+            f"load_vec_tr_at: rows_per_lane must be 4 or 8 (got {rows_per_lane})"
+        )
 
     def store_vec_at(
         self,

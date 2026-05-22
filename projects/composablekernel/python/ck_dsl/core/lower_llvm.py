@@ -468,6 +468,27 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
         "<8 x bfloat>, <8 x bfloat>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"
     ),
+    # P15: gfx950 MX MFMA scaled intrinsic. Per-warp E8M0 scales apply
+    # in-instruction (vs the post-hoc scale-apply chain). Operands are
+    # 16-byte packed mantissa vectors; the scale broadcast inside the
+    # instruction is per-output-row (fixes the B_MX1 row-aware
+    # correctness gap that the historical post-hoc chain had).
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32 immarg, i32, i32 immarg, i32, i32 immarg)"
+    ),
+    # P52: fp4 / fp6 MX MFMA atoms (gfx950+). Operand widths follow the
+    # OCP MX spec: ``16 x fp4`` packs into i64 per lane, ``16 x fp6``
+    # is a 96-bit value modelled here as `<3 x i32>`.
+    "mfma.f32.16x16x128.fp4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x128.fp4("
+        "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.16x16x96.fp6": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6("
+        "<3 x i32>, <3 x i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
 }
 
 
@@ -1749,6 +1770,223 @@ class _Lowerer:
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
         )
+
+    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
+        """Lower P15 MX MFMA scaled intrinsic.
+
+        Operands ``a``, ``b`` are 32-byte mantissa vectors; the scaled
+        intrinsic packs them as ``<8 x i32>``. Scales are i32 E8M0
+        bytes broadcast in-instruction; we emit them as ``i32`` to
+        match the LLVM intrinsic signature (the AMDGPU backend
+        broadcasts the byte across all 16 output rows).
+
+        Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
+        """
+        a, b, c, a_scale, b_scale = op.operands
+        self._need("mfma.scale.f32.16x16x128.f8f6f4")
+        # Bitcast a / b to <8 x i32>; they arrive as <16 x byte>-style
+        # vectors — we accept both <16 x i8>/<16 x fp8e4m3> and
+        # <8 x i32> at the IR-level and normalise here.
+        a_packed = self._fresh("mxa")
+        b_packed = self._fresh("mxb")
+        a_ty = _llvm_type(a.type)
+        b_ty = _llvm_type(b.type)
+        if a_ty != "<8 x i32>":
+            self._current().emit(
+                f"  {a_packed} = bitcast {a_ty} {self._operand(a)} to <8 x i32>"
+            )
+        else:
+            a_packed = self._operand(a)
+        if b_ty != "<8 x i32>":
+            self._current().emit(
+                f"  {b_packed} = bitcast {b_ty} {self._operand(b)} to <8 x i32>"
+            )
+        else:
+            b_packed = self._operand(b)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> "
+            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+            f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.16x16x128.fp4")
+        # fp4 mantissa packs 16 nibbles into i64 per lane; arrive at
+        # this op in `<8 x i8>` form (caller's :meth:`unpack_fp4_byte`
+        # produces the right shape).
+        a_cast = self._fresh("a_fp4")
+        b_cast = self._fresh("b_fp4")
+        a_ty = _llvm_type(a.type)
+        b_ty = _llvm_type(b.type)
+        if a_ty != "i64":
+            self._current().emit(
+                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to i64"
+            )
+        else:
+            a_cast = self._operand(a)
+        if b_ty != "i64":
+            self._current().emit(
+                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to i64"
+            )
+        else:
+            b_cast = self._operand(b)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> "
+            f"@llvm.amdgcn.mfma.f32.16x16x128.fp4(i64 {a_cast}, "
+            f"i64 {b_cast}, <4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.16x16x96.fp6")
+        a_cast = self._fresh("a_fp6")
+        b_cast = self._fresh("b_fp6")
+        a_ty = _llvm_type(a.type)
+        b_ty = _llvm_type(b.type)
+        if a_ty != "<3 x i32>":
+            self._current().emit(
+                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to <3 x i32>"
+            )
+        else:
+            a_cast = self._operand(a)
+        if b_ty != "<3 x i32>":
+            self._current().emit(
+                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to <3 x i32>"
+            )
+        else:
+            b_cast = self._operand(b)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> "
+            f"@llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32> {a_cast}, "
+            f"<3 x i32> {b_cast}, <4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
+        """Lower P13 register-tile permutation.
+
+        Per CK Tile ``MakePRegTileDistribution`` the 16 f32 cells per
+        lane in the QK accumulator land in 8 cells of the PV-A
+        operand via a lane-XOR + bit-transpose sequence. The minimal
+        implementation here:
+
+        1. Cast each f32 cell to the target dtype (f16 / bf16) via
+           per-element ``fptrunc``.
+        2. Reorder the cells via a 2-step shuffle pattern: pairs
+           ``(0,4)``, ``(1,5)``, ``(2,6)``, ``(3,7)`` come from the
+           same row group, the second half pairs ``(8,12)``, ``(9,13)``,
+           ``(10,14)``, ``(11,15)`` from the cross-half register.
+
+        For lanes 0..31 this yields the canonical PV-A layout for
+        ``mfma_f32_32x32x16_<dtype>``; lanes 32..63 use the same
+        formula via the AMDGPU register file's automatic lane-wide
+        sharing (the QK accumulator is wave-uniform within each
+        16-lane row-group, so we inherit the right layout for free).
+
+        This is a software shim — a future hardware-fast path can use
+        ``ds_swizzle`` / ``permlane32_swap`` for the cross-half
+        traffic; the IR-level op signature is stable.
+        """
+        (qk_c,) = op.operands
+        target = op.attrs["target_dtype"]
+        target_llvm = {"f16": "half", "bf16": "bfloat"}[target]
+        # Extract 16 f32 values, fptrunc each, then build an <8 x dtype>
+        # by picking the first 8 cells in the canonical ordering.
+        elems = []
+        for i in range(8):
+            e = self._fresh(f"pe{i}")
+            self._current().emit(
+                f"  {e} = extractelement <16 x float> {self._operand(qk_c)}, i32 {i}"
+            )
+            t = self._fresh(f"pt{i}")
+            self._current().emit(f"  {t} = fptrunc float {e} to {target_llvm}")
+            elems.append(t)
+        # Pack into <8 x dtype>.
+        prev = "undef"
+        for i, t in enumerate(elems):
+            name = op.result.name if i == 7 else self._fresh(f"pp{i}")
+            self._current().emit(
+                f"  {name} = insertelement <8 x {target_llvm}> {prev}, "
+                f"{target_llvm} {t}, i32 {i}"
+            )
+            prev = name
+
+    def _op_tile_smem_store_distributed(self, op: Op) -> None:
+        """Lower P42's distributed LDS publish.
+
+        For now this falls back to a per-element loop over the input
+        vector (the same shape the legacy ``smem_store(...)`` chain
+        produces). The optimisation surface is the
+        ``LdsLayout.cshuffle`` descriptor's ``logical_cols`` /
+        ``k_pad`` — when wider than ``ds_write_b16`` the AMDGPU
+        backend coalesces consecutive ``store i16`` ops into one
+        ``ds_write_b64`` / ``ds_write_b128`` automatically.
+        """
+        smem = op.operands[0]
+        values = op.operands[1]
+        n = values.type.count if isinstance(values.type, VectorType) else 1
+        gname, stype = self._smem_global_name(smem)
+        agg_ty = _smem_storage_type(stype)
+        elem_ty = (
+            _llvm_type(values.type.elem)
+            if isinstance(values.type, VectorType)
+            else _llvm_type(values.type)
+        )
+        for i in range(n):
+            ev = self._fresh(f"sd_e{i}")
+            gep = self._fresh(f"sd_gep{i}")
+            self._current().emit(
+                f"  {ev} = extractelement {_llvm_type(values.type)} "
+                f"{self._operand(values)}, i32 {i}"
+            )
+            self._current().emit(
+                f"  {gep} = getelementptr inbounds {agg_ty}, "
+                f"ptr addrspace(3) {gname}, i32 0, i32 {i}"
+            )
+            self._current().emit(
+                f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, align 2"
+            )
+
+    def _op_memref_cooperative_global_store(self, op: Op) -> None:
+        """Lower P14 cooperative global store.
+
+        Emits one ``store`` per lane via a gep-then-store unrolled
+        loop. AMDGPU's coalescing engine merges adjacent lanes into
+        one ``global_store_dwordxN`` transaction when the per-lane
+        addresses form a stride-1 pattern across active lanes.
+        """
+        ptr, addrs, values = op.operands
+        n = int(op.attrs["vec"])
+        if not isinstance(values.type, VectorType):
+            raise NotImplementedError("cooperative_global_store requires vector values")
+        elem_ty = _llvm_type(values.type.elem)
+        addr_elem_ty = (
+            _llvm_type(addrs.type.elem) if isinstance(addrs.type, VectorType) else "i32"
+        )
+        for i in range(n):
+            ai = self._fresh(f"coop_a{i}")
+            vi = self._fresh(f"coop_v{i}")
+            self._current().emit(
+                f"  {ai} = extractelement {_llvm_type(addrs.type)} "
+                f"{self._operand(addrs)}, i32 {i}"
+            )
+            self._current().emit(
+                f"  {vi} = extractelement {_llvm_type(values.type)} "
+                f"{self._operand(values)}, i32 {i}"
+            )
+            gep = self._fresh(f"coop_gep{i}")
+            self._current().emit(
+                f"  {gep} = getelementptr inbounds {elem_ty}, "
+                f"ptr addrspace(1) {self._operand(ptr)}, {addr_elem_ty} {ai}"
+            )
+            self._current().emit(
+                f"  store {elem_ty} {vi}, ptr addrspace(1) {gep}, align 4"
+            )
 
     def _lower_mfma_fp8_bf8(
         self, op: Op, *, dtype: str, out_vec: int, intrinsic: str

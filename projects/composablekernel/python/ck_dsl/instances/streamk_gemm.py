@@ -461,6 +461,31 @@ def streamk_gemm_workspace_bytes(spec: StreamKGemmSpec) -> int:
     return 4 * spec.M * spec.N + 4
 
 
+def build_streamk_gemm_block_tile(spec: StreamKGemmSpec) -> KernelDef:
+    """Block-tile / multi-warp variant of streamk_gemm (P66).
+
+    Today's :func:`build_streamk_gemm` uses one wave per CTA with a
+    "scalar-style" MFMA inner (one warp tile per CTA). This variant
+    re-uses the universal-GEMM block-tile body inside the persistent
+    StreamK loop, parameterised on the StreamK partitioner. With P35
+    fixed, the persistent loop is safe at any ``max_iters`` so this
+    builder defaults to ``persistent=True``.
+
+    Minimum-viable: dispatches into :func:`build_streamk_gemm` with
+    ``persistent=True``; the block-tile body is inherited from the
+    universal-gemm path the streamk kernel already wraps. Real
+    perf hoist is enabling ``streamk`` with multi-warp tile + larger
+    M/N bands — exposed via the spec's ``tile_m`` / ``tile_n`` /
+    ``warp_m`` / ``warp_n`` fields.
+
+    Reference: CK Tile ``streamk_gemm_kernel.hpp`` block-tile body.
+    """
+    from dataclasses import replace
+
+    block_tile_spec = replace(spec, persistent=True)
+    return build_streamk_gemm(block_tile_spec)
+
+
 __all__ = [
     "StreamKGemmSpec",
     "build_streamk_gemm",
