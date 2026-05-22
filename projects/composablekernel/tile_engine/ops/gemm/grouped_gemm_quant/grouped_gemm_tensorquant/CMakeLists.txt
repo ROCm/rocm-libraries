@@ -5,7 +5,10 @@ set(GROUPED_GEMM_TENSORQUANT_DATATYPE "fp8;bf8" CACHE STRING "List of datatypes 
 set(GROUPED_GEMM_TENSORQUANT_LAYOUT "rcr" CACHE STRING "List of layout for Grouped TensorQuant GEMM (semicolon-separated)")
 set(GROUPED_GEMM_TENSORQUANT_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 option(ENABLE_CCACHE_GROUPED_GEMM_TENSORQUANT "Enable ccache for Grouped TensorQuant GEMM ops compilation" OFF)
+<<<<<<< HEAD
 set(GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empy = no cap)")
+=======
+>>>>>>> 576a29f912 (add tensorquant to the tile engine)
 
 # Store the directory path for use in functions
 set(GROUPED_GEMM_TENSORQUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -126,6 +129,7 @@ function(build_individual_grouped_gemm_tensorquant_targets datatype layout)
     # Create working directory first
     file(MAKE_DIRECTORY ${working_path})
 
+<<<<<<< HEAD
     # Buld optional args for instance builder
     set(extra_list_args "")
     if(NOT "${GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES}" STREQUAL "")
@@ -139,6 +143,8 @@ function(build_individual_grouped_gemm_tensorquant_targets datatype layout)
         list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
     endif()
 
+=======
+>>>>>>> 576a29f912 (add tensorquant to the tile engine)
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -149,7 +155,10 @@ function(build_individual_grouped_gemm_tensorquant_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${GROUPED_GEMM_TENSORQUANT_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+<<<<<<< HEAD
                 ${extra_list_args}
+=======
+>>>>>>> 576a29f912 (add tensorquant to the tile engine)
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -254,6 +263,7 @@ else()
     add_custom_target(benchmark_grouped_gemm_tensorquant_cshuffle_epilogue)
     add_custom_target(benchmark_grouped_gemm_tensorquant_intrawave_scheduler)
 
+<<<<<<< HEAD
     # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that 
     # sampling fires per-combo rather than being a single cap larger than any combo's 
     # feasible set (which would make sampling a no-op for most combos).
@@ -267,6 +277,8 @@ else()
         endif()
     endif()
 
+=======
+>>>>>>> 576a29f912 (add tensorquant to the tile engine)
     # Build targets for each datatype and layout combination
     foreach(dt IN LISTS GROUPED_GEMM_TENSORQUANT_DATATYPE)
         foreach(l IN LISTS GROUPED_GEMM_TENSORQUANT_LAYOUT)
