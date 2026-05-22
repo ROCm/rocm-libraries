@@ -223,6 +223,20 @@ class ImplicitGemmConvSpec:
     # AMDGPU occupancy hint: emits ``amdgpu-waves-per-eu`` on the
     # kernel attribute list. ``None`` keeps the backend's default.
     waves_per_eu: Optional[int] = None
+    # P87: K0/K1 split for implicit-GEMM conv. Set ``k0_k1_split=True``
+    # to drive :class:`ck_dsl.helpers.loads.CoalescedTileLoader`'s
+    # ``inner_dim`` parameter (P33) so the loader processes whole C
+    # rows contiguously and the MFMA loop iterates ``kk`` over K1
+    # only. ``None`` (default) keeps the legacy flat-K behaviour.
+    k0_k1_split: bool = False
+    # P86: grouped convolution. ``groups > 1`` uses the descriptor
+    # DAG's ``unmerge('group', into=...)`` to recover the per-group
+    # `(C/groups, K/groups)` slabs so each group's GEMM stays
+    # within its own slab. The implementation mirrors CK Tile's
+    # ``GroupedConvolutionForward`` shape; for ``groups == 1`` (the
+    # default) the descriptor reduces to the flat-conv form and the
+    # kernel emits the same code as before.
+    groups: int = 1
 
     @property
     def block_size(self) -> int:

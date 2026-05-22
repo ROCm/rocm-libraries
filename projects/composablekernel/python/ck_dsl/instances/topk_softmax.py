@@ -131,6 +131,15 @@ class TopkSoftmaxSpec:
     out_dtype: DType = "f32"  # output Y dtype
     block_size: int = 64
     name: str = "ck_dsl_topk_softmax"
+    # P91: cross-wave packed argmax for ``block_size > 64``. When
+    # True, the per-wave wave-XOR butterfly produces a packed
+    # ``(val, idx)`` per wave, the per-wave packs land in
+    # ``num_warps``-slot LDS, and wave 0 runs a final XOR butterfly
+    # to merge them. Avoids the O(K * BS) per-thread chain that
+    # the legacy form does for BS > 64. Defaults to False because
+    # the cross-wave merge has higher register pressure on small
+    # BS — opt in for ``block_size in {128, 256}``.
+    cross_wave_argmax: bool = False
 
     @property
     def elems_per_thread(self) -> int:

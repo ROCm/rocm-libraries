@@ -135,12 +135,27 @@ class PermuteSpec:
         global load widths the AMDGPU backend supports for 16-bit
         elements.
         """
-        if self.perm[-1] != self.rank - 1:
+        if self.perm[-1] == self.rank - 1:
+            inner = self.x_shape[-1]
+            for v in (8, 4, 2):
+                if inner % v == 0 and self.total_elements % v == 0:
+                    return v
             return 1
-        inner = self.x_shape[-1]
-        for v in (8, 4, 2):
-            if inner % v == 0 and self.total_elements % v == 0:
-                return v
+        # P84: when ``perm[-1] != rank - 1`` but a *prefix* matches —
+        # i.e., the last few axes permute among themselves while the
+        # leading axes are pass-through — we can still vectorise along
+        # the next-inner output axis with a one-extra-gather pattern.
+        # The simplest sufficient condition is that ``perm[-2] ==
+        # rank - 1``, which means the second-to-last output axis is
+        # the innermost input axis: each lane vec-loads the inner
+        # input row and one extra lane-stride scatter writes the
+        # permuted slot. Match the same divisibility test as the
+        # primary branch.
+        if self.rank >= 2 and self.perm[-2] == self.rank - 1:
+            inner = self.x_shape[-1]
+            for v in (8, 4, 2):
+                if inner % v == 0 and self.total_elements % v == 0:
+                    return v
         return 1
 
     def kernel_name(self) -> str:

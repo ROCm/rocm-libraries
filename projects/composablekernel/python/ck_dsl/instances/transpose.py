@@ -179,8 +179,11 @@ def is_valid_spec(spec: Transpose2DSpec) -> Tuple[bool, str]:
         return ok, why
     if spec.tile_m not in (16, 32, 64) or spec.tile_n not in (16, 32, 64):
         return False, "tile_m/tile_n must be in {16, 32, 64}"
-    if spec.tile_m != spec.tile_n:
-        return False, "non-square tiles not yet supported (set tile_m == tile_n)"
+    # P83: non-square tiles (e.g. 64x16 for the attention reshape ``(M,
+    # head_dim) → (head_dim, M)``) work as long as the LDS staging
+    # buffer fits and the per-thread vec divides the tile area cleanly.
+    # The validator no longer rejects rectangular tiles; the LDS
+    # allocation in the build path already handles ``tile_m != tile_n``.
     if (spec.tile_m * spec.tile_n) % spec.vec:
         return False, "tile area must be divisible by vec"
     if spec.block_size > 1024:
