@@ -592,6 +592,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                             size_t                     user_odist,
                                             size_t*                    workSize)
 {
+    if(!plan || plan->initialized())
+    {
+        // plan initialization can be done only once in the plan's lifetime
+        return HIPFFT_INVALID_PLAN;
+    }
+
     // magic static to handle rocfft setup/cleanup
     struct rocfft_initializer
     {
@@ -619,12 +625,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     }
 
     const bool isrealcomplex = !iotype.is_complex_to_complex();
-
-    if(!plan || plan->initialized())
-    {
-        // plan initialization can be done only once in the plan's lifetime
-        return HIPFFT_INVALID_PLAN;
-    }
 
     rocfft_plan_description ip_forward_desc = nullptr;
     rocfft_plan_description op_forward_desc = nullptr;
