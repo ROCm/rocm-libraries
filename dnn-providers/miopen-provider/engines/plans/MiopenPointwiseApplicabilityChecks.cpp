@@ -29,6 +29,14 @@ void checkPointwiseModeSupported(const PointwiseAttributes& attrs)
             "Pointwise plan builder: unsupported pointwise mode. "
             "Supported modes for standalone pointwise: RELU_FWD");
     }
+
+    if(attrs.relu_lower_clip() && *attrs.relu_lower_clip() != 0.f && !attrs.relu_upper_clip())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Pointwise plan builder: RELU_FWD with non-zero lower_clip and no upper_clip "
+            "is not supported");
+    }
 }
 
 void checkPointwiseTensorsSupported(
@@ -48,6 +56,62 @@ void checkPointwiseTensorsSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Pointwise plan builder: input and output tensors must be non-virtual for a "
             "standalone pointwise operation");
+    }
+
+    const auto inputDtype = inputTensor.data_type();
+    const auto outputDtype = outputTensor.data_type();
+
+    if((inputDtype != DataType::FLOAT && inputDtype != DataType::HALF)
+       || (outputDtype != DataType::FLOAT && outputDtype != DataType::HALF))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Pointwise plan builder: only FLOAT and HALF IO dtypes are supported");
+    }
+
+    if(inputDtype != outputDtype)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Pointwise plan builder: input and output tensors must have the same data type");
+    }
+
+    const auto* inputDims = inputTensor.dims();
+    const auto* outputDims = outputTensor.dims();
+
+    if(inputDims == nullptr || outputDims == nullptr)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Pointwise plan builder: tensor dims are null");
+    }
+
+    const auto rank = inputDims->size();
+
+    if(rank < 1 || rank > 4)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Pointwise plan builder: tensor rank must be between 1 and 4, got "
+                + std::to_string(rank));
+    }
+
+    int64_t inputElementCount = 1;
+    for(flatbuffers::uoffset_t i = 0; i < inputDims->size(); ++i)
+    {
+        inputElementCount *= static_cast<int64_t>((*inputDims)[i]);
+    }
+
+    int64_t outputElementCount = 1;
+    for(flatbuffers::uoffset_t i = 0; i < outputDims->size(); ++i)
+    {
+        outputElementCount *= static_cast<int64_t>((*outputDims)[i]);
+    }
+
+    if(inputElementCount != outputElementCount)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Pointwise plan builder: input and output tensors must have the same element count");
     }
 }
 
