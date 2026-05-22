@@ -29,6 +29,7 @@ __device__ T* cast_pointer_to_generic_address_space(T CK_CONSTANT_ADDRESS_SPACE*
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
     return (T*)p; // NOLINT(old-style-cast)
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -44,6 +45,7 @@ __host__ __device__ T CK_CONSTANT_ADDRESS_SPACE* cast_pointer_to_constant_addres
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
     return (T CK_CONSTANT_ADDRESS_SPACE*)p; // NOLINT(old-style-cast)
 #ifdef __clang__
 #pragma clang diagnostic pop

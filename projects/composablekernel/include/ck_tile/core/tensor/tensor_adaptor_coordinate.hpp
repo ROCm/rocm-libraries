@@ -353,6 +353,7 @@ struct CK_PRINT_X_<str_literal<PREFIXChars...>, str_literal<SUFFIXChars...>>
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
         printf(fmt_wrap_v.data, get_thread_id(), args..., targs.at(number<Is>())...);
 #ifdef __clang__
 #pragma clang diagnostic pop

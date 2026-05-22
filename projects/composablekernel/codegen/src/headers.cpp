@@ -11,6 +11,7 @@ namespace host {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wglobal-constructors"
+#endif
 const std::string config_header = "";
 #ifdef __clang__
 #pragma clang diagnostic pop

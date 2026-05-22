@@ -23,6 +23,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 extern ck::index_t param_mask;
 extern ck::index_t instance_index;
 

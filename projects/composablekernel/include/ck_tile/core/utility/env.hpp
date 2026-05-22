@@ -113,8 +113,10 @@ struct EnvVar
         is_unset = false;
         value    = val;
     }
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     explicit EnvVar(const char* const name, const T& def_val)
     {
         // NOLINTNEXTLINE (concurrency-mt-unsafe)

@@ -510,7 +510,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
         auto print          = [&curFunc](const char* format, ...) -> void {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
-#if defined(__clang__)
+
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
@@ -520,10 +520,9 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
                 va_start(args, format);
                 std::vfprintf(stdout, format, args);
                 va_end(args);
-#if defined(__clang__)
+
 #ifdef __clang__
 #pragma clang diagnostic pop
-#endif
 #endif
                 std::cout << "In file: " << __FILE__ << ", function: " << curFunc << "\n";
             }

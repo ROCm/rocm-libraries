@@ -55,6 +55,7 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wuninitialized"
+#endif
                 vec_t x;
                 x = __builtin_amdgcn_cvt_scalef32_pk_fp4_f32(
                     x,
@@ -127,6 +128,7 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wuninitialized"
+#endif
                 vec_t x;
                 if constexpr(std::is_same_v<DstDataType, fp8_t>)
                 {

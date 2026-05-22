@@ -19,7 +19,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
-
+#endif
 struct GemmWarpConfig_Mfma
 {
     static constexpr ck_tile::index_t M_Warp_Tile = 32;

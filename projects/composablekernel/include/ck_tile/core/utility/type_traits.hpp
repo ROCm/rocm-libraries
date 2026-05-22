@@ -124,6 +124,7 @@ CK_TILE_HOST_DEVICE PY c_style_pointer_cast([[clang::lifetimebound]] PX p_x)
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wcast-align"
+#endif
     return (PY)p_x; // NOLINT(old-style-cast, cast-align)
 #ifdef __clang__
 #pragma clang diagnostic pop

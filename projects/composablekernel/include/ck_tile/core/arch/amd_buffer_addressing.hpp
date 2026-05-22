@@ -110,6 +110,7 @@ struct buffer_store_if;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-reinterpret-cast"
+#endif
 // TODO: strict aliasing rule seems fail when reinterpret_cast between vector type
 // (exp_vector_type(xxx))
 
@@ -1924,6 +1925,7 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
     // Use C-style cast to change address space without dropping llvm noalias attribute
     llvm_amdgcn_raw_buffer_load_lds(src_wave_buffer_resource,
                                     (as3_uint32_ptr)(smem),
@@ -3028,6 +3030,7 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
     // Use C-style cast to change address space without dropping llvm noalias attribute
     const auto in_ptr_ = (__LDS_ADDR T*)(const_cast<T*>(in_ptr));
 #ifdef __clang__
@@ -3089,7 +3092,7 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
                                             static_cast<index_t>(coherence));
     }
 #else
-        ignore = descriptor;
+    ignore = descriptor;
 #endif
 }
 
@@ -3121,7 +3124,7 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
                                                static_cast<index_t>(coherence));
     }
 #else
-        ignore = descriptor;
+    ignore = descriptor;
 #endif
 }
 

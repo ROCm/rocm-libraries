@@ -94,6 +94,7 @@ std::string MakeTuple(const std::vector<std::string>& v);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wglobal-constructors"
+#endif
 template <int... xs>
 const std::string S = SequenceStr({xs...});
 #ifdef __clang__

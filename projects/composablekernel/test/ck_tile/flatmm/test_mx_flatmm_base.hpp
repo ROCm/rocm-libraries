@@ -207,6 +207,7 @@ class TestMXFlatmmBase : public ::testing::Test
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-func-template"
+#endif
         BaseFlatmmPipeline::template TailHandler<true>(
             [&](auto has_hot_loop_, auto tail_num_) {
                 constexpr auto has_hot_loop_v = has_hot_loop_.value;

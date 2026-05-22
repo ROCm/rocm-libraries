@@ -125,7 +125,7 @@ using trait_{F_idx} = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wtautological-compare"
-
+#endif
 namespace {{
 template <bool kHasUnevenSplits>
 void run_instance(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a) {{

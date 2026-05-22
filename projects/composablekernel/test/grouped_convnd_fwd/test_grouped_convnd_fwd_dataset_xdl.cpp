@@ -15,6 +15,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 using namespace ck::tensor_layout::convolution; // Import tensor layout names (NHWGC, GKYXC, etc.)
 static ck::index_t param_mask     = 0xffff;
 static ck::index_t instance_index = -1;
