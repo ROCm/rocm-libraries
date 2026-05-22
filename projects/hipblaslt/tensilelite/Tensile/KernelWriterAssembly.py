@@ -4570,8 +4570,18 @@ class KernelWriterAssembly(KernelWriter):
     module.add(Label("sebB%s"%tc,""))
     module.addComment1("Tail-loop boundary DTL load for %s (Option C1: v_cmp + readlane)" % tc)
 
+    skipLabel = Label(self.labels.getNameInc("tailBoundarySkip%s" % tc), "")
+
     with self.allocTmpSgpr(6, 2) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
+      # --- Runtime gate: skip boundary load when K_rem is even ------------
+      # For even K_rem the regular dwordx4 + boundaryMask path is complete;
+      # this load is redundant and would corrupt LDS (v_cmp on a stale target
+      # can ff1 onto the wrong lane). Only odd K_rem has a trailing 16-bit.
+      module.add(SAndB32(dst=sgpr(stmp+0), src0=sgpr(loopCounterName), src1=hex(1),
+                         comment="K_rem & 1 (SCC=1 if odd)"))
+      module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                              comment="K_rem even -> skip boundary load"))
       # stmp+0 : sTarget       (numLine*stride*bpe + alignedK_byte - soffset)
       # stmp+1 : K_rem - 1     (then intra_K_byte, aligned_K_byte)
       # stmp+2 : numLine
@@ -4678,6 +4688,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SBarrier())
       self.vgprPool.checkIn(vTmp)
 
+    module.add(skipLabel)
     return module
 
   ##############################################################################
