@@ -82,7 +82,9 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_scan.hpp"
 #include "device/device_select.hpp"
-#include "device/device_topk.hpp"
+#ifdef ROCPRIM_WITH_TOPK
+    #include "device/device_topk.hpp"
+#endif // ROCPRIM_WITH_TOPK
 #include "device/device_transform.hpp"
 
 /// \brief The top level rocPRIM namespace.
