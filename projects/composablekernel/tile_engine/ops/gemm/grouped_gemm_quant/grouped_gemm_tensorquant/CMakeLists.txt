@@ -5,6 +5,7 @@ set(GROUPED_GEMM_TENSORQUANT_DATATYPE "fp8;bf8" CACHE STRING "List of datatypes 
 set(GROUPED_GEMM_TENSORQUANT_LAYOUT "rcr" CACHE STRING "List of layout for Grouped TensorQuant GEMM (semicolon-separated)")
 set(GROUPED_GEMM_TENSORQUANT_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 option(ENABLE_CCACHE_GROUPED_GEMM_TENSORQUANT "Enable ccache for Grouped TensorQuant GEMM ops compilation" OFF)
+set(GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empy = no cap)")
 
 # Store the directory path for use in functions
 set(GROUPED_GEMM_TENSORQUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -125,6 +126,19 @@ function(build_individual_grouped_gemm_tensorquant_targets datatype layout)
     # Create working directory first
     file(MAKE_DIRECTORY ${working_path})
 
+    # Buld optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -135,6 +149,7 @@ function(build_individual_grouped_gemm_tensorquant_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${GROUPED_GEMM_TENSORQUANT_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -238,6 +253,19 @@ else()
     add_custom_target(benchmark_grouped_gemm_tensorquant_compv3_pipeline)
     add_custom_target(benchmark_grouped_gemm_tensorquant_cshuffle_epilogue)
     add_custom_target(benchmark_grouped_gemm_tensorquant_intrawave_scheduler)
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that 
+    # sampling fires per-combo rather than being a single cap larger than any combo's 
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GROUPED_GEMM_TENSORQUANT_DATATYPE num_datatypes)
+        list(LENGTH GROUPED_GEMM_TENSORQUANT_LAYOUT num_layouts)
+        math(EXPR total_combos "${num_datatypes} * ${num_layouts}")
+        if(total_combos GREATER 0)
+            math(EXPR GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES "${GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES} / ${total_combos}")
+            message(STATUS "    grouped_gemm_tensorquant: per-combo budget = ${GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES} (${total_combos} combos)")
+        endif()
+    endif()
 
     # Build targets for each datatype and layout combination
     foreach(dt IN LISTS GROUPED_GEMM_TENSORQUANT_DATATYPE)
