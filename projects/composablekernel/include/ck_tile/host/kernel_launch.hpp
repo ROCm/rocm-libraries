@@ -15,7 +15,7 @@
 #include <cstddef>
 #include <hip/hip_runtime.h>
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -376,6 +376,6 @@ CK_TILE_HOST float launch_kernel_time_mask_flush_cache(const stream_config& s,
 
 } // namespace ck_tile
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

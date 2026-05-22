@@ -22,7 +22,7 @@
 #define CK_TILE_FMHA_ENABLE_HEAD_GROUPING 1
 #endif
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -432,6 +432,6 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
 
 } // namespace fmha_fwd_head_grouping
 #endif // CK_TILE_FMHA_ENABLE_HEAD_GROUPING
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

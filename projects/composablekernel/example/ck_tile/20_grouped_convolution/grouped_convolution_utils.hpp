@@ -15,7 +15,7 @@
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 #include "conv_configs.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -164,6 +164,6 @@ struct InvokerResult
     float ave_time;
     ck_tile::index_t split_k;
 };
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

@@ -23,7 +23,7 @@
 #include <utility>
 #endif
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -391,7 +391,7 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
 }
 
 } // namespace ck_tile::core::arch::mma
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 

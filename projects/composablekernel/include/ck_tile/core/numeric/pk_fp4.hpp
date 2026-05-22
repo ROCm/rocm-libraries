@@ -12,7 +12,7 @@
 #include "ck_tile/core/numeric/mxfp_scale.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -737,6 +737,6 @@ CK_TILE_HOST_DEVICE constexpr bf8x2_t pk_fp4_t::to_bf8x2(float scale) const
 }
 
 } // namespace ck_tile
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

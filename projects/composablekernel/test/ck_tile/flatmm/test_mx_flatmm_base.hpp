@@ -203,7 +203,7 @@ class TestMXFlatmmBase : public ::testing::Test
             // mx_flatmm_calc is explicitly instantiated in the linked object library;
             // suppress the -Wundefined-func-template warning that fires when the
             // compiler sees only the forward declaration in mx_flatmm.hpp.
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-func-template"
@@ -234,7 +234,7 @@ class TestMXFlatmmBase : public ::testing::Test
             },
             has_hot_loop,
             tail_num);
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 

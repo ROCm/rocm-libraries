@@ -18,7 +18,7 @@
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/library/utility/numeric.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -1590,7 +1590,7 @@ struct DeviceConvNdBwdDataNwcKxcNwk_Xdl
 } // namespace tensor_operation
 } // namespace ck
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 

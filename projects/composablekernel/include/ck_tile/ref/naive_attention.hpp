@@ -9,7 +9,7 @@
 #include <thread>
 #include <string>
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -829,6 +829,6 @@ CK_TILE_HOST float naive_attention_fwd(naive_attention_fwd_traits t,
 #undef CK_TILE_DISPATCH_NAIVE_ATTEN_FWD_INTERNAL_
 
 } // namespace ck_tile
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <map>
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -88,7 +88,7 @@ struct EnvVar
         is_unset = false;
         value    = val;
     }
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
@@ -106,7 +106,7 @@ struct EnvVar
             value = def_val;
         }
     }
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 };
@@ -199,7 +199,7 @@ void UpdateEnvVar(EnvVar, const std::string_view& val)
 // environment variable to enable logging:
 // export CK_LOGGING=ON or CK_LOGGING=1 or CK_LOGGING=ENABLED
 CK_DECLARE_ENV_VAR_BOOL(CK_LOGGING)
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 #endif

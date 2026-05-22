@@ -12,7 +12,7 @@
 
 #include "ck/library/utility/convolution_parameter.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -249,6 +249,6 @@ inline bool load_and_populate_test_cases(const std::vector<std::string>& csv_pat
 
 } // namespace test
 } // namespace ck
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

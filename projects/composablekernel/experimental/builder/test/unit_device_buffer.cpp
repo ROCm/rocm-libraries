@@ -50,7 +50,7 @@ TEST(DeviceBuffer, AutoFree)
 
     // In this test we are explicitly testing a pointer that is out of scope, so
     // we have to disable the clang compiler's lifestime safety checks.
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-permissive"
@@ -62,7 +62,7 @@ TEST(DeviceBuffer, AutoFree)
 
     // Trying to use a pointer after freeing should return en error in HIP.
     EXPECT_THAT(hipMemset(ptr, 0xFF, size), HipError(hipErrorInvalidValue));
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 

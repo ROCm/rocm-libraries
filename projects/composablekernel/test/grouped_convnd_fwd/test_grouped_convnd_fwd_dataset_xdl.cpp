@@ -11,7 +11,7 @@
 #include "profiler/profile_grouped_conv_fwd_impl.hpp" // The actual GPU profiler that does convolution work
 #include "../common/csv_test_loader.hpp"              // Shared CSV test case loader
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -198,6 +198,6 @@ int main(int argc, char** argv)
     }
     return RUN_ALL_TESTS();
 }
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

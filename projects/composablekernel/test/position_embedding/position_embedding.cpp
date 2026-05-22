@@ -9,7 +9,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -218,6 +218,6 @@ int main()
     // clang-format on
     return rtn ? 0 : -1;
 }
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

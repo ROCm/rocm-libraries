@@ -8,7 +8,7 @@
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/container/tuple.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -162,6 +162,6 @@ CK_TILE_HOST_DEVICE static void print(const map<key, data, max_size>& m)
 }
 
 } // namespace ck_tile
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

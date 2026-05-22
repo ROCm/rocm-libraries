@@ -14,7 +14,7 @@
 
 #include <hip/hip_runtime.h>
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -584,6 +584,6 @@ struct GroupedGemmKernel
 
 } // namespace ck_tile
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

@@ -5,7 +5,7 @@
 
 #include "ck_tile/core.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -229,6 +229,6 @@ struct AQPickerCommon : public BlockGemmQuantBase
     float scale_reg_f = 0.0f;
 };
 } // namespace ck_tile
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

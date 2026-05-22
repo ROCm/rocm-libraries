@@ -90,14 +90,14 @@ std::string SequenceStr(const std::vector<int>& v);
 
 std::string MakeTuple(const std::vector<std::string>& v);
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
 template <int... xs>
 const std::string S = SequenceStr({xs...});
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 

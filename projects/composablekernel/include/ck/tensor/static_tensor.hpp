@@ -4,7 +4,7 @@
 #ifndef CK_STATIC_TENSOR_HPP
 #define CK_STATIC_TENSOR_HPP
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -275,7 +275,7 @@ __host__ __device__ constexpr auto make_static_tensor(TensorDesc, X invalid_elem
 }
 
 } // namespace ck
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 #endif

@@ -12,7 +12,7 @@
 #include "ck/utility/functional.hpp"
 #include "ck/utility/math.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -1028,7 +1028,7 @@ using uniform_sequence_gen_t = typename uniform_sequence_gen<NSize, I>::type;
 
 } // namespace ck
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 

@@ -9,7 +9,7 @@
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -347,6 +347,6 @@ concept MmaPipelineInterface = std::derived_from<Derived, MmaPipelineBase<Flags,
 
 } // namespace ck_tile::core::arch::mma
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

@@ -7,7 +7,7 @@
 
 #include "ck/ck.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -86,6 +86,6 @@ assign_default_strides(Col, std::vector<ck::index_t>& strides, std::vector<ck::i
         stride *= dims[s];
     }
 }
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

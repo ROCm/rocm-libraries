@@ -169,7 +169,7 @@ struct FlatmmSn_32x128x512_1x4x1_16x16x32_BF16 : public FlatmmSn_32x128x512_1x4x
 
         // B nr->kr
         // clang-format off
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Winline-asm"
@@ -312,7 +312,7 @@ struct FlatmmSn_32x128x512_1x4x1_16x16x32_BF16 : public FlatmmSn_32x128x512_1x4x
           "v244", "v245", "v246", "v247", "v248", "v249", "v250", "v251",
           "v252", "v253", "v254", "v255"
         );
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
         // clang-format on
@@ -418,7 +418,7 @@ struct FlatmmSn_32x128x512_1x4x1_16x16x32_FP16 : public FlatmmSn_32x128x512_1x4x
 
         // B nr->kr
         // clang-format off
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Winline-asm"
@@ -561,7 +561,7 @@ struct FlatmmSn_32x128x512_1x4x1_16x16x32_FP16 : public FlatmmSn_32x128x512_1x4x
           "v244", "v245", "v246", "v247", "v248", "v249", "v250", "v251",
           "v252", "v253", "v254", "v255"
         );
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
         // clang-format on

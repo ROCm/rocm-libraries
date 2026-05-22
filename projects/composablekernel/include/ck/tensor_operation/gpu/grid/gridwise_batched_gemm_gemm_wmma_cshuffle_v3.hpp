@@ -511,7 +511,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
@@ -521,7 +521,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
                 std::vfprintf(stdout, format, args);
                 va_end(args);
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
                 std::cout << "In file: " << __FILE__ << ", function: " << curFunc << "\n";

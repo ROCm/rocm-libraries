@@ -9,7 +9,7 @@
 #include "ck/utility/enable_if.hpp"
 #include <tuple>
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -276,6 +276,6 @@ using tuple_element_or_t = typename detail::tuple_element_or_impl<N, Tuple, Defa
 
 } // namespace ck
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

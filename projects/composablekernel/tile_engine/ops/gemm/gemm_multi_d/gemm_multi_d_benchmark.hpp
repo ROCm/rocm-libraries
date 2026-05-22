@@ -13,7 +13,7 @@
 #include "ck_tile/host.hpp"
 #include "gemm/gemm_benchmark.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -75,6 +75,6 @@ void gemm_multi_d_host_reference(int verify,
             a_m_k, b_k_n, {d0_m_n, d1_m_n}, c_m_n_host_result);
     }
 }
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

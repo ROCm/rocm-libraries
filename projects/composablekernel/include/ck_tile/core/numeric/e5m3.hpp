@@ -5,7 +5,7 @@
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/scale_util.hpp"
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 #endif
@@ -95,6 +95,6 @@ CK_TILE_HOST_DEVICE e5m3_bexp_t::operator float() const
 }
 
 } // namespace ck_tile
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

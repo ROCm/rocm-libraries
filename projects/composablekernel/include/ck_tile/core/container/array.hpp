@@ -12,7 +12,7 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -290,6 +290,6 @@ CK_TILE_HOST_DEVICE constexpr auto to_array(const X& x)
 
 } // namespace ck_tile
 
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif

@@ -14,13 +14,13 @@ namespace ck_tile {
 template <typename T>
 CK_TILE_DEVICE __attribute__((address_space(1))) T* to_global(const T* ptr)
 {
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wcast-qual"
 #endif
     return (__attribute__((address_space(1))) T*)(ptr);
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 }
@@ -28,12 +28,12 @@ CK_TILE_DEVICE __attribute__((address_space(1))) T* to_global(const T* ptr)
 template <typename T>
 CK_TILE_DEVICE __attribute__((address_space(3))) T* to_lds(T* ptr)
 {
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     return (__attribute__((address_space(3))) T*)(ptr);
-#ifdef __clang__
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
 }
