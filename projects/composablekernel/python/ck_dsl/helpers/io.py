@@ -32,9 +32,13 @@ __all__ = [
     "load_scalar_as_f32",
     "load_vec",
     "load_vec_as_f32",
+    "pack_f32_to",
+    "pack_quant_chunk_f32",
+    "store_packed_chunk",
     "store_scalar",
     "store_scalar_from_f32",
     "store_vec",
+    "vector_row_copy",
 ]
 
 
@@ -159,3 +163,107 @@ def pack_f32_to(b: IRBuilder, scalars_f32: list[Value], *, dtype: str) -> Value:
     target = io_ir_type(dtype)
     casts = [b.cast_f32_to(v, target) for v in scalars_f32]
     return b.vec_pack(casts, target)
+
+
+def vector_row_copy(
+    b: IRBuilder,
+    *,
+    src: Value,
+    dst: Value,
+    src_base: Value,
+    dst_base: Value,
+    H: int,
+    dtype: str,
+    vec_bytes: int = 16,
+) -> None:
+    """Vectorised row copy along a head / hidden dimension.
+
+    Promotes the inline ``_copy_row_vec`` from
+    :mod:`ck_dsl.instances.fmha_appendkv` into a shared helper so the
+    same 16-byte-vector pattern can be reused by ``moe_gather`` and
+    ``fmha_bwd`` postlude.
+
+    The copy issues ``H // (vec_bytes / sizeof(elem))`` aligned vmem
+    transactions plus a scalar tail for any residual elements; the
+    AMDGPU backend coalesces the vector form into a single
+    ``buffer_load_dwordx4`` + ``buffer_store_dwordx4`` pair when
+    pointer alignment supports it. Matches CK Tile's
+    ``store_tile(k_dram_block_window, knew_tile)`` semantics in
+    ``include/ck_tile/ops/fmha/pipeline/block_fmha_fwd_appendkv_pipeline.hpp``.
+    """
+    ty = io_ir_type(dtype)
+    elem_bytes = 2  # f16 / bf16 storage width
+    vec = vec_bytes // elem_bytes
+    if vec not in (2, 4, 8):
+        raise ValueError(
+            f"vector_row_copy: vec_bytes {vec_bytes} maps to vec={vec}; "
+            "expected 4/8/16-byte aligned"
+        )
+    n_chunks = H // vec
+    for c in range(n_chunks):
+        d = c * vec
+        src_addr = b.add(src_base, b.const_i32(d))
+        dst_addr = b.add(dst_base, b.const_i32(d))
+        v = b.global_load_vN(src, src_addr, ty, vec, align=vec * elem_bytes)
+        b.global_store_vN(dst, dst_addr, v, vec, align=vec * elem_bytes)
+    for d in range(n_chunks * vec, H):
+        s = load_scalar_as_f32(b, src, b.add(src_base, b.const_i32(d)), dtype=dtype)
+        store_scalar_from_f32(b, dst, b.add(dst_base, b.const_i32(d)), s, dtype=dtype)
+
+
+def pack_quant_chunk_f32(
+    b: IRBuilder,
+    chunk_f32: list[Value],
+    *,
+    qdtype: str,
+) -> Value:
+    """Pack a list of 4 f32 scalars into a single packed quant vector.
+
+    Promotes the inline ``_pack_quant_chunk_f32`` from
+    :mod:`ck_dsl.instances.smoothquant` (and the duplicate copy in
+    :mod:`ck_dsl.instances.moe_smoothquant`) into a shared helper.
+
+    Routes through the matching packed cvt primitive on the IR:
+
+    * ``"fp8e4m3"`` / ``"fp8"`` — :meth:`IRBuilder.cvt_pk_fp8_f32x4`
+    * ``"bf8e5m2"`` / ``"bf8"`` — :meth:`IRBuilder.cvt_pk_bf8_f32x4`
+    * ``"i8"`` — :meth:`IRBuilder.cvt_pk_i8_f32x4` (P09)
+
+    The caller still owns the scale-multiply + clamp prelude (see
+    :func:`ck_dsl.helpers.quant.quantize_scalar_f32`); this helper
+    only does the packed cvt over a chunk of 4 f32 scalars.
+    """
+    if len(chunk_f32) != 4:
+        raise ValueError(
+            f"pack_quant_chunk_f32 expects exactly 4 f32 scalars, got {len(chunk_f32)}"
+        )
+    from ..core.ir import F32
+
+    vec_in = b.vec_pack(chunk_f32, F32)
+    if qdtype in ("fp8", "fp8e4m3"):
+        return b.cvt_pk_fp8_f32x4(vec_in)
+    if qdtype in ("bf8", "bf8e5m2"):
+        return b.cvt_pk_bf8_f32x4(vec_in)
+    if qdtype == "i8":
+        return b.cvt_pk_i8_f32x4(vec_in)
+    raise ValueError(
+        f"pack_quant_chunk_f32: unsupported qdtype {qdtype!r}; expected fp8 / bf8 / i8"
+    )
+
+
+def store_packed_chunk(
+    b: IRBuilder,
+    *,
+    dst: Value,
+    dst_base: Value,
+    packed_vec: Value,
+) -> None:
+    """Store a 4-byte packed quant vector to global memory.
+
+    Companion to :func:`pack_quant_chunk_f32`: takes the ``<4 x i8>``
+    /``<4 x fp8e4m3>`` / ``<4 x bf8e5m2>`` produced by the cvt and
+    emits a single 4-byte global store. AMDGPU's backend coalesces
+    adjacent lanes' chunks into one ``global_store_dwordx<N>``
+    transaction when alignments line up.
+    """
+    b.global_store_vN(dst, dst_base, packed_vec, 4, align=4)

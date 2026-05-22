@@ -51,8 +51,10 @@ __all__ = [
     "decode_mfma_lanes",
     "load_a_row_major_contiguous",
     "load_b_col_strided_scalars",
-    "mfma_k_loop",
     "mfma_atom_for_dtype",
+    "mfma_k_loop",
+    "mfma_k_loop_dynamic_K",
+    "store_acc_to_global",
 ]
 
 
@@ -124,12 +126,20 @@ def mfma_atom_for_dtype(
                 MfmaAtom.f16_32x32x16() if prefer_packed_k else MfmaAtom.f16_32x32x8()
             )
     if dtype_in == "bf16":
-        # bf16 atoms aren't in the MfmaAtom factory yet -- v2 follow-on
-        # adds them once the bf16 MFMA intrinsics land in IRBuilder.
-        raise NotImplementedError(
-            "bf16 MFMA atom factories not exposed yet; use the f16 atoms "
-            "by converting bf16 operands first"
-        )
+        # P53: bf16 atoms now ship in :mod:`ck_dsl.helpers.atoms` and the
+        # MFMA intrinsics (``mfma_f32_*_bf16``) are wired up in
+        # :class:`IRBuilder`. The 32x32x8 bf16 atom is unavailable
+        # (the LLVM intrinsic uses the ``_1k`` shape that takes
+        # ``<4 x i16>``-bitcast operands; we ship the K-packed
+        # ``32x32x16`` instead which is the canonical hero).
+        if (m, n) == (16, 16):
+            return (
+                MfmaAtom.bf16_16x16x32()
+                if prefer_packed_k
+                else MfmaAtom.bf16_16x16x16()
+            )
+        if (m, n) == (32, 32):
+            return MfmaAtom.bf16_32x32x16()
     if dtype_in == "fp8e4m3":
         if (m, n) == (16, 16):
             return MfmaAtom.fp8_16x16x32()
@@ -292,6 +302,50 @@ def mfma_k_loop(
     return kloop.results[0]
 
 
+def mfma_k_loop_dynamic_K(
+    b: IRBuilder,
+    *,
+    K_runtime: Value,
+    atom: MfmaAtom,
+    load_a: Callable[[IRBuilder, Value], Value],
+    load_b: Callable[[IRBuilder, Value], Value],
+    per_tile_post_mfma: Optional[Callable[[IRBuilder, Value, Value], Value]] = None,
+    initial_acc: Optional[Value] = None,
+    iv_name: str = "kt",
+    acc_name: str = "acc",
+) -> Value:
+    """Runtime-K variant of :func:`mfma_k_loop`.
+
+    Identical body to :func:`mfma_k_loop` but the K-loop trip count
+    is taken from a runtime ``K_runtime`` value (i32), not a
+    compile-time ``K`` int. Required by single-launch grouped-GEMM
+    (P58) where each group has its own ``K[g]``; the standard
+    compile-time-K loop can't dispatch the groups in one device
+    kernel because the trip count isn't known until kernel runtime.
+
+    The caller is responsible for ensuring ``K_runtime`` is a
+    multiple of ``atom.k`` at every group's runtime; the helper does
+    not emit a divisibility check.
+    """
+    acc0 = initial_acc if initial_acc is not None else atom.zero_acc(b)
+    n_tiles = b.div(K_runtime, b.const_i32(atom.k))
+    kloop = b.scf_for_iter(
+        b.const_i32(0),
+        n_tiles,
+        b.const_i32(1),
+        [(acc_name, acc0)],
+        iv_name=iv_name,
+    )
+    with kloop as (kt, (acc_v,)):
+        a_vec = load_a(b, kt)
+        b_vec = load_b(b, kt)
+        new_acc = atom.emit(b, a_vec, b_vec, acc_v)
+        if per_tile_post_mfma is not None:
+            new_acc = per_tile_post_mfma(b, new_acc, kt)
+        b.scf_yield(new_acc)
+    return kloop.results[0]
+
+
 def store_acc_to_global(
     b: IRBuilder,
     *,
@@ -304,6 +358,12 @@ def store_acc_to_global(
     N: int,
     out_dtype: str = "f16",
     atomic_add: bool = False,
+    epilogue: Optional[
+        Callable[
+            [IRBuilder, MfmaAtom, "LaneDecode", Value, Value, Value, Value, int, str],
+            None,
+        ]
+    ] = None,
 ) -> None:
     """Write a per-lane MFMA accumulator to global ``C`` in row-major.
 
@@ -313,11 +373,26 @@ def store_acc_to_global(
     Pass ``atomic_add=True`` to perform ``atomic_add(C[i], val)``
     instead of a plain store (StreamK split-K).
 
+    P39: pass ``epilogue=`` to route the per-lane accumulator through
+    a custom epilogue (e.g. :class:`ck_dsl.helpers.epilogues.
+    CShuffleEpilogue`) instead of the default per-cell scalar store.
+    The callback signature is::
+
+        epilogue(b, atom, lane_decode, C, m_tile_base, n_tile_base,
+                 acc, N, out_dtype)
+
+    and it owns the entire write-back. When ``epilogue`` is supplied,
+    ``atomic_add`` is ignored (the callback handles atomicity if
+    needed).
+
     The atom's :meth:`lane_to_output` returns the per-lane
     (row_in_atom, col_in_atom) for accumulator slot ``i``; combined
     with the tile base offsets, each lane writes ``c_per_lane`` output
     cells.
     """
+    if epilogue is not None:
+        epilogue(b, atom, lane_decode, C, m_tile_base, n_tile_base, acc, N, out_dtype)
+        return
     out_dtype_ir = F32 if out_dtype == "f32" else _ir_type_for_dtype(out_dtype)
     for i in range(atom.c_per_lane):
         row_in, col_in = atom.lane_to_output(b, lane_decode.lane, i)

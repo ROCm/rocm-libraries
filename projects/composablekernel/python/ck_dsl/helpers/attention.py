@@ -500,15 +500,24 @@ def binary_search_seq_idx(
     *,
     block_q: int,
     iterations: int,
+    per_token: bool = False,
 ) -> Value:
     """Triton-style binary search for the seq_idx for this q_block.
 
     Mirrors ``aiter.ops.triton.attention.unified_attention``'s
-    ``find_seq_idx(use_q_block_mode=True)`` -- the loop invariant is
-    ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the cumulative Q-block
-    count up to sequence ``i``). The caller specializes ``iterations``
-    from the known problem batch size; 32 is a safe fallback for
-    unspecialized tests.
+    ``find_seq_idx``. By default (``per_token=False``) the loop
+    invariant is ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the
+    cumulative Q-block count up to sequence ``i``). The caller
+    specializes ``iterations`` from the known problem batch size;
+    32 is a safe fallback for unspecialized tests.
+
+    P49: ``per_token=True`` switches to per-token mode
+    (``cu_q[s] <= q_token < cu_q[s+1]``) used by ``fmha_paged_prefill``,
+    ``fmha_appendkv``, and ``attention_unified``'s scalar oracle.
+    The Q dimension passed in is interpreted as a token index (not a
+    block index) and the BLOCK_Q divisor / iterator-add is dropped so
+    the search compares raw token ranges. Mirrors AITER's
+    ``find_seq_idx(use_q_block_mode=False)``.
     """
     bq = b.const_i32(block_q)
     loop = b.scf_for_iter(
@@ -522,9 +531,78 @@ def binary_search_seq_idx(
         done = b.cmp_ge(left, right)
         mid = b.div(b.add(left, right), b.const_i32(2))
         val = b.global_load_i32(cu_q, mid)
-        mid_val = b.add(b.div(val, bq), mid)
+        if per_token:
+            # ``mid_val = cu_q[mid]`` -- find the largest s with
+            # ``cu_q[s] <= q_token``.
+            mid_val = val
+        else:
+            mid_val = b.add(b.div(val, bq), mid)
         le = b.cmp_le(mid_val, q_block_global_idx)
         nl = b.select(le, b.add(mid, b.const_i32(1)), left)
         nr = b.select(le, right, mid)
         b.scf_yield(b.select(done, left, nl), b.select(done, right, nr))
     return b.sub(loop.results[0], b.const_i32(1))
+
+
+def pv32_v_load_paired(
+    b: IRBuilder,
+    *,
+    V_lds: Value,
+    v_buf: Value,
+    n: int,
+    k: int,
+    lane_half32: Value,
+    lane_col32: Value,
+    dtype: Type,
+) -> Value:
+    """Promoted 32x32x16 PV V-load (P50): two paired ``ds_read_tr16_b64``
+    + concat → ``<8 x dtype>`` per lane.
+
+    Reference inlined version at ``instances/attention_tiled_2d.py:
+    2610-2666`` (TRANSPOSED_HALF_LOCAL_PV branch). Same lane-layout
+    arithmetic, just lifted into a callable so the future P12 / P47
+    swap to ``ds_read_b128_tr_b16`` is a one-line edit at every call
+    site.
+
+    Inputs:
+
+    * ``V_lds`` — LDS allocation token holding the V tile.
+    * ``v_buf`` — i32 selector for the active V buffer (ping-pong /
+      double-buffer index).
+    * ``n`` / ``k`` — Python-int N-tile and K-tile indices for this
+      atom's slot.
+    * ``lane_half32`` / ``lane_col32`` — i32 SSA values produced by
+      the kernel's lane-decode (``lane_half32 in {0, 1}``,
+      ``lane_col32 in [0, 32)``).
+
+    Output: per-lane ``<8 x dtype>`` ready to feed
+    ``mfma_f32_32x32x16_<dtype>`` as the A operand of the transposed
+    PV.
+    """
+    col_group16 = b.mul(b.div(lane_col32, b.const_i32(16)), b.const_i32(16))
+    tr_col32 = b.add(
+        col_group16,
+        b.mul(b.mod(lane_col32, b.const_i32(4)), b.const_i32(4)),
+    )
+    tr_row_base32 = b.add(
+        b.add(
+            b.const_i32(k * 16),
+            b.mul(lane_half32, b.const_i32(4)),
+        ),
+        b.mod(b.div(lane_col32, b.const_i32(4)), b.const_i32(4)),
+    )
+    A_r0 = b.ds_read_tr16_b64(
+        V_lds,
+        v_buf,
+        tr_row_base32,
+        b.add(b.const_i32(n * 32), tr_col32),
+        dtype=dtype,
+    )
+    A_r1 = b.ds_read_tr16_b64(
+        V_lds,
+        v_buf,
+        b.add(tr_row_base32, b.const_i32(8)),
+        b.add(b.const_i32(n * 32), tr_col32),
+        dtype=dtype,
+    )
+    return b.vec_concat(A_r0, A_r1)

@@ -42,6 +42,7 @@ __all__ = [
     "lds_zero_i32",
     "block_histogram_i32",
     "block_exclusive_scan_i32",
+    "block_two_level_scan_i32",
 ]
 
 
@@ -209,6 +210,147 @@ def block_exclusive_scan_i32(
     # Phase 2: predicated write-back. The tid==0 slot gets 0; all
     # other in-bounds slots get the value previously held one position
     # to the left -- which is the canonical exclusive scan result.
+    with b.scf_if(in_bounds):
+        b.smem_store_vN(lds_buf, [tid], shifted, 1)
+    b.sync()
+
+
+def block_two_level_scan_i32(
+    b: IRBuilder,
+    lds_buf: Value,
+    *,
+    tid: Value,
+    block_size: int,
+    length: int,
+    wave_size: int = 64,
+) -> None:
+    """Two-level exclusive prefix-sum: per-wave Kogge-Stone + cross-wave merge.
+
+    For ``length > 64`` (the moe_sorting target with ``E in {64, 128,
+    256}``), the canonical :func:`block_exclusive_scan_i32` issues
+    ``log2(length)`` LDS round-trips, each guarded by an
+    ``s_barrier``. P34 promotes AITER's ``moe_sorting_opus.h::
+    wave_cumsum`` shape: each lane in a wave does a 6-stage
+    Kogge-Stone scan via wave-internal shuffles (no LDS, no
+    barrier), the per-wave totals land in a ``num_warps`` LDS
+    slot table, ``wave 0`` scans the totals (≤4 stages), and the
+    cross-wave prefix is added back to each wave's local prefix.
+
+    Halves LDS round-trip count from 7 to 1 for ``length=128`` and
+    saves the matching number of barriers — biggest absolute win in
+    the persistent / fused MP variant of moe_sorting (P63) where the
+    scan is hot.
+
+    The implementation falls back to the existing single-level
+    Hillis-Steele scan when ``length <= wave_size`` (it's already
+    optimal in that regime) or when the kernel ``block_size`` cannot
+    be cleanly divided into ``wave_size`` waves.
+    """
+    if length <= 0:
+        raise ValueError(f"length must be > 0 (got {length})")
+    # Single-wave fall-back: the existing Hillis-Steele scan is already
+    # at the lower bound for ``length <= wave_size``.
+    if length <= wave_size or block_size % wave_size != 0:
+        block_exclusive_scan_i32(
+            b, lds_buf, tid=tid, block_size=block_size, length=length
+        )
+        return
+    if length > block_size:
+        raise ValueError(
+            f"block_two_level_scan_i32: length {length} > block_size "
+            f"{block_size}; multi-pass scans not implemented yet"
+        )
+
+    # Stage 1: per-wave Kogge-Stone. Each wave handles ``wave_size``
+    # consecutive slots; lane ``l`` in wave ``w`` reads ``lds_buf[w *
+    # wave_size + l]`` from the input and produces an in-wave inclusive
+    # scan via :meth:`IRBuilder.warp_shuffle_xor` shuffles. The
+    # inclusive form is converted to exclusive by a one-lane right
+    # shift via ``warp_shuffle_xor`` with mask 1 + a lane-0 zero
+    # substitute.
+    num_waves = length // wave_size
+    if length % wave_size != 0:
+        # Tail: residual `length % wave_size` lanes in the last wave
+        # — we keep the canonical scan for the residual to avoid a
+        # second tier of arithmetic. Falls back to the single-level
+        # scan when length is not a clean multiple of wave_size.
+        block_exclusive_scan_i32(
+            b, lds_buf, tid=tid, block_size=block_size, length=length
+        )
+        return
+
+    c_wave = b.const_i32(wave_size)
+    lane = b.mod(tid, c_wave)
+    warp = b.div(tid, c_wave)
+    in_bounds = b.cmp_lt(tid, b.const_i32(length))
+
+    # Load my slot's input value.
+    self_idx = b.select(in_bounds, tid, b.const_i32(0))
+    self_v = b.vec_extract(b.smem_load_vN(lds_buf, self_idx, dtype=I32, n=1), 0)
+    b.sync()
+
+    # Per-wave Kogge-Stone inclusive scan via warp_shuffle_xor.
+    # AMDGPU's ds_swizzle handles the within-wave shuffle in 1 LDS op
+    # (vs ds_bpermute's address-arithmetic + LDS round-trip).
+    cur = self_v
+    stages = wave_size.bit_length() - 1
+    for k in range(stages):
+        mask = 1 << k
+        remote = b.warp_shuffle_xor(cur, mask)
+        # Lanes whose XOR neighbour is "earlier" (i.e. lane ^ mask
+        # < lane) add the remote partial; the others see no change.
+        is_higher = b.cmp_ge(lane, b.const_i32(mask))
+        cur = b.select(is_higher, b.add(cur, remote), cur)
+
+    inclusive = cur
+
+    # Per-wave totals: lane (wave_size - 1) holds the wave-local sum.
+    # Stash to LDS so wave 0 can scan them.
+    is_wave_tail = b.cmp_eq(lane, b.const_i32(wave_size - 1))
+    with b.scf_if(b.land(is_wave_tail, in_bounds)):
+        b.smem_store_vN(lds_buf, [warp], inclusive, 1)
+    b.sync()
+
+    # Cross-wave scan: wave 0 reads num_waves entries, scans them
+    # serially (small N: typically 2 / 4 / 8 — fewer cycles than another
+    # round of warp shuffles), and writes back per-wave prefixes.
+    is_wave0 = b.cmp_eq(warp, b.const_i32(0))
+    is_xfer_lane = b.land(is_wave0, b.cmp_lt(lane, b.const_i32(num_waves)))
+    with b.scf_if(is_xfer_lane):
+        # Read every wave's total into the lane-0 wave.
+        my_total = b.vec_extract(b.smem_load_vN(lds_buf, lane, dtype=I32, n=1), 0)
+        # Synthesise the cross-wave exclusive prefix by reading lower
+        # waves' totals and summing. ``num_waves`` is small so this
+        # unrolled loop costs at most 7 adds.
+        prefix = b.const_i32(0)
+        for w_lower in range(num_waves):
+            other_total = b.vec_extract(
+                b.smem_load_vN(lds_buf, b.const_i32(w_lower), dtype=I32, n=1),
+                0,
+            )
+            include_lower = b.cmp_lt(b.const_i32(w_lower), lane)
+            prefix = b.select(include_lower, b.add(prefix, other_total), prefix)
+        del my_total  # informational; the in-wave scan recomputes it
+        b.smem_store_vN(lds_buf, [lane], prefix, 1)
+    b.sync()
+
+    # Add the cross-wave prefix back into each lane's inclusive scan,
+    # then shift right by 1 to make the scan exclusive.
+    cross_prefix = b.vec_extract(b.smem_load_vN(lds_buf, warp, dtype=I32, n=1), 0)
+    full_inclusive = b.add(inclusive, cross_prefix)
+    b.sync()
+
+    # Inclusive -> exclusive: lane writes its left neighbour's
+    # inclusive value (or 0 for lane 0 of wave 0).
+    in_range_left = b.land(in_bounds, b.cmp_gt(tid, b.const_i32(0)))
+    # Stash inclusive scan back into LDS so the right-shift can read it.
+    with b.scf_if(in_bounds):
+        b.smem_store_vN(lds_buf, [tid], full_inclusive, 1)
+    b.sync()
+    left_idx = b.select(in_range_left, b.sub(tid, b.const_i32(1)), b.const_i32(0))
+    left_vec = b.smem_load_vN(lds_buf, left_idx, dtype=I32, n=1)
+    shifted = b.select(in_range_left, b.vec_extract(left_vec, 0), b.const_i32(0))
+    b.sync()
     with b.scf_if(in_bounds):
         b.smem_store_vN(lds_buf, [tid], shifted, 1)
     b.sync()

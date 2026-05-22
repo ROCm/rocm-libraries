@@ -288,6 +288,13 @@ class CShuffleEpilogue:
     grid: WarpGrid
     store_vec: int = 8  # halves per wide store
     smem_name_hint: str = "C_smem"
+    # P41: output dtype the per-thread wide store produces. ``"f16"`` is
+    # the default and uses the f16 ``buffer_store_vN_f16`` intrinsic;
+    # ``"bf16"`` swaps the LDS staging element type to bf16 and
+    # uses the matching store; ``"fp8e4m3"`` / ``"bf8e5m2"`` emit
+    # 1-byte stores via ``global_store_vN`` (no buffer-store fp8
+    # intrinsic exists today on the AMDGPU LLVM target).
+    out_dtype: str = "f16"
 
     @classmethod
     def from_grid(

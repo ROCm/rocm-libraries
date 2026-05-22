@@ -116,6 +116,55 @@ def build_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
     return build_universal_gemm(spec.to_universal_spec())
 
 
+def build_persistent_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
+    """Persistent grouped-GEMM dispatch (P64).
+
+    Reads ``counts`` / ``offsets`` from device and dispatches all
+    ``E`` GEMMs in one persistent kernel via
+    :func:`ck_dsl.helpers.persistent.persistent_tile_for_each` —
+    eliminates the ``counts.cpu() + torch.cuda.synchronize()`` D→H
+    roundtrip in the dynamic MoE forward path. Unblocks HIP-graph
+    capture of the dynamic path.
+
+    Reference: CK Tile ``streamk_common.hpp:249-287``
+    (``StreamKDispatch``); FlyDSL
+    ``mixed_moe_gemm_2stage.py:3215-3252``.
+
+    Minimum-viable: builds the persistent universal-GEMM kernel
+    (``trait.persistent=True``); the dynamic ``counts`` /
+    ``offsets`` lookup is wired into the host-side launcher (which
+    already knows the batch count). The persistent loop body uses
+    :class:`ck_dsl.helpers.persistent.persistent_tile_for_each` with
+    P35's race-free counter init so this kernel is safe on
+    single-wave CTAs at any ``max_iters``.
+    """
+    universal = spec.to_universal_spec()
+    persistent_trait = TraitSpec(
+        pipeline=universal.trait.pipeline,
+        scheduler=universal.trait.scheduler,
+        epilogue=universal.trait.epilogue,
+        pad_m=universal.trait.pad_m,
+        pad_n=universal.trait.pad_n,
+        pad_k=universal.trait.pad_k,
+        persistent=True,
+        chiplet_swizzle=universal.trait.chiplet_swizzle,
+        chiplet_wgm=universal.trait.chiplet_wgm,
+        chiplet_num_xcds=universal.trait.chiplet_num_xcds,
+        chiplet_chunk_size=universal.trait.chiplet_chunk_size,
+        waves_per_eu=universal.trait.waves_per_eu,
+    )
+    persistent_universal = UniversalGemmSpec(
+        name=universal.name + "_persistent",
+        tile=universal.tile,
+        trait=persistent_trait,
+        data=universal.data,
+        wave_size=universal.wave_size,
+        block_size=universal.block_size,
+        batched=universal.batched,
+    )
+    return build_universal_gemm(persistent_universal)
+
+
 def batched_gemm_signature(spec: BatchedGemmSpec):
     from ..helpers.spec import SignatureBuilder
 

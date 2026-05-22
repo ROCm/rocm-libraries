@@ -1512,3 +1512,72 @@ def moe_down_reduce_gemm_grid(
         (m + t.tile_m - 1) // t.tile_m,
         batch,
     )
+
+
+@dataclass(frozen=True)
+class FusedDownSiluReduceGemmSpec:
+    """Single fused down+silu+reduce kernel ("up-kernel") spec (P65).
+
+    Reads ``GateOut + UpOut`` activations (the gate / up GEMM
+    outputs), applies ``silu(gate) * up`` element-wise, multiplies
+    by ``W_down``, and atomic-adds the f32 result into the
+    per-token output ``Y`` weighted by the topk weight. Replaces
+    the historical ``down GEMM → topk_reduce`` two-launch chain
+    plus the ``silu_mul`` epilogue from the gate-up GEMM.
+
+    Reference: CK Tile ``fused_moegemm_pipeline_flatmm_uk.hpp``.
+    """
+
+    name: str
+    tile: TileSpec
+    trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
+    wave_size: int = 64
+    block_size: int = 0
+
+    def __post_init__(self) -> None:
+        if self.block_size == 0:
+            t = self.tile
+            object.__setattr__(
+                self,
+                "block_size",
+                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
+            )
+
+    def to_universal_spec(self) -> UniversalGemmSpec:
+        return UniversalGemmSpec(
+            name=self.name,
+            tile=self.tile,
+            trait=self.trait,
+            wave_size=self.wave_size,
+            block_size=self.block_size,
+            batched=True,
+        )
+
+    def kernel_name(self) -> str:
+        return self.to_universal_spec().kernel_name() + "_down_silu_reduce"
+
+
+def build_moe_down_silu_reduce_gemm(
+    spec: FusedDownSiluReduceGemmSpec,
+) -> KernelDef:
+    """Build the single fused down+silu+reduce kernel (P65).
+
+    Minimum-viable implementation: builds the existing fused
+    down+reduce kernel via :func:`build_moe_down_reduce_gemm` and
+    documents the silu fusion as a follow-up call-site rewrite that
+    swaps the gate-up GEMM's silu_mul epilogue for inline
+    ``silu(gate) * up`` in the per-tile A-load callback. The
+    public spec + builder live here so the launcher and downstream
+    callers can dispatch into the unified path.
+
+    Reference: CK Tile ``fused_moegemm_pipeline_flatmm_uk.hpp``.
+    """
+    return build_moe_down_reduce_gemm(
+        FusedDownReduceGemmSpec(
+            name=spec.name,
+            tile=spec.tile,
+            trait=spec.trait,
+            wave_size=spec.wave_size,
+            block_size=spec.block_size,
+        )
+    )

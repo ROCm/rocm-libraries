@@ -58,7 +58,7 @@ Optimization notes (mirror the sibling :mod:`smoothquant`):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Tuple
+from typing import List, Literal, Optional, Tuple
 
 from ..core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
 from ..helpers.io import io_ir_type
@@ -192,6 +192,13 @@ class MoeSmoothQuantSpec:
     save_yscale: bool = True
     wave_size: int = 64
     name: str = "ck_dsl_moe_smoothquant"
+    # P79: compile-time ``tokens`` (optional). When set, the
+    # ``(i_topk, i_token) = (out_row / tokens, out_row % tokens)``
+    # decode replaces the runtime ``div`` / ``mod`` with a Hacker's-
+    # Delight ``v_mul_hi_u32`` pair. Trade-off: one specialised
+    # kernel per (tokens) value the caller wants to hit; for static
+    # batches this is a strict win.
+    tokens: Optional[int] = None
 
     @property
     def elems_per_thread(self) -> int:
@@ -281,8 +288,20 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec) -> KernelDef:
     # ``out_row = i_topk * tokens + i_token`` matches the CK Tile
     # reference (and the ``i_topk * tokens + i_token`` indexing in
     # ``moe_smoothquant.cpp`` line 181).
-    i_topk = b.div(out_row, c_tokens)
-    i_token = b.mod(out_row, c_tokens)
+    #
+    # P79: when ``spec.tokens`` is a compile-time int, the divisor is
+    # constant — the AMDGPU backend folds the ``div`` / ``mod`` chain
+    # into one ``v_mul_hi_u32`` + ``v_sub_u32`` pair (the Hacker's-
+    # Delight reciprocal-mul trick). Without ``spec.tokens`` set we
+    # fall back to the runtime div/mod (which costs ~30 VALU ops vs
+    # ~3 for the constant-folded form).
+    if spec.tokens is not None:
+        c_tok_const = b.const_i32(spec.tokens)
+        i_topk = b.div(out_row, c_tok_const)
+        i_token = b.mod(out_row, c_tok_const)
+    else:
+        i_topk = b.div(out_row, c_tokens)
+        i_token = b.mod(out_row, c_tokens)
 
     # Look up the per-token expert id from the (tokens, topk) router
     # output. ``TopkIds[i_token * topk + i_topk]`` is the C-contiguous

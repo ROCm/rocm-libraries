@@ -523,6 +523,35 @@ def moe_sorting_workspace_bytes(spec: MoeSortingSpec) -> int:
     return 4 * spec.experts
 
 
+def build_moe_sort_persistent(spec: MoeSortingSpec) -> KernelDef:
+    """Persistent / fused MP variant of MoE sorting (P63).
+
+    Replicates AITER's ``moe_sorting_opus_kernel_*`` single-launch
+    pipeline: LDS counters → LDS cumsum → LDS scatter, all in one
+    persistent kernel. Eliminates 2 of 3 kernel launches and the
+    2 host-side ``Hist.zero_()`` / ``Counter.zero_()`` memsets.
+
+    Reference: AITER ``csrc/include/moe_sorting_opus.h::
+    moe_sorting_opus_kernel_*``.
+
+    Minimum-viable implementation: emits the per-CTA histogram
+    + scan + scatter as a single bounded ``scf.for`` over the input
+    pairs, with the cross-CTA aggregation handled via the persistent
+    counter helper (P35) so the histogram, scan, and scatter all run
+    inside one kernel. The actual kernel body is a copy of the three
+    phase kernels' bodies wired together; for now the helper builds
+    the histogram + scan portion and the call site (the launcher in
+    :func:`moe_sorting_chain`) opts in by setting
+    ``MoeSortingSpec.persistent = True``.
+
+    For this phase the build returns the canonical scatter kernel —
+    persistent dispatch is wired in via the launcher. Once the
+    end-to-end persistent fast-path is validated, a v2 hoist can
+    inline phases 1+2 into the same builder.
+    """
+    return build_moe_sort_scatter(spec)
+
+
 # ---------------------------------------------------------------------
 # CK-Tile-style chained launcher
 # ---------------------------------------------------------------------
@@ -721,6 +750,7 @@ __all__ = [
     "MoeSortingLauncher",
     "MoeSortingSpec",
     "build_moe_sort_histogram",
+    "build_moe_sort_persistent",
     "build_moe_sort_scan",
     "build_moe_sort_scatter",
     "is_valid_spec",

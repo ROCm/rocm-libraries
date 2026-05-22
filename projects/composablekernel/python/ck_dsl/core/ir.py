@@ -1438,6 +1438,132 @@ class IRBuilder:
             result_name_hint="acc",
         ).result
 
+    def mfma_scale_f32_16x16x128_f8f6f4(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """MX-MFMA with in-instruction scales (P15).
+
+        ``mfma_scale_f32_16x16x128_f8f6f4`` is the gfx950 MX MFMA
+        instruction family. Operands are 16-byte packed mantissa
+        vectors (fp8/fp6/fp4) plus per-warp E8M0 scales applied
+        in-instruction. The scale broadcast inside the instruction is
+        per-output-row (vs per-input-row), which is what fixes the
+        B_MX1 row-aware correctness gap that the post-hoc
+        scale-apply chain has.
+
+        Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        """
+        return self._op(
+            "tile.mfma_scale_f32_16x16x128_f8f6f4",
+            [a, b, c, a_scale, b_scale],
+            [VectorType(F32, 4)],
+            result_name_hint="mxacc",
+        ).result
+
+    def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
+        """fp4 MX MFMA (gfx950+, P52).
+
+        Operands are 64-bit packed `<16 x fp4>` per lane;
+        accumulator is `<4 x float>`. Scales are applied separately
+        via :meth:`mfma_scale_f32_16x16x128_f8f6f4` for the
+        production MX path.
+        """
+        return self._op(
+            "tile.mfma_f32_16x16x128_fp4",
+            [a, b, c],
+            [VectorType(F32, 4)],
+            result_name_hint="acc4",
+        ).result
+
+    def mfma_f32_16x16x96_fp6(self, a: Value, b: Value, c: Value) -> Value:
+        """fp6 MX MFMA (gfx950+, P52)."""
+        return self._op(
+            "tile.mfma_f32_16x16x96_fp6",
+            [a, b, c],
+            [VectorType(F32, 4)],
+            result_name_hint="acc6",
+        ).result
+
+    def register_p_from_qk_c(self, qk_c: Value, target_dtype: Type) -> Value:
+        """Lane-XOR + bit-transpose to convert a `<16 x f32>` QK-MFMA
+        accumulator into a `<8 x dtype>` PV-MFMA A-vector (P13).
+
+        The historical implementation lives inline in
+        ``attention_tiled_2d.py:_permute_p_c_to_a16 / _pack_p_a16 /
+        _pack_p_a32`` (L1020-1078 of phase-0). This IR-level primitive
+        wraps the lane-XOR + bit-transpose sequence so the
+        ``use_register_pv`` path can be enabled by default and the
+        per-element P_LDS publish is dropped from the kernel body.
+
+        Reference: CK Tile ``block_fmha_fwd_v3_pipeline.hpp:471-479,
+        700-734`` and ``MakePRegTileDistribution`` at
+        ``block_fmha_fwd_v3_pipeline_default_policy.hpp:178-186``.
+        """
+        if target_dtype.name not in ("f16", "bf16"):
+            raise ValueError(
+                f"register_p_from_qk_c target must be f16/bf16, got {target_dtype.name}"
+            )
+        return self._op(
+            "tile.register_p_from_qk_c",
+            [qk_c],
+            [VectorType(target_dtype, 8)],
+            attrs={"target_dtype": target_dtype.name},
+            result_name_hint="pa",
+        ).result
+
+    def smem_store_distributed(
+        self,
+        smem: Value,
+        layout_attrs: Dict[str, Any],
+        values: Value,
+    ) -> None:
+        """CShuffle-style distributed LDS store (P42).
+
+        Takes a per-lane ``<c_per_lane x dtype>`` accumulator and an
+        ``LdsLayout.cshuffle`` descriptor (passed via ``layout_attrs``)
+        and writes the lane's slice of the warp tile to LDS in one
+        ``ds_write_b<N>``-shaped op. Replaces the per-element
+        ``smem_store(..., n=1)`` chain (~64 per-element ops per warp
+        tile) in the cshuffle epilogue.
+
+        Reference: CK Tile ``cshuffle_epilogue.hpp:316-384, 661-759``.
+        """
+        return self._op(
+            "tile.smem_store_distributed",
+            [smem, values],
+            attrs=dict(layout_attrs),
+        )
+
+    def cooperative_global_store(
+        self,
+        ptr: Value,
+        addrs: Value,
+        values: Value,
+    ) -> None:
+        """Cooperative global store with per-lane address (P14).
+
+        Takes a per-lane vector of f32 values + a matching per-lane
+        vector of i32 addresses. Issues the per-lane stores while
+        letting the AMDGPU backend coalesce adjacent lanes into one
+        global_store_dwordxN transaction. Replaces the per-lane
+        ``global_store(workspace_acc, …)`` chain in
+        ``attention_tiled_3d.py:854``.
+        """
+        return self._op(
+            "memref.cooperative_global_store",
+            [ptr, addrs, values],
+            attrs={
+                "vec": int(values.type.count)
+                if isinstance(values.type, VectorType)
+                else 1
+            },
+        )
+
     def mfma_f32_4x4x4_f16(self, a: Value, b: Value, c: Value) -> Value:
         """The 4x4x4 f16 MFMA atom — 16 independent 4x4 matmuls per wave.
 

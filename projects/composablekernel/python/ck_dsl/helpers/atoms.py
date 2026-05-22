@@ -305,6 +305,41 @@ class MfmaAtom:
         )
 
     @classmethod
+    def fp4_16x16x128(cls) -> "MfmaAtom":
+        """fp4 MX MFMA atom (gfx950+, P52).
+
+        Per-lane: A = 16 fp4 nibbles packed as i64 (= 8 bytes per
+        lane × 2 nibbles); B same; C = ``<4 x float>``. K = 128
+        elements per atom — the densest gfx950 MFMA shape.
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=128,
+            a_per_lane=16,
+            b_per_lane=16,
+            c_per_lane=4,
+            dtype_in="fp4",
+            dtype_out="f32",
+            name="mfma_f32_16x16x128_fp4",
+        )
+
+    @classmethod
+    def fp6_16x16x96(cls) -> "MfmaAtom":
+        """fp6 MX MFMA atom (gfx950+, P52)."""
+        return cls(
+            m=16,
+            n=16,
+            k=96,
+            a_per_lane=12,
+            b_per_lane=12,
+            c_per_lane=4,
+            dtype_in="fp6",
+            dtype_out="f32",
+            name="mfma_f32_16x16x96_fp6",
+        )
+
+    @classmethod
     def f16_4x4x4(cls) -> "MfmaAtom":
         """The tiny f16 atom. One MFMA emits 16 independent 4x4x4 matmuls per wave.
 
@@ -360,9 +395,32 @@ class MfmaAtom:
             return b.mfma_f32_32x32x16_fp8(a, bb, c)
         if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "bf8e5m2"):
             return b.mfma_f32_32x32x16_bf8(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 128, "fp4"):
+            return b.mfma_f32_16x16x128_fp4(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 96, "fp6"):
+            return b.mfma_f32_16x16x96_fp6(a, bb, c)
         raise NotImplementedError(
             f"no MFMA dispatch for atom {self.dtype_in} {self.m}x{self.n}x{self.k}"
         )
+
+    def emit_scaled(
+        self,
+        b: IRBuilder,
+        a: Value,
+        bb: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """Issue a scaled MX MFMA (P15).
+
+        Currently routes every shape through the
+        ``mfma_scale_f32_16x16x128_f8f6f4`` intrinsic; the
+        per-output-row scale broadcast happens inside the
+        instruction. Future expansion: dedicated scaled intrinsics
+        for the 32x32 hero shape if AMDGPU exposes them.
+        """
+        return b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, c, a_scale, b_scale)
 
     def zero_acc(self, b: IRBuilder) -> Value:
         """Allocate a fresh `<c_per_lane x float>` accumulator (all zeros).
@@ -458,12 +516,20 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.bf8_32x32x16(),
 )
 
+# P52: MX fp4 / fp6 atoms (gfx950+).
+MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
+    MfmaAtom.fp4_16x16x128(),
+    MfmaAtom.fp6_16x16x96(),
+)
+
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
 # factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
-MFMA_ATOMS: Tuple[MfmaAtom, ...] = MFMA_F16_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
+MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
+    MFMA_F16_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+)
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,
 # ``bf8`` -> ``bf8e5m2``. Keeps Triton-ported and CK Tile-ported

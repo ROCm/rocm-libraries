@@ -155,6 +155,14 @@ class TraitSpec:
     chiplet_num_xcds: int = 8
     chiplet_chunk_size: int = 64
     waves_per_eu: Optional[int] = None
+    # P40: when True, the kernel expects the B operand pre-shuffled by
+    # the host into the layout :func:`ck_dsl.helpers.preshuffle.
+    # host_preshuffle_layout` produces, and the per-lane B-load uses
+    # :func:`emit_preshuffleb_offset` to compute the byte offset
+    # (one ``buffer_load_dwordx4`` per K-tile vs the per-K-element
+    # strided scalar loads of the column-major path). The flag-free
+    # default keeps the canonical strided-scalar load.
+    preshuffle_b: bool = False
 
 
 @dataclass(frozen=True)
@@ -485,10 +493,17 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     lane = b.mod(tid, c_wave)
 
     if spec.batched:
-        batch_idx = b.block_id_z()
-        batch_off_a = b.mul(batch_idx, stride_a)
-        batch_off_b = b.mul(batch_idx, stride_b)
-        batch_off_c = b.mul(batch_idx, stride_c)
+        # P57: every wave-uniform i32 derived from the batch axis is
+        # pinned into an SGPR via ``to_sgpr_u32`` so the per-tile
+        # address arithmetic stays in scalar registers rather than
+        # being re-materialised in VGPRs at every consumer (one
+        # ``v_readfirstlane_b32`` saved per use across the K-loop +
+        # epilogue). Mirrors CK Tile ``batched_gemm_kernel.hpp:215-230``
+        # ``amd_wave_read_first_lane`` pattern.
+        batch_idx = b.to_sgpr_u32(b.block_id_z())
+        batch_off_a = b.to_sgpr_u32(b.mul(batch_idx, stride_a))
+        batch_off_b = b.to_sgpr_u32(b.mul(batch_idx, stride_b))
+        batch_off_c = b.to_sgpr_u32(b.mul(batch_idx, stride_c))
     else:
         batch_off_a = c0
         batch_off_b = c0
@@ -522,11 +537,15 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             num_xcds=spec.trait.chiplet_num_xcds,
             chunk_size=spec.trait.chiplet_chunk_size,
         )
-        block_m_off = b.mul(swz.row, c_block_m)
-        block_n_off = b.mul(swz.col, c_block_n)
+        # P57: pin chiplet-swizzled offsets in SGPR. ``swz.row`` / ``swz.col``
+        # are wave-uniform (function of CTA-uniform inputs), so
+        # ``readfirstlane`` is safe.
+        block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
+        block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
     else:
-        block_m_off = b.mul(b.block_id_y(), c_block_m)
-        block_n_off = b.mul(b.block_id_x(), c_block_n)
+        # P57: pin the non-swizzled batched-GEMM offsets in SGPR too.
+        block_m_off = b.to_sgpr_u32(b.mul(b.block_id_y(), c_block_m))
+        block_n_off = b.to_sgpr_u32(b.mul(b.block_id_x(), c_block_n))
 
     # LDS allocation. For compv4 we double-buffer; the second buffer is
     # logically allocated as a second smem region. The cshuffle epilogue

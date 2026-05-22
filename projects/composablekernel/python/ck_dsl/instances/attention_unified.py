@@ -580,11 +580,29 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
 def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
     """Enable register-resident P for the existing 16x16x32 2D path.
 
-    Hard-disabled by default while the lane transform is being validated.
-    Tests/experiments can monkey-patch this selector; once parity and trace
-    benches are clean it can be enabled for bf16 no-window long-prefill.
+    P73: enable for ``dtype == "bf16"`` when the gate conditions hold
+    (no sinks, no sliding window, no softcap, no alibi, no qq_bias,
+    no kv_storage_dtype). The lane-XOR + bit-transpose register
+    permutation in ``attention_tiled_2d.py:1020-1078`` is now stable
+    enough to flip on for bf16; the f16 path stays disabled until the
+    same parity sweep validates it. Other configurations stay on the
+    P_LDS publish path.
     """
-    return False
+    if problem.dtype != "bf16":
+        return False
+    if problem.use_sinks:
+        return False
+    if problem.sliding_window > 0:
+        return False
+    if problem.softcap > 0:
+        return False
+    if problem.use_alibi:
+        return False
+    if problem.use_qq_bias:
+        return False
+    if _kv_storage_dtype(problem) is not None:
+        return False
+    return True
 
 
 def _tiled_spec_from_problem(
@@ -1900,18 +1918,26 @@ def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDe
 def _emit_find_seq_idx_scan(
     b: IRBuilder, cu_q: Value, q_tok: Value, num_seqs: Value
 ) -> Value:
-    scan = b.scf_for_iter(
-        b.const_i32(0),
+    """Find ``seq_idx`` for the given Q token via a binary search.
+
+    P74: replaces the historical linear scan (``O(num_seqs)``) with
+    the shared ``binary_search_seq_idx`` helper in per-token mode
+    (``cu_q[s] <= q_tok < cu_q[s+1]``). Cosmetic on the scalar
+    oracle but matches the tiled kernels' shape and saves
+    ``O(num_seqs - log2(num_seqs))`` linear-scan iterations on
+    high-batch decode workloads.
+    """
+    from ..helpers.attention import binary_search_seq_idx
+
+    return binary_search_seq_idx(
+        b,
+        cu_q,
+        q_tok,
         num_seqs,
-        b.const_i32(1),
-        [("seq_idx", b.const_i32(0))],
-        iv_name="si",
+        block_q=1,  # unused in per_token mode
+        iterations=32,  # bounded scf.for trip count; 32 covers num_seqs <= 2^32
+        per_token=True,
     )
-    with scan as (si, (seq_idx,)):
-        start_i = b.global_load_i32(cu_q, si)
-        le = b.cmp_le(start_i, q_tok)
-        b.scf_yield(b.select(le, si, seq_idx))
-    return scan.results[0]
 
 
 def _q_descriptor(p: UnifiedAttentionProblem) -> TensorDescriptor:

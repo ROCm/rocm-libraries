@@ -94,6 +94,11 @@ class BlockScaleGemmSpec:
     block_tile_m: int = 16
     block_tile_n: int = 16
     name: str = "ck_dsl_block_scale_gemm"
+    # P77 sibling: per-output-row scale broadcast, same shape as
+    # :class:`ck_dsl.instances.mx_gemm.MxGemmSpec.per_input_row`.
+    # Defaults to True for backwards compat; flip on per-row
+    # varying-scale workloads.
+    per_input_row: bool = True
 
     @property
     def atom(self) -> MfmaAtom:
