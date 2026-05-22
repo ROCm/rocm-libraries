@@ -2148,6 +2148,7 @@ try
     switch(cptype)
     {
     case HIPFFT_COPY_HOST_TO_DEVICE:
+        [[fallthrough]];
     case HIPFFT_COPY_DEVICE_TO_HOST:
     {
         const bool h2d = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
@@ -2284,9 +2285,7 @@ try
         return HIPFFT_SUCCESS;
     }
     case HIPFFT_COPY_DEVICE_TO_DEVICE:
-    {
         return HIPFFT_NOT_IMPLEMENTED;
-    }
     case HIPFFT_COPY_UNDEFINED:
         return HIPFFT_NOT_IMPLEMENTED;
     default:

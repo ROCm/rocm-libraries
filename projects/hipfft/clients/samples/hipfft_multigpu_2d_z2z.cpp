@@ -62,7 +62,7 @@ int main()
     std::cout << "Number of available devices: " << deviceCount << std::endl;
     if(static_cast<size_t>(deviceCount) < ngpus)
     {
-        std::cout << "Sample needs at least " << ngpus << "GPUs\n";
+        std::cout << "Sample needs at least " << ngpus << " GPUs\n";
         return 0;
     }
     std::cout << "\n";
@@ -97,7 +97,7 @@ int main()
     std::iota(gpus.begin(), gpus.end(), 0);
     hipfftResult hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtSetGPUs failed with code" + std::to_string(hipfft_rt));
+        throw std::runtime_error("hipfftXtSetGPUs failed with code " + std::to_string(hipfft_rt));
 
     // Make the 2D plan
 
@@ -111,9 +111,7 @@ int main()
     hipfft_rt               = hipfftXtMalloc(plan, &inoutdesc, format);
     if(hipfft_rt != HIPFFT_SUCCESS)
     {
-        std::stringstream ss;
-        ss << "hipfftXtMalloc failed with error " << hipfft_rt;
-        throw std::runtime_error(ss.str());
+        throw std::runtime_error("hipfftXtMalloc failed with error " + std::to_string(hipfft_rt));
     }
 
     std::cout << "The descriptor is now allocated:\n";
