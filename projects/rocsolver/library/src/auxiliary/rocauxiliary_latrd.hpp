@@ -2828,15 +2828,15 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
     T* Atmp = nullptr;
     T* Wtmp = nullptr;
 
-    // Shared memory: tau_j[1] | pSmem[MAX_THDS] | pSv[n] | pSw[nb].  z1/z2 live in global work.
-    // pSv holds the Householder column (Parts B/C/E). pSw holds row-j scalars (Part A, j<=nb-1)
-    // and z2 (Part D, j<=nb-1). Part E reads w directly from global to avoid sizing pSw at n.
-    // n is bounded by sharedMemPerBlock via use_fused_kernel gate.
+    // Shared memory: tau_j[1] | pSmem[MAX_THDS] | pSz1[nb] | pSz2[nb].  z1/z2 live in global work.
+    // pSz1 stages row-j W scalars (Part A) and z1 (Part D). pSz2 stages row-j A scalars (Part A)
+    // and z2 (Part D). Parts B/C/E read v directly from global memory (coalesced, L2-cached).
+    // LDS is O(1) in n — eliminates the occupancy cliff at large n.
     extern __shared__ double lmem[];
     T* tau_j = reinterpret_cast<T*>(lmem);
     T* pSmem = tau_j + 1;
-    T* pSv = pSmem + MAX_THDS; // [n]
-    T* pSw = pSv + n; // [nb]
+    T* pSz1 = pSmem + MAX_THDS; // [nb] — row-j W scalars (Part A), z1 (Part D)
+    T* pSz2 = pSz1 + nb;        // [nb] — row-j A scalars (Part A), z2 (Part D)
 
     // Global workspace per batch: z1[nb], z2[nb].  v and w point into pA and pW.
     // Pad nb to a 128-byte boundary so both z1 and z2 are aligned
@@ -2875,10 +2875,11 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
             // Step 2: A(j:n-1, j) = -W(j:n-1, 0:j-1) * A(j, 0:j-1)^H + A(j:n-1, j)
             //
             // Stage row j of W and A (the scalar broadcast values) into LDS.
-            if(tid < j)
+            // Use a strided loop so all j elements are filled even when j > MAX_THDS.
+            for(I jj = tid; jj < j; jj += MAX_THDS)
             {
-                pSv[tid] = conj(pW[j + (I)tid * ldSW]);
-                pSw[tid] = conj(pA[j + (I)tid * ldSA]);
+                pSz1[jj] = conj(pW[j + (I)jj * ldSW]);
+                pSz2[jj] = conj(pA[j + (I)jj * ldSA]);
             }
             __syncthreads();
 
@@ -2895,7 +2896,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
                 if(ii < nj + 1)
                 {
                     for(I jj = lane_id; jj < j; jj += warpSize)
-                        temp += pA[j + ii + jj * ldSA] * pSv[jj] + pW[j + ii + jj * ldSW] * pSw[jj];
+                        temp += pA[j + ii + jj * ldSA] * pSz1[jj] + pW[j + ii + jj * ldSW] * pSz2[jj];
                 }
                 reduce_wave_sum(temp);
 
@@ -2916,33 +2917,37 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
 
         if(bid == 0)
         {
-            // Load A(j+1:n-1, j) into pSv. pSv[0] = alpha.
-            for(I ii = tid; ii < nj; ii += MAX_THDS)
-                pSv[ii] = pA[(j + 1 + ii) + j * ldSA];
-            __syncthreads();
-
-            // Norm of pSv[1:nj-1] (sub-diagonal part; excludes alpha at pSv[0]).
-            temp = T(0);
-            for(I ii = tid; ii < nj - 1; ii += MAX_THDS)
-                temp += pSv[ii + 1] * conj(pSv[ii + 1]);
-            reduce_block_sum(temp, pSmem);
-
-            if(tid == 0)
+            // v points into pA column j; read directly (coalesced, no LDS staging needed).
+            // Guard nj > 0: at j = n-1, nj = 0 and v points past the matrix allocation.
+            if(nj > 0)
             {
-                run_set_taubeta<T>(tau_j, &temp, pSv, E + j); // pSv[0] <- 1, temp <- scal
-                tau[j] = tau_j[0];
-                pSmem[0] = temp;
+                // Norm of v[1:nj-1] (sub-diagonal part; excludes alpha at v[0]).
+                temp = T(0);
+                for(I ii = tid; ii < nj - 1; ii += MAX_THDS)
+                    temp += v[ii + 1] * conj(v[ii + 1]);
+                reduce_block_sum(temp, pSmem);
+
+                if(tid == 0)
+                {
+                    run_set_taubeta<T>(tau_j, &temp, v, E + j); // v[0] <- 1, temp <- scal
+                    tau[j] = tau_j[0];
+                    pSmem[0] = temp;
+                }
+                __syncthreads();
+
+                // Scale v[1:nj-1] in-place (v aliases pA col j, so A is updated simultaneously).
+                T scal = pSmem[0];
+                for(I ii = tid; ii < nj; ii += MAX_THDS)
+                {
+                    if(ii > 0)
+                        v[ii] *= scal;
+                }
             }
-            __syncthreads();
-
-            // Scale pSv[1:nj-1] and write the Householder vector back to A.
-            // v points into pA so this simultaneously updates v.
-            T scal = pSmem[0];
-            for(I ii = tid; ii < nj; ii += MAX_THDS)
+            else if(tid == 0)
             {
-                if(ii > 0)
-                    pSv[ii] *= scal;
-                pA[(j + 1 + ii) + j * ldSA] = pSv[ii];
+                // nj == 0: no sub-diagonal entries; tau = 0, E[j] = A[j, j-1] already set.
+                tau_j[0] = T(0);
+                tau[j] = T(0);
             }
         }
         grid.sync();
@@ -2956,22 +2961,18 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         // v/w/z1/z2 are in global memory — all blocks participate.
         //
 
-        // Load A(j+1:n-1, j) into pSv.
-        for(I ii = tid; ii < nj; ii += MAX_THDS)
-            pSv[ii] = pA[(j + 1 + ii) + j * ldSA];
-        __syncthreads();
-
         // Step 4: w(j+1:n-1) = A(j+1:n-1, j+1:n-1) * v(0:nj-1)
         //
+        // v is read directly from global memory (coalesced). No LDS staging needed.
         // GEMVT-style: block bid handles output rows ii = bid, bid+gridDim.x, ...
-        // For each row ii, all threads compute dot(column ii of Atmp, pSv) and reduce.
+        // For each row ii, all threads compute dot(column ii of Atmp, v) and reduce.
         // Exploits symmetry: w[ii] = sum_jj A[ii,jj]*v[jj] = sum_jj A[jj,ii]*v[jj].
         Atmp = pA + (j + 1) + (j + 1) * ldSA;
         for(I ii = bid; ii < nj; ii += gridDim.x)
         {
             temp = T(0);
             for(I jj = tid; jj < nj; jj += MAX_THDS)
-                temp += Atmp[jj + (rocblas_stride)ii * ldSA] * pSv[jj];
+                temp += Atmp[jj + (rocblas_stride)ii * ldSA] * v[jj];
             reduce_block_sum(temp, pSmem);
             if(tid == 0)
                 w[j + 1 + ii] = temp;
@@ -2996,7 +2997,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
                 T s1 = T(0), s2 = T(0);
                 for(I ii = 0; ii < nj; ++ii)
                 {
-                    T vi = pSv[ii];
+                    T vi = v[ii];
                     s1 += Wtmp[ii + jj * ldSW] * vi;
                     s2 += Atmp[ii + jj * ldSA] * vi;
                 }
@@ -3010,7 +3011,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
             {
                 T s1 = T(0);
                 for(I ii = tid; ii < nj; ii += MAX_THDS)
-                    s1 += Wtmp[ii + jj * ldSW] * pSv[ii];
+                    s1 += Wtmp[ii + jj * ldSW] * v[ii];
                 reduce_block_sum(s1, pSmem);
                 if(tid == 0)
                     z1[jj] = s1;
@@ -3020,7 +3021,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
             {
                 T s2 = T(0);
                 for(I ii = tid; ii < nj; ii += MAX_THDS)
-                    s2 += Atmp[ii + jj * ldSA] * pSv[ii];
+                    s2 += Atmp[ii + jj * ldSA] * v[ii];
                 reduce_block_sum(s2, pSmem);
                 if(tid == 0)
                     z2[jj] = s2;
@@ -3038,9 +3039,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         //
         // Note: Steps 6 and 8 are fused.
 
-        // Load z1 and z2 into shared mem.
-        T* pSz1 = pSv;
-        T* pSz2 = pSw;
+        // Load z1 and z2 into LDS (pSz1/pSz2 declared in shared mem setup above).
         for(I ii = tid; ii < j; ii += MAX_THDS)
         {
             pSz1[ii] = z1[ii];
@@ -3081,24 +3080,20 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         //
         if(bid == 0)
         {
-            // Load v into pSv; accumulate dot product reading w directly from global.
-            // pSw is sized nb (not n) so w is not staged here.
+            // Accumulate dot product <v, w>; read v from global directly (coalesced).
             temp = T(0);
             for(I ii = tid; ii < nj; ii += MAX_THDS)
-            {
-                pSv[ii] = v[ii];
-                temp += pSv[ii] * conj(w[ii + j + 1]);
-            }
+                temp += v[ii] * conj(w[ii + j + 1]);
             reduce_block_sum(temp, pSmem);
 
             if(tid == 0)
                 pSmem[0] = -0.5 * tau_j[0] * tau_j[0] * temp; // alpha
             __syncthreads();
 
-            // AXPY: pSv holds v; re-read w from global.
+            // AXPY: read v and w from global.
             T alpha = pSmem[0];
             for(I ii = tid; ii < nj; ii += MAX_THDS)
-                pW[(j + 1 + ii) + j * ldSW] = alpha * pSv[ii] + tau_j[0] * w[ii + j + 1];
+                pW[(j + 1 + ii) + j * ldSW] = alpha * v[ii] + tau_j[0] * w[ii + j + 1];
         }
         grid.sync();
     }
@@ -3185,11 +3180,11 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         bool use_small_kernel = !select_coop_launch && (n < small_switch_size)
             && (lmemsize_small <= props->sharedMemPerBlock);
 
-        // Shared memory: tau_j[1] | pSmem[256] | pSv[n] | pSw[k]. z1/z2 live in global work.
-        // pSw is sized k (not n) since Part E reads w directly from global.
-        // lmemsize_fused grows with n; use_fused_kernel is false when it exceeds sharedMemPerBlock.
+        // Shared memory: tau_j[1] | pSmem[256] | pSz1[k] | pSz2[k]. z1/z2 live in global work.
+        // LDS is O(1) in n (k=nb, default 64) — eliminates the occupancy cliff at large n.
+        // Parts B/C/E read v directly from global memory; only Parts A/D need LDS (j<=k-1 elems).
         constexpr rocblas_int NAIVE_THDS = 256;
-        const size_t lmemsize_fused = (1 + NAIVE_THDS + n + k) * sizeof(T);
+        const size_t lmemsize_fused = (1 + NAIVE_THDS + 2 * k) * sizeof(T);
         const bool is_batched = batch_count > 1;
         bool use_fused_kernel = select_coop_launch && !is_batched
             && !rocblas_is_complex<T> && (lmemsize_fused <= props->sharedMemPerBlock);
