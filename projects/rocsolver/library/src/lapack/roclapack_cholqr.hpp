@@ -33,10 +33,14 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
  
-//bool constexpr use_syrk = true;
+/****************************************************************************/
+/******************* Kernels and compute functions **************************/
+/****************************************************************************/
 
-
-
+//---------------------------------------------
+// This kernel updates the values in nr after 
+// when needed during refinement
+//--------------------------------------------- 
 template <typename I>
 ROCSOLVER_KERNEL void cholqr_updatenr_kernel(const I n,
                                              I* nrA,
@@ -55,6 +59,10 @@ ROCSOLVER_KERNEL void cholqr_updatenr_kernel(const I n,
     }
 }
 
+//---------------------------------------------
+// Kernel to clean the cholesky factor when 
+// info > 0
+//---------------------------------------------
 template <typename I, typename T>
 ROCSOLVER_KERNEL void cholqr_cleannr_t_kernel(const I m,
                                             const I n,
@@ -112,6 +120,10 @@ ROCSOLVER_KERNEL void cholqr_cleannr_t_kernel(const I m,
     }
 }
 
+//---------------------------------------------
+// This kernel restore columns of A in Q and
+// cleans the cholesky factor accordingly.
+//---------------------------------------------
 template <typename I, typename T, typename U>
 ROCSOLVER_KERNEL void cholqr_cleannr_q_kernel(const I m,
                                             const I n,
@@ -178,24 +190,17 @@ ROCSOLVER_KERNEL void cholqr_cleannr_q_kernel(const I m,
     }
 }
 
-
-
-
-
-
+//---------------------------------------------
 // kernel to compute the square of g-norm
 // which is the max 2-norm square of the columns
-//
 // max_j  norm( A(:,j),2)^2
 //
-//
 // launch as dim3(1,nby,nbz), dim3(nx,ny,1)
-//
 // all threads in x-direction in thread block work on
 // computing the 2-norm square of a single column
-//
 // assume nx <= warpsize
 // to use DPP instructions
+//---------------------------------------------
 template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
 static __global__ void cal_gnorm_sq_kernel(const I m,
                                            const I n,
@@ -335,7 +340,7 @@ static __global__ void cal_gnorm_sq_kernel(const I m,
 
 
 // -------------------------------------
-// scale an array
+// this kernel scales an array
 // launch as dim3(nbx,1,1), dim3(nx,1,1)
 // -------------------------------------
 template <typename S, typename I>
@@ -359,7 +364,6 @@ static __global__ void scale_kernel(I const batch_count, S const dscale, S* cons
 // by Yuwei Fan, Haoran Guan, Zhonghua Qiao
 //
 // sigma = 11 * n * u (m + (n+1) ) * gnorm(A)^2
-//
 // where u is machine epsilon
 // ---------------------------------------
 template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
@@ -416,7 +420,6 @@ static rocblas_status cal_sigma(rocblas_handle handle,
 
 // ---------------------------------
 // kernel to perform B <- B + sigma * identity
-//
 // launch as dim3(nbx,1,batch_count), dim3(nx,1,1)
 // ---------------------------------
 template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
@@ -493,56 +496,10 @@ static void add_shift(rocblas_handle handle,
 }
 
 
-// ----------------------------------------------------
-// set_triangular sets
-//
-// the  *strictly* lower triangular part if uplo == 'L'
-// similar to tri(A,-1) = alpha
-//
-// the  *strictly* upper triangular part if uplo == 'U'
-// similar to triu(A,1) = alpha
-//
-// the entire matrix if uplo == 'G'
-// similar to A = alpha
-//
-// laset is used by adjusting the indices by 1 for
-// the lower and upper case
-// ----------------------------------------------------
-/*template <typename T, typename I, typename U>
-static void set_triangular(rocblas_handle handle,
-                           const rocblas_fill uplo,
-                           const I m,
-                           const I n,
-                           const T alpha,
-                           U A,
-                           const rocblas_stride shiftA,
-                           const I lda,
-                           const rocblas_stride strideA,
-                           const I batch_count)
-{
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
 
-    rocblas_stride const offset = (uplo == rocblas_fill_lower) ? idx2D(1, 0, lda)
-        : (uplo == rocblas_fill_upper)                         ? idx2D(0, 1, lda)
-                                                               : 0;
-
-    I const mm = (uplo != rocblas_fill_full) ? m - 1 : m;
-    I const nn = (uplo != rocblas_fill_full) ? n - 1 : n;
-
-    I const max_threads = 256;
-    I const nx = (m <= 32) ? 32 : 64;
-    I const ny = max_threads / nx;
-
-    I const max_blocks = 1024;
-    I const nbx = std::min(max_blocks, ceil(m, nx));
-    I const nby = std::min(max_blocks, ceil(n, ny));
-    I const nbz = std::min(max_blocks, batch_count);
-
-    ROCSOLVER_LAUNCH_KERNEL((laset_kernel<T>), dim3(nbx, nby, nbz), dim3(nx, ny, 1), 0, stream, uplo,
-                            mm, nn, alpha, alpha, A, shiftA + offset, lda, strideA, batch_count);
-}*/
-
+/****************************************************************************/
+/****************************  Host main functions **************************/
+/****************************************************************************/
 
 template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
 rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
@@ -594,7 +551,6 @@ rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
 
     return rocblas_status_continue;
 }
-
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
 static rocblas_status rocsolver_cholqr_getMemorySize(const rocsolver_cholqr_shift cholshift,
@@ -680,13 +636,13 @@ static rocblas_status rocsolver_cholqr_getMemorySize(const rocsolver_cholqr_shif
 
 
 // -------------------------------------------------
-// compute A = Q * R,  using Cholesky factorization
+// CholQR factorization step.
+// compute A = Q * R (or A = L * Q)
 //
-// B = A' * A
-//
-// R = chol(B)
-//
-// Q = A / R
+// B = A' * A (or B = A * A')
+// R = chol(B) (or L = chol(B))
+// Q is solution of upper triangular system  A = QR, (or
+// lower triangular system A = LQ)
 //
 // Q will over-write A
 // -------------------------------------------------
@@ -754,44 +710,25 @@ static rocblas_status rocsolver_cholqr1_template(rocblas_handle handle,
         uplo = rocblas_fill_lower;
     }
 
-//print_device_matrix(std::cout,"Ain",m,n,A,lda);
-
-
-    // compute B = A' * A
+    // compute B = A' * A  (or B = A * A')
     // B is stored in R
-//    if constexpr(use_syrk)
-//    {
-//        // Note output matrix for SYRK is n by n
-//        ROCBLAS_CHECK(rocblasCall_syrk_herk<BATCHED, T>(
-//            handle, rocblas_fill_upper, rocblas_operation_conjugate_transpose, n, m, &Sone, A,
-//            shiftA, lda, strideA, &Szero, R, shiftR, ldr, strideR, batch_count, workArr));
-//    }
-//    else
-//    {
-        ROCBLAS_CHECK(rocblasCall_gemm<T>(handle, trans1, trans2, mn, mn, MN, &one, A, shiftA, lda,
+    ROCBLAS_CHECK(rocblasCall_gemm<T>(handle, trans1, trans2, mn, mn, MN, &one, A, shiftA, lda,
                                           strideA, A, shiftA, lda, strideA, &zero, R, shiftR, ldr,
                                           strideR, batch_count, workArr));
-//    }
-
-//print_device_matrix(std::cout,"A'A",mn,mn,R,ldr);
 
     // optional, if sigma != 0
     // B <- B + sigma * identity
     if(add_sigma)
         add_shift<T>(handle, m, n, batch_count, sigma_array, R, shiftR, ldr, strideR);
 
-//print_device_matrix(std::cout,"A'A + sigma",n,n,R,ldr);
-
     // perform Cholesky factorization
-    // B = R' * R,   R is upper triangular
-    // R will over-write B
+    // B = R' * R with R upper triangular (or B = L * L' with L lower triangular)
+    // R or L will over-write B
     ROCBLAS_CHECK(rocsolver_potrf_template<false, true, T, I, I, S>(
             handle, uplo, mn, R, shiftR, ldr, strideR, iinfo, batch_count, scalars, work1,
             work2, work3, work4, pivots, iinfo + batch_count, optim_mem));
 
-//print_device_matrix(std::cout,"R after chol",n,n,R,ldr);
-//print_device_matrix(std::cout,"info",1,1,iinfo,1);
-
+    // clean cholesky factor R (or L) if factorization of all columns (rows) failed
     I max_blocks = 1024;
     I thdx = 16, thdy = 16;
     I blkx = std::min(max_blocks, ceil(mn, thdx));
@@ -800,27 +737,20 @@ static rocblas_status rocsolver_cholqr1_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(cholqr_cleannr_t_kernel, dim3(blkx,blky,blkz), dim3(thdx,thdy,1), 0, stream, 
                             m, n, mn, nr, iinfo, R, shiftR, ldr, strideR, batch_count, set_nr, update_nr);
 
-//print_device_matrix(std::cout,"clean R",n,n,R,ldr);
-//print_device_matrix(std::cout,"clean info",1,1,nr,1);
-
-    // compute Q = A / R
+    // compute Q by solving triangular system
     // note Q over-writes original matrix A
     ROCBLAS_CHECK(rocblasCall_trsm<T>(handle, side, uplo,
                                       rocblas_operation_none, rocblas_diagonal_non_unit, m, n, &one,
                                       R, shiftR, ldr, strideR, A, shiftA, lda, strideA, batch_count,
                                       optim_mem, work1, work2, work3, work4, workArr));
 
-//print_device_matrix(std::cout,"Q",m,n,A,lda);
-
     if(update_nr)
     {
-//printf("update_nr...\n");
+        // update values in nr (will happen in first refinement iteration when 
+        // cholshift is not none)
         blkx = ceil(batch_count, BS1);
         ROCSOLVER_LAUNCH_KERNEL(cholqr_updatenr_kernel, dim3(blkx), dim3(BS1), 0, stream,
                                 mn, nr, iinfo, batch_count);
-
-//print_device_matrix(std::cout,"nr",1,batch_count,nr,1);
-//print_device_matrix(std::cout,"info",1,batch_count,iinfo,1);
     }
 
     return rocblas_status_success;
@@ -857,8 +787,6 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
                                                 bool optim_mem)
 
 {
-//print_device_matrix(std::cout,"Ain",m,n,A,lda);
-
     // quick return
     if(batch_count == 0)
         return rocblas_status_success;
@@ -887,8 +815,6 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     if(compute_sigma)
         ROCBLAS_CHECK(cal_sigma<T, I>(handle, m, n, A, shiftA, lda, strideA, sigma, batch_count));
 
-//print_device_matrix(std::cout,"sigma",1,batch_count,sigma,1);
-
     // save a copy of A to restore it if necessary when using the shifted algorithm
     I blocksm, blocksn;
     if(add_sigma)
@@ -897,26 +823,19 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
         blocksn = ceil(n, BS2);
         ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocksm, blocksn, batch_count), dim3(BS2, BS2, 1),
                                 0, stream, copymat_to_buffer, m, n, A, shiftA, lda, strideA, Acpy);
-//print_device_matrix(std::cout,"Acpy",m,n,Acpy,lda);
     }
 
     // compute initial cholqr step 
     bool set_nr = true;
     bool update_nr = false;
-//printf("initial...\n");
     rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, sigma, nr, batch_count, 
             scalars, work1, work2, work3, work4, pivots, iinfo, Acpy, 
             workArr, optim_mem, add_sigma, set_nr, update_nr);
 
-//print_device_matrix(std::cout,"A",m,n,A,lda);
-//print_device_matrix(std::cout,"R",mn,mn,R,ldr);
-//print_device_matrix(std::cout,"nr",1,batch_count,nr,1);
-//print_device_matrix(std::cout,"info",1,batch_count,iinfo,1);
-
     // refinement iteration
     // (if the initial cholesky was shifted, this first iteration updates the size nr of the
-    //  factorization to avoid counting dependent rows/columns in Q)
+    // factorization to avoid counting dependent rows/columns in Q)
     rocblas_side side;
     rocblas_fill uplo;
     if(mn == n) 
@@ -937,43 +856,26 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
 
     for(auto k = 1; k < cholnum; ++k)
     {
-//printf("%d refinement...\n",k);
         rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R1, 0, mn, mn * mn, sigma, nr, batch_count, 
             scalars, work1, work2, work3, work4, pivots, iinfo, Acpy, 
             workArr, optim_mem, add_sigma, set_nr, update_nr);
-//print_device_matrix(std::cout,"A",m,n,A,lda);
-//print_device_matrix(std::cout,"R1",mn,mn,R1,mn);
-//print_device_matrix(std::cout,"nr",1,batch_count,nr,1);
-//print_device_matrix(std::cout,"info",1,batch_count,iinfo,1);
         
         if(update_nr)
         {
-//printf("update_nr...\n");
             update_nr = false;
-
-//print_device_matrix(std::cout,"Q before clean",m,n,A,lda);
-//print_device_matrix(std::cout,"R before clean",mn,mn,R,ldr);
 
             // restore columns of A if necessary during the first refinement
             ROCSOLVER_LAUNCH_KERNEL(cholqr_cleannr_q_kernel, dim3(blocksm,blocksn,batch_count), dim3(BS2,BS2,1), 0, stream,
                                 m, n, nr, iinfo, A, shiftA, lda, strideA, R, shiftR, ldr, strideR,
                                 Acpy, batch_count);
-//print_device_matrix(std::cout,"Q after clean",m,n,A,lda);
-//print_device_matrix(std::cout,"R after clean",mn,mn,R,ldr);
         }
 
         ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, side, uplo,
                                       rocblas_operation_none, rocblas_diagonal_non_unit, mn, mn, &one,
                                       0, R1, 0, mn, mn * mn, R, shiftR, ldr, strideR, batch_count,
                                       workArr));
-//print_device_matrix(std::cout,"new R",mn,mn,R,ldr);
     }
-
-//print_device_matrix(std::cout,"Final A",m,n,A,lda);
-//print_device_matrix(std::cout,"Final R",mn,mn,R,ldr);
-//print_device_matrix(std::cout,"nr",1,batch_count,nr,1);
-
 
     rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;

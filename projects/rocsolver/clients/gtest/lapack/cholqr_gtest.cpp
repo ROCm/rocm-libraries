@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,34 +33,34 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
+template <typename I>
+using cholqr_tuple = tuple<vector<I>, int>;
 
-/** Test parameter tuple: {{m, n, lda, ldr}, singular}
+/** Test parameter tuple: {{m, n, lda, ldw}, singular}
     the value of singular is used to manipulate the conditioning of the inpuit matrix
     to test the different algorithm configs (choleskyQR1, choleskyQR2, shifted_choleskyQR3)
 
     - If singular = 0, the input matrix is non singular (cond(A) small).
     - If singular = 1, the matrix is singular (has zero columns/rows, i.e cond(A) = inf or very large)
-    - If singular = s > 1, then a matrix A with repeated columns/rows if modified as 
-      A = A + I * eps * 10^(s - 1) in double precision, or
-      A = A + I * eps * 10^((s - 1)/2) in single precision 
-      to gradually reduce cond(A). **/
-
-template <typename I>
-using cholqr_tuple = tuple<vector<I>, int>;
+    - If singular = s > 1, then a matrix A with repeated columns/rows is diagonally loaded as 
+      A = A + I * eps * 10^(s - 1) to gradually reduce cond(A). **/
 
 // case when m = n = 0 and singular = 0 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-const vector<int> singular_range = {
-    0,  // test with rocsolver_cholqr_shift_none, cholnum = 1  
-    1,  // test with rocsolver_cholqr_shift_computed, cholnum = 2
-    2,  // test with rocsolver_cholqr_shift_computed, cholnum = 2,3
-    4   // test with rocsolver_cholqr_shift_none, cholnum = 1,2
-}; 
 
 // ============================================================================
 // Size cases for checkin_lapack tests (small/quick tests)
 // ============================================================================
+const vector<int> singular_range = {
+    0,  // test with rocsolver_cholqr_shift_none, cholnum = 1  
+    1,  // test with rocsolver_cholqr_shift_computed, cholnum = 2
+    3,  // test with rocsolver_cholqr_shift_computed, cholnum = 2,3
+    5   // test with rocsolver_cholqr_shift_none, cholnum = 1,2
+        // cases 3 and 5 are tested with different cholnum values to verify that
+        // the orthogonallity error improved.  
+}; 
+
 const vector<vector<int>> matrix_size_range = {
     // quick return
     {0, 1, 1, 1},       // m = 0
@@ -72,12 +72,12 @@ const vector<vector<int>> matrix_size_range = {
     {20, 10, 20, 5},    // invalid ldr (m > n)
     {10, 20, 10, 5},    // invalid ldr (n > m)
     // normal (valid) samples
-    {18, 18, 18, 18},
+    {15, 15, 15, 15},
     {30, 30, 100, 30},
     {40, 40, 40, 100},
     {100, 30, 130, 30},
     {20, 80, 20, 20},
-    {40, 110, 40, 100}
+    {10, 100, 40, 80}
 };
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
@@ -91,17 +91,22 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {20, 10, 20, 5},    // invalid ldr (m > n)
     {10, 20, 10, 5},    // invalid ldr (n > m)
     // normal (valid) samples
-    {18, 18, 18, 18},
+    {15, 15, 15, 15},
     {30, 30, 100, 30},
     {40, 40, 40, 100},
     {100, 30, 130, 30},
     {20, 80, 20, 20},
-    {40, 110, 40, 100}
+    {10, 100, 40, 80}
 };
 
 // ============================================================================
 // Test sizes for daily_lapack tests (larger/longer tests)
 // ============================================================================
+const vector<int> large_singular_range = {
+    0,  // test with rocsolver_cholqr_shift_none, cholnum = 1  
+    1,  // test with rocsolver_cholqr_shift_computed, cholnum = 2
+}; 
+
 const vector<vector<int>> large_matrix_size_range = {
     {152, 152, 152, 152},
     {640, 800, 640, 640},
@@ -129,7 +134,7 @@ Arguments cholqr_setup_arguments(cholqr_tuple<I> tup)
     arg.set<I>("m", matrix_size[0]);
     arg.set<I>("n", matrix_size[1]);
     arg.set<I>("lda", matrix_size[2]);
-    arg.set<I>("ldr", matrix_size[3]);
+    arg.set<I>("ldw", matrix_size[3]);
 
     // Set the algorithm
     arg.singular = singular;
@@ -354,9 +359,9 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR,
                          Combine(ValuesIn(large_matrix_size_range),
-                                 ValuesIn(singular_range)));
+                                 ValuesIn(large_singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(large_matrix_size_range_64),
-                                 ValuesIn(singular_range)));
+                                 ValuesIn(large_singular_range)));

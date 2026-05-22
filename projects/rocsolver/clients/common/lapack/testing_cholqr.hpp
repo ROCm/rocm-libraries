@@ -179,66 +179,6 @@ void cholqr_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-/*        int exa = atoi(getenv("EXA"));
-        
-        if(exa==1)
-        {
-            const T a[10][5] = { {  1,   0,   2,   2,   -1 },
-                                 { -2,   3,   1,   1,    0 },
-                                 {  1,  -1,   0,  -2,    2 },
-                                 {  0,   0,   0,   1,   -1 },
-                                 {  1,   0,   1,   0,    1 },
-                                 {  1,   0,   1,   0,    1 },
-                                 {  3,  -3,   0,  -1,    1 },
-                                 {  3,  -4,   -1,  -2,    1 },
-                                 {  0,   0,   0,   0,    0 },
-                                 {  1,   0,   2,  -1,    8 } };
-            for(auto i = 0; i < m; ++i)
-            {
-                for(auto j = 0; j < n; ++j)
-                    hA[0][i + j * lda] = a[i][j];
-            }
-        }
-        else if(exa==2)
-        {
-            const T a[10][5] = { {  1,   0,   1,   2,   -1 },
-                                 { -2,   3,   1,   1,    0 },
-                                 {  1,  -1,   0,  -2,    2 },
-                                 {  0,   0,   0,   1,   -1 },
-                                 {  1,   0,   1,   0,    1 },
-                                 {  1,   0,   1,   0,    1 },
-                                 {  3,  -3,   0,  -1,    1 },
-                                 {  3,  -4,   -1,  -2,    1 },
-                                 {  0,   0,   0,   0,    0 },
-                                 {  1,   0,   1.0000000001,  -1,    8 } };
-            for(auto i = 0; i < m; ++i)
-            {
-                for(auto j = 0; j < n; ++j)
-                    hA[0][i + j * lda] = a[i][j];
-            }
-        }
-        else if(exa==3)
-        {
-            const T a[10][5] = { {  1,   0,   0,   0,    0 },
-                                 { -2,   3,   0,   1,    0 },
-                                 {  1,  -1,   0,   0,    0 },
-                                 {  0,   0,   0,   0,    0 },
-                                 {  1,   0,   0,   2,    0 },
-                                 {  1,   0,   0,   0,    0 },
-                                 {  3,  -3,   0,   0,    0 },
-                                 {  3,  -4,   0,   0,    1 },
-                                 {  0,   0,   0,   0,    0 },
-                                 {  1,   0,   0,   0,    -1 } };
-            for(auto i = 0; i < m; ++i)
-            {
-                for(auto j = 0; j < n; ++j)
-                    hA[0][i + j * lda] = a[i][j];
-            }
-        }
-        else
-        {*/
-        
-
         rocblas_init<T>(hA, true);
 
         for(auto b = 0; b < bc; ++b)
@@ -257,7 +197,7 @@ void cholqr_initData(const rocblas_handle handle,
         
             if(singular)
             {
-                // if singular, modify modify the matrix to be singular, and 
+                // if needed, modify the matrix to be singular, and 
                 // change the condition number of the matrix 
                 // to test different configurations of the algorithm
                 
@@ -268,6 +208,7 @@ void cholqr_initData(const rocblas_handle handle,
                 I i_start, i_step, j_start, j_step;
                 if(mn == n)
                 {
+                    // case m >= n
                     i_start = 0;
                     i_step = 1;
                     j_start = mn / 3 + 1;
@@ -275,6 +216,7 @@ void cholqr_initData(const rocblas_handle handle,
                 }
                 else
                 {
+                    // case m < n
                     i_start = mn / 3 + 1;
                     i_step = i_start + 1;
                     j_start = 0;
@@ -307,32 +249,11 @@ void cholqr_initData(const rocblas_handle handle,
                 }
             }
         }
-//        }
 
-        // Initialize sigma array based on algorithm mode
-        // For cholqr3_user, we compute sigma using the same formula as cholqr3_compute:
-        //   sigma = 11 * n * eps * (m + (n+1)) * ||A||_F^2
-        // For other modes, sigma is either not used or computed internally
-//        if(cholshift == rocsolver_cholqr_shift_provided)
-//        {
-//            S eps = std::numeric_limits<S>::epsilon();
-//            for(I b = 0; b < bc; ++b)
-//            {
-//                // Compute ||A||_F^2 (Frobenius norm squared)
-//                S gnorm = snorm('F', m, n, hA[b], lda);
-
-                // sigma = 11 * n * eps * (m + (n+1)) * gnorm_sq
-//                hSigma[b][0] = S(11.0) * S(n) * eps * (S(m) + S(n + 1)) * gnorm * gnorm;
-//            }
-//        }
-//        else
-//        {
-            // For other algorithms, sigma is not used or computed internally
-            for(I b = 0; b < bc; ++b)
-            {
-                hSigma[b][0] = cholshift == rocsolver_cholqr_shift_provided ? sigma : S(0.0);
-            }
-//        }
+        // Initialize sigma array. When the shift is user provided, the value is in
+        // sigma (same value for all matrices in batch). Otherwise, initialize with zero. 
+        for(I b = 0; b < bc; ++b)
+            hSigma[b][0] = cholshift == rocsolver_cholqr_shift_provided ? sigma : S(0.0);
     }
 
     if(GPU)
@@ -386,12 +307,10 @@ void cholqr_getError(const rocblas_handle handle,
     std::vector<double> err2(bc, 0);
     I mn = std::min(m, n);
     I MN = std::max(m, n);
-
     
     // input data initialization
     cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
                                    hR, hSigma, sigma, singular);
-//print_host_matrix(std::cout,"Ain",m,n,hA[0],lda);
 
     // -------------------------------------------
     // compute orthogonality error:
@@ -470,10 +389,6 @@ void cholqr_getError(const rocblas_handle handle,
     }
     maxerr = *std::max_element(err2.begin(), err2.end());
     *recon_error = maxerr;
-
-//print_device_matrix(std::cout,"Q",m,n,dA.data(),lda);
-//print_device_matrix(std::cout,"R",n,n,dR.data(),ldr);
-//print_device_matrix(std::cout,"nr",1,1,dnr.data(),1);
 }
 
 template <bool STRIDED,
@@ -595,7 +510,7 @@ void testing_cholqr(Arguments& argus)
     I n = argus.get<I>("n", m);
     I mn = std::min(m,n);
     I lda = argus.get<I>("lda", m);
-    I ldr = argus.get<I>("ldr", mn);
+    I ldr = argus.get<I>("ldw", mn);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stR = argus.get<rocblas_stride>("strideR", ldr * mn);
     char cholshift_char = argus.get<char>("cholshift");
@@ -759,18 +674,18 @@ void testing_cholqr(Arguments& argus)
             rocsolver_bench_header("Arguments:");
             if(BATCHED)
             {
-                rocsolver_bench_output("m", "n", "lda", "ldr", "strideR", "cholshift", "batch_c");
+                rocsolver_bench_output("m", "n", "lda", "ldw", "strideW", "cholshift", "batch_c");
                 rocsolver_bench_output(m, n, lda, ldr, stR, cholshift_char, bc);
             }
             else if(STRIDED)
             {
-                rocsolver_bench_output("m", "n", "lda", "strideA", "ldr", "strideR", "cholshift",
+                rocsolver_bench_output("m", "n", "lda", "strideA", "ldw", "strideW", "cholshift",
                                        "batch_c");
                 rocsolver_bench_output(m, n, lda, stA, ldr, stR, cholshift_char, bc);
             }
             else
             {
-                rocsolver_bench_output("m", "n", "lda", "ldr", "cholshift");
+                rocsolver_bench_output("m", "n", "lda", "ldw", "cholshift");
                 rocsolver_bench_output(m, n, lda, ldr, cholshift_char);
             }
             rocsolver_bench_header("Results:");
