@@ -101,7 +101,9 @@ def compile_kernel(
     t1 = time.perf_counter()
     llvm_text = lower_kernel_to_llvm(kernel)
     t2 = time.perf_counter()
-    hsaco, comgr_t = build_hsaco_from_llvm_ir(llvm_text, isa=isa)
+    hsaco, comgr_t = build_hsaco_from_llvm_ir(
+        llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
+    )
     t3 = time.perf_counter()
 
     timings["ir_opt"] = (t_pass - t0) * 1000.0
@@ -121,6 +123,33 @@ def compile_kernel(
         pass_stats=pass_stats,
         isa=isa,
     )
+
+
+def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
+    """Return AMDGPU codegen options implied by kernel attrs."""
+
+    options = ["-O3"]
+    agpr_alloc = kernel.attrs.get("agpr_alloc")
+    if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
+        options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    return options
+
+
+def _is_zero_agpr_alloc(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        parts = value.strip().split(",")
+    elif isinstance(value, (tuple, list)):
+        parts = list(value)
+    else:
+        return False
+    if len(parts) != 2:
+        return False
+    try:
+        return int(parts[0]) == 0 and int(parts[1]) == 0
+    except (TypeError, ValueError):
+        return False
 
 
 def compile_kernel_via_hipcc(

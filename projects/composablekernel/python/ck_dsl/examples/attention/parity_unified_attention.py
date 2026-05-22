@@ -1095,6 +1095,7 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
         num_sms=120,
+        compile_backend=os.environ.get("CK_DSL_ATTENTION_COMPILE_BACKEND") or None,
     )
 
     hip_stream = _bench_stream_handle()
@@ -1146,6 +1147,18 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             return True
 
         use_hlpv = use_hlpv_variant()
+        # Measured best local policy for the d64/b32/h64kv8 bf16+sinks family:
+        #   * no-SW: R4_s1mask_hlpv + mask-limit + fast paged-KV + skip legacy Q
+        #   * SW:    R4_s1mask_hlpv + fast paged-KV + skip legacy Q
+        #   * SW high-num-seq tail falls back to plain R4 in use_hlpv_variant().
+        use_transposed_mask_limit = use_hlpv and (s.sliding_window or 0) == 0
+        use_mfma32_skip_legacy_qreg = use_hlpv
+        use_fast_paged_kv_desc = use_hlpv
+        # AGPR0 is still experimental and did not improve this path broadly; keep
+        # it as an explicit environment opt-in for microbench work only.
+        use_agpr_alloc_zero = (
+            use_hlpv and os.environ.get("CK_DSL_ATTENTION_AGPR_ALLOC_ZERO") == "1"
+        )
         spec = UnifiedAttention2DTiledSpec(
             head_size=s.head_size,
             block_size=s.block_size,
@@ -1167,6 +1180,10 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             use_transposed_scalar_state=use_hlpv,
             use_transposed_mask_once=use_hlpv,
             use_transposed_half_local_pv=use_hlpv,
+            use_mfma32_skip_legacy_qreg=use_mfma32_skip_legacy_qreg,
+            use_transposed_mask_limit=use_transposed_mask_limit,
+            use_fast_paged_kv_desc=use_fast_paged_kv_desc,
+            use_agpr_alloc_zero=use_agpr_alloc_zero,
         )
         kernel = build_unified_attention_2d_tiled(spec)
         if _select_2d_compile_backend(problem) == "hipcc":
@@ -1181,7 +1198,14 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             signature=_attn_signature(
                 dtype_str, include_bt_stride=True, include_qq_bias_stride=True
             ),
-            cache_key=("r4_hlpv_parity", spec.kernel_name()),
+            cache_key=(
+                "r4_hlpv_parity",
+                spec.kernel_name(),
+                use_agpr_alloc_zero,
+                use_mfma32_skip_legacy_qreg,
+                use_transposed_mask_limit,
+                use_fast_paged_kv_desc,
+            ),
         )
         vals = _attn_values(
             problem=problem,
