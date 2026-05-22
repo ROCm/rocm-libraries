@@ -48,8 +48,10 @@ namespace fs = std::experimental::filesystem;
 
 #ifdef ROCSOLVER_CLIENTS_TEST
 #define ROCSOLVER_TEST_CHECK(T, max_error, tol) ASSERT_LE((max_error), (tol)*get_epsilon<T>())
+#define ROCSOLVER_TEST_CHECK2(err2, err1) ASSERT_LE((err2), (err1))
 #else // ROCSOLVER_CLIENTS_BENCH
 #define ROCSOLVER_TEST_CHECK(T, max_error, tol)
+#define ROCSOLVER_TEST_CHECK2(err2, err1)
 #endif
 
 #define ROCSOLVER_FORMAT_HASH(h) fmt::format("0x{:x}", h)

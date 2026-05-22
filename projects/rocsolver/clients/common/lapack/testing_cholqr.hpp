@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,7 +41,8 @@
 
 template <bool STRIDED, typename T, typename I, typename S, typename U, typename V>
 void cholqr_checkBadArgs(const rocblas_handle handle,
-                         const rocsolver_alg_select algo,
+                         const rocsolver_cholqr_shift cholshift,
+                         const rocblas_int cholnum, 
                          const I m,
                          const I n,
                          T dA,
@@ -51,50 +52,50 @@ void cholqr_checkBadArgs(const rocblas_handle handle,
                          const I ldr,
                          const rocblas_stride stR,
                          S dSigma,
-                         V dInfo,
+                         V dnr,
                          const I bc)
 {
     // handle
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, nullptr, algo, m, n, dA, lda, stA, dR, ldr, stR,
-                                           dSigma, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, nullptr, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR,
+                                           dSigma, dnr, bc),
                           rocblas_status_invalid_handle);
 
     // values
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, rocsolver_alg_select(0), m, n, dA, lda,
-                                           stA, dR, ldr, stR, dSigma, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, rocsolver_cholqr_shift(0), cholnum, m, n, dA, lda,
+                                           stA, dR, ldr, stR, dSigma, dnr, bc),
                           rocblas_status_invalid_value);
 
     // sizes (only check batch_count if applicable)
     if(STRIDED)
-        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA, lda, stA, dR, ldr,
-                                               stR, dSigma, dInfo, (I)-1),
+        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr,
+                                               stR, dSigma, dnr, (I)-1),
                               rocblas_status_invalid_size);
 
     // pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, (T) nullptr, lda, stA, dR,
-                                           ldr, stR, dSigma, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T) nullptr, lda, stA, dR,
+                                           ldr, stR, dSigma, dnr, bc),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA, lda, stA, (U) nullptr,
-                                           ldr, stR, dSigma, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, (U) nullptr,
+                                           ldr, stR, dSigma, dnr, bc),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA, lda, stA, dR, ldr, stR,
-                                           (S) nullptr, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR,
+                                           (S) nullptr, dnr, bc),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA, lda, stA, dR, ldr, stR,
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR,
                                            dSigma, (V) nullptr, bc),
                           rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, (I)0, n, (T) nullptr, lda, stA,
-                                           (U) nullptr, ldr, stR, dSigma, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, (I)0, n, (T) nullptr, lda, stA,
+                                           (U) nullptr, ldr, stR, dSigma, dnr, bc),
                           rocblas_status_success);
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, (I)0, (T) nullptr, lda, stA,
-                                           (U) nullptr, ldr, stR, dSigma, dInfo, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, (I)0, (T) nullptr, lda, stA,
+                                           (U) nullptr, ldr, stR, dSigma, dnr, bc),
                           rocblas_status_success);
 
     // quick return with zero batch_count if applicable
     if(STRIDED)
-        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA, lda, stA, dR, ldr,
+        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr,
                                                stR, (S) nullptr, (V) nullptr, (I)0),
                               rocblas_status_success);
 }
@@ -106,7 +107,8 @@ void testing_cholqr_bad_arg()
 
     // safe arguments
     rocblas_local_handle handle;
-    rocsolver_alg_select algo = rocsolver_alg_select3;
+    rocsolver_cholqr_shift cholshift = rocsolver_cholqr_shift_computed;
+    rocblas_int cholnum = 2;
     I m = 1;
     I n = 1;
     I lda = 1;
@@ -115,43 +117,50 @@ void testing_cholqr_bad_arg()
     rocblas_stride stR = 1;
     I bc = 1;
 
+    // memory allocations for any case
+    device_strided_batch_vector<T> dR(1, 1, 1, 1);
+    device_strided_batch_vector<S> dSigma(1, 1, 1, 1);
+    device_strided_batch_vector<I> dnr(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dR.memcheck());
+    CHECK_HIP_ERROR(dSigma.memcheck());
+    CHECK_HIP_ERROR(dnr.memcheck());
+        
     if(BATCHED)
     {
         // memory allocations
         device_batch_vector<T> dA(1, 1, 1);
-        device_strided_batch_vector<T> dR(1, 1, stR, 1);
-        device_strided_batch_vector<S> dSigma(1, 1, 1, 1);
-        device_strided_batch_vector<I> dInfo(1, 1, 1, 1);
         CHECK_HIP_ERROR(dA.memcheck());
-        CHECK_HIP_ERROR(dR.memcheck());
-        CHECK_HIP_ERROR(dSigma.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
 
         // check bad arguments
-        cholqr_checkBadArgs<STRIDED>(handle, algo, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
-                                     dSigma.data(), dInfo.data(), bc);
+        cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
+                                     dSigma.data(), dnr.data(), bc);
     }
     else
     {
         // memory allocations
         device_strided_batch_vector<T> dA(1, 1, 1, 1);
-        device_strided_batch_vector<T> dR(1, 1, 1, 1);
-        device_strided_batch_vector<S> dSigma(1, 1, 1, 1);
-        device_strided_batch_vector<I> dInfo(1, 1, 1, 1);
         CHECK_HIP_ERROR(dA.memcheck());
-        CHECK_HIP_ERROR(dR.memcheck());
-        CHECK_HIP_ERROR(dSigma.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
-
+        
         // check bad arguments
-        cholqr_checkBadArgs<STRIDED>(handle, algo, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
-                                     dSigma.data(), dInfo.data(), bc);
+        cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
+                                     dSigma.data(), dnr.data(), bc);
     }
 }
 
-template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Ud, typename Sd, typename Th, typename Uh, typename Sh>
+template <bool CPU, 
+          bool GPU, 
+          typename T, 
+          typename S, 
+          typename I, 
+          typename Td, 
+          typename Ud, 
+          typename Sd, 
+          typename Th, 
+          typename Uh, 
+          typename Sh>
 void cholqr_initData(const rocblas_handle handle,
-                     const rocsolver_alg_select algo,
+                     const rocsolver_cholqr_shift cholshift,
+                     const rocblas_int cholnum,
                      const I m,
                      const I n,
                      Td& dA,
@@ -164,52 +173,166 @@ void cholqr_initData(const rocblas_handle handle,
                      const I bc,
                      Th& hA,
                      Uh& hR,
-                     Sh& hSigma)
+                     Sh& hSigma,
+                     S sigma,
+                     const rocblas_int singular)
 {
-    using S = decltype(std::real(T{}));
-
     if(CPU)
     {
+/*        int exa = atoi(getenv("EXA"));
+        
+        if(exa==1)
+        {
+            const T a[10][5] = { {  1,   0,   2,   2,   -1 },
+                                 { -2,   3,   1,   1,    0 },
+                                 {  1,  -1,   0,  -2,    2 },
+                                 {  0,   0,   0,   1,   -1 },
+                                 {  1,   0,   1,   0,    1 },
+                                 {  1,   0,   1,   0,    1 },
+                                 {  3,  -3,   0,  -1,    1 },
+                                 {  3,  -4,   -1,  -2,    1 },
+                                 {  0,   0,   0,   0,    0 },
+                                 {  1,   0,   2,  -1,    8 } };
+            for(auto i = 0; i < m; ++i)
+            {
+                for(auto j = 0; j < n; ++j)
+                    hA[0][i + j * lda] = a[i][j];
+            }
+        }
+        else if(exa==2)
+        {
+            const T a[10][5] = { {  1,   0,   1,   2,   -1 },
+                                 { -2,   3,   1,   1,    0 },
+                                 {  1,  -1,   0,  -2,    2 },
+                                 {  0,   0,   0,   1,   -1 },
+                                 {  1,   0,   1,   0,    1 },
+                                 {  1,   0,   1,   0,    1 },
+                                 {  3,  -3,   0,  -1,    1 },
+                                 {  3,  -4,   -1,  -2,    1 },
+                                 {  0,   0,   0,   0,    0 },
+                                 {  1,   0,   1.0000000001,  -1,    8 } };
+            for(auto i = 0; i < m; ++i)
+            {
+                for(auto j = 0; j < n; ++j)
+                    hA[0][i + j * lda] = a[i][j];
+            }
+        }
+        else if(exa==3)
+        {
+            const T a[10][5] = { {  1,   0,   0,   0,    0 },
+                                 { -2,   3,   0,   1,    0 },
+                                 {  1,  -1,   0,   0,    0 },
+                                 {  0,   0,   0,   0,    0 },
+                                 {  1,   0,   0,   2,    0 },
+                                 {  1,   0,   0,   0,    0 },
+                                 {  3,  -3,   0,   0,    0 },
+                                 {  3,  -4,   0,   0,    1 },
+                                 {  0,   0,   0,   0,    0 },
+                                 {  1,   0,   0,   0,    -1 } };
+            for(auto i = 0; i < m; ++i)
+            {
+                for(auto j = 0; j < n; ++j)
+                    hA[0][i + j * lda] = a[i][j];
+            }
+        }
+        else
+        {*/
+        
+
         rocblas_init<T>(hA, true);
 
-        for(I b = 0; b < bc; ++b)
+        for(auto b = 0; b < bc; ++b)
         {
-            for(I i = 0; i < m; i++)
+            // start with a well-conditioned, diagonally-dominant matrix 
+            for(auto j = 0; j < n; j++)
             {
-                for(I j = 0; j < n; j++)
+                for(auto i = 0; i < m; i++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + j * lda] += 100;
                     else
                         hA[b][i + j * lda] -= 4;
                 }
             }
+        
+            if(singular)
+            {
+                // if singular, modify modify the matrix to be singular, and 
+                // change the condition number of the matrix 
+                // to test different configurations of the algorithm
+                
+                // a) add two zero or repeated columns/rows at approx
+                // 1/3 and 2/3 of the matrix (always same positions for 
+                // debbuging purposes)
+                I mn = std::min(m,n);
+                I i_start, i_step, j_start, j_step;
+                if(mn == n)
+                {
+                    i_start = 0;
+                    i_step = 1;
+                    j_start = mn / 3 + 1;
+                    j_step = j_start + 1;
+                }
+                else
+                {
+                    i_start = mn / 3 + 1;
+                    i_step = i_start + 1;
+                    j_start = 0;
+                    j_step = 1;
+                }
+                for(auto i = i_start; i < m; i += i_step)
+                {
+                    for(auto j = j_start; j < n; j += j_step)
+                    {
+                        T val = (mn == n) ? hA[b][i + (j - j_start) * lda] : 
+                                            hA[b][(i - i_start) + j * lda];
+                        hA[b][i + j * lda] = (singular > 1) ? val : 0;
+                    }    
+                }                        
+                
+                // b) diagonal loading if needed
+                if(singular > 1)
+                { 
+                    S eps = std::numeric_limits<S>::epsilon();
+                    S val = 1;
+                    for(auto k = 1; k < singular; ++k)
+                    {
+                        val *= 10;
+                    }
+                    val *= eps;
+                    for(auto i = 0; i < mn; ++i)
+                    {
+                        hA[b][i + i * lda] += val;
+                    } 
+                }
+            }
         }
+//        }
 
         // Initialize sigma array based on algorithm mode
         // For cholqr3_user, we compute sigma using the same formula as cholqr3_compute:
         //   sigma = 11 * n * eps * (m + (n+1)) * ||A||_F^2
         // For other modes, sigma is either not used or computed internally
-        if(algo == rocsolver_alg_select4)
-        {
-            S eps = std::numeric_limits<S>::epsilon();
-            for(I b = 0; b < bc; ++b)
-            {
-                // Compute ||A||_F^2 (Frobenius norm squared)
-                S gnorm = snorm('F', m, n, hA[b], lda);
+//        if(cholshift == rocsolver_cholqr_shift_provided)
+//        {
+//            S eps = std::numeric_limits<S>::epsilon();
+//            for(I b = 0; b < bc; ++b)
+//            {
+//                // Compute ||A||_F^2 (Frobenius norm squared)
+//                S gnorm = snorm('F', m, n, hA[b], lda);
 
                 // sigma = 11 * n * eps * (m + (n+1)) * gnorm_sq
-                hSigma[b][0] = S(11.0) * S(n) * eps * (S(m) + S(n + 1)) * gnorm * gnorm;
-            }
-        }
-        else
-        {
+//                hSigma[b][0] = S(11.0) * S(n) * eps * (S(m) + S(n + 1)) * gnorm * gnorm;
+//            }
+//        }
+//        else
+//        {
             // For other algorithms, sigma is not used or computed internally
             for(I b = 0; b < bc; ++b)
             {
-                hSigma[b][0] = S(0.0);
+                hSigma[b][0] = cholshift == rocsolver_cholqr_shift_provided ? sigma : S(0.0);
             }
-        }
+//        }
     }
 
     if(GPU)
@@ -222,6 +345,7 @@ void cholqr_initData(const rocblas_handle handle,
 
 template <bool STRIDED,
           typename T,
+          typename S,
           typename I,
           typename Td,
           typename Ud,
@@ -232,7 +356,8 @@ template <bool STRIDED,
           typename Sh,
           typename Ih>
 void cholqr_getError(const rocblas_handle handle,
-                     const rocsolver_alg_select algo,
+                     const rocsolver_cholqr_shift cholshift,
+                     const rocblas_int cholnum,
                      const I m,
                      const I n,
                      Td& dA,
@@ -242,98 +367,118 @@ void cholqr_getError(const rocblas_handle handle,
                      const I ldr,
                      const rocblas_stride stR,
                      Sd& dSigma,
-                     Id& dInfo,
+                     Id& dnr,
                      const I bc,
                      Th& hA,
                      Th& hARes,
                      Uh& hR,
                      Uh& hRRes,
                      Sh& hSigma,
-                     Ih& hInfo,
-                     double* max_err)
+                     Ih& hnr,
+                     S sigma,
+                     double* orth_error,
+                     double* recon_error,
+                     const rocblas_int singular,
+                     const bool forgtest)
 {
-    using S = decltype(std::real(T{}));
-    I min_mn = std::min(m, n);
+    S eps = std::numeric_limits<S>::epsilon();
+    std::vector<double> err1(bc, 10);
+    std::vector<double> err2(bc, 0);
+    I mn = std::min(m, n);
+    I MN = std::max(m, n);
 
-    // Work arrays for CPU reference (GEQRF + ORGQR)
-    I lwork = std::max(I(1), std::max(m, n) * 32);
-    std::vector<T> hW(lwork);
-    std::vector<T> hTau(min_mn);
-
+    
     // input data initialization
-    cholqr_initData<true, true, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
-                                   hR, hSigma);
+    cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
+                                   hR, hSigma, sigma, singular);
+//print_host_matrix(std::cout,"Ain",m,n,hA[0],lda);
 
-    // execute GPU cholqr
-    CHECK_ROCBLAS_ERROR(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA.data(), lda, stA,
-                                         dR.data(), ldr, stR, dSigma.data(), dInfo.data(), bc));
-    CHECK_HIP_ERROR(hARes.transfer_from(dA)); // Q_gpu is stored in A
-    CHECK_HIP_ERROR(hRRes.transfer_from(dR)); // R_gpu
-    CHECK_HIP_ERROR(hInfo.transfer_from(dInfo));
-
-    // Check info for factorization success
-    // (We expect the used input matrices to always succeed. The test matrices
-    // are well-conditioned with large diagonal dominance.)
-    *max_err = 0;
-    for(I b = 0; b < bc; ++b)
+    // -------------------------------------------
+    // compute orthogonality error:
+    // -------------------------------------------
+    std::vector<T> QtQ(size_t(mn) * mn, T(0));
+    std::vector<T> identity(size_t(mn) * mn, T(0));
+    cpu_laset('A', mn, mn, T(0), T(1), identity.data(), mn);
+    rocblas_int start;
+    if(forgtest)
+        start = (cholshift == rocsolver_cholqr_shift_none) ? 1 : 2;
+    else
+        start = cholnum;
+    
+    for(auto cnum = start; cnum <= cholnum; ++cnum)
     {
-        EXPECT_EQ(hInfo[b][0], 0) << "where b = " << b;
-        if(hInfo[b][0] != 0)
-            *max_err += 1;
-    }
+        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
+                                        hR, hSigma, sigma, singular);
 
-    // Compute Error
-    // ||Q^T Q - I||_F (orthogonality) and ||A - QR||_F (reconstruction)
-    double err = 0;
-    for(I b = 0; b < bc; ++b)
-    {
-        // Only compute numerical error if factorization succeeded
-        if(hInfo[b][0] == 0)
+        // execute GPU cholqr
+        CHECK_ROCBLAS_ERROR(rocsolver_cholqr(STRIDED, handle, cholshift, cnum, m, n, dA.data(), lda, stA,
+                                         dR.data(), ldr, stR, dSigma.data(), dnr.data(), bc));
+        CHECK_HIP_ERROR(hARes.transfer_from(dA)); 
+        CHECK_HIP_ERROR(hnr.transfer_from(dnr));
+
+        for(I b = 0; b < bc; ++b)
         {
-            // -----------------------
-            // Compute Q_gpu^H * Q_gpu using GEMM (should be identity for orthogonal Q)
-            // QtQ = Q^H * Q, result is min_mn x min_mn
-            // -----------------------
-            std::vector<T> QtQ(size_t(min_mn) * min_mn, T(0));
-            std::vector<T> identity(size_t(min_mn) * min_mn, T(0));
-
-            // form identity
-            cpu_laset('A', min_mn, min_mn, T(0), T(1), identity.data(), min_mn);
-
-            // Compute QtQ <-  Q' * Q
-            cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, min_mn, min_mn,
-                     m, T(1), hARes[b], lda, hARes[b], lda, T(0), QtQ.data(), min_mn);
-
-            // Compute orth_err = norm( Q^H Q - I )
-            auto orth_err = norm_error('F', min_mn, min_mn, min_mn, identity.data(), QtQ.data());
-
-            // -----------------------
-            // Compute Q_gpu * R_gpu using GEMM (should equal original A)
-            // QR = Q * R, result is m x n
-            // Note: R may have garbage below diagonal from GPU, so extract only upper triangular
-            // -----------------------
-            std::vector<T> QR(size_t(lda) * n, T(0));
-
-            //  Copy upper triangular part
-            //  hR = triu( hRRes[b] )
-            cpu_lacpy('U', min_mn, min_mn, hRRes[b], ldr, hR[b], ldr);
-
-            // compute  QR <-  Q * R
-            cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, min_mn, T(1), hARes[b],
-                     lda, hR[b], ldr, T(0), QR.data(), lda);
-
-            // Compute recon_err = norm(A - QR)
-            // Note: Must iterate column by column to respect leading dimension lda
-            auto recon_err = norm_error('F', m, n, lda, hA[b], QR.data());
-
-            err = std::max(orth_err, recon_err);
-            *max_err = err > *max_err ? err : *max_err;
+            I nr = hnr[b][0];
+            
+            // orthogonality error is ||Q^T Q - I|| or ||Q Q^T - I||
+            if(mn == n)
+            {
+                // case m >= n
+                cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nr, nr, MN, 
+                        T(1), hARes[b], lda, hARes[b], lda, T(0), QtQ.data(), mn);
+            }
+            else
+            {
+                // case m < n
+                cpu_gemm(rocblas_operation_none, rocblas_operation_conjugate_transpose, nr, nr, MN,
+                        T(1), hARes[b], lda, hARes[b], lda, T(0), QtQ.data(), mn);
+            }
+            err2[b] = norm_error('F', nr, nr, mn, identity.data(), QtQ.data());
+            
+            // verify that orthogonality of Q improved
+            if(err1[b] > MN * eps)
+                ROCSOLVER_TEST_CHECK2(err2[b], err1[b]); // check if err2 < err1
+            
+            err1[b] = err2[b];
         }
     }
+    double maxerr = *std::max_element(err1.begin(), err1.end());
+    *orth_error = maxerr;
+
+    // --------------------------------------------
+    // compute reconstruction error
+    // --------------------------------------------
+    CHECK_HIP_ERROR(hRRes.transfer_from(dR));
+    std::vector<T> Ac(size_t(lda) * n, T(0));
+    
+    for(I b = 0; b < bc; ++b)
+    {
+        // reconstruction error is ||A - QR|| / ||A|| or ||A - LQ|| / ||A||
+        if(mn == n) 
+        {
+            // case m >= n
+            cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hARes[b],
+                     lda, hRRes[b], ldr, T(0), Ac.data(), lda);
+        }
+        else
+        {
+            // case m < n
+            cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hRRes[b],
+                     ldr, hARes[b], lda, T(0), Ac.data(), lda);
+        }
+        err2[b] = norm_error('F', m, n, lda, hA[b], Ac.data());
+    }
+    maxerr = *std::max_element(err2.begin(), err2.end());
+    *recon_error = maxerr;
+
+//print_device_matrix(std::cout,"Q",m,n,dA.data(),lda);
+//print_device_matrix(std::cout,"R",n,n,dR.data(),ldr);
+//print_device_matrix(std::cout,"nr",1,1,dnr.data(),1);
 }
 
 template <bool STRIDED,
           typename T,
+          typename S,
           typename I,
           typename Td,
           typename Ud,
@@ -344,7 +489,8 @@ template <bool STRIDED,
           typename Sh,
           typename Ih>
 void cholqr_getPerfData(const rocblas_handle handle,
-                        const rocsolver_alg_select algo,
+                        const rocsolver_cholqr_shift cholshift,
+                        const rocblas_int cholnum,
                         const I m,
                         const I n,
                         Td& dA,
@@ -354,48 +500,59 @@ void cholqr_getPerfData(const rocblas_handle handle,
                         const I ldr,
                         const rocblas_stride stR,
                         Sd& dSigma,
-                        Id& dInfo,
+                        Id& dnr,
                         const I bc,
                         Th& hA,
                         Uh& hR,
                         Sh& hSigma,
-                        Ih& hInfo,
+                        Ih& hnr,
+                        S sigma,
                         double* gpu_time_used,
                         double* cpu_time_used,
                         const rocblas_int hot_calls,
                         const int profile,
                         const bool profile_kernels,
-                        const bool perf)
+                        const bool perf,
+                        const rocblas_int singular)
 {
-    using S = decltype(std::real(T{}));
-    std::vector<T> hW(n);
-    std::vector<T> hTau(std::min(m, n));
+    I mn = std::min(m, n);
+    std::vector<T> hW(mn);
+    std::vector<T> hTau(mn);
 
     if(!perf)
     {
-        cholqr_initData<true, false, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
-                                        hA, hR, hSigma);
+        cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
+                                        hA, hR, hSigma, sigma, singular);
 
-        // cpu-lapack performance (using GEQRF as reference, only if not in perf mode)
+        // cpu-lapack performance (using GEQRF or GELQF as reference, only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
         for(I b = 0; b < bc; ++b)
         {
-            cpu_geqrf(m, n, hA[b], lda, hTau.data(), hW.data(), n);
+            if(mn == n)
+            {
+                // case m >= n
+                cpu_geqrf(m, n, hA[b], lda, hTau.data(), hW.data(), mn);
+            }
+            else
+            {
+                // case m < n
+                cpu_gelqf(m, n, hA[b], lda, hTau.data(), hW.data(), mn);
+            }
         }
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    cholqr_initData<true, false, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
-                                    hR, hSigma);
+    cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
+                                    hR, hSigma, sigma, singular);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        cholqr_initData<false, true, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
-                                        hA, hR, hSigma);
+        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
+                                        hA, hR, hSigma, sigma, singular);
 
-        CHECK_ROCBLAS_ERROR(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA.data(), lda, stA,
-                                             dR.data(), ldr, stR, dSigma.data(), dInfo.data(), bc));
+        CHECK_ROCBLAS_ERROR(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
+                                             dR.data(), ldr, stR, dSigma.data(), dnr.data(), bc));
     }
 
     // gpu-lapack performance
@@ -415,16 +572,17 @@ void cholqr_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        cholqr_initData<false, true, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
-                                        hA, hR, hSigma);
+        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
+                                        hA, hR, hSigma, sigma, singular);
 
         timer.start(stream);
-        rocsolver_cholqr(STRIDED, handle, algo, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
-                         dSigma.data(), dInfo.data(), bc);
+        rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
+                         dSigma.data(), dnr.data(), bc);
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
 }
+
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
 void testing_cholqr(Arguments& argus)
@@ -435,18 +593,17 @@ void testing_cholqr(Arguments& argus)
     rocblas_local_handle handle;
     I m = argus.get<I>("m");
     I n = argus.get<I>("n", m);
+    I mn = std::min(m,n);
     I lda = argus.get<I>("lda", m);
-    I ldr = argus.get<I>("ldr", n);
+    I ldr = argus.get<I>("ldr", mn);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stR = argus.get<rocblas_stride>("strideR", ldr * n);
-
-    // Get cholqr algorithm from command line
-    char algo_char = argus.get<char>("alg_select");
-    rocsolver_alg_select algo = char2rocsolver_alg_select(algo_char);
-
+    rocblas_stride stR = argus.get<rocblas_stride>("strideR", ldr * mn);
+    char cholshift_char = argus.get<char>("cholshift");
+    rocsolver_cholqr_shift cholshift = char2rocsolver_cholqr_shift(cholshift_char);
+    rocblas_int cholnum = argus.get<rocblas_int>("cholnum");
     I bc = argus.batch_count;
+    S sigma = S(argus.get<double>("sigma", 0));
     rocblas_int hot_calls = argus.iters;
-
     rocblas_stride stARes = (argus.unit_check || argus.norm_check) ? stA : 0;
     rocblas_stride stRRes = (argus.unit_check || argus.norm_check) ? stR : 0;
 
@@ -455,24 +612,24 @@ void testing_cholqr(Arguments& argus)
 
     // determine sizes
     size_t size_A = size_t(lda) * n;
-    size_t size_R = size_t(ldr) * n;
-    size_t size_Sigma = 1; // one sigma per batch
-    double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
+    size_t size_R = size_t(ldr) * mn;
+    double err1 = 0, err2 = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
     size_t size_RRes = (argus.unit_check || argus.norm_check) ? size_R : 0;
 
     // check invalid sizes
-    bool invalid_size = (m < 0 || n < 0 || lda < m || ldr < n || bc < 0);
+    bool invalid_size = (m < 0 || n < 0 || lda < m || ldr < mn || bc < 0 || cholnum < 1 || 
+                        (cholshift != rocsolver_cholqr_shift_none && cholnum < 2));
     if(invalid_size)
     {
         if(BATCHED)
-            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, (T* const*)nullptr,
+            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T* const*)nullptr,
                                                    lda, stA, (T*)nullptr, ldr, stR, (S*)nullptr,
                                                    (I*)nullptr, bc),
                                   rocblas_status_invalid_size);
         else
-            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, (T*)nullptr, lda,
+            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T*)nullptr, lda,
                                                    stA, (T*)nullptr, ldr, stR, (S*)nullptr,
                                                    (I*)nullptr, bc),
                                   rocblas_status_invalid_size);
@@ -488,11 +645,11 @@ void testing_cholqr(Arguments& argus)
     {
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
         if(BATCHED)
-            CHECK_ALLOC_QUERY(rocsolver_cholqr(STRIDED, handle, algo, m, n, (T* const*)nullptr, lda,
+            CHECK_ALLOC_QUERY(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T* const*)nullptr, lda,
                                                stA, (T*)nullptr, ldr, stR, (S*)nullptr, (I*)nullptr,
                                                bc));
         else
-            CHECK_ALLOC_QUERY(rocsolver_cholqr(STRIDED, handle, algo, m, n, (T*)nullptr, lda, stA,
+            CHECK_ALLOC_QUERY(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T*)nullptr, lda, stA,
                                                (T*)nullptr, ldr, stR, (S*)nullptr, (I*)nullptr, bc));
 
         size_t size;
@@ -502,31 +659,33 @@ void testing_cholqr(Arguments& argus)
         return;
     }
 
+    // memory allocations for any case
+    host_strided_batch_vector<T> hR(size_R, 1, stR, bc);
+    host_strided_batch_vector<T> hRRes(size_RRes, 1, stR, bc);
+    host_strided_batch_vector<S> hSigma(1, 1, 1, bc);
+    host_strided_batch_vector<I> hnr(1, 1, 1, bc);
+    device_strided_batch_vector<T> dR(size_R, 1, stR, bc);
+    device_strided_batch_vector<S> dSigma(1, 1, 1, bc);
+    device_strided_batch_vector<I> dnr(1, 1, 1, bc);
+    if(size_R)
+        CHECK_HIP_ERROR(dR.memcheck());
+    CHECK_HIP_ERROR(dSigma.memcheck());
+    CHECK_HIP_ERROR(dnr.memcheck());
+
     if(BATCHED)
     {
         // memory allocations
         host_batch_vector<T> hA(size_A, 1, bc);
         host_batch_vector<T> hARes(size_ARes, 1, bc);
-        host_strided_batch_vector<T> hR(size_R, 1, stR, bc);
-        host_strided_batch_vector<T> hRRes(size_RRes, 1, stR, bc);
-        host_strided_batch_vector<S> hSigma(size_Sigma, 1, size_Sigma, bc);
-        host_strided_batch_vector<I> hInfo(1, 1, 1, bc);
         device_batch_vector<T> dA(size_A, 1, bc);
-        device_strided_batch_vector<T> dR(size_R, 1, stR, bc);
-        device_strided_batch_vector<S> dSigma(size_Sigma, 1, size_Sigma, bc);
-        device_strided_batch_vector<I> dInfo(1, 1, 1, bc);
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
-        if(size_R)
-            CHECK_HIP_ERROR(dR.memcheck());
-        CHECK_HIP_ERROR(dSigma.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
 
         // check quick return
         if(m == 0 || n == 0 || bc == 0)
         {
-            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA.data(), lda, stA,
-                                                   dR.data(), ldr, stR, dSigma.data(), dInfo.data(),
+            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
+                                                   dR.data(), ldr, stR, dSigma.data(), dnr.data(),
                                                    bc),
                                   rocblas_status_success);
             if(argus.timing)
@@ -537,15 +696,16 @@ void testing_cholqr(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            cholqr_getError<STRIDED, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                        dInfo, bc, hA, hARes, hR, hRRes, hSigma, hInfo, &max_error);
+            cholqr_getError<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
+                                        dnr, bc, hA, hARes, hR, hRRes, hSigma, hnr, sigma, &err1, &err2,
+                                        argus.singular, argus.unit_check);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
-            cholqr_getPerfData<STRIDED, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                           dInfo, bc, hA, hR, hSigma, hInfo, &gpu_time_used,
+            cholqr_getPerfData<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
+                                           dnr, bc, hA, hR, hSigma, hnr, sigma, &gpu_time_used,
                                            &cpu_time_used, hot_calls, argus.profile,
-                                           argus.profile_kernels, argus.perf);
+                                           argus.profile_kernels, argus.perf, argus.singular);
     }
 
     else
@@ -553,26 +713,15 @@ void testing_cholqr(Arguments& argus)
         // memory allocations
         host_strided_batch_vector<T> hA(size_A, 1, stA, bc);
         host_strided_batch_vector<T> hARes(size_ARes, 1, stARes, bc);
-        host_strided_batch_vector<T> hR(size_R, 1, stR, bc);
-        host_strided_batch_vector<T> hRRes(size_RRes, 1, stRRes, bc);
-        host_strided_batch_vector<S> hSigma(size_Sigma, 1, size_Sigma, bc);
-        host_strided_batch_vector<I> hInfo(1, 1, 1, bc);
         device_strided_batch_vector<T> dA(size_A, 1, stA, bc);
-        device_strided_batch_vector<T> dR(size_R, 1, stR, bc);
-        device_strided_batch_vector<S> dSigma(size_Sigma, 1, size_Sigma, bc);
-        device_strided_batch_vector<I> dInfo(1, 1, 1, bc);
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
-        if(size_R)
-            CHECK_HIP_ERROR(dR.memcheck());
-        CHECK_HIP_ERROR(dSigma.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
 
         // check quick return
         if(m == 0 || n == 0 || bc == 0)
         {
-            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, algo, m, n, dA.data(), lda, stA,
-                                                   dR.data(), ldr, stR, dSigma.data(), dInfo.data(),
+            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
+                                                   dR.data(), ldr, stR, dSigma.data(), dnr.data(),
                                                    bc),
                                   rocblas_status_success);
             if(argus.timing)
@@ -583,20 +732,24 @@ void testing_cholqr(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            cholqr_getError<STRIDED, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                        dInfo, bc, hA, hARes, hR, hRRes, hSigma, hInfo, &max_error);
+            cholqr_getError<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
+                                        dnr, bc, hA, hARes, hR, hRRes, hSigma, hnr, sigma, &err1, &err2,
+                                        argus.singular, argus.unit_check);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
-            cholqr_getPerfData<STRIDED, T>(handle, algo, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                           dInfo, bc, hA, hR, hSigma, hInfo, &gpu_time_used,
+            cholqr_getPerfData<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
+                                           dnr, bc, hA, hR, hSigma, hnr, sigma, &gpu_time_used,
                                            &cpu_time_used, hot_calls, argus.profile,
-                                           argus.profile_kernels, argus.perf);
+                                           argus.profile_kernels, argus.perf, argus.singular);
     }
 
     // Use tolerance based on algorithm and problem size
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, std::max(m, n));
+    {
+        ROCSOLVER_TEST_CHECK(T, err1, 3*std::max(m, n));    // orthogonality check
+        ROCSOLVER_TEST_CHECK(T, err2, 3*std::max(m, n));    // reconstruction check    
+    }
 
     // output results for rocsolver-bench
     if(argus.timing)
@@ -606,25 +759,25 @@ void testing_cholqr(Arguments& argus)
             rocsolver_bench_header("Arguments:");
             if(BATCHED)
             {
-                rocsolver_bench_output("m", "n", "lda", "ldr", "strideR", "algo", "batch_c");
-                rocsolver_bench_output(m, n, lda, ldr, stR, algo_char, bc);
+                rocsolver_bench_output("m", "n", "lda", "ldr", "strideR", "cholshift", "batch_c");
+                rocsolver_bench_output(m, n, lda, ldr, stR, cholshift_char, bc);
             }
             else if(STRIDED)
             {
-                rocsolver_bench_output("m", "n", "lda", "strideA", "ldr", "strideR", "algo",
+                rocsolver_bench_output("m", "n", "lda", "strideA", "ldr", "strideR", "cholshift",
                                        "batch_c");
-                rocsolver_bench_output(m, n, lda, stA, ldr, stR, algo_char, bc);
+                rocsolver_bench_output(m, n, lda, stA, ldr, stR, cholshift_char, bc);
             }
             else
             {
-                rocsolver_bench_output("m", "n", "lda", "ldr", "algo");
-                rocsolver_bench_output(m, n, lda, ldr, algo_char);
+                rocsolver_bench_output("m", "n", "lda", "ldr", "cholshift");
+                rocsolver_bench_output(m, n, lda, ldr, cholshift_char);
             }
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "orth_error", "recon_error");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, err1, err2);
             }
             else
             {
@@ -636,7 +789,7 @@ void testing_cholqr(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, err1, err2);
             else
                 rocsolver_bench_output(gpu_time_used);
         }

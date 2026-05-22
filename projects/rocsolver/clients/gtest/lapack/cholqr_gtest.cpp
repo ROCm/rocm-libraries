@@ -33,115 +33,126 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-/**
- * Test parameter tuple: {m, lda, ldr}, n, algo
- *
- * Algorithm modes:
- *   '1' = Basic CholeskyQR1 - fast but may fail on ill-conditioned matrices
- *   '2' = CholeskyQR2 - more robust, does two iterations (default)
- *   '3' = Shifted CholeskyQR3 with internally computed shifts - most robust
- *   '4' = Shifted CholeskyQR3 with user-provided sigma shifts
- */
-template <typename I>
-using cholqr_tuple = tuple<vector<I>, I, char>;
 
-// case when m = n = 0 and alg_select = 1 will also execute the bad arguments test
+/** Test parameter tuple: {{m, n, lda, ldr}, singular}
+    the value of singular is used to manipulate the conditioning of the inpuit matrix
+    to test the different algorithm configs (choleskyQR1, choleskyQR2, shifted_choleskyQR3)
+
+    - If singular = 0, the input matrix is non singular (cond(A) small).
+    - If singular = 1, the matrix is singular (has zero columns/rows, i.e cond(A) = inf or very large)
+    - If singular = s > 1, then a matrix A with repeated columns/rows if modified as 
+      A = A + I * eps * 10^(s - 1) in double precision, or
+      A = A + I * eps * 10^((s - 1)/2) in single precision 
+      to gradually reduce cond(A). **/
+
+template <typename I>
+using cholqr_tuple = tuple<vector<I>, int>;
+
+// case when m = n = 0 and singular = 0 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-// ============================================================================
-// Test sizes for checkin_lapack tests (small/quick tests)
-// ============================================================================
+const vector<int> singular_range = {
+    0,  // test with rocsolver_cholqr_shift_none, cholnum = 1  
+    1,  // test with rocsolver_cholqr_shift_computed, cholnum = 2
+    2,  // test with rocsolver_cholqr_shift_computed, cholnum = 2,3
+    4   // test with rocsolver_cholqr_shift_none, cholnum = 1,2
+}; 
 
-// Matrix sizes: {m, lda, ldr}
+// ============================================================================
+// Size cases for checkin_lapack tests (small/quick tests)
+// ============================================================================
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0, 1, 1},
+    {0, 1, 1, 1},       // m = 0
+    {1, 0, 1, 1},       // n = 0
+    {0, 0, 1, 1},       // m = n = 0
     // invalid
-    {-1, 1, 1},
-    {20, 5, 20}, // invalid lda
-    {20, 20, 5}, // invalid ldr
+    {-1, 1, 1, 1},      // invalid size
+    {20, 5, 10, 5},     // invalid lda
+    {20, 10, 20, 5},    // invalid ldr (m > n)
+    {10, 20, 10, 5},    // invalid ldr (n > m)
     // normal (valid) samples
-    {50, 50, 50},
-    {70, 100, 70},
-    {130, 130, 130},
-    {150, 200, 150}};
-
-const vector<int> n_size_range = {
-    // quick return
-    0,
-    // invalid
-    -1,
-    // normal (valid) samples
-    16, 20, 130, 150};
+    {18, 18, 18, 18},
+    {30, 30, 100, 30},
+    {40, 40, 40, 100},
+    {100, 30, 130, 30},
+    {20, 80, 20, 20},
+    {40, 110, 40, 100}
+};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
-    {0, 1, 1},
+    {0, 1, 1, 1},       // m = 0
+    {1, 0, 1, 1},       // n = 0
+    {0, 0, 1, 1},       // m = n = 0
     // invalid
-    {-1, 1, 1},
-    {20, 5, 20}, // invalid lda
-    {20, 20, 5}, // invalid ldr
+    {-1, 1, 1, 1},      // invalid size
+    {20, 5, 10, 5},     // invalid lda
+    {20, 10, 20, 5},    // invalid ldr (m > n)
+    {10, 20, 10, 5},    // invalid ldr (n > m)
     // normal (valid) samples
-    {50, 50, 50},
-    {70, 100, 70},
-    {130, 130, 130},
-    {150, 200, 150}};
-
-const vector<int64_t> n_size_range_64 = {
-    // quick return
-    0,
-    // invalid
-    -1,
-    // normal (valid) samples
-    16, 20, 130, 150};
-
-// Algorithm choices for testing
-const vector<char> algo_range = {
-    '1', // cholqr1
-    '2', // cholqr2
-    '3' // cholqr3_compute
+    {18, 18, 18, 18},
+    {30, 30, 100, 30},
+    {40, 40, 40, 100},
+    {100, 30, 130, 30},
+    {20, 80, 20, 20},
+    {40, 110, 40, 100}
 };
 
 // ============================================================================
 // Test sizes for daily_lapack tests (larger/longer tests)
 // ============================================================================
-
 const vector<vector<int>> large_matrix_size_range = {
-    {152, 152, 152},
-    {640, 640, 640},
-    {1000, 1024, 1000},
+    {152, 152, 152, 152},
+    {640, 800, 640, 640},
+    {1024, 256, 1000, 256}
 };
-
-const vector<int> large_n_size_range = {64, 98, 130, 220, 400};
 
 const vector<vector<int64_t>> large_matrix_size_range_64 = {
-    {152, 152, 152},
-    {640, 640, 640},
-    {1000, 1024, 1000},
+    {152, 152, 152, 152},
+    {640, 800, 640, 640},
+    {1024, 256, 1000, 256}
 };
 
-const vector<int64_t> large_n_size_range_64 = {64, 98, 130, 220, 400};
 
 // ============================================================================
 // Argument setup functions
 // ============================================================================
-
 template <typename I>
 Arguments cholqr_setup_arguments(cholqr_tuple<I> tup)
 {
     vector<I> matrix_size = std::get<0>(tup);
-    I n_size = std::get<1>(tup);
-    char algo = std::get<2>(tup);
+    int singular = std::get<1>(tup);
 
     Arguments arg;
 
     arg.set<I>("m", matrix_size[0]);
-    arg.set<I>("n", n_size);
-    arg.set<I>("lda", matrix_size[1]);
-    arg.set<I>("ldr", matrix_size.size() > 2 ? matrix_size[2] : n_size);
+    arg.set<I>("n", matrix_size[1]);
+    arg.set<I>("lda", matrix_size[2]);
+    arg.set<I>("ldr", matrix_size[3]);
 
     // Set the algorithm
-    arg.set<char>("alg_select", algo);
+    arg.singular = singular;
+    if(singular == 0)
+    {
+        arg.set<char>("cholshift", 'N');
+        arg.set<int>("cholnum", 1);
+    }
+    else if(singular == 1)
+    {
+        arg.set<char>("cholshift", 'C');
+        arg.set<int>("cholnum", 2);
+    }
+    else if(singular == 3)
+    {
+        arg.set<char>("cholshift", 'C');
+        arg.set<int>("cholnum", 3);
+    }
+    else
+    {
+        arg.set<char>("cholshift", 'N');
+        arg.set<int>("cholnum", 2);
+    }
 
     // only testing standard use case/defaults for strides
 
@@ -167,10 +178,10 @@ protected:
     void run_tests()
     {
         Arguments arg = cholqr_setup_arguments(this->GetParam());
-
-        if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 0 && arg.peek<char>("alg_select") == '1')
+    
+        if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 0 && arg.singular == 0)
             testing_cholqr_bad_arg<BATCHED, STRIDED, T, I>();
-
+        
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
         testing_cholqr<BATCHED, STRIDED, T, I>(arg);
     }
@@ -332,24 +343,20 @@ TEST_P(CHOLQR_64, strided_batched__double_complex)
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          CHOLQR,
                          Combine(ValuesIn(matrix_size_range),
-                                 ValuesIn(n_size_range),
-                                 ValuesIn(algo_range)));
+                                 ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(matrix_size_range_64),
-                                 ValuesIn(n_size_range_64),
-                                 ValuesIn(algo_range)));
+                                 ValuesIn(singular_range)));
 
 // Daily tests: reduced algorithms, larger sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR,
                          Combine(ValuesIn(large_matrix_size_range),
-                                 ValuesIn(large_n_size_range),
-                                 ValuesIn(algo_range)));
+                                 ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(large_matrix_size_range_64),
-                                 ValuesIn(large_n_size_range_64),
-                                 ValuesIn(algo_range)));
+                                 ValuesIn(singular_range)));

@@ -577,6 +577,25 @@ try
             "                           Used in iterative Jacobi functions.\n"
             "                           ")
 
+        // cholqr options
+        ("cholshift",
+         value<char>()->default_value('N'),
+            "N = None, C = Computed, P = Provided.\n"
+            "                           Specifies how sigma is determined for the shifted cholqr method.\n"
+            "                           ")
+        
+        ("cholnum",
+         value<rocblas_int>()->default_value(1),
+            "Total number of Cholesky factorizations performed by the cholqr method.\n"
+            "                           Cholnum - 1 factorizations are used for the refinement.\n"
+            "                           ")
+        
+        ("sigma",
+         value<double>()->default_value(0),
+            "Value of sigma when provided for the shifted cholqr method .\n"
+            "                           Same value is used for all matrices in batched cases.\n"
+            "                           ")
+
         // other options
         ("abstol",
          value<double>()->default_value(0),
@@ -655,14 +674,8 @@ try
          value<char>()->default_value('U'),
             "U = upper, L = lower.\n"
             "                           Indicates where the data for a triangular or symmetric/hermitian matrix is stored.\n"
-            "                           ")
-
-        ("alg_select",
-         value<char>()->default_value('D'),
-            "D = default, 1 = 1st algorithm, 2 = 2nd algorithm,\n"
-            "                           3 = 3rd algorithm, 4 = 4th algorithm.\n"
-            "                           Specifies which algorithm to use.\n"
             "                           ");
+
 
     // clang-format on
 
@@ -715,7 +728,7 @@ try
     argus.validate_itype("itype");
     argus.validate_norm_type("norm_type");
     argus.validate_rfinfo_mode("rfinfo_mode");
-    argus.validate_alg_select("alg_select");
+    argus.validate_cholshift("cholshift");
 
     // prepare logging infrastructure and ignore environment variables
     rocsolver_log_begin();

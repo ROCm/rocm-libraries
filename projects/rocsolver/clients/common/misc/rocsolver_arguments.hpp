@@ -330,14 +330,14 @@ public:
             throw std::invalid_argument("Invalid value for " + name);
     }
 
-    void validate_alg_select(const std::string name) const
+    void validate_cholshift(const std::string name) const
     {
         auto val = find(name);
         if(val == end())
             return;
 
         char algo = std::toupper(val->second.as<char>());
-        if(algo != 'D' && algo != '1' && algo != '2' && algo != '3' && algo != '4')
+        if(algo != 'N' && algo != 'C' && algo != 'P')
             throw std::invalid_argument("Invalid value for " + name);
     }
 
