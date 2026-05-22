@@ -11,6 +11,7 @@
 #include "ck_tile/core/arch/mma/mma.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
+#include "ck_tile/core/arch/mma/mma_wavewise.hpp"
 #include "ck_tile/core/arch/mma/sparse/sparse_mma_pipeline.hpp"
 #include <hip/hip_runtime.h>
 #include "ck_tile/core/numeric/bfloat16.hpp"
@@ -171,11 +172,11 @@ struct SparseTransformKernel
     __device__ void operator()(void* a, void* idx) const
     {
         using ResultT =
-            decltype(SparseCompressTransform<CompressionRatio>::execOld(*static_cast<Vec*>(a)));
+            decltype(SparseCompressTransform<CompressionRatio>::execExtVec(*static_cast<Vec*>(a)));
         using FirstT = std::tuple_element_t<0, ResultT>;
         using IdxT   = std::tuple_element_t<1, ResultT>;
         const auto& [vec, i] =
-            SparseCompressTransform<CompressionRatio>::execOld(*static_cast<Vec*>(a));
+            SparseCompressTransform<CompressionRatio>::execExtVec(*static_cast<Vec*>(a));
         *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
         __builtin_memcpy(idx, &i, sizeof(IdxT));
     }
@@ -524,6 +525,10 @@ struct SparsePipelineKernel
                                                  WaveTileN,
                                                  WaveTileK,
                                                  AccumPolicy,
+                                                 false, // CTranspose
+                                                 1,     // SwizzleFactor
+                                                 1,     // AttrNumAccessAV
+                                                 1,     // AttrNumAccessAV
                                                  CompilerTarget>;
 
         using ATensor = typename Pipeline::AWarpTensor;
@@ -579,6 +584,10 @@ struct SparsePipelineFactory
                                        WaveTileN,
                                        WaveTileK,
                                        AccumPolicy,
+                                       false, // CTranspose
+                                       1,     // SwizzleFactor
+                                       1,     // AttrNumAccessAV
+                                       1,     // AttrNumAccessAV
                                        Target>;
     };
 };
