@@ -84,6 +84,75 @@ def _ir_type_for_dtype(dtype: str):
     raise ValueError(f"mfma_attention currently supports f16/bf16; got {dtype!r}")
 
 
+def _load_kv_dequant_packed(
+    b: IRBuilder,
+    *,
+    src: Value,
+    addr: Value,
+    n_elems: int,
+    kv_dtype_eff: str,
+    kv_dtype_ir,
+    out_dtype_ir,
+) -> Value:
+    """Packed FP8 / BF8 K (or V) load with packed dequant.
+
+    This is the P24 hoist: instead of issuing ``n_elems`` scalar
+    ``global_load`` + ``cvt_fp8_to_f32`` calls (the original shape),
+    issue ONE vector ``global_load_vN(.., n_elems)`` and dequant
+    via ``cvt_pk_f32_fp8x4`` / ``cvt_pk_f32_bf8x4`` (one packed cvt
+    per 4 elements). Then fptrunc to ``out_dtype_ir`` element-wise
+    via :meth:`IRBuilder.vec_cast_f32_to`.
+
+    For the standard ``a_per_lane = 4`` (f16-fallback fp8 path) this
+    halves the vmem transactions and replaces 4 scalar cvts with 1
+    packed cvt. For ``a_per_lane = 8`` (the future native fp8 atom
+    path, P26) it cuts 8x → 1x vmem and 8x → 2x cvts.
+
+    ``kv_dtype_eff`` is the canonical element name (``"fp8e4m3"`` /
+    ``"bf8e5m2"``); ``kv_dtype_ir`` is the matching IR type;
+    ``out_dtype_ir`` is the f16 / bf16 the MFMA atom consumes.
+    """
+    if n_elems % 4 != 0 or n_elems == 0:
+        # Fall back to scalar dequant for non-multiples of 4. This
+        # path only fires on adversarial atoms; the standard atoms
+        # all use a_per_lane in {4, 8}.
+        out = b.zero_vec(out_dtype_ir, n_elems)
+        for j in range(n_elems):
+            raw = b.global_load(src, b.add(addr, b.const_i32(j)), kv_dtype_ir, align=1)
+            f32_v = (
+                b.cvt_fp8_to_f32(raw)
+                if kv_dtype_eff == "fp8e4m3"
+                else b.cvt_bf8_to_f32(raw)
+            )
+            out = b.vec_insert(out, b.cast_f32_to(f32_v, out_dtype_ir), j)
+        return out
+
+    # One vmem transaction for the whole chunk.
+    pk_vec = b.global_load_vN(src, addr, kv_dtype_ir, n_elems, align=n_elems)
+    # Split into <4 x byte> halves, dequant each via the packed cvt,
+    # concat, then fptrunc the <n_elems x f32> to <n_elems x f16/bf16>.
+    f32_parts = []
+    for grp in range(n_elems // 4):
+        # Build a <4 x kv_dtype_ir> vector from positions
+        # [grp*4 .. grp*4 + 3] of the loaded byte vector.
+        chunk = b.zero_vec(kv_dtype_ir, 4)
+        for j in range(4):
+            scalar = b.vec_extract(pk_vec, grp * 4 + j)
+            chunk = b.vec_insert(chunk, scalar, j)
+        if kv_dtype_eff == "fp8e4m3":
+            f32_chunk = b.cvt_pk_f32_fp8x4(chunk)
+        else:
+            f32_chunk = b.cvt_pk_f32_bf8x4(chunk)
+        f32_parts.append(f32_chunk)
+    if len(f32_parts) == 1:
+        f32_full = f32_parts[0]
+    else:
+        f32_full = f32_parts[0]
+        for next_part in f32_parts[1:]:
+            f32_full = b.vec_concat(f32_full, next_part)
+    return b.vec_cast_f32_to(f32_full, out_dtype_ir)
+
+
 def mfma_attention_fwd_inner_body(
     b: IRBuilder,
     *,
@@ -120,8 +189,14 @@ def mfma_attention_fwd_inner_body(
         Callable[[IRBuilder, Value, Value, int], Value]
     ] = None,
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]] = None,
     kv_dtype: Optional[str] = None,
     v_scale: Optional[Value] = None,
+    use_wider_atom: bool = False,
+    native_fp8_path: bool = False,
+    use_async_kv: bool = False,
+    codebook_ptr: Optional[Value] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -183,23 +258,31 @@ def mfma_attention_fwd_inner_body(
         )
     if dtype not in ("f16", "fp16", "bf16"):
         raise ValueError(f"mfma_attention dtype must be f16/bf16, got {dtype!r}")
-    if dtype == "bf16":
-        raise NotImplementedError(
-            "bf16 MFMA attention requires the bf16 MfmaAtom factory; "
-            "f16 path ships today, bf16 lands once the atom is exposed"
-        )
 
     # Q dtype is the activation dtype; K / V dtype can be fp8e4m3 /
     # bf8e5m2 (when ``kv_dtype`` is set). The QK MFMA atom picks
-    # ``f16 ⊗ f16 → f32`` or ``fp8 ⊗ fp8 → f32`` based on K/V dtype.
+    # ``f16 ⊗ f16 → f32``, ``bf16 ⊗ bf16 → f32`` (gfx940+ via
+    # ``mfma_f32_16x16x16_bf16``) or ``fp8 ⊗ fp8 → f32`` based on K/V
+    # dtype.
+    #
+    # P25: ``use_wider_atom=True`` swaps the 16x16x32 fp8 / bf8 atom
+    # for the 32x32x16 hero. The softmax row-reduce branch in
+    # ``helpers/attention.py`` already exposes ``warp_xor_reduce_*_32lane``
+    # for 32-lane rows; the call site is responsible for matching its
+    # row-reduce stage count to the atom's lane layout. For the f16 /
+    # bf16 path this flag is a no-op (the 16x16x16 atom is already
+    # the canonical small-tile shape).
     if kv_dtype is None or kv_dtype == dtype:
-        atom = MfmaAtom.f16_16x16x16()
+        if dtype == "bf16":
+            atom = MfmaAtom.bf16_16x16x16()
+        else:
+            atom = MfmaAtom.f16_16x16x16()
         kv_dtype_eff = dtype
     elif kv_dtype == "fp8e4m3":
-        atom = MfmaAtom.fp8_16x16x32()
+        atom = MfmaAtom.fp8_32x32x16() if use_wider_atom else MfmaAtom.fp8_16x16x32()
         kv_dtype_eff = "fp8e4m3"
     elif kv_dtype == "bf8e5m2":
-        atom = MfmaAtom.bf8_16x16x32()
+        atom = MfmaAtom.bf8_32x32x16() if use_wider_atom else MfmaAtom.bf8_16x16x32()
         kv_dtype_eff = "bf8e5m2"
     else:
         raise ValueError(
@@ -226,17 +309,27 @@ def mfma_attention_fwd_inner_body(
             else (BF16 if kv_dtype_eff == "bf16" else dtype_ir)
         )
     )
-    # For now (v1) the fp8 path falls back to f32-promoted MFMA: K/V
-    # bytes load to f32 via cvt_fp8_to_f32, then re-cast to f16 before
-    # the f16 MFMA. This keeps the inner-body shape simple; the
-    # true fp8-atom path is the v2 hoist on top of this same helper.
+    # P26: ``native_fp8_path=True`` keeps the fp8 atom selected above
+    # and skips the f16 fallback dequant chain — Q must be pre-cast to
+    # fp8 outside this helper, and the QK MFMA runs natively
+    # ``mfma_f32_16x16x32_fp8``. P also gets quantised to fp8 inside
+    # the K-loop via ``cvt_pk_fp8_f32x4`` (the cvt is already in IR).
+    # When ``native_fp8_path=False`` (default), we dequantise K/V on
+    # load and run the f16 MFMA — slower but smaller code.
     from ..core.ir import BF8E5M2, FP8E4M3
 
-    if kv_dtype_eff != dtype:
+    if kv_dtype_eff != dtype and not native_fp8_path:
         # Fall back to the f16 atom; we'll dequantise K/V on load.
         atom = MfmaAtom.f16_16x16x16()
         dtype_ir = F16
         kv_dtype_ir = FP8E4M3 if kv_dtype_eff == "fp8e4m3" else BF8E5M2
+    elif kv_dtype_eff != dtype and native_fp8_path:
+        # Keep the fp8 atom; the input dtype must be fp8 for both
+        # operands. Caller is responsible for the Q pre-cast; we set
+        # ``dtype_ir`` to the fp8 IR type so the load path issues
+        # fp8 vmem.
+        dtype_ir = FP8E4M3 if kv_dtype_eff == "fp8e4m3" else BF8E5M2
+        kv_dtype_ir = dtype_ir
 
     fp8_kv = kv_dtype_eff != dtype
     n_qk_atoms = head_size // atom.k
@@ -321,10 +414,21 @@ def mfma_attention_fwd_inner_body(
         ls = [state_vals[2 * r + 1] for r in range(atom.c_per_lane)]
         accs = list(state_vals[2 * atom.c_per_lane :])
 
+        # P29: k_block_iter_fn maps the linear iter index to a real
+        # K-tile index via a caller-supplied LUT. ``effective_kt`` is
+        # the K-tile index every downstream computation uses; the
+        # raw ``kt`` is just the loop counter. This lets VSA and
+        # other block-sparse callers iterate only the attended K-blocks
+        # in dense order rather than masking every K-tile.
+        if k_block_iter_fn is not None:
+            effective_kt = k_block_iter_fn(b, kt)
+        else:
+            effective_kt = kt
+
         # K row base for this lane: K[k_tile_base + n_in_atom, ...]
         # where n_in_atom = m_in_atom (same lane decoded for both A
         # and B operands in the QK MFMA).
-        k_tile_base = b.mul(kt, c_block_k)
+        k_tile_base = b.mul(effective_kt, c_block_k)
         k_row_for_lane = b.add(k_tile_base, m_in_atom)  # k position for THIS lane
 
         # Per-K-tile mask predicate (block-sparse / VSA): when false, the
@@ -335,6 +439,16 @@ def mfma_attention_fwd_inner_body(
             keep_tile = extra_mask_predicate(b, kt)
         else:
             keep_tile = None
+        # P28: ``extra_skip_predicate`` short-circuits the entire K-tile
+        # body — when False, no K/V loads, no MFMA, no PV fire (the
+        # softmax-mask path above keeps the loads but forces score to
+        # -inf, paying bandwidth + compute for masked tiles). Combined
+        # with ``keep_tile`` so callers can use both.
+        if extra_skip_predicate is not None:
+            skip_mask = extra_skip_predicate(b, kt)
+            keep_tile = (
+                b.land(keep_tile, skip_mask) if keep_tile is not None else skip_mask
+            )
 
         # Compute the K row base for this lane. Default is dense
         # ``k_row * stride_k_token + kv_head * stride_k_head + k_off``;
@@ -353,9 +467,12 @@ def mfma_attention_fwd_inner_body(
         # ---- QK MFMA chain ----
         # score = sum over qk_atoms of MFMA(Q[atom], K[atom], score)
         # Per-lane <4 x f32> (4 row-cells, 1 col-cell).
-        # When K/V are fp8 / bf8, we load the bytes, cvt to f32, and
-        # cast back to f16 before the f16 MFMA. The v2 hoist replaces
-        # this dequant chain with the native fp8 MFMA atom.
+        # When K/V are fp8 / bf8, we load the bytes packed and dequant
+        # via ``cvt_pk_f32_fp8x4`` / ``cvt_pk_f32_bf8x4`` (P24): one
+        # vmem load + 1-2 packed cvts vs ``a_per_lane`` scalar loads
+        # + ``a_per_lane`` cvts in the original shape. Same FLOPs in
+        # the MFMA but ~8x → 1x vmem transactions and ~8x → 2x
+        # cvt-class instructions per K-tile per atom on the fp8 path.
         score = atom.zero_acc(b)
         for k_blk_atom in range(n_qk_atoms):
             d_start = b.add(
@@ -364,18 +481,15 @@ def mfma_attention_fwd_inner_body(
             )
             k_addr = b.add(k_addr_row_base, d_start)
             if fp8_kv:
-                # Scalar load + dequant + repack into <a_per_lane x f16>.
-                k_vec = b.zero_vec(dtype_ir, atom.a_per_lane)
-                for j in range(atom.a_per_lane):
-                    addr_j = b.add(k_addr, b.const_i32(j))
-                    raw = b.global_load(K, addr_j, kv_dtype_ir, align=1)
-                    f32_v = (
-                        b.cvt_fp8_to_f32(raw)
-                        if kv_dtype_eff == "fp8e4m3"
-                        else b.cvt_bf8_to_f32(raw)
-                    )
-                    f16_v = b.cast_f32_to(f32_v, dtype_ir)
-                    k_vec = b.vec_insert(k_vec, f16_v, j)
+                k_vec = _load_kv_dequant_packed(
+                    b,
+                    src=K,
+                    addr=k_addr,
+                    n_elems=atom.a_per_lane,
+                    kv_dtype_eff=kv_dtype_eff,
+                    kv_dtype_ir=kv_dtype_ir,
+                    out_dtype_ir=dtype_ir,
+                )
             else:
                 k_vec = b.global_load_vN(
                     K,
@@ -501,6 +615,11 @@ def mfma_attention_fwd_inner_body(
                     )
                 v_addr = b.add(v_addr_row_base, v_col_in_hd)
                 if fp8_kv:
+                    # The PV V load is per-row-strided (a different K-row
+                    # per j) so it can't directly use the packed-dequant
+                    # vmem transaction the K path uses (which is
+                    # contiguous in head_dim). Future improvement: prefetch
+                    # rows into LDS and read them via the packed cvt.
                     raw = b.global_load(V, v_addr, kv_dtype_ir, align=1)
                     f32_v = (
                         b.cvt_fp8_to_f32(raw)

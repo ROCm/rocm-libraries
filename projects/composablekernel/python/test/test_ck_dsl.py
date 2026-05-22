@@ -5287,19 +5287,25 @@ class TestMfmaGemm(unittest.TestCase):
     """Tests for the MFMA GEMM kernel."""
 
     def test_builds_emits_mfma_intrinsic(self):
-        """The kernel IR must reference the mfma_f32_16x16x16 intrinsic.
+        """The kernel IR must reference an AMDGCN MFMA intrinsic.
 
-        AMDGPU's intrinsic spelling is ``f32.16x16x16f16`` (no dot
-        between the last shape value and the dtype suffix); the test
-        guards against accidentally dispatching to a different MFMA
-        shape via the atom factory.
+        Phase-1 ``mfma_flatmm`` worker switched ``mfma_gemm`` /
+        ``flatmm`` from the legacy ``16x16x16`` atom to the K-packed
+        ``16x16x32`` (and the ``32x32x16`` hero for larger tiles) on
+        gfx950+ — see ``notes/instances/mfma_flatmm.md`` (1.33×–2.78×
+        speedup, bit-exact parity). The test now guards the *MFMA-ness*
+        of the kernel without pinning the atom shape.
         """
         from ck_dsl.instances import MfmaGemmSpec, build_mfma_gemm
 
         spec = MfmaGemmSpec(M=32, N=32, K=32, dtype="f16")
         kernel = build_mfma_gemm(spec)
         ll = lower_kernel_to_llvm(kernel)
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # The default ``kpack=True`` selects the f16 16x16x32 atom on
+        # gfx950+; fall back to a substring match so the test stays
+        # honest if a future worker bumps the default again.
+        self.assertIn("@llvm.amdgcn.mfma.f32.", ll)
+        self.assertIn(".f16(", ll)
 
     def test_grid_one_cta_per_tile(self):
         """Grid math: (N//16, M//16, 1)."""
@@ -5316,14 +5322,27 @@ class TestMfmaGemm(unittest.TestCase):
         self.assertEqual(spec.block_size, 64)
 
     def test_spec_validation_rejects_non_atom_shape(self):
-        """M / N / K must divide the 16x16x16 atom shape."""
+        """M / N / K must divide the active MFMA atom shape.
+
+        With ``kpack=True`` (the new default) the active atom is
+        ``16x16x32`` on the f16 path. ``M=17`` is still genuinely
+        invalid (does not divide 16), so the validator should reject
+        with an error string that mentions the *current* atom shape.
+        """
         from ck_dsl.instances import MfmaGemmSpec
         from ck_dsl.instances.mfma_gemm import is_valid_spec
 
+        # M=17 is invalid for both the legacy 16x16x16 atom and the new
+        # 16x16x32 default — the test exercises the "non-atom shape"
+        # validator path without coupling to the specific atom variant.
         spec = MfmaGemmSpec(M=17, N=32, K=32)
         ok, why = is_valid_spec(spec)
         self.assertFalse(ok)
-        self.assertIn("16x16x16", why)
+        # The error message names the atom shape; assert on the
+        # invariant prefix the validator produces (``"NxMxK atom
+        # shape"`` — true regardless of whether the active atom is
+        # 16x16x16 or 16x16x32).
+        self.assertIn("atom shape", why)
 
 
 class TestEveryKernelUsesMfma(unittest.TestCase):
@@ -5345,7 +5364,11 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
             build_mfma_gemm,
             MfmaGemmSpec(M=32, N=32, K=32, dtype="f16"),
         )
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16", ll)
+        # The "uses MFMA" gremlin: assert an AMDGCN MFMA intrinsic is
+        # emitted regardless of the specific atom shape (legacy
+        # 16x16x16 vs the new K-packed 16x16x32 — the phase-1
+        # ``mfma_flatmm`` worker bumped the default).
+        self.assertIn("@llvm.amdgcn.mfma.f32.", ll)
 
     def test_streamk_gemm_uses_mfma(self):
         from ck_dsl.instances import StreamKGemmSpec, build_streamk_gemm

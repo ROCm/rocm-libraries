@@ -75,6 +75,8 @@ def build_persistent_counter_init(
     increment: int = 1,
     cooperative: bool = True,
     broadcast_slot: Optional[Value] = None,
+    wave_size: int = 64,
+    block_size: int = 64,
 ) -> Value:
     """Atomic-fetch the first tile id for this CTA from ``counter``.
 
@@ -88,12 +90,29 @@ def build_persistent_counter_init(
     stride -- always 1 for the canonical pattern; values > 1 are for
     fancy "fetch a chunk at a time" variants that we don't ship yet.
 
+    Cooperative broadcast (P35 fix)
+    -------------------------------
+
     When ``cooperative`` is True (default), only thread 0 performs the
-    atomic; the result is broadcast to all threads in the workgroup via
-    an LDS slot (``broadcast_slot``, allocated by the caller at CTA
-    scope) + ``sync``. Pass ``cooperative=False`` for the "every thread
-    is its own worker" variant (rare; the MoE-sort histogram pass uses
-    it because each thread owns its own work item).
+    atomic; the result must reach every thread in the workgroup so
+    they all process the same tile. The historical implementation used
+    an LDS slot + ``s_barrier`` for the broadcast, but at
+    ``max_iters > 1`` and ``block_size <= 64`` (single-wave CTA) the
+    AMDGPU optimizer elided the ``s_barrier`` and ~1.7% of in-range
+    body executions were skipped because lanes 1..63 raced ahead of
+    lane 0's atomic.
+
+    The fix uses :meth:`IRBuilder.ds_bpermute` for the broadcast.
+    ``ds_bpermute(addr=0, val)`` returns lane 0's ``val`` to every
+    lane in the wave, with ZERO need for an LDS round-trip or
+    ``s_barrier`` — wave-internal cross-lane traffic is sequenced by
+    the SIMD pipeline directly.
+
+    For multi-wave workgroups (``block_size > 64``), the ds_bpermute
+    is still wave-internal, so we keep the LDS broadcast as a fallback
+    when any other wave needs the value. The ``broadcast_slot``
+    argument is preserved on the public surface for backwards
+    compatibility but is unused on the SGPR-broadcast path.
     """
     from ..core.ir import I32
 
@@ -101,10 +120,38 @@ def build_persistent_counter_init(
         counter_idx = b.const_i32(0)
     if not cooperative:
         return b.global_atomic_add(counter, counter_idx, b.const_i32(increment))
-    if broadcast_slot is None:
-        broadcast_slot = b.smem_alloc(I32, [1], name_hint="pers_brd")
+
     tid = b.thread_id_x()
     is_lead = b.cmp_eq(tid, b.const_i32(0))
+
+    # P35 fix: choose a broadcast medium that survives at all
+    # ``block_size`` values.
+    #
+    # * **Single-wave CTA** (``block_size <= wave_size``): use
+    #   ``ds_bpermute(0, fetched)`` — every lane issues the atomic
+    #   with a per-lane ``increment`` (only lane 0 contributes a
+    #   non-zero value), the wave's lane 0 atomic-result is broadcast
+    #   to every lane via wave-internal SIMD-pipeline traffic. No
+    #   ``s_barrier`` needed (the optimiser had been eliding the
+    #   barrier on the single-wave path, causing ~1.7% of in-range
+    #   body executions to be skipped at ``max_iters > 1``).
+    #
+    #   AMDGPU coalesces the 64 lane-atomics targeting the same
+    #   address into a single VMEM atomic transaction at the
+    #   hardware level so the redundant lane atomics are nearly
+    #   free.
+    #
+    # * **Multi-wave CTA** (``block_size > wave_size``): keep the
+    #   LDS slot + ``s_barrier`` shape, but the barrier is REAL
+    #   (other waves are observers) so the optimiser cannot elide
+    #   it.
+    if block_size <= wave_size:
+        inc_per_lane = b.select(is_lead, b.const_i32(increment), b.const_i32(0))
+        fetched = b.global_atomic_add(counter, counter_idx, inc_per_lane)
+        return b.ds_bpermute(b.const_i32(0), fetched)
+
+    if broadcast_slot is None:
+        broadcast_slot = b.smem_alloc(I32, [1], name_hint="pers_brd")
     with b.scf_if(is_lead):
         v = b.global_atomic_add(counter, counter_idx, b.const_i32(increment))
         b.smem_store_vN(broadcast_slot, [b.const_i32(0)], v, 1)
@@ -126,6 +173,8 @@ def persistent_tile_loop(
     counter_idx: Optional[Value] = None,
     cooperative: bool = True,
     broadcast_slot: Optional[Value] = None,
+    wave_size: int = 64,
+    block_size: int = 64,
 ) -> Iterator[tuple]:
     """Context manager wrapping the persistent-kernel body.
 
@@ -171,7 +220,9 @@ def persistent_tile_loop(
         yield tile_idx, in_range
         # After the caller's body, fetch the next tile id for this CTA
         # and yield it as the loop-carried value. Cooperative path uses
-        # one atomic + LDS broadcast per iteration.
+        # one atomic + (ds_bpermute | LDS) broadcast per iteration; the
+        # broadcast medium follows the P35 dispatch in
+        # :func:`build_persistent_counter_init`.
         next_tile = build_persistent_counter_init(
             b,
             counter,
@@ -179,6 +230,8 @@ def persistent_tile_loop(
             increment=1,
             cooperative=cooperative,
             broadcast_slot=broadcast_slot,
+            wave_size=wave_size,
+            block_size=block_size,
         )
         b.scf_yield(next_tile)
 
@@ -192,6 +245,8 @@ def persistent_tile_for_each(
     body: Callable[[Value], None],
     counter_idx: Optional[Value] = None,
     cooperative: bool = True,
+    wave_size: int = 64,
+    block_size: int = 64,
 ) -> None:
     """Functional sugar over :func:`persistent_tile_loop`.
 
@@ -211,7 +266,9 @@ def persistent_tile_for_each(
     from ..core.ir import I32
 
     broadcast_slot = None
-    if cooperative:
+    if cooperative and block_size > wave_size:
+        # Multi-wave CTA still uses LDS broadcast; allocate the slot
+        # once at CTA scope so every iteration reuses it.
         broadcast_slot = b.smem_alloc(I32, [1], name_hint="pers_brd")
     tile_idx0 = build_persistent_counter_init(
         b,
@@ -219,6 +276,8 @@ def persistent_tile_for_each(
         counter_idx=counter_idx,
         cooperative=cooperative,
         broadcast_slot=broadcast_slot,
+        wave_size=wave_size,
+        block_size=block_size,
     )
     with persistent_tile_loop(
         b,
@@ -229,6 +288,8 @@ def persistent_tile_for_each(
         counter_idx=counter_idx,
         cooperative=cooperative,
         broadcast_slot=broadcast_slot,
+        wave_size=wave_size,
+        block_size=block_size,
     ) as (tile_idx, in_range):
         with b.scf_if(in_range):
             body(tile_idx)

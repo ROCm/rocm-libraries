@@ -35,6 +35,19 @@ folding into one of the planar tile counters. This keeps the per-batch
 launch trivially parallel and lets the kernel reuse the
 single-batch indexing logic byte-for-byte (modulo the per-batch
 pointer offset added at the top of the kernel).
+
+Scalar -> tile/vector replacements
+----------------------------------
+
+Identical to the single-batch :mod:`ck_dsl.instances.transpose` writeup:
+Phase 2's per-lane column gather is ``vec`` separate scalar
+``ds_read_b16`` reads. Folding them into a single ``ds_read_*_tr_*``
+needs a new IR primitive (proposal documented in the
+:mod:`ck_dsl.instances.transpose` module docstring). Everything else
+flows through the CK Tile-style :class:`TensorView` /
+:class:`TileWindow` pair (the leading batch axis ``block_id_z`` rides
+into ``x_view.tile``'s origin); both batch-stride args are consumed
+naturally as the descriptor's per-batch stride.
 """
 
 from __future__ import annotations
@@ -148,8 +161,6 @@ def build_batched_transpose2d(spec: BatchedTranspose2DSpec) -> KernelDef:
     # into the same per-thread address calculation as the planar
     # 2D transpose.
     batch_idx = b.block_id_z()
-    batch_off_x = b.mul(batch_idx, batch_stride_x)
-    batch_off_y = b.mul(batch_idx, batch_stride_y)
 
     tile_x = b.block_id_x()
     tile_y = b.block_id_y()
@@ -159,7 +170,11 @@ def build_batched_transpose2d(spec: BatchedTranspose2DSpec) -> KernelDef:
 
     # 3D views with a leading batch axis whose stride is the per-batch
     # element stride (passed in as a runtime arg). The middle and inner
-    # axes are exactly what the single-batch transpose uses.
+    # axes are exactly what the single-batch transpose uses; the rich
+    # descriptor algebra (``stride_b * b_idx + stride_h * h + stride_w * w``)
+    # falls out of ``TensorDescriptor.with_strides`` so the kernel body
+    # stays the same as the planar transpose plus a fixed ``batch_idx``
+    # in the origin tuple.
     x_view = make_global_view(
         X, shape=(1, TM, TN), dtype=io_ty, strides=(batch_stride_x, W, 1)
     )
@@ -184,6 +199,8 @@ def build_batched_transpose2d(spec: BatchedTranspose2DSpec) -> KernelDef:
     b.sync()
 
     # Phase 2: column-strided LDS reads, coalesced global stores.
+    # Same scalar-gather residue as :mod:`ck_dsl.instances.transpose`;
+    # the proper fix is the proposed ``ds_read_*_tr_*`` IR family.
     col2 = b.div(tid, c_TM_chunks)
     row2_chunk = b.mod(tid, c_TM_chunks)
     row2_base = b.mul(row2_chunk, c_vec)
@@ -194,12 +211,6 @@ def build_batched_transpose2d(spec: BatchedTranspose2DSpec) -> KernelDef:
     ]
     out_vec = b.vec_pack(elems, io_ty)
     y_tile.store_vec(b, b.const_i32(0), col2, row2_base, value=out_vec, n=vec)
-
-    # Suppress "unused parameter" warnings for batch_off_x / batch_off_y
-    # by referencing them in the IR (the offset arithmetic above already
-    # folds them via the descriptor's leading-axis stride).
-    _ = batch_off_x  # noqa: F841
-    _ = batch_off_y  # noqa: F841
 
     return b.kernel
 

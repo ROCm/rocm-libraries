@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
-from ..helpers.io import io_ir_type, load_scalar_as_f32, store_scalar_from_f32
+from ..helpers.io import (
+    io_ir_type,
+    load_scalar_as_f32,
+    pack_f32_to,
+    store_scalar_from_f32,
+)
 from ..helpers.rotary import (
     RotarySpec,
     apply_rotary_pair_f32,
@@ -26,6 +31,16 @@ from ..helpers.rotary import (
 )
 from ..helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from ._fmha_common import FmhaCommonSpec, validate_common_spec
+
+
+# CK Tile's appendkv default policy reads 16 bytes at a time
+# (``GetAlignmentK = 16 / sizeof(KDataType) = 8`` for f16/bf16; see
+# ``include/ck_tile/ops/fmha/pipeline/block_fmha_fwd_appendkv_pipeline_default_policy.hpp``).
+# The corresponding scalar load chain we replace below issues ``H`` 2-byte
+# loads per thread; the vector path collapses that to ``H/_VEC`` 16-byte
+# loads, the same shape ``buffer_load_dwordx4`` lowers to in the C++
+# reference.
+_VEC = 8  # 16-byte vector for f16 / bf16
 
 
 __all__ = [
@@ -184,20 +199,26 @@ def _appendkv_body(
 ):
     """The per-thread appendkv body extracted so the bounds-check
     wrapper above stays compact.
+
+    Address math + sequence lookup runs first; the actual K / V
+    copy is delegated to the vectorised helpers below so the body
+    stays readable and the scalar / vector choice lives in one spot.
     """
 
-    seq_loop = b.scf_for_iter(
-        b.const_i32(0),
-        b.const_i32(spec.batch),
-        b.const_i32(1),
-        [("seq", b.const_i32(0))],
-        iv_name="bs_i",
-    )
-    with seq_loop as (iv, (seq,)):
-        cuq_next = b.global_load_i32(cu_seqlens_new, b.add(iv, b.const_i32(1)))
+    # Per-token sequence lookup. ``new_token`` is wave-non-uniform so
+    # the scan result is *per-thread* (no readfirstlane). Python-
+    # unrolling the loop (``spec.batch`` is compile-time constant)
+    # drops the scf.for overhead — the compiler emits an unrolled
+    # chain of ``v_cmp / v_cndmask`` instead of a back-edge loop.
+    # This mirrors the CK Tile reference where ``i_batch`` is on
+    # ``blockIdx.z`` and the per-batch metadata is one
+    # ``buffer_load_dword`` per CTA.
+    seq = b.const_i32(0)
+    for i in range(spec.batch):
+        cuq_next = b.global_load_i32(cu_seqlens_new, b.const_i32(i + 1))
         is_in_seq = b.cmp_lt(new_token, cuq_next)
-        b.scf_yield(b.select(is_in_seq, seq, b.add(seq, b.const_i32(1))))
-    seq_idx = seq_loop.results[0]
+        seq = b.select(is_in_seq, seq, b.add(seq, b.const_i32(1)))
+    seq_idx = seq
     cu_base = b.global_load_i32(cu_seqlens_new, seq_idx)
     local_new = b.sub(new_token, cu_base)
     seqlen_cur = b.global_load_i32(seqlen_kv, seq_idx)
@@ -210,62 +231,263 @@ def _appendkv_body(
         b.mul(dst_pos, stride_cache_token), b.mul(kv_head_idx, stride_cache_head)
     )
 
-    if spec.rotary is not None:
-        for pair in range(spec.rotary.pair_count):
-            lo_d, hi_d = pair_indices(spec.rotary, pair)
-            k_lo = load_scalar_as_f32(
-                b, K_new, b.add(in_row_base, b.const_i32(lo_d)), dtype=dtype
-            )
-            k_hi = load_scalar_as_f32(
-                b, K_new, b.add(in_row_base, b.const_i32(hi_d)), dtype=dtype
-            )
-            cos_v, sin_v = load_cos_sin(
-                b,
-                cos_table,
-                sin_table,
-                token_pos=dst_pos,
-                pair_idx=b.const_i32(pair),
-                spec=spec.rotary,
-            )
-            new_lo, new_hi = apply_rotary_pair_f32(b, k_lo, k_hi, cos_v, sin_v)
-            store_scalar_from_f32(
-                b,
-                K_cache,
-                b.add(cache_row_base, b.const_i32(lo_d)),
-                new_lo,
-                dtype=dtype,
-            )
-            store_scalar_from_f32(
-                b,
-                K_cache,
-                b.add(cache_row_base, b.const_i32(hi_d)),
-                new_hi,
-                dtype=dtype,
-            )
-    else:
-        for d in range(H):
-            v = load_scalar_as_f32(
-                b, K_new, b.add(in_row_base, b.const_i32(d)), dtype=dtype
-            )
-            store_scalar_from_f32(
-                b,
-                K_cache,
-                b.add(cache_row_base, b.const_i32(d)),
-                v,
-                dtype=dtype,
-            )
+    _appendkv_copy_k(
+        b,
+        spec=spec,
+        H=H,
+        dtype=dtype,
+        K_new=K_new,
+        K_cache=K_cache,
+        cos_table=cos_table,
+        sin_table=sin_table,
+        dst_pos=dst_pos,
+        in_row_base=in_row_base,
+        cache_row_base=cache_row_base,
+    )
+    _appendkv_copy_v(
+        b,
+        H=H,
+        dtype=dtype,
+        V_new=V_new,
+        V_cache=V_cache,
+        in_row_base=in_row_base,
+        cache_row_base=cache_row_base,
+    )
 
-    for d in range(H):
+
+def _copy_row_vec(
+    b,
+    *,
+    H,
+    dtype,
+    src_ptr,
+    dst_ptr,
+    src_row_base,
+    dst_row_base,
+):
+    """Vectorised row copy along the head dim.
+
+    Replaces the scalar ``for d in range(H): load + store`` with
+    ``H // _VEC`` 16-byte vector copies (each
+    ``buffer_load_dwordx4`` + ``buffer_store_dwordx4`` on AMDGPU);
+    the residual ``H % _VEC`` tail falls back to scalar so any
+    future head_size we add can still go through this path.
+
+    Matches CK Tile's ``store_tile(k_dram_block_window, knew_tile)``
+    semantics in
+    ``include/ck_tile/ops/fmha/pipeline/block_fmha_fwd_appendkv_pipeline.hpp``:
+    one head_dim row is moved with the widest aligned vector the
+    pointer's ``align=16`` declaration supports.
+    """
+    ty = io_ir_type(dtype)
+    n_chunks = H // _VEC
+    elem_bytes = 2  # f16 / bf16
+
+    for c in range(n_chunks):
+        d = c * _VEC
+        src_addr = b.add(src_row_base, b.const_i32(d))
+        dst_addr = b.add(dst_row_base, b.const_i32(d))
+        vec = b.global_load_vN(src_ptr, src_addr, ty, _VEC, align=_VEC * elem_bytes)
+        b.global_store_vN(dst_ptr, dst_addr, vec, _VEC, align=_VEC * elem_bytes)
+
+    for d in range(n_chunks * _VEC, H):
         v = load_scalar_as_f32(
-            b, V_new, b.add(in_row_base, b.const_i32(d)), dtype=dtype
+            b, src_ptr, b.add(src_row_base, b.const_i32(d)), dtype=dtype
         )
         store_scalar_from_f32(
-            b,
-            V_cache,
-            b.add(cache_row_base, b.const_i32(d)),
-            v,
-            dtype=dtype,
+            b, dst_ptr, b.add(dst_row_base, b.const_i32(d)), v, dtype=dtype
         )
+
+
+def _appendkv_copy_k(
+    b,
+    *,
+    spec,
+    H,
+    dtype,
+    K_new,
+    K_cache,
+    cos_table,
+    sin_table,
+    dst_pos,
+    in_row_base,
+    cache_row_base,
+):
+    """K-cache copy, optionally fused with rotary embedding.
+
+    No-rotary path is a straight vector copy
+    (:func:`_copy_row_vec`). Rotary paths read the K row with vec
+    loads, apply the 2x2 rotation per pair on f32, then pack +
+    vector-store. CK Tile's
+    ``BlockRotaryEmbedding<RotaryEnum>::apply`` (see
+    ``include/ck_tile/ops/fmha/block/block_rotary_embedding.hpp``)
+    does the same: load a knew tile vectorised, rotate, store back
+    vectorised.
+    """
+    if spec.rotary is None:
+        _copy_row_vec(
+            b,
+            H=H,
+            dtype=dtype,
+            src_ptr=K_new,
+            dst_ptr=K_cache,
+            src_row_base=in_row_base,
+            dst_row_base=cache_row_base,
+        )
+        return
+
+    ty = io_ir_type(dtype)
+    elem_bytes = 2
+    layout = spec.rotary.layout
+    pair_count = spec.rotary.pair_count
+
+    if layout == "half" and (H // 2) % _VEC == 0:
+        # LLaMA-2/3/Qwen style: pair (i, i + H/2). The lo halves are
+        # contiguous in [0, H/2), the hi halves are contiguous in
+        # [H/2, H), so each side gets its own dwordx4 load + store.
+        half = H // 2
+        n_chunks = half // _VEC
+        for c in range(n_chunks):
+            d_lo = c * _VEC
+            d_hi = half + c * _VEC
+            lo_vec = b.global_load_vN(
+                K_new,
+                b.add(in_row_base, b.const_i32(d_lo)),
+                ty,
+                _VEC,
+                align=_VEC * elem_bytes,
+            )
+            hi_vec = b.global_load_vN(
+                K_new,
+                b.add(in_row_base, b.const_i32(d_hi)),
+                ty,
+                _VEC,
+                align=_VEC * elem_bytes,
+            )
+            out_lo_f32 = []
+            out_hi_f32 = []
+            for j in range(_VEC):
+                pair = c * _VEC + j
+                cos_v, sin_v = load_cos_sin(
+                    b,
+                    cos_table,
+                    sin_table,
+                    token_pos=dst_pos,
+                    pair_idx=b.const_i32(pair),
+                    spec=spec.rotary,
+                )
+                lo_f32 = b.cast_to_f32(b.vec_extract(lo_vec, j))
+                hi_f32 = b.cast_to_f32(b.vec_extract(hi_vec, j))
+                new_lo, new_hi = apply_rotary_pair_f32(b, lo_f32, hi_f32, cos_v, sin_v)
+                out_lo_f32.append(new_lo)
+                out_hi_f32.append(new_hi)
+            lo_pack = pack_f32_to(b, out_lo_f32, dtype=dtype)
+            hi_pack = pack_f32_to(b, out_hi_f32, dtype=dtype)
+            b.global_store_vN(
+                K_cache,
+                b.add(cache_row_base, b.const_i32(d_lo)),
+                lo_pack,
+                _VEC,
+                align=_VEC * elem_bytes,
+            )
+            b.global_store_vN(
+                K_cache,
+                b.add(cache_row_base, b.const_i32(d_hi)),
+                hi_pack,
+                _VEC,
+                align=_VEC * elem_bytes,
+            )
+        return
+
+    if layout == "interleaved" and H % _VEC == 0 and _VEC % 2 == 0:
+        # GPT-J / LLaMA-1 style: pair (2i, 2i+1). Adjacent in the head
+        # dim so ``_VEC = 8`` covers 4 pairs per chunk; we load the
+        # chunk once, rotate each pair on f32, then pack + store the
+        # rotated chunk (same dwordx4 store the no-rotary path uses).
+        pairs_per_chunk = _VEC // 2
+        n_chunks = H // _VEC
+        for c in range(n_chunks):
+            d = c * _VEC
+            vec = b.global_load_vN(
+                K_new,
+                b.add(in_row_base, b.const_i32(d)),
+                ty,
+                _VEC,
+                align=_VEC * elem_bytes,
+            )
+            out_f32 = []
+            for j in range(pairs_per_chunk):
+                pair = c * pairs_per_chunk + j
+                cos_v, sin_v = load_cos_sin(
+                    b,
+                    cos_table,
+                    sin_table,
+                    token_pos=dst_pos,
+                    pair_idx=b.const_i32(pair),
+                    spec=spec.rotary,
+                )
+                lo_f32 = b.cast_to_f32(b.vec_extract(vec, 2 * j))
+                hi_f32 = b.cast_to_f32(b.vec_extract(vec, 2 * j + 1))
+                new_lo, new_hi = apply_rotary_pair_f32(b, lo_f32, hi_f32, cos_v, sin_v)
+                out_f32.append(new_lo)
+                out_f32.append(new_hi)
+            packed = pack_f32_to(b, out_f32, dtype=dtype)
+            b.global_store_vN(
+                K_cache,
+                b.add(cache_row_base, b.const_i32(d)),
+                packed,
+                _VEC,
+                align=_VEC * elem_bytes,
+            )
+        return
+
+    # Catch-all fallback: keep the original scalar pair loop so any
+    # exotic head_size that doesn't align to _VEC still compiles.
+    for pair in range(pair_count):
+        lo_d, hi_d = pair_indices(spec.rotary, pair)
+        k_lo = load_scalar_as_f32(
+            b, K_new, b.add(in_row_base, b.const_i32(lo_d)), dtype=dtype
+        )
+        k_hi = load_scalar_as_f32(
+            b, K_new, b.add(in_row_base, b.const_i32(hi_d)), dtype=dtype
+        )
+        cos_v, sin_v = load_cos_sin(
+            b,
+            cos_table,
+            sin_table,
+            token_pos=dst_pos,
+            pair_idx=b.const_i32(pair),
+            spec=spec.rotary,
+        )
+        new_lo, new_hi = apply_rotary_pair_f32(b, k_lo, k_hi, cos_v, sin_v)
+        store_scalar_from_f32(
+            b, K_cache, b.add(cache_row_base, b.const_i32(lo_d)), new_lo, dtype=dtype
+        )
+        store_scalar_from_f32(
+            b, K_cache, b.add(cache_row_base, b.const_i32(hi_d)), new_hi, dtype=dtype
+        )
+
+
+def _appendkv_copy_v(
+    b,
+    *,
+    H,
+    dtype,
+    V_new,
+    V_cache,
+    in_row_base,
+    cache_row_base,
+):
+    """V cache copy is always a plain row copy (no rotary on V)."""
+    _copy_row_vec(
+        b,
+        H=H,
+        dtype=dtype,
+        src_ptr=V_new,
+        dst_ptr=V_cache,
+        src_row_base=in_row_base,
+        dst_row_base=cache_row_base,
+    )
 
 
 def fmha_appendkv_grid(

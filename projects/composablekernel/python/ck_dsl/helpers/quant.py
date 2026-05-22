@@ -142,6 +142,7 @@ def quantize_scalar_f32(
     *,
     inv_scale: Value,
     qdtype: str,
+    skip_clamp_on_pack: bool = False,
 ) -> Value:
     """Quantise one f32 scalar to ``qdtype``.
 
@@ -181,6 +182,16 @@ def quantize_scalar_f32(
     c_pos = b.const_f32(qmax)
     c_neg = b.const_f32(-qmax)
     scaled = b.fmul(x_f32, inv_scale)
+    # P55: when ``skip_clamp_on_pack`` is set and the target is fp8 /
+    # bf8, drop the explicit ``v_med3_f32`` clamp because the AMDGPU
+    # ``cvt.pk.fp8.f32`` / ``cvt.pk.bf8.f32`` instructions already
+    # saturate the input on conversion. For ``i8`` we keep the clamp:
+    # ``v_cvt_pk_i16_i32`` does not saturate so the explicit
+    # ``smax`` / ``smin`` chain is required for correctness.
+    if skip_clamp_on_pack and canon in ("fp8e4m3", "bf8e5m2"):
+        if canon == "fp8e4m3":
+            return b.cvt_f32_to_fp8(scaled)
+        return b.cvt_f32_to_bf8(scaled)
     clamped = b.clamp_f32(scaled, c_neg, c_pos)
     if canon == "i8":
         return b.cvt_f32_to_i8_sat(clamped)

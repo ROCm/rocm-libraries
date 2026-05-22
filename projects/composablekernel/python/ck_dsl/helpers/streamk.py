@@ -59,6 +59,8 @@ __all__ = [
     "StreamKReductionStrategy",
     "compute_streamk_grid_size",
     "emit_streamk_decode",
+    "emit_streamk_partial_load_accumulate",
+    "emit_streamk_partial_store",
     "streamk_num_macro_tiles",
 ]
 
@@ -170,3 +172,64 @@ def emit_streamk_decode(
         is_first=is_first,
         is_last=is_last,
     )
+
+
+def emit_streamk_partial_store(
+    b: IRBuilder,
+    *,
+    workspace: Value,
+    flag_table: Value,
+    workspace_off: Value,
+    flag_off: Value,
+    value: Value,
+    is_first: Value,
+) -> None:
+    """Cooperative ``Reduction`` strategy partial-store + signal.
+
+    P37: each contributing CTA stores its partial K-sum at the
+    ``(m_tile, n_tile, k_iter)`` slot in the workspace and bumps the
+    flag-table counter for ``(m_tile, n_tile)`` via ``atomic_add(+1)``.
+    The first contributor's store is unconditionally a fresh write
+    (``is_first=True``); later contributors atomic-add into the
+    workspace too so the order doesn't matter.
+
+    Reference: CK Tile ``streamk_common.hpp::SignalStorePartialDone``
+    + ``streamk_gemm_kernel.hpp:448-504`` (Tree-reduction).
+    """
+    # Initial store: lane-0-only write (the workspace is per-lane sized
+    # already in the caller's view) — the consumer in
+    # :func:`emit_streamk_partial_load_accumulate` reads each slot once.
+    with b.scf_if(is_first):
+        b.global_store(workspace, workspace_off, value, align=4)
+    # Non-first contributors: atomic add into the same f32 slot (the
+    # ``is_last`` reducer reads the converged value).
+    with b.scf_if(b.lnot(is_first)):
+        b.global_atomic_add(workspace, workspace_off, value)
+    # Bump the flag counter so the last-finishing CTA can detect "I'm
+    # the reducer" via flag == k_iters_per_tile.
+    b.global_atomic_add(flag_table, flag_off, b.const_i32(1))
+
+
+def emit_streamk_partial_load_accumulate(
+    b: IRBuilder,
+    *,
+    workspace: Value,
+    workspace_off: Value,
+    is_last: Value,
+) -> Value:
+    """Read the converged f32 partial sum at ``workspace_off`` once
+    every contributor has signalled (``is_last == True`` is the
+    caller's responsibility).
+
+    The flag-table-based wait protocol is a busy-loop on
+    ``atomic_load(flag_table[tile_id]) == k_iters_per_tile``; we expose
+    it as a separate helper because the busy-loop shape differs
+    between Linear / Tree reduction. For now the Atomic strategy is
+    the canonical path; this helper plus
+    :func:`emit_streamk_partial_store` give callers the surface
+    needed to opt into the Reduction strategy.
+
+    Reference: CK Tile ``streamk_common.hpp:34-73``
+    (``WaitStorePartialDone``).
+    """
+    return b.global_load_f32(workspace, workspace_off)

@@ -155,6 +155,14 @@ class TraitSpec:
     chiplet_num_xcds: int = 8
     chiplet_chunk_size: int = 64
     waves_per_eu: Optional[int] = None
+    # P40: when True, the kernel expects the B operand pre-shuffled by
+    # the host into the layout :func:`ck_dsl.helpers.preshuffle.
+    # host_preshuffle_layout` produces, and the per-lane B-load uses
+    # :func:`emit_preshuffleb_offset` to compute the byte offset
+    # (one ``buffer_load_dwordx4`` per K-tile vs the per-K-element
+    # strided scalar loads of the column-major path). The flag-free
+    # default keeps the canonical strided-scalar load.
+    preshuffle_b: bool = False
 
 
 @dataclass(frozen=True)
@@ -485,10 +493,17 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     lane = b.mod(tid, c_wave)
 
     if spec.batched:
-        batch_idx = b.block_id_z()
-        batch_off_a = b.mul(batch_idx, stride_a)
-        batch_off_b = b.mul(batch_idx, stride_b)
-        batch_off_c = b.mul(batch_idx, stride_c)
+        # P57: every wave-uniform i32 derived from the batch axis is
+        # pinned into an SGPR via ``to_sgpr_u32`` so the per-tile
+        # address arithmetic stays in scalar registers rather than
+        # being re-materialised in VGPRs at every consumer (one
+        # ``v_readfirstlane_b32`` saved per use across the K-loop +
+        # epilogue). Mirrors CK Tile ``batched_gemm_kernel.hpp:215-230``
+        # ``amd_wave_read_first_lane`` pattern.
+        batch_idx = b.to_sgpr_u32(b.block_id_z())
+        batch_off_a = b.to_sgpr_u32(b.mul(batch_idx, stride_a))
+        batch_off_b = b.to_sgpr_u32(b.mul(batch_idx, stride_b))
+        batch_off_c = b.to_sgpr_u32(b.mul(batch_idx, stride_c))
     else:
         batch_off_a = c0
         batch_off_b = c0
@@ -522,11 +537,15 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             num_xcds=spec.trait.chiplet_num_xcds,
             chunk_size=spec.trait.chiplet_chunk_size,
         )
-        block_m_off = b.mul(swz.row, c_block_m)
-        block_n_off = b.mul(swz.col, c_block_n)
+        # P57: pin chiplet-swizzled offsets in SGPR. ``swz.row`` / ``swz.col``
+        # are wave-uniform (function of CTA-uniform inputs), so
+        # ``readfirstlane`` is safe.
+        block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
+        block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
     else:
-        block_m_off = b.mul(b.block_id_y(), c_block_m)
-        block_n_off = b.mul(b.block_id_x(), c_block_n)
+        # P57: pin the non-swizzled batched-GEMM offsets in SGPR too.
+        block_m_off = b.to_sgpr_u32(b.mul(b.block_id_y(), c_block_m))
+        block_n_off = b.to_sgpr_u32(b.mul(b.block_id_x(), c_block_n))
 
     # LDS allocation. For compv4 we double-buffer; the second buffer is
     # logically allocated as a second smem region. The cshuffle epilogue
@@ -671,13 +690,17 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
 
+        # k_blk * a_per_lane is the lane-local K offset inside the
+        # current K-tile; reused across every kk to form ``col_base``.
+        # Hoisting saves a mul + add per kk and matches CK Tile's
+        # block_gemm where the lane-K base is computed once outside
+        # the warp_gemm_dispatcher inner loop.
+        k_blk_kbase = b.mul(k_blk, b.const_i32(a_per_lane))
+
         new_accs: List[Value] = list(iter_vars)
 
         for kk in range(k_atoms):
-            col_base = b.add(
-                b.mul(k_blk, b.const_i32(a_per_lane)),
-                b.const_i32(kk * t.warp_tile_k),
-            )
+            col_base = b.add(k_blk_kbase, b.const_i32(kk * t.warp_tile_k))
             # We compute one A load per atom-row and reuse across N.
             a_rows = []
             for mi in range(mfmas_m):
@@ -850,41 +873,59 @@ def _emit_epilogue_default(
         with b.scf_if(in_bounds):
             b.global_store(C, c_off, h, align=2)
 
+    # Compile-time invariants that do not depend on (mi, ni, i).
+    # Hoisting them avoids re-emitting the same add chain per
+    # accumulator slot; the IR's constant folder collapses them
+    # downstream, but building them once keeps the IR small and the
+    # lowered LLVM readable.
+    block_warp_m_off = b.add(block_m_off, warp_m_off)
+    block_warp_n_off = b.add(block_n_off, warp_n_off)
+
     if is_32x32:
         # 32x32 layout: lane % 32 -> n_in_atom; lane / 32 -> M sub-block (0 or 1).
         c_atom_n = b.const_i32(t.warp_tile_n)
         n_in_atom = b.mod(lane, c_atom_n)
         m_blk = b.div(lane, c_atom_n)  # 0 or 1 (32 lanes per half of MFMA M)
+        # m_blk * 4 is the lane-local M sub-block offset; the same
+        # SSA value is reused for every (mi, ni, i) so we compute it
+        # once outside the loops.
+        m_blk_x4 = b.mul(m_blk, b.const_i32(4))
         # acc[i] -> row = (i//4)*8 + m_blk*4 + (i%4); col = n_in_atom
         # row-of-block: rb = i // 4 (0..3), row-in-block: ri = i % 4 (0..3)
         flat = 0
         for mi in range(mfmas_m):
+            # Hoist per-mi atom base (block + warp + mi * warp_tile_m
+            # + m_blk * 4). Inner loop just adds the constant ramp
+            # rb * 8 + ri.
+            base_m = b.add(
+                b.add(block_warp_m_off, b.const_i32(mi * t.warp_tile_m)),
+                m_blk_x4,
+            )
             for ni in range(mfmas_n):
                 acc = accs[flat]
                 flat += 1
+                # Tile-level: cast the entire f32 accumulator to the
+                # output storage dtype once, then extract halves per
+                # element. Matches CK Tile's CShuffleEpilogue which
+                # calls ``cast_tile<ODataType>`` once per warp tile.
+                # Saves c_per_lane fptrunc ops per (mi, ni).
+                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
                 c_n = b.add(
-                    b.add(block_n_off, warp_n_off),
+                    block_warp_n_off,
                     b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
                 )
                 for i in range(c_per_lane):
                     rb = i // 4
                     ri = i % 4
-                    m_off = b.add(
-                        b.add(
-                            b.mul(b.const_i32(8), b.const_i32(rb)),
-                            b.mul(b.const_i32(4), m_blk),
-                        ),
-                        b.const_i32(ri),
-                    )
-                    c_m = b.add(
-                        b.add(block_m_off, warp_m_off),
-                        b.add(b.const_i32(mi * t.warp_tile_m), m_off),
-                    )
+                    # b.const_i32(rb * 8 + ri) is a single host-side
+                    # constant; the prior form emitted const(8) *
+                    # const(rb) (folds, but leaves a redundant mul in
+                    # the printed IR) plus a const(4) * m_blk per i.
+                    c_m = b.add(base_m, b.const_i32(rb * 8 + ri))
                     c_off = b.add(b.mul(c_m, N), c_n)
                     if batch_off_c is not None:
                         c_off = b.add(batch_off_c, c_off)
-                    v = b.vec_extract(acc, i)
-                    h = b.cast_f32_to(v, storage_dtype)
+                    h = b.vec_extract(acc_h, i)
                     _store_masked(c_m, c_n, c_off, h)
     else:
         # 16x16 atoms: lane = (m_blk * 16 + n_in_atom)
@@ -895,24 +936,27 @@ def _emit_epilogue_default(
         m_base = b.mul(m_blk, c_clen)
         flat = 0
         for mi in range(mfmas_m):
+            # Per-(mi) M base: block + warp + mi * warp_tile_m + m_base.
+            # Only the per-i constant ramp i ∈ [0, c_per_lane) is added
+            # inside the inner loop.
+            base_m = b.add(
+                b.add(block_warp_m_off, b.const_i32(mi * t.warp_tile_m)),
+                m_base,
+            )
             for ni in range(mfmas_n):
                 acc = accs[flat]
                 flat += 1
+                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
                 c_n = b.add(
-                    b.add(block_n_off, warp_n_off),
+                    block_warp_n_off,
                     b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
                 )
                 for i in range(c_per_lane):
-                    m_off = b.add(m_base, b.const_i32(i))
-                    c_m = b.add(
-                        b.add(block_m_off, warp_m_off),
-                        b.add(b.const_i32(mi * t.warp_tile_m), m_off),
-                    )
+                    c_m = b.add(base_m, b.const_i32(i))
                     c_off = b.add(b.mul(c_m, N), c_n)
                     if batch_off_c is not None:
                         c_off = b.add(batch_off_c, c_off)
-                    v = b.vec_extract(acc, i)
-                    h = b.cast_f32_to(v, storage_dtype)
+                    h = b.vec_extract(acc_h, i)
                     _store_masked(c_m, c_n, c_off, h)
 
 
@@ -984,12 +1028,28 @@ def _emit_epilogue_cshuffle(
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
 
     # ---- step 1+2: warp accs -> LDS at the MFMA layout. ----
+    #
+    # For both 16x16 and 32x32 we hoist the per-tile (warp + mi *
+    # warp_tile_m, warp + ni * warp_tile_n + n_in_atom) bases outside
+    # the per-element loop. The MFMA output layout pins consecutive
+    # lanes to consecutive N columns and scatters the per-lane
+    # c_per_lane slots across M rows, so the smem store itself stays
+    # scalar (n=1). What we can hoist is the address arithmetic:
+    # every (mi, ni, i) re-derived the warp + mi offset in the
+    # original form.
     if is_32x32:
         c_atom_n = b.const_i32(t.warp_tile_n)
         n_in_atom = b.mod(lane, c_atom_n)
         m_blk = b.div(lane, c_atom_n)
+        # m_blk * 4 is the lane-local sub-block offset; same SSA value
+        # reused for every accumulator slot.
+        m_blk_x4 = b.mul(m_blk, b.const_i32(4))
         flat = 0
         for mi in range(mfmas_m):
+            warp_mi_off = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
+            # Lane-local M base inside this mi tile (m_blk*4 already
+            # included). Inner i loop just adds rb*8 + ri.
+            base_m = b.add(warp_mi_off, m_blk_x4)
             for ni in range(mfmas_n):
                 acc = accs[flat]
                 flat += 1
@@ -1000,16 +1060,7 @@ def _emit_epilogue_cshuffle(
                 for i in range(c_per_lane):
                     rb = i // 4
                     ri = i % 4
-                    m_off = b.add(
-                        b.add(
-                            b.mul(b.const_i32(8), b.const_i32(rb)),
-                            b.mul(b.const_i32(4), m_blk),
-                        ),
-                        b.const_i32(ri),
-                    )
-                    ld_m = b.add(
-                        b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)), m_off
-                    )
+                    ld_m = b.add(base_m, b.const_i32(rb * 8 + ri))
                     h = b.vec_extract(acc_h, i)
                     b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
     else:
@@ -1020,6 +1071,13 @@ def _emit_epilogue_cshuffle(
         m_base = b.mul(m_blk, c_clen)
         flat = 0
         for mi in range(mfmas_m):
+            # Lane-local M base inside this mi tile: warp + mi *
+            # warp_tile_m + m_base. Inner i loop just adds the
+            # constant ramp i ∈ [0, c_per_lane).
+            base_m = b.add(
+                b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)),
+                m_base,
+            )
             for ni in range(mfmas_n):
                 acc = accs[flat]
                 flat += 1
@@ -1028,10 +1086,7 @@ def _emit_epilogue_cshuffle(
                     b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)), n_in_atom
                 )
                 for i in range(c_per_lane):
-                    m_off = b.add(m_base, b.const_i32(i))
-                    ld_m = b.add(
-                        b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)), m_off
-                    )
+                    ld_m = b.add(base_m, b.const_i32(i))
                     h = b.vec_extract(acc_h, i)
                     b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
 

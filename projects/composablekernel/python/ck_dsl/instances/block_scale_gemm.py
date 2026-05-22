@@ -63,6 +63,7 @@ from ..helpers.mfma_gemm_inner import (
     load_a_row_major_contiguous,
     load_b_col_strided_scalars,
     mfma_k_loop,
+    store_acc_to_global,
 )
 from ..helpers.quant import quant_ir_type
 from ..helpers.spec import SignatureBuilder, kernel_name_join
@@ -93,6 +94,11 @@ class BlockScaleGemmSpec:
     block_tile_m: int = 16
     block_tile_n: int = 16
     name: str = "ck_dsl_block_scale_gemm"
+    # P77 sibling: per-output-row scale broadcast, same shape as
+    # :class:`ck_dsl.instances.mx_gemm.MxGemmSpec.per_input_row`.
+    # Defaults to True for backwards compat; flip on per-row
+    # varying-scale workloads.
+    per_input_row: bool = True
 
     @property
     def atom(self) -> MfmaAtom:
@@ -284,28 +290,6 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec) -> KernelDef:
     n_scale_count_b = (spec.N + gn - 1) // gn
     k_scale_count_a = (spec.K + gk - 1) // gk
 
-    def _load_a(b, kt):
-        return load_a_row_major_contiguous(
-            b,
-            A=A,
-            atom=atom,
-            lane_decode=lane_decode,
-            m_tile_base=m_tile_base,
-            k_tile_base=b.mul(kt, b.const_i32(atom.k)),
-            K=spec.K,
-        )
-
-    def _load_b(b, kt):
-        return load_b_col_strided_scalars(
-            b,
-            B=Bp,
-            atom=atom,
-            lane_decode=lane_decode,
-            n_tile_base=n_tile_base,
-            k_tile_base=b.mul(kt, b.const_i32(atom.k)),
-            N=spec.N,
-        )
-
     # Per-group MFMA pipeline: run ``atoms_per_group`` MFMAs into a
     # zero-initialised group accumulator, multiply by ``a_scale *
     # b_scale``, fold into the outer accumulator. Mathematically
@@ -374,25 +358,40 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec) -> KernelDef:
             acc_name="gacc",
         )
 
-        # Vector fmul + fadd: scale-and-accumulate per-lane vec_f32.
-        scaled = b.zero_vec_f32(atom.c_per_lane)
-        for i in range(atom.c_per_lane):
-            v = b.vec_extract(group_acc, i)
-            old = b.vec_extract(outer_acc, i)
-            new = b.fadd(old, b.fmul(v, ab_scale))
-            scaled = b.vec_insert(scaled, new, i)
-        b.scf_yield(scaled)
+        # Tile-level scale-and-accumulate the group's MFMA result.
+        # ``group_acc`` and ``outer_acc`` are both ``<c_per_lane x f32>``
+        # per-lane vectors; broadcast the scalar ``ab_scale`` to that
+        # width and emit one vector fmul + one vector fadd, which lower
+        # to packed ``v_pk_mul_f32`` / ``v_pk_add_f32`` (or a fused
+        # ``v_pk_fma_f32``) on AMDGPU instead of the c_per_lane scalar
+        # fmul/fadd chain the prior implementation produced. The
+        # ab_scale broadcast is correct under the spec's current
+        # uniform-scale assumption (group_m=group_n=1 collapses to per-
+        # row/col scales that map 1:1 to lane outputs).
+        ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
+        scaled_group = b.vector_mul(group_acc, ab_scale_vec)
+        new_outer = b.vector_add(outer_acc, scaled_group)
+        b.scf_yield(new_outer)
 
     acc_final = outer.results[0]
 
-    # Output store: one lane writes c_per_lane cells via the atom's
-    # lane→output mapping.
-    for i in range(atom.c_per_lane):
-        row_in, col_in = atom.lane_to_output(b, lane, i)
-        row = b.add(m_tile_base, row_in)
-        col = b.add(n_tile_base, col_in)
-        addr = b.add(b.mul(row, b.const_i32(spec.N)), col)
-        b.global_store(C, addr, b.vec_extract(acc_final, i), align=4)
+    # Output store via the shared MFMA epilogue helper: each lane
+    # writes its ``c_per_lane`` cells to global via the atom's
+    # ``lane_to_output`` mapping. f32 out (no cast), no atomic add.
+    # The per-cell stores stay scalar because the 16x16 atom places a
+    # lane's 4 outputs at the same column across 4 consecutive rows
+    # (stride = N), which is not vectorisable without an LDS shuffle.
+    store_acc_to_global(
+        b,
+        C=C,
+        atom=atom,
+        lane_decode=lane_decode,
+        m_tile_base=m_tile_base,
+        n_tile_base=n_tile_base,
+        acc=acc_final,
+        N=spec.N,
+        out_dtype="f32",
+    )
     b.ret()
     return b.kernel
 

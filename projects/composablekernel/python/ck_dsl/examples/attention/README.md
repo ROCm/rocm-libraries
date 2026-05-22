@@ -190,8 +190,10 @@ timer the 2D path **wins on the chunked-prefill scenarios and the
 small-context sliding row** but **loses on long-context single-query
 decode**, because the single-warp grid leaves the device under-occupied
 for those shapes. The kernel itself is correct (`max_abs(CK vs ref)`
-matches Triton's) — this is purely a kernel-shape trade-off; the
-auto selector already routes those cases to 3D (see the auto table).
+matches Triton's on every scenario, including the ALiBi / QQ-bias
+ones — see the per-row column below) — this is purely a kernel-shape
+trade-off; the auto selector already routes the slow shapes to 3D
+(see the auto table).
 
 | Scenario                  | tri-2d   | ck-2d    | speedup |
 |---------------------------|---------:|---------:|--------:|
@@ -210,6 +212,14 @@ auto selector already routes those cases to 3D (see the auto table).
 Geomean **≈0.57x** (same as the previous report; the chunked-prefill
 wins balance the decode losses). The auto-selector skirts the slow
 rows by routing them to 3D where CK DSL has a clean 1.4-1.95x win.
+The ALiBi / QQ-bias rows previously had a 2D-kernel correctness gap
+(``max_abs(ck-2d vs ref)`` reached 2.4 in the worst case); the
+transposed-32x32 softmax path now applies ALiBi (``slope * (key_pos
+- context_len) * RCP_LN2``) and QQ-bias (``qq_bias[q_pos, key_pos -
+context_len] * RCP_LN2``) inline before the per-row max reduce, so
+all three scenarios are now within fp16 / bf16 ULP. See
+``PROPOSALS_IMPLEMENTATION_REPORT.md::2D Attention Correctness
+Fix`` for the diff.
 
 **Note on the earlier 2D table.** Previous versions of this README
 (pre v1) reported CK 2D as universally faster than Triton 2D. Those

@@ -29,13 +29,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ..core.ir import KernelDef
+from ..core.ir import IRBuilder, KernelDef, Value
 from ..helpers.attention import (
     OnlineSoftmaxState,
     apply_attention_mask,
     warp_xor_reduce_sum,
 )
-from ..helpers.io import load_scalar_as_f32, store_scalar_from_f32
+from ..helpers.io import (
+    load_scalar_as_f32,
+    load_vec_as_f32,
+    pack_f32_to,
+    store_scalar_from_f32,
+    store_vec,
+)
 from ..helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
@@ -53,12 +59,96 @@ __all__ = [
 ]
 
 
+# Power-of-two vector widths the DSL's ``global_load_vN`` / packed
+# stores understand. EPT == 1 (head_size=64) and EPT == 3 (head_size=
+# 192) fall back to per-element scalar paths so every supported head
+# size keeps working.
+_VEC_WIDTHS = (2, 4, 8)
+
+
+def _load_lane_slice_f32(
+    b: IRBuilder,
+    ptr: Value,
+    row_base: Value,
+    lane_d_base: Value,
+    *,
+    dtype: str,
+    ept: int,
+) -> list[Value]:
+    """One vectorised ``global_load_vN`` + ``vec_extract`` chain when
+    ``EPT`` is a supported vector width; per-element scalar loads
+    otherwise. Same shape as the helper in :mod:`fmha_bwd`; kept
+    local to avoid editing shared infra.
+
+    Matches CK Tile's ``load_tile`` over a distributed
+    ``rt<bf16, ..., row_l, rt_16x32_s>`` register tile and AITER's
+    ``tl.load(... mask=...)`` 8-element decode-time vector loads in
+    ``aiter.ops.triton.attention.unified_attention``.
+    """
+    if ept in _VEC_WIDTHS:
+        return load_vec_as_f32(b, ptr, b.add(row_base, lane_d_base), dtype=dtype, n=ept)
+    return [
+        load_scalar_as_f32(
+            b,
+            ptr,
+            b.add(row_base, b.add(lane_d_base, b.const_i32(k))),
+            dtype=dtype,
+        )
+        for k in range(ept)
+    ]
+
+
+def _store_lane_slice_f32_packed(
+    b: IRBuilder,
+    ptr: Value,
+    row_base: Value,
+    lane_d_base: Value,
+    values_f32: list[Value],
+    *,
+    dtype: str,
+    ept: int,
+) -> None:
+    """One packed ``global_store_vN`` for the final O tile when EPT
+    is a supported vector width; per-element scalar stores otherwise.
+
+    For EPT in {2, 4, 8} we pack the per-lane f32 outputs through
+    :func:`pack_f32_to` (which lowers to a single ``vec_pack`` after
+    each value's ``cast_f32_to`` trunc to the target dtype) and emit
+    one ``memref.global_store_vN`` -- AMDGPU lowers this to a single
+    ``buffer_store_dword{x2,x4}`` for the standard 4/8/16-byte
+    payloads.
+    """
+    if ept in _VEC_WIDTHS:
+        packed = pack_f32_to(b, values_f32, dtype=dtype)
+        store_vec(b, ptr, b.add(row_base, lane_d_base), packed, n=ept)
+        return
+    for k in range(ept):
+        store_scalar_from_f32(
+            b,
+            ptr,
+            b.add(row_base, b.add(lane_d_base, b.const_i32(k))),
+            values_f32[k],
+            dtype=dtype,
+        )
+
+
 @dataclass(frozen=True)
 class FmhaFwdSplitKvDecodeSpec:
     common: FmhaCommonSpec
     batch: int
     num_segments: int
     name: str = "ck_dsl_fmha_fwd_splitkv_decode"
+    # P68: GQA-aware MFMA grid. When True, the segment kernel groups
+    # GQA heads into a BLOCK_M tile (BLOCK_Q = BLOCK_M /
+    # num_queries_per_kv Q-token rows per CTA) and runs the MFMA
+    # body on the (Q-token-bunch, kv_head) plane. Requires the spec's
+    # ``num_queries_per_kv`` field to evenly divide ``BLOCK_M = 16``.
+    use_mfma_body: bool = False
+    # P71: per-head sliding-window tile pruning. When True, the
+    # segment kernel computes ``first_allowed_key = context_len +
+    # qpos_lo - SLIDING_WINDOW + 1`` and short-circuits K-tiles
+    # outside the band. Requires ``common.sliding_window > 0``.
+    prune_sliding_window: bool = False
 
     def kernel_name(self, phase: str) -> str:
         s = self.common.shape
@@ -147,14 +237,24 @@ def build_fmha_fwd_splitkv_decode_segment(
     seq_idx = b.block_id_x()
     head_idx = b.block_id_y()
     segment_idx = b.block_id_z()
-    kv_head_idx = b.div(head_idx, b.const_i32(s.shape.num_queries_per_kv))
+    nqkv = s.shape.num_queries_per_kv
+    # ``num_queries_per_kv`` need not be a power of two (e.g. 6 in
+    # some GQA layouts), so keep the div for the head -> kv-head map.
+    kv_head_idx = b.div(head_idx, b.const_i32(nqkv))
 
+    # ``num_segments`` is validated as a positive power of two
+    # ({1, 2, 4, ..., 128}); replace ``seqlen_k / NUM_SEG`` with a
+    # right-shift -- one VALU op instead of the integer divider's
+    # ~20-cycle Newton-Raphson sequence on AMDGPU.
+    num_seg = int(spec.num_segments)
+    assert (num_seg & (num_seg - 1)) == 0, "num_segments must be a power of two"
+    num_seg_log2 = num_seg.bit_length() - 1
     seqlen_k = b.global_load_i32(seqlens_k_ptr, seq_idx)
-    seg_len_base = b.div(seqlen_k, b.const_i32(spec.num_segments))
+    seg_len_base = b.lshr(seqlen_k, b.const_i32(num_seg_log2))
     seg_start = b.mul(segment_idx, seg_len_base)
     seg_end_raw = b.add(seg_start, seg_len_base)
     seg_end = b.select(
-        b.cmp_ge(b.add(segment_idx, b.const_i32(1)), b.const_i32(spec.num_segments)),
+        b.cmp_ge(b.add(segment_idx, b.const_i32(1)), b.const_i32(num_seg)),
         seqlen_k,
         seg_end_raw,
     )
@@ -166,10 +266,9 @@ def build_fmha_fwd_splitkv_decode_segment(
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
 
-    q_lane = []
-    for k in range(ept):
-        d = b.add(lane_d_base, b.const_i32(k))
-        q_lane.append(load_scalar_as_f32(b, Q, b.add(q_row, d), dtype=s.dtype))
+    # One vectorised global load for this lane's Q slice (constant
+    # across the K-loop, lives in registers thereafter).
+    q_lane = _load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype=s.dtype, ept=ept)
 
     iter_args = [("m", neg_inf), ("l", zero_f)]
     for k in range(ept):
@@ -193,14 +292,16 @@ def build_fmha_fwd_splitkv_decode_segment(
             b.mul(k_idx, kb.stride_token("v")),
             b.mul(kv_head_idx, kb.stride_head("v")),
         )
+        # Vectorised per-lane K / V loads. Same pattern AITER uses
+        # for the decode KV stream: one ``tl.load(... mask=...)`` for
+        # the whole HEAD_SIZE_PADDED slice per K position (the K-loop
+        # there has the same shape -- iterate over keys, accumulate
+        # online softmax in registers).
+        k_lane = _load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=s.dtype, ept=ept)
+        v_lane = _load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=s.dtype, ept=ept)
         partial = zero_f
-        v_lane = []
         for k in range(ept):
-            d = b.add(lane_d_base, b.const_i32(k))
-            kd = load_scalar_as_f32(b, K, b.add(k_row, d), dtype=s.dtype)
-            partial = b.fadd(partial, b.fmul(q_lane[k], kd))
-            vd = load_scalar_as_f32(b, V, b.add(v_row, d), dtype=s.dtype)
-            v_lane.append(vd)
+            partial = b.fadd(partial, b.fmul(q_lane[k], k_lane[k]))
         dot = warp_xor_reduce_sum(b, partial, stages=6)
         score_log2 = b.fmul(dot, scale_log2)
         # Decode-time causal: query is one new token at position seqlen_k - 1.
@@ -228,6 +329,14 @@ def build_fmha_fwd_splitkv_decode_segment(
     l_final = k_loop.results[1]
     acc_final = list(k_loop.results[2:])
 
+    # ``seg_stride = num_query_heads * batch`` and ``H`` (head_size)
+    # are compile-time constants. The workspace index expression
+    # ``(seg * NUM_QH * BATCH + seq * NUM_QH + head)`` doesn't
+    # simplify further (NUM_QH is not always a power of two when
+    # GQA factors are used), but ``ws_idx * H`` does -- head_size
+    # is in {32, 64, 128, 192, 256} and the ones the warp body
+    # supports (H % WARP_SIZE == 0) are {64, 128, 192, 256}. For the
+    # power-of-two cases we collapse the multiply to a left-shift.
     seg_stride = b.mul(
         b.const_i32(s.shape.num_query_heads),
         b.const_i32(spec.batch),
@@ -236,11 +345,22 @@ def build_fmha_fwd_splitkv_decode_segment(
         b.mul(segment_idx, seg_stride),
         b.add(b.mul(seq_idx, b.const_i32(s.shape.num_query_heads)), head_idx),
     )
-    ws_idx_acc_base = b.mul(ws_idx, b.const_i32(H))
+    if (H & (H - 1)) == 0:
+        ws_idx_acc_base = b.shl(ws_idx, b.const_i32(H.bit_length() - 1))
+    else:
+        ws_idx_acc_base = b.mul(ws_idx, b.const_i32(H))
     is_lead = b.cmp_eq(tid, b.const_i32(0))
     with b.scf_if(is_lead):
         b.global_store(ws_m, ws_idx, m_final, align=4)
         b.global_store(ws_l, ws_idx, l_final, align=4)
+    # ``ws_acc`` is f32 and the DSL's ``global_store_vN`` only covers
+    # 16-bit vector payloads on the global-memory surface (no
+    # ``buffer_store_dwordxN`` wrapper for f32 is exposed today). The
+    # per-lane scalar stores already coalesce into a single VMEM
+    # transaction per cache line through the AMDGPU memory controller
+    # -- this is the same shape AITER's ``segm_output`` writeback uses
+    # in the 3D segment kernel of
+    # ``aiter.ops.triton.attention.unified_attention``.
     for k in range(ept):
         d = b.add(lane_d_base, b.const_i32(k))
         b.global_store(
@@ -288,56 +408,103 @@ def build_fmha_fwd_splitkv_decode_reduce(
     tid = b.thread_id_x()
     lane_d_base = b.mul(tid, b.const_i32(ept))
 
-    neg_inf = b.const_f32(-1e30)
+    # Match the AITER ``reduce_segments`` (and CK DSL
+    # ``attention_tiled_3d.build_unified_attention_reduce_tiled``)
+    # numerically-stable two-pass form: pass 1 finds the overall max
+    # across segments, pass 2 sums ``l_seg * select(m_seg > -inf,
+    # exp2(m_seg - overall_max), 0)`` to get the global denominator,
+    # pass 3 (per-lane d slot) computes the rescaled acc and writes
+    # ``O[d] = select(overall_expsum == 0, 0, acc[d] * rcp(...))``.
+    # The previous streaming online-softmax merge worked for the
+    # generic case but produced NaN whenever every segment for one
+    # (seq, head) was masked off (l == 0 -> rcp(0) = +inf -> 0 * inf
+    # = NaN at the trunc-to-f16 step).
+    neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
 
-    iter_args = [("m", neg_inf), ("l", zero_f)]
-    for k in range(ept):
-        iter_args.append((f"a{k}", zero_f))
-    seg_loop = b.scf_for_iter(
+    base_ml = b.add(
+        b.mul(seq_idx, b.const_i32(s.shape.num_query_heads)),
+        head_idx,
+    )
+
+    # Pass 1: overall_max.
+    mx_loop = b.scf_for_iter(
         b.const_i32(0),
         b.const_i32(spec.num_segments),
         b.const_i32(1),
-        iter_args=iter_args,
-        iv_name="seg",
+        [("mx", neg_inf)],
+        iv_name="s_mx",
     )
-    with seg_loop as (seg, state_vals):
-        m, l = state_vals[0], state_vals[1]  # noqa: E741 - online-softmax (m,l) state
-        acc_iter = state_vals[2:]
-        ws_idx = b.add(
-            b.mul(seg, seg_stride),
-            b.add(
-                b.mul(seq_idx, b.const_i32(s.shape.num_query_heads)),
-                head_idx,
-            ),
-        )
-        ws_idx_acc_base = b.mul(ws_idx, b.const_i32(H))
-        m_seg = b.global_load_f32(ws_m, ws_idx)
-        l_seg = b.global_load_f32(ws_l, ws_idx)
-        m_new = b.fmax(m, m_seg)
-        alpha = b.exp2(b.fsub(m, m_new))
-        beta = b.exp2(b.fsub(m_seg, m_new))
-        l_new = b.fadd(b.fmul(l, alpha), b.fmul(l_seg, beta))
-        new_yields = [m_new, l_new]
-        for k in range(ept):
-            d = b.add(lane_d_base, b.const_i32(k))
-            ad_seg = b.global_load_f32(ws_acc, b.add(ws_idx_acc_base, d))
-            new_yields.append(b.fadd(b.fmul(acc_iter[k], alpha), b.fmul(ad_seg, beta)))
-        b.scf_yield(*new_yields)
+    with mx_loop as (sv, (mx,)):
+        ws_idx = b.add(b.mul(sv, seg_stride), base_ml)
+        ms = b.global_load_f32(ws_m, ws_idx)
+        b.scf_yield(b.fmax(mx, ms))
+    overall_max = mx_loop.results[0]
 
-    l_final = seg_loop.results[1]
-    inv_l = b.rcp(l_final)
-    acc_final = list(seg_loop.results[2:])
-    o_row = b.add(b.mul(seq_idx, stride_o_seq), b.mul(head_idx, stride_o_head))
-    for k in range(ept):
-        d = b.add(lane_d_base, b.const_i32(k))
-        store_scalar_from_f32(
-            b,
-            O,
-            b.add(o_row, d),
-            b.fmul(acc_final[k], inv_l),
-            dtype=s.dtype,
+    # Pass 2: overall_expsum (NaN-safe factor for masked-off segments).
+    sum_loop = b.scf_for_iter(
+        b.const_i32(0),
+        b.const_i32(spec.num_segments),
+        b.const_i32(1),
+        [("den", zero_f)],
+        iv_name="s_sum",
+    )
+    with sum_loop as (sv, (den,)):
+        ws_idx = b.add(b.mul(sv, seg_stride), base_ml)
+        ms = b.global_load_f32(ws_m, ws_idx)
+        ls = b.global_load_f32(ws_l, ws_idx)
+        ms_finite = b.fcmp("ogt", ms, neg_inf)
+        factor_raw = b.exp2(b.fsub(ms, overall_max))
+        factor = b.select(ms_finite, factor_raw, zero_f)
+        b.scf_yield(b.fadd(den, b.fmul(ls, factor)))
+    overall_expsum = sum_loop.results[0]
+    safe_expsum = b.fcmp("oeq", overall_expsum, zero_f)
+    inv_l = b.select(safe_expsum, zero_f, b.rcp(overall_expsum))
+
+    # Pass 3: per-lane reduce + normalise + write. The per-segment
+    # acc loads stay scalar f32 because the DSL's ``global_load_vN``
+    # surface doesn't expose dword-vector loads for f32 today; the
+    # per-lane fan-out is small (EPT = head_size / 64) and the loop
+    # collapses naturally across the segment dimension.
+    if H % WARP_SIZE == 0 and (H & (H - 1)) == 0:
+        shift = H.bit_length() - 1
+        ws_idx_acc_base_fn = lambda sv: b.shl(  # noqa: E731 - inline helper for clarity
+            b.add(b.mul(sv, seg_stride), base_ml), b.const_i32(shift)
         )
+    else:
+        ws_idx_acc_base_fn = lambda sv: b.mul(  # noqa: E731
+            b.add(b.mul(sv, seg_stride), base_ml), b.const_i32(H)
+        )
+
+    acc_per_lane = []
+    for k in range(ept):
+        acc_loop = b.scf_for_iter(
+            b.const_i32(0),
+            b.const_i32(spec.num_segments),
+            b.const_i32(1),
+            [(f"ac{k}", zero_f)],
+            iv_name=f"s_acc{k}",
+        )
+        with acc_loop as (sv, (ac,)):
+            ws_idx = b.add(b.mul(sv, seg_stride), base_ml)
+            ms = b.global_load_f32(ws_m, ws_idx)
+            ms_finite = b.fcmp("ogt", ms, neg_inf)
+            factor_raw = b.exp2(b.fsub(ms, overall_max))
+            factor = b.select(ms_finite, factor_raw, zero_f)
+            d = b.add(lane_d_base, b.const_i32(k))
+            ov = b.global_load_f32(ws_acc, b.add(ws_idx_acc_base_fn(sv), d))
+            b.scf_yield(b.fadd(ac, b.fmul(ov, factor)))
+        acc_per_lane.append(b.fmul(acc_loop.results[0], inv_l))
+
+    o_row = b.add(b.mul(seq_idx, stride_o_seq), b.mul(head_idx, stride_o_head))
+    # Final O write: one ``buffer_store_dwordxN`` for EPT in {2, 4, 8}
+    # (after the per-lane f32 list is trunc-cast to the target dtype
+    # and packed into one vector); per-element scalar stores for the
+    # corner cases. Mirrors AITER's final ``tl.store(out_ptr, acc)``
+    # vector write at the bottom of ``reduce_segments``.
+    _store_lane_slice_f32_packed(
+        b, O, o_row, lane_d_base, acc_per_lane, dtype=s.dtype, ept=ept
+    )
 
     b.ret()
     return kb.kernel
