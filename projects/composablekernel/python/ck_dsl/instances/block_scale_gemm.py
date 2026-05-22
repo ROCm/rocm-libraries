@@ -285,28 +285,6 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec) -> KernelDef:
     n_scale_count_b = (spec.N + gn - 1) // gn
     k_scale_count_a = (spec.K + gk - 1) // gk
 
-    def _load_a(b, kt):
-        return load_a_row_major_contiguous(
-            b,
-            A=A,
-            atom=atom,
-            lane_decode=lane_decode,
-            m_tile_base=m_tile_base,
-            k_tile_base=b.mul(kt, b.const_i32(atom.k)),
-            K=spec.K,
-        )
-
-    def _load_b(b, kt):
-        return load_b_col_strided_scalars(
-            b,
-            B=Bp,
-            atom=atom,
-            lane_decode=lane_decode,
-            n_tile_base=n_tile_base,
-            k_tile_base=b.mul(kt, b.const_i32(atom.k)),
-            N=spec.N,
-        )
-
     # Per-group MFMA pipeline: run ``atoms_per_group`` MFMAs into a
     # zero-initialised group accumulator, multiply by ``a_scale *
     # b_scale``, fold into the outer accumulator. Mathematically
