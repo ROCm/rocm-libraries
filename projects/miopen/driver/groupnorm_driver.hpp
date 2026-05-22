@@ -247,19 +247,19 @@ int GroupNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     int status;
 
-    for(auto i = 0ULL; i < in_sz; i++)
+    for(size_t i = 0ULL; i < in_sz; i++)
     {
         in[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
     }
     status = in_dev->ToGPU(q, in.data());
 
-    for(auto i = 0ULL; i < weight_sz; i++)
+    for(size_t i = 0ULL; i < weight_sz; i++)
     {
         weight[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
     }
     status |= weight_dev->ToGPU(q, weight.data());
 
-    for(auto i = 0ULL; i < bias_sz; i++)
+    for(size_t i = 0ULL; i < bias_sz; i++)
     {
         bias[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
     }

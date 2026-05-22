@@ -62,18 +62,18 @@ void mloKthvalueFwdRunHost(TIO* input,
 
     std::vector<float> elements;
     std::vector<size_t> ids(dimSize);
-    for(auto i = 0ULL; i < dimSize; ++i)
+    for(size_t i = 0ULL; i < dimSize; ++i)
     {
         ids[i] = i;
     }
 
-    for(auto slideID = 0ULL; slideID < numSlice; ++slideID)
+    for(size_t slideID = 0ULL; slideID < numSlice; ++slideID)
     {
         elements.clear();
         tensor_layout_t<4> layout(inputTvWithoutDim, slideID);
         auto idx = inputTvWithoutDim.get_tensor_view_idx(layout);
 
-        for(auto j = 0ULL; j < dimSize; ++j)
+        for(size_t j = 0ULL; j < dimSize; ++j)
         {
             elements.push_back(static_cast<float>(input[idx + j * dimStride]));
         }

@@ -159,7 +159,7 @@ void InputFlags::Parse(int argc, char* argv[])
     //	if(args.size() == 0) // No Input Flag
     //		Print();
 
-    for(auto i = 0ULL; i < args.size(); i++)
+    for(size_t i = 0ULL; i < args.size(); i++)
     {
         std::string temp = args[i];
         if(temp[0] != '-')

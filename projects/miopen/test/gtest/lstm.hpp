@@ -1593,7 +1593,7 @@ struct Verifier
             // Compute gpu
             if(time)
             {
-                for(auto i = 0; i < warmup_iter; ++i)
+                for(int i = 0; i < warmup_iter; ++i)
                 {
                     v.gpu(xs...);
                 }
@@ -1604,7 +1604,7 @@ struct Verifier
             if(time)
             {
                 float total_time = h.GetKernelTime();
-                for(auto i = 1; i < time_iter; ++i)
+                for(int i = 1; i < time_iter; ++i)
                 {
                     h.ResetKernelTime();
                     v.gpu(xs...);
@@ -1803,7 +1803,7 @@ struct LSTM_test : Verifier
         miopenGetRNNParamsSize(&handle, rnnDesc, &firstInputDesc, &wei_bytes, dataType);
         auto wei_sz = int(wei_bytes / sizeof(T));
         std::vector<T> weights(wei_sz);
-        for(auto i = 0; i < wei_sz; i++)
+        for(int i = 0; i < wei_sz; i++)
         {
             weights[i] = prng::gen_descreet_uniform_sign<T>(dataScale, 100);
         }
