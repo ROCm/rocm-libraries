@@ -289,9 +289,9 @@ inline const char* get_name(kernel_operation method)
 {
     switch(method)
     {
-        case kernel_operation::no_operation: return "no_operation";
+        case kernel_operation::no_operation: return "no_kernel_op";
         case kernel_operation::block_scan: return "block_scan";
-        case kernel_operation::custom_operation: return "custom_operation";
+        case kernel_operation::custom_operation: return "custom_kernel_op";
         case kernel_operation::atomics_no_collision: return "atomics_no_collision";
         case kernel_operation::atomics_inter_block_collision:
             return "atomics_inter_block_collision";
@@ -319,7 +319,7 @@ class device_memory_benchmark : public primbench::benchmark_interface
             .add("items_per_thread", ItemsPerThread)
             .add("kernel_op", get_name(KernelOp))
             .add("block_size", BlockSize)
-            .add("size", Size);
+            .add("size", Size * sizeof(T));
         ;
     }
 
@@ -375,7 +375,7 @@ class memcpy_benchmark : public primbench::benchmark_interface
             .add("subalgo", "memcpy")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
-            .add("size", Size);
+            .add("size", Size * sizeof(T));
     }
 
     void run(primbench::state& state) override
