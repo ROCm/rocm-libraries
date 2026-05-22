@@ -42,6 +42,7 @@ from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
 from .KernelWriterModules import *
+
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
@@ -247,6 +248,8 @@ class StateValues:
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
   serializedStore: bool                  = False
+  storeAlign8: bool                      = False
+  subtileTotalMOffsetSgpr: Optional[int] = None
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
@@ -4447,6 +4450,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tileInfo.deallocOffsetRegisters(self, kernel)
 
     # For subtile kernels, free SGPRs that were only needed during the main loop
+    self.states.storeAlign8 = False
     if kernel["UseSubtileImpl"]:
       # Remove SrdWS from the free pool before defineSgprIdx calls below,
       # otherwise checkOutAligned can grab registers overlapping SrdWS.
@@ -4465,6 +4469,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(RegSet("s", "sgprSubtileNGuard", self.states.subtileN16ValidBlocksSgpr))
       self.states.nonPostLoopSgpr.append("SubtileMGuard")
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
+      self.states.storeAlign8 = True
 
     # Start of post-loop code
     if 1:
@@ -6183,15 +6188,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.lrvwTileB = 1
 
     if kernel["ProblemType"]["MXBlockA"]:
-      if ((self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle")
-          or (not kernel["UnrollMajorLDSMXSA"] and not forceLrvwTile1A)):
+      if not kernel["UnrollMajorLDSMXSA"] and not forceLrvwTile1A:
         self.states.lrvwTileMXSA = kernel["VectorWidthA"]
       else:
         self.states.lrvwTileMXSA = 1
 
     if kernel["ProblemType"]["MXBlockB"]:
-      if ((self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle")
-          or (not kernel["UnrollMajorLDSMXSB"] and not forceLrvwTile1B)):
+      if not kernel["UnrollMajorLDSMXSB"] and not forceLrvwTile1B:
         self.states.lrvwTileMXSB = kernel["VectorWidthB"]
       else:
         self.states.lrvwTileMXSB = 1
@@ -6767,7 +6770,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           elif self.states.mxsa.numVgprValuPerBlock == 0:
             self.states.mxsa.numVgprValuPerBlock = kernel["MIWaveTileMXSA"]
           self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * valuBlocksA
-          if not self.states.asmCaps["HasWMMA_V3"] and self.states.lrvwTileMXSA > 1:
+          if self.states.lrvwTileMXSA > 1:
             self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"]
 
         if kernel["ProblemType"]["MXBlockB"]:
@@ -6783,7 +6786,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           elif self.states.mxsb.numVgprValuPerBlock == 0:
             self.states.mxsb.numVgprValuPerBlock = kernel["MIWaveTileMXSB"]
           self.states.mxsb.numVgprValu = self.states.mxsb.numVgprValuPerBlock * valuBlocksB
-          if not self.states.asmCaps["HasWMMA_V3"] and self.states.lrvwTileMXSB > 1:
+          if self.states.lrvwTileMXSB > 1:
             self.states.mxsb.numVgprValu = self.states.mxsb.numVgprValuPerBlock * kernel["InnerUnroll"]
 
       else: # mac instruction
@@ -8512,17 +8515,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ForceUnrollSubIter"]:
         numA = numA // factorSubIterA
       if kernel["ProblemType"]["MXBlockA"]:
+        self.states.numReadsPerUnrollMXSA = 1
+        numMXSA = kernel["InnerUnroll"] * kernel["MIWaveTile"][0] // tensorParametersMXSA["localReadInstruction"].numOffsets
+        if self.states.lrvwTileMXSA > 1:
+          numMXSA = numMXSA // kernel["VectorWidthA"]
+
+      if kernel["ProblemType"]["MXBlockA"]:
         if kernel["UnrollMajorLDSMXSA"]:
           self.states.numReadsPerUnrollMXSA = ceil(kernel["MIInputPerThreadMXSA"] / int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4))
         else:
           self.states.numReadsPerUnrollMXSA = kernel["MIInputPerThreadMXSA"]
         numMXSA = kernel["InnerUnroll"] * kernel["MIWaveTile"][0] // tensorParametersMXSA["localReadInstruction"].numOffsets
         if self.states.lrvwTileMXSA > 1:
-          if self.states.asmCaps["HasWMMA_V3"]:
-            mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
-          else:
-            numMXSA = numMXSA // kernel["VectorWidthA"]
+          numMXSA = numMXSA // kernel["VectorWidthA"]
 
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         if kernel["UnrollMajorLDSMetadata"]:
@@ -8549,6 +8554,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ForceUnrollSubIter"]:
         numB = numB // factorSubIterB
       if kernel["ProblemType"]["MXBlockB"]:
+        self.states.numReadsPerUnrollMXSB = 1
+        numMXSB = kernel["InnerUnroll"] * kernel["MIWaveTile"][1] // tensorParametersMXSB["localReadInstruction"].numOffsets
+        if self.states.lrvwTileMXSB > 1:
+          numMXSB = numMXSB // kernel["VectorWidthB"]
+
+      if kernel["ProblemType"]["MXBlockB"]:
         if kernel["UnrollMajorLDSMXSB"]:
           self.states.numReadsPerUnrollMXSB = ceil(kernel["MIInputPerThreadMXSB"] / int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4))
         else:
@@ -8556,11 +8567,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         numMXSB = kernel["InnerUnroll"] * kernel["MIWaveTile"][1] // tensorParametersMXSB["localReadInstruction"].numOffsets
         if self.states.lrvwTileMXSB > 1:
-          if self.states.asmCaps["HasWMMA_V3"]:
-            mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
-          else:
-            numMXSB = numMXSB // kernel["VectorWidthB"]
+          numMXSB = numMXSB // kernel["VectorWidthB"]
 
       # wider localread has 2 mode
       # 1. using larger IU to coalesced localread, only half of local reads in 1 iteration

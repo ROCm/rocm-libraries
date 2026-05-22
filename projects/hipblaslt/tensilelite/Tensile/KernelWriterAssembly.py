@@ -428,15 +428,9 @@ class KernelWriterAssembly(KernelWriter):
       elif tChar == "B":
         localReadWidth = (self.states.lrvwUnrollB * tP["bpeDS"]) / bpr
       elif tChar == "MXSA":
-        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
-          localReadWidth = (self.states.lrvwUnrollMXSA * kernel["VectorWidthA"] * tP["bpeDS"]) / bpr
-        else:
-          localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
+        localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
       elif tChar == "MXSB":
-        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
-          localReadWidth = (self.states.lrvwUnrollMXSB * kernel["VectorWidthB"] * tP["bpeDS"]) / bpr
-        else:
-          localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr
+        localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr
       elif tChar == "Metadata":
         localReadWidth = (self.states.lrvwUnrollMetadata * tP["bpeDS"]) / bpr
       else:
@@ -4849,7 +4843,7 @@ class KernelWriterAssembly(KernelWriter):
           "padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
       self.vgprPool.checkIn(tmpVgpr)
 
-    if tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
+    if tc in ("B", "MXSA", "MXSB", "Metadata"):
       if kernel["LdsOffset%s" % tc] != 0:
         module.add(VAddCOU32(
             dst=vgpr(destVgpr), \
@@ -4935,9 +4929,9 @@ class KernelWriterAssembly(KernelWriter):
           comment="Copy lds write address VGPR to SGPR"))
         module.add(SMulI32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
                          src1=int((kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%s"%tc]+kernel["LdsPad%s"%tc]) * tP["bpeGR"]) ))
-        if tc in ('A', 'B') and kernel["LdsOffset%s" % tc] != 0:
+        if tc == 'B':
           module.add(SAddU32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
-                         src1=kernel["LdsOffset%s" % tc] ))
+                         src1=kernel["LdsOffsetB"] ))
         self.vgprPool.checkIn(tmpv)
       self.vgprPool.checkIn(destVgpr)
 
@@ -12329,7 +12323,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def SrdTDInit(self, kernel):
     module = Module("SrdTDInit")
-    tmpspgr0 = self.sgprPool.checkOut(1)
+    tmpspgr0 = self.sgprPool.checkOut(1, preventOverflow=False)
     tmpspgr1 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
     tmpspgr2 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
     module.addComment0("calculate SrdTD address")
@@ -13503,7 +13497,8 @@ class KernelWriterAssembly(KernelWriter):
 
     if not isSize1:
       divisor   = kernel["MacroTile0"]
-      alignSize  = kernel["MatrixInstM"]
+      destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
+      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -13515,8 +13510,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCmpGeU32(src0=sgpr(wgSgpr), src1=sgpr(tmpS1), comment="wg0 >= nwg0-1 ?"))
     else:
       divisor   = kernel["MacroTile1"]
-      # N-dimension: use 16-row alignment (one MIWaveTile row = 16 cols for bf16)
-      alignSize  = 16
+      alignSize  = 1 if self.states.storeAlign8 else kernel["MatrixInstN"]
       wgSgpr    = "WorkGroup1"
       nwgSgpr   = "NumWorkGroups1"
       # tmpS0 = SizeJ % MT1
@@ -13612,8 +13606,8 @@ class KernelWriterAssembly(KernelWriter):
     # Use pre-allocated permanent guard SGPRs (allocated at start of post-loop).
     assert self.states.subtileM32ValidBlocksSgpr is not None, \
       "SubtileMGuard must be pre-allocated before _emitSubtileGuards"
-    tmpM       = self.sgprPool.checkOut(1, "subtileWaveIdM")
-    tmpN       = self.sgprPool.checkOut(1, "subtileWaveIdN")
+    tmpM       = self.sgprPool.checkOut(1, "subtileWaveIdM", preventOverflow=False)
+    tmpN       = self.sgprPool.checkOut(1, "subtileWaveIdN", preventOverflow=False)
 
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
@@ -13639,14 +13633,17 @@ class KernelWriterAssembly(KernelWriter):
     edgeModule.addComment0("M-guard: numValidD1Steps = min(ceil(max(validM-waveBase,0)/%d), MIWaveTile[0]=%d)" % (miM, kernel["MIWaveTile"][0]))
     edgeModule.add(SMulI32(dst=sgpr("SubtileMGuard"), src0=sgpr("WorkGroup0"), src1=mt0,
                            comment="WG0 * MT0"))
-    edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SizeI"), src1=sgpr("SubtileMGuard"),
-                           comment="validM = SizeI - WG0*MT0"))
     edgeModule.add(SMulI32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=waveGroupM,
                            comment="waveBase = waveIdM * waveGroupM(%d)" % waveGroupM))
-    edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SubtileMGuard"), src1=sgpr(tmpM),
-                           comment="validM - waveBase; SCC=1 if OOB"))
+    edgeModule.add(SAddU32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=sgpr("SubtileMGuard"),
+                           comment="totalMOffset = waveBase + WG0*MT0"))
+    edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SizeI"), src1=sgpr(tmpM),
+                           comment="validM_wave = SizeI - totalMOffset; SCC=1 if OOB"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileMGuard"), src0=0, src1=sgpr("SubtileMGuard"),
                                comment="remainder = 0 if OOB"))
+    # Precompute clamped validM_wave for per-store exec mask (avoids recomputing per store)
+    edgeModule.add(SMinU32(dst=sgpr(tmpM), src0=sgpr("SubtileMGuard"), src1=waveGroupM,
+                           comment="validM_wave = min(remainder, waveGroupM=%d) (precomputed for exec mask)" % waveGroupM))
     edgeModule.add(SAddU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SubtileMGuard"), src1=miM - 1,
                            comment="ceil: remainder + (%d-1)" % miM))
     edgeModule.add(SLShiftRightB32(dst=sgpr("SubtileMGuard"), src=sgpr("SubtileMGuard"), shiftHex=miMShift,
@@ -13654,7 +13651,8 @@ class KernelWriterAssembly(KernelWriter):
     # Clamp: guard comparison is (numValidD1Steps > d1); d1 < MIWaveTile[0] always.
     edgeModule.add(SMinU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SubtileMGuard"), src1=kernel["MIWaveTile"][0],
                            comment="clamp to MIWaveTile[0]=%d" % kernel["MIWaveTile"][0]))
-    self.sgprPool.checkIn(tmpM)
+    # Keep tmpM alive — it holds clamped validM_wave for use in per-store exec mask.
+    self.states.subtileTotalMOffsetSgpr = tmpM
 
     # --- N guard ---
     edgeModule.addComment0("N-guard: numValid16NBlocks = min(max(validN-waveBaseN,0), waveGroupN=%d) >> 4" % waveGroupN)
@@ -13676,8 +13674,13 @@ class KernelWriterAssembly(KernelWriter):
                            comment="validN_wave - waveGroupN; SCC=1 if validN_wave < waveGroupN"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileNGuard"), src0=sgpr("SubtileNGuard"), src1=waveGroupN,
                                comment="min(validN_wave, waveGroupN)"))
-    edgeModule.add(SLShiftRightB32(dst=sgpr("SubtileNGuard"), src=sgpr("SubtileNGuard"), shiftHex=4,
-                                   comment="numValid16NBlocks = clamped >> 4"))
+    if self.states.storeAlign8:
+      # Keep SubtileNGuard = clamped (not shifted). At use sites:
+      #   numBlocks = SubtileNGuard >> 4, partialN = SubtileNGuard & 0xF
+      edgeModule.addComment0("SubtileStoreAlign8: SubtileNGuard stores clamped (not >>4) for arbitrary N mask")
+    else:
+      edgeModule.add(SLShiftRightB32(dst=sgpr("SubtileNGuard"), src=sgpr("SubtileNGuard"), shiftHex=4,
+                                     comment="numValid16NBlocks = clamped >> 4"))
     self.sgprPool.checkIn(tmpN)
 
     self.states.subtileMBlockSize = mBlockSize
@@ -14236,7 +14239,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VMulF32(dst=vgpr(newAlphaVgpr), src0=vgpr(newAlphaVgpr), src1=sgpr(sgprScaleB)))
         module.add(SNop(waitState=0, comment="1 wait states"))
         if kernel["StreamK"] > 0:
-          oldAlpha = self.sgprPool.checkOut(1)
+          oldAlpha = self.sgprPool.checkOut(1, preventOverflow=False)
           module.add(SMovB32(dst=sgpr(oldAlpha), src=sgpr("Alpha"), comment="Save alpha value"))
         module.add(VReadfirstlaneB32(dst=sgpr("Alpha"), src=vgpr(newAlphaVgpr), comment="Update Alpha"))
         self.vgprPool.checkIn(newAlphaVgpr)
@@ -14899,6 +14902,7 @@ class KernelWriterAssembly(KernelWriter):
       if "SubtileMGuard" not in self.sgprs:
         self.states.subtileM32ValidBlocksSgpr = None
         self.states.subtileN16ValidBlocksSgpr = None
+        self.states.subtileTotalMOffsetSgpr = None
         self.states.subtileMBlockSize = 0
 
     # Activation
@@ -14963,6 +14967,9 @@ class KernelWriterAssembly(KernelWriter):
     #################
     # Free after final vgpr calculation
     # Only free locally-allocated guard SGPRs, not permanent ones (SubtileMGuard).
+    if self.states.subtileTotalMOffsetSgpr is not None:
+      self.sgprPool.checkIn(self.states.subtileTotalMOffsetSgpr)
+      self.states.subtileTotalMOffsetSgpr = None
     if self.states.subtileM32ValidBlocksSgpr is not None and "SubtileMGuard" not in self.sgprs:
       self.sgprPool.checkIn(self.states.subtileM32ValidBlocksSgpr)
       self.sgprPool.checkIn(self.states.subtileN16ValidBlocksSgpr)
@@ -17323,20 +17330,15 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["Multicast"] and enableCluster:
       mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
-    with self.allocTmpSgpr(2) as tmpSgprRes:
+    with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
-      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
-      dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
-                f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
-        mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
-                f"padBytes = numPadBlocks * ({ldsPadSize=})"))
-        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
-                "woffset += padBytes"))
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor) + round(mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
+                "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor) + (mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize)"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
@@ -17456,20 +17458,16 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["Multicast"] and enableCluster:
       mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
-    with self.allocTmpSgpr(2) as tmpSgprRes:
+    with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
-      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)) + 1, sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // 2"))
-      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
-                f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
-        mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
-                f"padBytes = numPadBlocks * ({ldsPadSize=})"))
-        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
-                "woffset += padBytes"))
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor) + round(mt // numComp * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
+                "woffset = wId * (mt // numComp * du * bpe + mt // numComp * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor), "woffset = wId * (mt // numComp * du * bpe)"))
+
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
