@@ -23,12 +23,11 @@
 #include <utility>
 #endif
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile::core::arch::mma {
 
 /**---------------------------------------------------
@@ -392,8 +391,9 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
 }
 
 } // namespace ck_tile::core::arch::mma
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
 
 // Include the implementations
 #include "wmma/wmma.hpp" // should be included before the below headers

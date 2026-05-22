@@ -5,12 +5,11 @@
 
 #include "ck_tile/core.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 // Common utilities for quantized GEMM block operations
@@ -230,5 +229,6 @@ struct AQPickerCommon : public BlockGemmQuantBase
     float scale_reg_f = 0.0f;
 };
 } // namespace ck_tile
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

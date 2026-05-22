@@ -18,12 +18,11 @@
 
 #define DEBUG_LOG 0
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -2128,5 +2127,6 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
 };
 
 } // namespace ck
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

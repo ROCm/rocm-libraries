@@ -12,12 +12,11 @@
 #include "ck/utility/functional.hpp"
 #include "ck/utility/math.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 template <index_t, index_t, index_t>
@@ -1029,8 +1028,9 @@ using uniform_sequence_gen_t = typename uniform_sequence_gen<NSize, I>::type;
 
 } // namespace ck
 
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
 
 #if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
 template <ck::index_t... Is>

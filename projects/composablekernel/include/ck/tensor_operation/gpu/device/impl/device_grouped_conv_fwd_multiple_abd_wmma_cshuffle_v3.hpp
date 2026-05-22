@@ -34,11 +34,11 @@
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_abd_wmma_cshuffle_v3.hpp"
 #endif
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -2390,5 +2390,6 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
 #ifdef CK_EXPERIMENTAL_BUILDER
 #include "ck_tile/builder/reflect/reflect_device_grouped_conv_fwd_multiple_abd_wmma_cshuffle_v3.inc"
 #endif
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

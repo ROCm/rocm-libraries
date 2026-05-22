@@ -7,12 +7,11 @@
 #include "ck_tile/core/container/array.hpp"
 #include "ck_tile/core/container/tuple.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 #if CK_TILE_THREAD_BUFFER_DEFAULT == CK_TILE_THREAD_BUFFER_USE_TUPLE
@@ -150,5 +149,6 @@ struct vector_traits<thread_buffer<T, N>, std::enable_if_t<std::is_class_v<T>>>
 
 } // namespace ck_tile
 
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

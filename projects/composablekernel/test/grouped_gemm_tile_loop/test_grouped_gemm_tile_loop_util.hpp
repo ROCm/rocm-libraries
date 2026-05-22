@@ -19,8 +19,7 @@
 #include "example/ck_tile/17_grouped_gemm/grouped_gemm_multi_d.hpp"
 #include "profiler/profile_grouped_gemm_tile_loop_generic_impl.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -176,5 +175,6 @@ class TestGroupedGemmTileLoop : public testing::Test
 
 } // namespace test
 } // namespace ck
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

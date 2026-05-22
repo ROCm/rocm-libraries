@@ -18,11 +18,11 @@
 #include "ck/host_utility/hip_check_error.hpp"
 #include "ck/library/utility/check_err.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace profiler {
 
@@ -522,5 +522,6 @@ float gpu_reduce_max(Iterator device_buffer, std::size_t size, hipStream_t strea
 
 } // namespace profiler
 } // namespace ck
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

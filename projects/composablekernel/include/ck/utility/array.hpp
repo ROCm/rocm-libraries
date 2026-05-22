@@ -9,12 +9,11 @@
 #include <type_traits>
 #include <cassert>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 template <typename TData, index_t NSize>
@@ -100,7 +99,8 @@ __host__ __device__ constexpr auto make_array()
 
 } // namespace ck
 
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
 
 #endif

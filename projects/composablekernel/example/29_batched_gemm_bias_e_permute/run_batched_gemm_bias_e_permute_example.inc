@@ -1,9 +1,8 @@
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 // hardcoded for NumDimM == NumDimN == NumDimK == 2
 template <ck::index_t NumDimG,
           ck::index_t NumDimM,
@@ -353,5 +352,6 @@ int run_batched_gemm_bias_e_permute_example(int argc, char* argv[])
 
     return 1;
 }
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

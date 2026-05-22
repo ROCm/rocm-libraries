@@ -23,8 +23,9 @@ __device__ __attribute__((address_space(1))) T* to_global(const T* ptr)
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wcast-qual"
     return (__attribute__((address_space(1))) T*)(ptr);
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
 }
 } // namespace detail
 

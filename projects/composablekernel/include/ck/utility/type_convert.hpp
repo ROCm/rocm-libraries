@@ -13,11 +13,11 @@
 #include "ck/utility/amd_inline_asm.hpp"
 #include "ck/utility/type.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 // Define the common macro for MI300 models
 #if defined(__gfx942__) || defined(__gfx950__)
@@ -2950,5 +2950,6 @@ inline __host__ __device__ void array_convert(Array<Y, NumElems>& y, const Array
 }
 
 } // namespace ck
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

@@ -59,14 +59,14 @@ class cpu_core_guard
         CPU_ZERO(&new_cpu_set);
         for(unsigned int i = 0; i < num_cores; ++i)
         {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
             CPU_SET(i, &new_cpu_set); // NOLINT(old-style-cast)
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
         }
         sched_setaffinity(0, sizeof(cpu_set_t), &new_cpu_set);
     }

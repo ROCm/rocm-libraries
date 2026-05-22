@@ -18,12 +18,11 @@
 #include "ck/utility/scheduler_enum.hpp"
 #include "ck/utility/integral_constant.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -708,8 +707,7 @@ struct DeviceGemmGemm_Wmma_CShuffleV3_Common_Invoker_Arg
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
 #if defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
@@ -719,8 +717,9 @@ struct DeviceGemmGemm_Wmma_CShuffleV3_Common_Invoker_Arg
                 std::vfprintf(stdout, format, args);
                 va_end(args);
 #if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
 #endif
                 std::cout << "In file: " << __FILE__ << ", function: " << curFunc << "\n";
             }
@@ -910,5 +909,6 @@ struct DeviceGemmGemm_Wmma_CShuffleV3_Common_Invoker_Arg
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

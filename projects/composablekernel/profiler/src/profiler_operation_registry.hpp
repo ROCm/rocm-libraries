@@ -9,12 +9,11 @@
 #include <string_view>
 #include <utility>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 class ProfilerOperationRegistry final
 {
     ProfilerOperationRegistry()  = default;
@@ -89,5 +88,6 @@ class ProfilerOperationRegistry final
             ::ProfilerOperationRegistry::GetInstance().Add(name, description, operation)      \
                 _Pragma("clang diagnostic pop")
 // clang-format on
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

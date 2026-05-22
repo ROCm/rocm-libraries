@@ -10,12 +10,11 @@
 #include <string>
 #include <type_traits>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 #if !defined(CK_TILE_HAS_ROW_NEWBCAST)
 // row_newbcast (DPP modifier 0x157) support by architecture:
 // - Not supported: gfx908 (MI100) and older
@@ -3132,5 +3131,6 @@ struct MoeSortingMultiPhaseKernel_P23
 
 } // namespace ck_tile
 
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif

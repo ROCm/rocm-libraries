@@ -5,10 +5,10 @@
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/scale_util.hpp"
-
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 struct e5m3_bexp_t
@@ -95,5 +95,6 @@ CK_TILE_HOST_DEVICE e5m3_bexp_t::operator float() const
 }
 
 } // namespace ck_tile
+#ifdef __clang__
 #pragma clang diagnostic pop
-#pragma GCC diagnostic pop
+#endif
