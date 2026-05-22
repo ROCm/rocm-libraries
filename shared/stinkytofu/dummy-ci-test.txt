@@ -1,0 +1,2 @@
+This file tests that stinkytofu CI triggers correctly.
+Delete this file after testing.
