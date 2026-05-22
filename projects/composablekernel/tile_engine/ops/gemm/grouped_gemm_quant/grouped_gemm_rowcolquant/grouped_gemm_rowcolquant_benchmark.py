@@ -280,10 +280,10 @@ def main():
 
     # Export results
     if benchmark.results:
-        benchmark_utils.export_csv(args.csv)
+        benchmark_utils.export_csv(benchmark.results, args.csv)
         benchmark_utils.export_best_kernels(best_kernels, args.best)
         if args.json:
-            benchmark_utils.export_json(args.json, best_kernels)
+            benchmark_utils.export_json(benchmark.results, args.json, best_kernels)
 
     print("\nBenchmark complete!")
     return 0
