@@ -55,7 +55,7 @@ struct GemmABQuantPipelineAgBgCrDefaultPolicy
                       "KPerWarpGemm must be a multiple of QuantGroupSize::kK!");
 
         constexpr index_t vector_size =
-            DS_READ_TR_SIZE() / sizeof(typename Problem::ComputeDataType);
+            DS_READ_TR_SIZE() / sizeof(typename Problem::AComputeDataType);
         constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
         constexpr auto wg_attr_num_access =
             !(Base::is_a_load_tr<Problem> || Base::is_b_load_tr<Problem>)
