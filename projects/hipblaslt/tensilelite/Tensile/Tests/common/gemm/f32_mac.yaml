@@ -25,7 +25,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: false
       TransposeB: false
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -74,7 +74,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: false
       TransposeB: true
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -123,7 +123,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: true
       TransposeB: false
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -172,7 +172,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: true
       TransposeB: true
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -221,7 +221,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: false
       TransposeB: false
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -296,7 +296,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: false
       TransposeB: true
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -371,7 +371,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: true
       TransposeB: false
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true
@@ -446,7 +446,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: true
       TransposeB: true
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true

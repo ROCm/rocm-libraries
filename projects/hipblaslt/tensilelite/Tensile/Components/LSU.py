@@ -472,7 +472,7 @@ class LSUOn(LSU):
             writer.vgprs.addrBias          = -1
             writer.vgprs.addrScaleAVec     = -1
             writer.vgprs.addrScaleBVec     = -1
-            writer.vgprs.addrScaleAlphaVec = -1
+            writer.vgprs.addrDeviceAlpha = -1
         else:
             writer.vgprs.addrD = writer.vgprPool.checkOut(2)
             module.add(VMovB32(
@@ -538,15 +538,15 @@ class LSUOn(LSU):
                         dst=vgpr(writer.vgprs.addrScaleBVec+1), \
                         src=sgpr("AddressScaleB+1"), \
                         comment="sgpr -> vgpr"))
-            if kernel["ProblemType"]["UseScaleAlphaVec"]:
-                writer.vgprs.addrScaleAlphaVec = writer.vgprPool.checkOut(2, 'addrScaleAlphaVec')
+            if kernel["ProblemType"]["UseDeviceAlpha"]:
+                writer.vgprs.addrDeviceAlpha = writer.vgprPool.checkOut(2, 'addrDeviceAlpha')
                 module.add(VMovB32( \
-                        dst=vgpr(self.vgprs.addrScaleAlphaVec+0), \
-                        src=sgpr("AddressScaleAlphaVec+0"), \
+                        dst=vgpr(self.vgprs.addrDeviceAlpha+0), \
+                        src=sgpr("AddressDeviceAlpha+0"), \
                         comment="sgpr -> vgpr"))
                 module.add(VMovB32( \
-                        dst=vgpr(self.vgprs.addrScaleAlphaVec+1), \
-                        src=sgpr("AddressScaleAlphaVec+1"), \
+                        dst=vgpr(self.vgprs.addrDeviceAlpha+1), \
+                        src=sgpr("AddressDeviceAlpha+1"), \
                         comment="sgpr -> vgpr"))
             if kernel["GlobalSplitU"] != 0:
                 module.add(gsuLabel)

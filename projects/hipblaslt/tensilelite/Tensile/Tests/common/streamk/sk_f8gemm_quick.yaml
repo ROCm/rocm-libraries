@@ -16,7 +16,7 @@ GlobalParameters:
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   MaxWorkspaceSize: 134217728
   DeviceLDS: 163840
   MaxLDS: 163840
@@ -40,7 +40,7 @@ BenchmarkProblems:
       # UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      # UseScaleAlphaVec: 3
+      # UseDeviceAlpha: 3
       # UseBias: 3
       # BiasDataTypeList: [s]
       # UseE: True
@@ -120,7 +120,7 @@ BenchmarkProblems:
       UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       UseBias: 3
       BiasDataTypeList: [s]
       UseE: True
@@ -200,7 +200,7 @@ BenchmarkProblems:
       UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       UseBias: 3
       BiasDataTypeList: [s]
       UseE: True
@@ -281,7 +281,7 @@ BenchmarkProblems:
       UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       UseBias: 3
       BiasDataTypeList: [s]
       UseE: True
@@ -361,7 +361,7 @@ BenchmarkProblems:
       UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       UseBias: 3
       BiasDataTypeList: [s]
       UseE: True
@@ -442,7 +442,7 @@ BenchmarkProblems:
       # UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      # UseScaleAlphaVec: 3
+      # UseDeviceAlpha: 3
       # UseBias: 3
       # BiasDataTypeList: [s]
       # UseE: True
@@ -522,7 +522,7 @@ BenchmarkProblems:
       UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       UseBias: 3
       BiasDataTypeList: [s]
       UseE: True
@@ -603,7 +603,7 @@ BenchmarkProblems:
       UseScaleAB: "Vector"
       # UseScaleAB: "Scalar"
       # UseScaleCD: True
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       UseBias: 3
       BiasDataTypeList: [s]
       UseE: True

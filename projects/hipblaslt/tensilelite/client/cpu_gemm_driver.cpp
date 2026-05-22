@@ -126,10 +126,10 @@ namespace
     //   effectiveAlpha = alpha
     //                  * scaleA[i]                              (if scaleAVec     != nullptr)
     //                  * scaleB[j]                              (if scaleBVec     != nullptr)
-    //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
+    //                  * deviceAlpha[factorDim == 0 ? i : j]  (if deviceAlpha != nullptr)
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
-    // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
+    // factorDim only affects deviceAlpha: 0 = row-dim (length M), 1 = col-dim (length N).   
     // Quantize a value through `Narrow`, then return as float. This mirrors
     // what the GPU MFMA path does when storage is wider than the MAC input
     // type (e.g. Half stored, F8 used in MFMA).
@@ -171,7 +171,7 @@ namespace
                          float          alpha,
                          float          beta,
                          const float*   biasVec        = nullptr,
-                         const float*   scaleAlphaVec  = nullptr,
+                         const float*   deviceAlpha  = nullptr,
                          ActivationType activation     = ActivationType::None,
                          const float*   scaleAVec      = nullptr,
                          const float*   scaleBVec      = nullptr,
@@ -213,8 +213,8 @@ namespace
                     effectiveAlpha *= scaleAVec[i];
                 if(scaleBVec)
                     effectiveAlpha *= scaleBVec[j];
-                if(scaleAlphaVec)
-                    effectiveAlpha *= scaleAlphaVec[factorDim == 0 ? i : j];
+                if(deviceAlpha)
+                    effectiveAlpha *= deviceAlpha[factorDim == 0 ? i : j];
 
                 float result = effectiveAlpha * sum + beta * c[i + j * m];
 
@@ -249,7 +249,7 @@ int runGemm(size_t         m,
             bool           tryFastPath,
             bool           useBias,
             ActivationType activation,
-            bool               useScaleAlphaVec,
+            bool               useDeviceAlpha,
             const std::string& useScaleAB,
             int                factorDim,
             rocisa::DataType   computeInputA = rocisa::DataType::None,
@@ -343,7 +343,7 @@ int runGemm(size_t         m,
 
     // Optional feature buffers
     std::vector<float> biasVec;
-    std::vector<float> scaleAlphaVecBuf;
+    std::vector<float> deviceAlphaBuf;
 
     if(useBias)
     {
@@ -353,13 +353,13 @@ int runGemm(size_t         m,
         contraction.setBias(rocisa::DataType::Float, m, m);
     }
 
-    if(useScaleAlphaVec)
+    if(useDeviceAlpha)
     {
-        size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
-        scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), randomGen);
-        contraction.setUseScaleAlphaVec(1);
-        contraction.setScaleAlphaVec(rocisa::DataType::Float, scaleAlphaVecLen, factorDim);
+        size_t deviceAlphaLen = (factorDim == 0) ? m : n;
+        deviceAlphaBuf.resize(deviceAlphaLen);
+        std::generate(deviceAlphaBuf.begin(), deviceAlphaBuf.end(), randomGen);
+        contraction.setUseDeviceAlpha(1);
+        contraction.setDeviceAlpha(rocisa::DataType::Float, deviceAlphaLen, factorDim);
     }
 
     // Random scale generator: magnitude in (1, 100], integer values to avoid rounding issues, sign random.
@@ -405,7 +405,7 @@ int runGemm(size_t         m,
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), alpha, beta);
     inputs.bias          = useBias ? biasVec.data() : nullptr;
-    inputs.scaleAlphaVec = useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr;
+    inputs.deviceAlpha = useDeviceAlpha ? deviceAlphaBuf.data() : nullptr;
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
     inputs.scaleB        = (useScaleAB != "none") ? scaleBBuf.data() : nullptr;
 
@@ -457,7 +457,7 @@ int runGemm(size_t         m,
                         (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
                         beta,
                         useBias ? biasVec.data() : nullptr,
-                        useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
+                        useDeviceAlpha ? deviceAlphaBuf.data() : nullptr,
                         activation,
                         (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
                         (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
@@ -522,8 +522,8 @@ int main(int argc, char* argv[])
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
-        "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
-        "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
+        "deviceAlpha", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
+        "factorDim", po::value<int>()->default_value(0), "DeviceAlpha dimension: 0=row(M), 1=col(N)")(
         "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)");
 
     po::variables_map vm;
@@ -587,7 +587,7 @@ int main(int argc, char* argv[])
     bool        tryFastPath      = vm["tryFastPath"].as<bool>();
     bool        useBias          = vm["bias"].as<bool>();
     std::string activationStr    = vm["activation"].as<std::string>();
-    bool        useScaleAlphaVec = vm["scaleAlphaVec"].as<bool>();
+    bool        useDeviceAlpha = vm["deviceAlpha"].as<bool>();
     int         factorDim        = vm["factorDim"].as<int>();
     std::string useScaleAB       = vm["useScaleAB"].as<std::string>();
 
@@ -626,7 +626,7 @@ int main(int argc, char* argv[])
             using BT = decltype(bTag);
             return runGemm<AT, BT>(
                 m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
-                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
+                useBias, activation, useDeviceAlpha, useScaleAB, factorDim,
                 computeInputA, computeInputB);
         };
         if(typeBStr == "f32")        return callB(float{});

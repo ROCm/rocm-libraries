@@ -515,7 +515,7 @@ BenchmarkProblems:
           - [Enum: gelu]
 
   ########################################
-  # BF16 TN — all hipblaslt activations (BBS) with ScaleAlphaVec
+  # BF16 TN — all hipblaslt activations (BBS) with DeviceAlpha
   #
   # Exercises every activation function supported by hipblaslt_all:
   # none, relu, gelu, sigmoid, silu, clamp, dgelu, drelu.
@@ -536,7 +536,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseBias: 1
       BiasDataTypeList: [s]
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:

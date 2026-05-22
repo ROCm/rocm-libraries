@@ -477,7 +477,7 @@ BenchmarkProblems:
       SupportUserArgs: True
       UseBias: 0
       Activation: False
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

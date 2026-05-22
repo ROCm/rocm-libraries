@@ -35,7 +35,7 @@ BenchmarkProblems:
       Batched: True
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       #ActivationHPA: True
       Sparse: 1
 
@@ -117,7 +117,7 @@ BenchmarkProblems:
       Batched: True
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       #ActivationHPA: True
       Sparse: 1
 

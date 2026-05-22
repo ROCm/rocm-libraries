@@ -350,7 +350,7 @@ class FactorDimArgs:
   def __init__(self, problemType, config):
     self.factorDims = []
     self.totalProblemSizes = 0
-    if problemType["UseScaleAlphaVec"] or problemType["UseBias"]:
+    if problemType["UseDeviceAlpha"] or problemType["UseBias"]:
       for fdim in config:
         dim = int(fdim)
         if dim not in [0, 1]:
@@ -4539,7 +4539,7 @@ class Solution(collections.abc.Mapping):
     # Calc the required LDS
     vecDT = VectorDataTypes()
     biasDim = state["ProblemType"]["UseBias"]
-    savDim = state["ProblemType"]["UseScaleAlphaVec"]
+    savDim = state["ProblemType"]["UseDeviceAlpha"]
     sAB = state["ProblemType"]["UseScaleAB"] == "Vector"
     # Calc LDS for Bias
     maxTurn = 0
@@ -4561,8 +4561,8 @@ class Solution(collections.abc.Mapping):
       maxTurn = calcEpilogueTurns([1])
     elif savVecBits == 3:
       maxTurn = calcEpilogueTurns([0, 1])
-    vecDT.scaleAlpha(0).turn = maxTurn
-    vecDT.scaleAlpha(1).turn = maxTurn
+    vecDT.deviceAlpha(0).turn = maxTurn
+    vecDT.deviceAlpha(1).turn = maxTurn
 
     # Calc LDS for ScaleA, ScaleB
     if sAB:
@@ -4590,8 +4590,8 @@ class Solution(collections.abc.Mapping):
       else:
         epilogueSize = int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.bias(0).turn)
     # Calculate max ldsNumBytes for other epilogues
-    if state["ProblemType"]["UseScaleAlphaVec"]:
-      epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.scaleAlpha(0).turn)
+    if state["ProblemType"]["UseDeviceAlpha"]:
+      epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.deviceAlpha(0).turn)
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
@@ -4917,9 +4917,9 @@ class Solution(collections.abc.Mapping):
       if state["GroupLoadStore"]:
         reject(state, printRejectionReason, "Bias reduction does not support GroupLoadStore.")
 
-    # Bias and ScaleAlphaVec
-    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != state["ProblemType"]["UseScaleAlphaVec"]:
-      reject(state, printRejectionReason, "When both UseBias and UseScaleAlphaVec are enabled then UseBias and UseScaleAlphaVec must have same settings.")
+    # Bias and DeviceAlpha
+    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseDeviceAlpha"] != 0 and state["ProblemType"]["UseBias"] != state["ProblemType"]["UseDeviceAlpha"]:
+      reject(state, printRejectionReason, "When both UseBias and UseDeviceAlpha are enabled then UseBias and UseDeviceAlpha must have same settings.")
 
     # ScaleAB or ScaleABVec
     if state["ProblemType"]["DataTypeA"] != state["ProblemType"]["MacDataTypeA"] and \

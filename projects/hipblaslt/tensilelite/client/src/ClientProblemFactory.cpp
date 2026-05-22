@@ -204,8 +204,8 @@ namespace TensileLite
                 m_useScaleAB = args["use-scaleAB"].as<std::string>();
             if(args.count("use-scaleCD"))
                 m_useScaleCD = args["use-scaleCD"].as<bool>();
-            if(args.count("use-scaleAlphaVec"))
-                m_useScaleAlphaVec = args["use-scaleAlphaVec"].as<int>();
+            if(args.count("use-deviceAlpha"))
+                m_useDeviceAlpha = args["use-deviceAlpha"].as<int>();
             if(args.count("max-workspace-size"))
                 m_maxWorkspaceSize = args["max-workspace-size"].as<size_t>();
 
@@ -274,7 +274,7 @@ namespace TensileLite
             int biasSize       = std::max(1, (int)m_biasTypeArgs.size());
             int activationSize = std::max(1, (int)m_activationEnumArg.size());
             int factorDimSize  = std::max(
-                1, m_useScaleAlphaVec >= 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
+                1, m_useDeviceAlpha >= 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
             rv.reserve(m_problemSizes.size() * activationSize * biasSize * factorDimSize);
 
             std::vector<size_t> aStrides, bStrides, cStrides, dStrides, eStrides, biasStrides;
@@ -320,12 +320,12 @@ namespace TensileLite
                                 biasStrides
                                     = m_tensorStrides[ContractionProblemGemm::TENSOR::BIAS][i];
 
-                            if(m_useBias && m_useScaleAlphaVec && m_useBias != m_useScaleAlphaVec)
+                            if(m_useBias && m_useDeviceAlpha && m_useBias != m_useDeviceAlpha)
                                 continue;
 
-                            int factorDim = (m_useScaleAlphaVec == 1 || m_useBias == 1)   ? 0
-                                            : (m_useScaleAlphaVec == 2 || m_useBias == 2) ? 1
-                                            : (m_useScaleAlphaVec >= 3 || m_useBias == 3)
+                            int factorDim = (m_useDeviceAlpha == 1 || m_useBias == 1)   ? 0
+                                            : (m_useDeviceAlpha == 2 || m_useBias == 2) ? 1
+                                            : (m_useDeviceAlpha >= 3 || m_useBias == 3)
                                                 ? m_factorDimArgs[l]
                                                 : 0;
                             rv.push_back(ContractionProblemGemm::FromIndexSizes(
@@ -449,8 +449,8 @@ namespace TensileLite
                                 rv.back().setScaleD(
                                     m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                             }
-                            rv.back().setUseScaleAlphaVec(m_useScaleAlphaVec);
-                            rv.back().setScaleAlphaVec(
+                            rv.back().setUseDeviceAlpha(m_useDeviceAlpha);
+                            rv.back().setDeviceAlpha(
                                 m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
                                 rv.back().d().sizes()[factorDim],
                                 factorDim);

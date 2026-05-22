@@ -2451,8 +2451,8 @@ namespace TensileLite
                 }
             };
 
-            struct UseScaleAlphaVecCheck
-                : public Predicate_CRTP<UseScaleAlphaVecCheck, ContractionProblemGemm>
+            struct UseDeviceAlphaCheck
+                : public Predicate_CRTP<UseDeviceAlphaCheck, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2461,20 +2461,20 @@ namespace TensileLite
                 };
                 int value;
 
-                UseScaleAlphaVecCheck() = default;
-                UseScaleAlphaVecCheck(int value)
+                UseDeviceAlphaCheck() = default;
+                UseDeviceAlphaCheck(int value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "UseScaleAlphaVec";
+                    return "UseDeviceAlpha";
                 }
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return !problem.useScaleAlphaVec() || (problem.useScaleAlphaVec() & value);
+                    return !problem.useDeviceAlpha() || (problem.useDeviceAlpha() & value);
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -2482,7 +2482,7 @@ namespace TensileLite
                 {
                     bool rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "prob=" << problem.useScaleAlphaVec() << ", sol_supports=" << value;
+                    details << "prob=" << problem.useDeviceAlpha() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -2561,8 +2561,8 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    if(problem.useBias() && problem.useScaleAlphaVec()
-                       && problem.useBias() != problem.useScaleAlphaVec())
+                    if(problem.useBias() && problem.useDeviceAlpha()
+                       && problem.useBias() != problem.useDeviceAlpha())
                         return false;
 
                     int factorDim = (problem.useBias() == 1) ? 0

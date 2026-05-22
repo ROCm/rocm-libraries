@@ -47,7 +47,7 @@ BenchmarkProblems:
       BiasDataTypeList: ['s', 'h']
       Batched: True
       UseScaleAB: "Scalar"
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       ActivationFused: true
 
     - # BenchmarkProblemSizeGroup - Standard - All problem

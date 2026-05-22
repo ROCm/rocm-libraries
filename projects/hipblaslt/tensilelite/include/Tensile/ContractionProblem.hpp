@@ -313,7 +313,7 @@ namespace TensileLite
             SCALEB        = 7,
             SCALEC        = 8,
             SCALED        = 9,
-            SCALEALPHAVEC = 10,
+            DEVICEALPHA = 10,
             METADATA      = 11,
             Synchronizer  = 12,
             AMAXD         = 13,
@@ -595,7 +595,7 @@ namespace TensileLite
                                TensorDescriptor const& scaleB,
                                TensorDescriptor const& scaleC,
                                TensorDescriptor const& scaleD,
-                               TensorDescriptor const& scaleAlphaVec,
+                               TensorDescriptor const& deviceAlpha,
                                FreeIndices const&      freeIndices,
                                BatchIndices const&     batchIndices,
                                BoundIndices const&     boundIndices,
@@ -613,7 +613,7 @@ namespace TensileLite
                                TensorDescriptor const& scaleB,
                                TensorDescriptor const& scaleC,
                                TensorDescriptor const& scaleD,
-                               TensorDescriptor const& scaleAlphaVec,
+                               TensorDescriptor const& deviceAlpha,
                                FreeIndices const&      freeIndices,
                                BatchIndices const&     batchIndices,
                                BoundIndices const&     boundIndices,
@@ -745,9 +745,9 @@ namespace TensileLite
             m_useScaleCD = useScaleCD;
         }
 
-        void setUseScaleAlphaVec(int useScaleAlphaVec)
+        void setUseDeviceAlpha(int useDeviceAlpha)
         {
-            m_useScaleAlphaVec = useScaleAlphaVec;
+            m_useDeviceAlpha = useDeviceAlpha;
         }
 
         bool useE() const
@@ -775,9 +775,9 @@ namespace TensileLite
             return m_useScaleCD;
         }
 
-        int useScaleAlphaVec() const
+        int useDeviceAlpha() const
         {
-            return m_useScaleAlphaVec;
+            return m_useDeviceAlpha;
         }
 
         void setE(rocisa::DataType           type,
@@ -882,14 +882,14 @@ namespace TensileLite
             }
         }
 
-        void setScaleAlphaVec(rocisa::DataType type, size_t length, int factorDim = 0)
+        void setDeviceAlpha(rocisa::DataType type, size_t length, int factorDim = 0)
         {
-            m_scaleAlphaVecType = type;
-            if(type != rocisa::DataType::None && m_useScaleAlphaVec)
+            m_deviceAlphaType = type;
+            if(type != rocisa::DataType::None && m_useDeviceAlpha)
             {
                 setParams().setFactorDim(factorDim);
-                m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
-                    = {"scaleAlphaVec", m_scaleAlphaVecType, {length}, {1, length}};
+                m_tensors[ContractionProblemGemm::TENSOR::DEVICEALPHA]
+                    = {"deviceAlpha", m_deviceAlphaType, {length}, {1, length}};
             }
         }
 
@@ -1205,9 +1205,9 @@ namespace TensileLite
         {
             return m_tensors[ContractionProblemGemm::TENSOR::BIAS];
         }
-        TensorDescriptor const& scaleAlphaVec() const
+        TensorDescriptor const& deviceAlpha() const
         {
-            return m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC];
+            return m_tensors[ContractionProblemGemm::TENSOR::DEVICEALPHA];
         }
         TensorDescriptor const& amaxd() const
         {
@@ -1408,7 +1408,7 @@ namespace TensileLite
         int              m_useBias                 = 0;
         std::string      m_useScaleAB              = "";
         bool             m_useScaleCD              = false;
-        int              m_useScaleAlphaVec        = 0;
+        int              m_useDeviceAlpha        = 0;
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
@@ -1432,7 +1432,7 @@ namespace TensileLite
             = rocisa::DataType::None; // if not assigned, will follow beta-type
         rocisa::DataType m_scaleDType
             = rocisa::DataType::None; // if not assigned, will follow beta-type
-        rocisa::DataType m_scaleAlphaVecType
+        rocisa::DataType m_deviceAlphaType
             = rocisa::DataType::None; // if not assigned, will follow alpha-type
         rocisa::DataType m_activationComputeType = rocisa::DataType::None;
 
@@ -1517,7 +1517,7 @@ namespace TensileLite
                           void const*          _scaleB,
                           void const*          _scaleC,
                           void const*          _scaleD,
-                          void const*          _scaleAlphaVec,
+                          void const*          _deviceAlpha,
                           void*                _ws,
                           void*                _Synchronizer,
                           unsigned char const* _metadata,
@@ -1551,7 +1551,7 @@ namespace TensileLite
         void const* scaleB        = nullptr;
         void const* scaleC        = nullptr;
         void const* scaleD        = nullptr;
-        void const* scaleAlphaVec = nullptr;
+        void const* deviceAlpha = nullptr;
         void const* mxsa          = nullptr;
         void const* mxsb          = nullptr;
 

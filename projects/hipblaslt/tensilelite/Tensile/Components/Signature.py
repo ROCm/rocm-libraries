@@ -49,7 +49,7 @@ class UserArgumentsInfo:
     # gemm related
     gemmArgumentSize: int = 0
     # Epilogue related
-    scaleAlphaVecSize: int = 0
+    deviceAlphaSize: int = 0
     biasSize: int = 0
     eSize: int = 0
     activationSize: int = 0
@@ -237,12 +237,12 @@ class SignatureDefault(Signature):
         userArgumentsInfo.scaleCSize += 8
         userArgumentsInfo.scaleDSize += 8
 
-        if kernel["ProblemType"]["UseScaleAlphaVec"]:
-            signature.addArg("AddressScaleAlphaVec", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
-            if kernel["ProblemType"]["UseScaleAlphaVec"] >= 3:
+        if kernel["ProblemType"]["UseDeviceAlpha"]:
+            signature.addArg("AddressDeviceAlpha", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+            if kernel["ProblemType"]["UseDeviceAlpha"] >= 3:
                 userArgumentsInfo.factorDimSize = 4
 
-        userArgumentsInfo.scaleAlphaVecSize += 8
+        userArgumentsInfo.deviceAlphaSize += 8
 
         if writer.states.useBias != DataDirection.NONE:
             signature.addArg("bias", SVK.SIG_GLOBALBUFFER, biasValueType, "generic")  # Note: We append the data in ws_d
@@ -294,7 +294,7 @@ class SignatureDefault(Signature):
                                       userArgumentsInfo.scaleBSize + \
                                       userArgumentsInfo.scaleCSize + \
                                       userArgumentsInfo.scaleDSize + \
-                                      userArgumentsInfo.scaleAlphaVecSize + \
+                                      userArgumentsInfo.deviceAlphaSize + \
                                       userArgumentsInfo.biasSize + \
                                       userArgumentsInfo.factorDimSize + \
                                       userArgumentsInfo.eSize + \

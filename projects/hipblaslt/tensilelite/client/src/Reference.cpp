@@ -1266,14 +1266,14 @@ namespace TensileLite
                 ptrD = shadowD.data();
             }
 
-            bool useScaleAlphaVec = problem.useScaleAlphaVec();
+            bool useDeviceAlpha = problem.useDeviceAlpha();
             int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
 
-            ShadowBuffer shadowAlphaVec;
-            if(problem.useScaleAlphaVec())
+            ShadowBuffer shadowDeviceAlpha;
+            if(problem.useDeviceAlpha())
             {
                 size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
-                shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+                shadowDeviceAlpha = ShadowBuffer(inputs.deviceAlpha, problem.alphaType(), vecLen);
             }
 
             size_t sizeBatch = problem.batchSize(0);
@@ -1436,19 +1436,19 @@ namespace TensileLite
                                     {
                                         alpha *= scaleABScalar;
                                     }
-                                    if(useScaleAlphaVec)
+                                    if(useDeviceAlpha)
                                     {
                                         if(factorDim == 2)
                                         {
-                                            alpha *= shadowAlphaVec[0];
+                                            alpha *= shadowDeviceAlpha[0];
                                         }
                                         else if(factorDim == 1)
                                         {
-                                            alpha *= shadowAlphaVec[global_n];
+                                            alpha *= shadowDeviceAlpha[global_n];
                                         }
                                         else
                                         {
-                                            alpha *= shadowAlphaVec[global_m];
+                                            alpha *= shadowDeviceAlpha[global_m];
                                         }
                                     }
                                     if(beta != 0.0f)
@@ -1831,7 +1831,7 @@ namespace TensileLite
 
                 auto resultD = multiply<Accumulator>(alpha, value);
 
-                if(problem.useScaleAlphaVec())
+                if(problem.useDeviceAlpha())
                 {
                     int pos = 0;
                     if(problem.getParams().factorDim() == 2)
@@ -1840,9 +1840,9 @@ namespace TensileLite
                         pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
                     else
                         pos = int(dNum % problem.d().sizes()[0]);
-                    Accumulator scaleAlphaVec = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleAlphaVec, pos, aConjugate);
-                    resultD *= scaleAlphaVec;
+                    Accumulator deviceAlpha = GetValue<Accumulator>(
+                        problem.alphaType(), inputs.deviceAlpha, pos, aConjugate);
+                    resultD *= deviceAlpha;
                 }
 
                 if(beta != zero)

@@ -33,7 +33,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseScaleAB: "Scalar"
       UseScaleCD: False
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       UseBias: 0
       BiasDataTypeList: [s,b,h]
     - # BenchmarkProblemSizeGroup - Standard
@@ -102,7 +102,7 @@ BenchmarkProblems:
       ActivationType: all
       UseScaleAB: "Scalar"
       UseScaleCD: False
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       UseBias: 0
       BiasDataTypeList: [s,b,h]
     - # BenchmarkProblemSizeGroup - Standard
@@ -170,7 +170,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseScaleAB: "Scalar"
       UseScaleCD: False
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       UseBias: 0
       BiasDataTypeList: [s,b,h]
     - # BenchmarkProblemSizeGroup - Standard
@@ -239,7 +239,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseScaleAB: "Scalar"
       UseScaleCD: False
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       UseBias: 0
       BiasDataTypeList: [s,b,h]
     - # BenchmarkProblemSizeGroup - Standard
@@ -311,7 +311,7 @@ BenchmarkProblems:
       ActivationType: all
       UseScaleAB: "Scalar"
       UseScaleCD: False
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -548,7 +548,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseScaleAB: "Scalar"
       UseScaleCD: False
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard

@@ -37,7 +37,7 @@ BenchmarkProblems:
       Batched: True
       UseBias: 1
       BiasDataTypeList: [s]
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: true
       ActivationType: hipblaslt_all
       ActivationFuncCall: true
@@ -69,7 +69,7 @@ BenchmarkProblems:
       Batched: True
       UseBias: 1
       BiasDataTypeList: [s]
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: true
       ActivationType: hipblaslt_all
       ActivationFuncCall: true
@@ -101,7 +101,7 @@ BenchmarkProblems:
       Batched: True
       UseBias: 1
       BiasDataTypeList: [s]
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: true
       ActivationType: hipblaslt_all
       ActivationFuncCall: true

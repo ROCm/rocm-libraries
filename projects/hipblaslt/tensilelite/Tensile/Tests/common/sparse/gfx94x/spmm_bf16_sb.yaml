@@ -34,7 +34,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       BiasDataTypeList: [s]
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -98,7 +98,7 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       UseBias: 0
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       Batched: True
       Activation: True
       ActivationType: all
@@ -167,7 +167,7 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       UseBias: 0
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       Batched: True
       Activation: True
       ActivationType: all

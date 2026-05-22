@@ -17,7 +17,7 @@ GlobalParameters:
   DataInitTypeBias: 0
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 1
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   BoundsCheck: 2
 
 BenchmarkProblems:
@@ -38,7 +38,7 @@ BenchmarkProblems:
       UseBias:       1
       UseE:          False
       Activation:    True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       # SupportUserArgs: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

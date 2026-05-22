@@ -196,7 +196,7 @@ namespace TensileLite
                 iot::mapOptional(io, "useE", s.useE);
                 iot::mapOptional(io, "useScaleAB", s.useScaleAB);
                 iot::mapOptional(io, "useScaleCD", s.useScaleCD);
-                iot::mapOptional(io, "useScaleAlphaVec", s.useScaleAlphaVec);
+                iot::mapOptional(io, "useDeviceAlpha", s.useDeviceAlpha);
                 iot::mapOptional(io, "outputAmaxD", s.outputAmaxD);
                 iot::mapRequired(io, "highPrecisionAccumulate", s.highPrecisionAccumulate);
                 iot::mapOptional(io, "useInitialStridesAB", s.useInitialStridesAB);

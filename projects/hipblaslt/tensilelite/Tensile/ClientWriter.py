@@ -516,7 +516,7 @@ def dataInitParams(problemType):
     initScaleB  = globalParameters['DataInitTypeScaleB']
     initScaleC  = globalParameters['DataInitTypeScaleC']
     initScaleD  = globalParameters['DataInitTypeScaleD']
-    initScaleAlphaVec  = globalParameters['DataInitTypeScaleAlphaVec']
+    initDeviceAlpha  = globalParameters['DataInitTypeDeviceAlpha']
     initMXScaleA = globalParameters["DataInitTypeMXSA"]
     initMXScaleB = globalParameters["DataInitTypeMXSB"]
 
@@ -538,7 +538,7 @@ def dataInitParams(problemType):
             ('init-scaleB',        DataInitName(initScaleB).name),
             ('init-scaleC',        DataInitName(initScaleC).name),
             ('init-scaleD',        DataInitName(initScaleD).name),
-            ('init-scaleAlphaVec', DataInitName(initScaleAlphaVec).name),
+            ('init-deviceAlpha', DataInitName(initDeviceAlpha).name),
             ('init-mx-a',      DataInitName(initMXScaleA).name),
             ('init-mx-b',      DataInitName(initMXScaleB).name)]
 
@@ -599,7 +599,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('output-amaxD', problemType.outputAmaxD)
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
-        param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
+        param('use-deviceAlpha',   problemType.useDeviceAlpha)
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         if problemType.mxBlockA:
@@ -665,8 +665,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           param("print-tensor-ref",       1)
         if globalParameters["PrintTensorBias"]:
           param("print-tensor-bias",      1)
-        if globalParameters["PrintTensorScaleAlphaVec"]:
-          param("print-tensor-scale-alpha-vec",      1)
+        if globalParameters["PrintTensorDeviceAlpha"]:
+          param("print-tensor-device-alpha",      1)
         if globalParameters["PrintTensorAmaxD"]:
           param("print-tensor-amaxd",      1)
         if globalParameters["DumpTensors"]:

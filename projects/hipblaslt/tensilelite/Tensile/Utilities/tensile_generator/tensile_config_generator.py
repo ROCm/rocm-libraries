@@ -313,10 +313,10 @@ def extract_dtype(match):
         res["ActivationType"] = "hipblaslt_all"
     if scaleA == "1" and scaleB == "1":
         res["UseScaleAB"] = "Scalar"
-        res["UseScaleAlphaVec"] = 1
+        res["UseDeviceAlpha"] = 1
     elif scaleA == "2" and scaleB == "2":
         res["UseScaleAB"] = "Vector"
-        res["UseScaleAlphaVec"] = 1
+        res["UseDeviceAlpha"] = 1
     return res
 
 def find_matmul_instruction(mfma_instruction, size):
@@ -637,7 +637,7 @@ elif args.gridbase_config and args.hipblaslt_log is None:
             TransposeB = trans_map(data['TransposeB'])
             HighPrecisionAccumulate = get_high_precision_accumulate(DataType)
             ComputeDataType, F32XdlMathOp = adapt_xf32(ComputeDataType)
-            dtype = {"Batched": True, "DataType": DataType, "DestDataType": DestDataType, "ComputeDataType": ComputeDataType, "TransposeA": TransposeA, "TransposeB": TransposeB, "HighPrecisionAccumulate": HighPrecisionAccumulate, "F32XdlMathOp": F32XdlMathOp, "OperationType": "GEMM", "UseBeta": True, "UseBias": 1, "Activation": True, "ActivationType": "hipblaslt_all", "UseScaleAlphaVec": 1}
+            dtype = {"Batched": True, "DataType": DataType, "DestDataType": DestDataType, "ComputeDataType": ComputeDataType, "TransposeA": TransposeA, "TransposeB": TransposeB, "HighPrecisionAccumulate": HighPrecisionAccumulate, "F32XdlMathOp": F32XdlMathOp, "OperationType": "GEMM", "UseBeta": True, "UseBias": 1, "Activation": True, "ActivationType": "hipblaslt_all", "UseDeviceAlpha": 1}
             dtype_str = json.dumps(dtype)
             for m in m_shapes:
                 for n in n_shapes:

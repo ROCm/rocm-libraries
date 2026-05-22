@@ -316,7 +316,7 @@ BenchmarkProblems:
           - [Enum: swish]
 
   #########################################
-  ## Test UseBias=3 and UseScaleAlphaVec=3
+  ## Test UseBias=3 and UseDeviceAlpha=3
   #########################################
   -
     - # ProblemType
@@ -333,7 +333,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

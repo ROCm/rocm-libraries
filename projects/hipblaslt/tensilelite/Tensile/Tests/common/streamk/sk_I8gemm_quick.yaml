@@ -16,7 +16,7 @@ GlobalParameters:
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   MaxWorkspaceSize: 134217728
   PrintSolutionRejectionReason: True
 
@@ -33,7 +33,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation:    True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
     -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -89,7 +89,7 @@ BenchmarkProblems:
       Batched: True
       Activation:    True
       UseScaleAB: "Vector"
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [S]
       UseE: True
@@ -149,7 +149,7 @@ BenchmarkProblems:
       Batched: True
       Activation:    True
       UseScaleAB: "Vector"
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [S]
       UseE: True
@@ -209,7 +209,7 @@ BenchmarkProblems:
       Batched: True
       Activation:    True
       UseScaleAB: "Vector"
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [S]
       UseE: True

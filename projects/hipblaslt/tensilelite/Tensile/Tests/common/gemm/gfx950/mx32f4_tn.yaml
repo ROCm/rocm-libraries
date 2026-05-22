@@ -51,7 +51,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
 #      UseScaleAB: "Scalar"
 #      UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s]
 

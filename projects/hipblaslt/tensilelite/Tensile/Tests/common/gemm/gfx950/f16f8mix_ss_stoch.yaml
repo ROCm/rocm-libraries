@@ -39,7 +39,7 @@ BenchmarkProblems:
       UseScaleAB: "Scalar"
       UseScaleCD: False
       StochasticRounding : True
-      UseScaleAlphaVec: 0
+      UseDeviceAlpha: 0
       UseBias: 0
       BiasDataTypeList: [s,b,h]
     - # BenchmarkProblemSizeGroup - Standard

@@ -68,7 +68,7 @@ class BoundIndex:
 
 class ProblemType:
     StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
-                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
+                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useDeviceAlpha', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
@@ -252,9 +252,9 @@ class ProblemType:
         if 'UseScaleCD' in d:
             rv.useScaleCD = d['UseScaleCD']
 
-        rv.useScaleAlphaVec = 0
-        if 'UseScaleAlphaVec' in d:
-            rv.useScaleAlphaVec = d['UseScaleAlphaVec']
+        rv.useDeviceAlpha = 0
+        if 'UseDeviceAlpha' in d:
+            rv.useDeviceAlpha = d['UseDeviceAlpha']
 
         rv.batched = d['Batched']
 
@@ -387,7 +387,7 @@ class ProblemType:
                 supportedBy = ActivationType.SupportedBy.ALL if self.activationType == 'all' else ActivationType.SupportedBy.HIPBLASLT
                 enumList = [actEnum.capitalize() for actEnum in ActivationType.getEnumStrList(self.activationComputeDataType, supportedBy, exportType=exportType)]
                 predicates.append(ProblemPredicate("ActivationEnumWhiteList", value=enumList))
-            # predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
+            # predicates.append(ProblemPredicate("UseDeviceAlpha", value=self.useDeviceAlpha))
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
         if includeType:
@@ -404,7 +404,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
             predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))
-            predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
+            predicates.append(ProblemPredicate("UseDeviceAlpha", value=self.useDeviceAlpha))
             predicates.append(ProblemPredicate("Sparse", value=self.sparse))
             predicates.append(ProblemPredicate("F32XdlMathOp", value=self.f32XdlMathOp))
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))

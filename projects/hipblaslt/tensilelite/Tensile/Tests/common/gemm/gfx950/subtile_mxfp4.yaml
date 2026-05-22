@@ -480,7 +480,7 @@ BenchmarkProblems:
           - [Enum: relu]
 
   ########################################
-  # FP4 TN — all hipblaslt activations with ScaleAlphaVec
+  # FP4 TN — all hipblaslt activations with DeviceAlpha
   #
   # Exercises every activation function supported by hipblaslt_all:
   # none, relu, gelu, sigmoid, silu, clamp, dgelu, drelu.
@@ -503,7 +503,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseBias: 1
       BiasDataTypeList: [s]
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:

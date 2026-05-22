@@ -12,7 +12,7 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   DataInitTypeBias: 0
-  DataInitTypeScaleAlphaVec: 1
+  DataInitTypeDeviceAlpha: 1
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
   Device: 0
@@ -38,7 +38,7 @@ BenchmarkProblems:
       BiasTypeList: [S,B]
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
 
       # GroupedGemm: True
       # SupportUserArgs: True
@@ -88,7 +88,7 @@ BenchmarkProblems:
       BiasDataTypeList: [S,B]
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
 
       # GroupedGemm: True
       # SupportUserArgs: True

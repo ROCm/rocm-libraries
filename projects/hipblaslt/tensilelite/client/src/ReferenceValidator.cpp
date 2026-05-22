@@ -55,7 +55,7 @@ namespace TensileLite
             m_printTensorD             = args["print-tensor-d"].as<bool>();
             m_printTensorRef           = args["print-tensor-ref"].as<bool>();
             m_printTensorBias          = args["print-tensor-bias"].as<bool>();
-            m_printTensorScaleAlphaVec = args["print-tensor-scale-alpha-vec"].as<bool>();
+            m_printTensorDeviceAlpha = args["print-tensor-device-alpha"].as<bool>();
             m_printTensorAmaxD         = args["print-tensor-amaxd"].as<bool>();
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
@@ -490,10 +490,10 @@ namespace TensileLite
                     resPtr = result.scaleD;
                 }
                 break;
-                case ContractionProblemGemm::TENSOR::SCALEALPHAVEC:
+                case ContractionProblemGemm::TENSOR::DEVICEALPHA:
                 {
-                    refPtr = reference.scaleAlphaVec;
-                    resPtr = result.scaleAlphaVec;
+                    refPtr = reference.deviceAlpha;
+                    resPtr = result.deviceAlpha;
                 }
                 break;
                 case ContractionProblemGemm::TENSOR::Synchronizer:
@@ -586,9 +586,9 @@ namespace TensileLite
             if(m_printTensorBias)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.bias().totalAllocatedBytes());
-            if(m_printTensorScaleAlphaVec)
+            if(m_printTensorDeviceAlpha)
                 requiredBufferSize
-                    = std::max(requiredBufferSize, problem.scaleAlphaVec().totalAllocatedBytes());
+                    = std::max(requiredBufferSize, problem.deviceAlpha().totalAllocatedBytes());
             if(m_printTensorAmaxD)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.amaxd().totalAllocatedBytes());
@@ -704,17 +704,17 @@ namespace TensileLite
                                       problem.bias(),
                                       result.bias);
             }
-            if(m_printTensorScaleAlphaVec)
+            if(m_printTensorDeviceAlpha)
             {
                 HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
-                                        result.scaleAlphaVec,
-                                        problem.scaleAlphaVec().totalAllocatedBytes(),
+                                        result.deviceAlpha,
+                                        problem.deviceAlpha().totalAllocatedBytes(),
                                         hipMemcpyDeviceToHost));
                 m_reporter->logTensor(LogLevel::Verbose,
-                                      "scaleAlphaVec",
+                                      "deviceAlpha",
                                       m_cpuResultBuffer.get(),
-                                      problem.scaleAlphaVec(),
-                                      result.scaleAlphaVec);
+                                      problem.deviceAlpha(),
+                                      result.deviceAlpha);
             }
 
             if(m_printTensorAmaxD)

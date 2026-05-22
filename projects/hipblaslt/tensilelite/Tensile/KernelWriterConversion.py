@@ -132,11 +132,11 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  " + scalePtrStr + " * " + "ScaleD;" + self.endLine
 
     enableFactorDim = False
-    # interface: ScaleAlphaVec GSU>1 GSUA "MUL"
-    if self.state["ProblemType"]["UseScaleAlphaVec"]:
-      scaleAlphaVecPtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
-      kStr += "  " + scaleAlphaVecPtrStr + " * " + "ScaleAlphaVec;" + self.endLine
-      if self.state["ProblemType"]["UseScaleAlphaVec"] >= 3:
+    # interface: DeviceAlpha GSU>1 GSUA "MUL"
+    if self.state["ProblemType"]["UseDeviceAlpha"]:
+      deviceAlphaPtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
+      kStr += "  " + deviceAlphaPtrStr + " * " + "DeviceAlpha;" + self.endLine
+      if self.state["ProblemType"]["UseDeviceAlpha"] >= 3:
         enableFactorDim = True
 
     # alpha & beta
@@ -687,28 +687,28 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  %s[%d] *= (%s)arg.alpha;%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
     kStr += self.endLine
 
-    if self.state["ProblemType"]["UseScaleAlphaVec"]:
-      kStr += "  if(arg.ScaleAlphaVec != nullptr){" + self.endLine
+    if self.state["ProblemType"]["UseDeviceAlpha"]:
+      kStr += "  if(arg.DeviceAlpha != nullptr){" + self.endLine
 
-      if self.state["ProblemType"]["UseScaleAlphaVec"] >= 3:
+      if self.state["ProblemType"]["UseDeviceAlpha"] >= 3:
         kStr += "    if(arg.factorDim == 0){" + self.endLine
         for vIdx in range(self.num_dword_load):
-          kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[id0+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+          kStr += "      %s[%d] *= (%s)arg.DeviceAlpha[id0+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
         kStr += "    }else if(arg.factorDim == 2){" + self.endLine
         for vIdx in range(self.num_dword_load):
-          kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[0];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
+          kStr += "      %s[%d] *= (%s)arg.DeviceAlpha[0];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
         kStr += "    }else{" + self.endLine
         for vIdx in range(self.num_dword_load):
-          kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
+          kStr += "      %s[%d] *= (%s)arg.DeviceAlpha[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
         kStr += "    }" + self.endLine
         kStr += "  }" + self.endLine
       elif self.state["ProblemType"]["UseBias"] == 2:
         for vIdx in range(self.num_dword_load):
-          kStr += "    %s[%d] *= (%s)arg.ScaleAlphaVec[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
+          kStr += "    %s[%d] *= (%s)arg.DeviceAlpha[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
         kStr += "  }" + self.endLine
       else:
         for vIdx in range(self.num_dword_load):
-          kStr += "    %s[%d] *= (%s)arg.ScaleAlphaVec[id0+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+          kStr += "    %s[%d] *= (%s)arg.DeviceAlpha[id0+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
         kStr += "  }" + self.endLine
 
       kStr += self.endLine
@@ -880,7 +880,7 @@ class KernelWriterConversion(KernelWriterBase):
         name += "_Bias%s"%btype.toChar()
 
     factorDim =  0 if state["ProblemType"]["Gradient"] else state["ProblemType"]["UseBias"]
-    factorDim =  max(factorDim, state["ProblemType"]["UseScaleAlphaVec"])
+    factorDim =  max(factorDim, state["ProblemType"]["UseDeviceAlpha"])
     if factorDim > 1:
         name += "_FD%s"%("N" if factorDim == 2 else "MN")
 
@@ -904,7 +904,7 @@ class KernelWriterConversion(KernelWriterBase):
     elif state["ProblemType"]["UseScaleAB"] == "Vector":
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
-    name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
+    name += "_DeviceAlpha" if state["ProblemType"]["UseDeviceAlpha"] else ""
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)

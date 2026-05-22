@@ -25,7 +25,7 @@ BenchmarkProblems:
       ComputeDataType: s
       TransposeA: true
       TransposeB: false
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
       # UseBeta: true
       # UseBias: 1
       Batched: true

@@ -121,7 +121,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::DataTypeEEqual>(),
                      Base::template Pair<Predicates::Contraction::UseScaleABCheck>(),
                      Base::template Pair<Predicates::Contraction::UseScaleCDCheck>(),
-                     Base::template Pair<Predicates::Contraction::UseScaleAlphaVecCheck>(),
+                     Base::template Pair<Predicates::Contraction::UseDeviceAlphaCheck>(),
                      Base::template Pair<Predicates::Contraction::BiasDataTypeWhiteList>(),
                      Base::template Pair<Predicates::Contraction::BiasSrcWhiteList>(),
                      Base::template Pair<Predicates::Contraction::SizeInRange>(),
@@ -508,8 +508,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UseScaleAlphaVecCheck, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UseScaleAlphaVecCheck, IO>
+        struct MappingTraits<Predicates::Contraction::UseDeviceAlphaCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseDeviceAlphaCheck, IO>
         {
         };
 

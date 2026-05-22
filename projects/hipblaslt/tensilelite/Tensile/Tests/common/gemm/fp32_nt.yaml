@@ -25,7 +25,7 @@ BenchmarkProblems:
       UseBias: 1
       Batched: True
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
 
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:

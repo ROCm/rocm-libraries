@@ -8881,11 +8881,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if self.states.numSgprAddressScaleD:
         self.states.numStoreSgprNames.append("AddressScaleD")
         self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressScaleD)
-    if kernel["ProblemType"]["UseScaleAlphaVec"]:
+    if kernel["ProblemType"]["UseDeviceAlpha"]:
         storeSgprLoad += self.states.rpga
-        self.states.numStoreSgprNames.append("AddressScaleAlphaVec")
+        self.states.numStoreSgprNames.append("AddressDeviceAlpha")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)
-        self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
+        self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseDeviceAlpha"])
         if self.states.FactorDim >= 3:
           enableFactorDim = True
     if self.states.useBias != DataDirection.NONE:

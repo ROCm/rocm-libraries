@@ -16,7 +16,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 13
-  DataInitTypeScaleAlphaVec: 12
+  DataInitTypeDeviceAlpha: 12
   #MaxFileName: 256
 
 BenchmarkProblems:
@@ -428,7 +428,7 @@ BenchmarkProblems:
       Batched: True
       UseBias: 1
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseScaleAB: "Scalar"
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -607,7 +607,7 @@ BenchmarkProblems:
       Batched: True
       UseBias: 1
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseScaleAB: "Scalar"
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -1989,7 +1989,7 @@ BenchmarkProblems:
       # BiasDataTypeList: [s,h]
       # Activation: True
       # ActivationType: hipblaslt_all
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -2058,7 +2058,7 @@ BenchmarkProblems:
       # BiasDataTypeList: [s,h]
       # Activation: True
       # ActivationType: hipblaslt_all
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:

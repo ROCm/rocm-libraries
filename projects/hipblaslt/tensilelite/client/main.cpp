@@ -243,7 +243,7 @@ namespace TensileLite
                 ("init-scaleB",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleB")
                 ("init-scaleC",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleC")
                 ("init-scaleD",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleD")
-                ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
+                ("init-deviceAlpha",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for deviceAlpha")
                 ("init-mx-a",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
                 ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
@@ -269,7 +269,7 @@ namespace TensileLite
                 ("print-tensor-d",                  po::value<bool>()->default_value(false), "Print tensor D.")
                 ("print-tensor-ref",                po::value<bool>()->default_value(false), "Print reference tensor D.")
                 ("print-tensor-bias",               po::value<bool>()->default_value(false), "Print tensor Bias.")
-                ("print-tensor-scale-alpha-vec",    po::value<bool>()->default_value(false), "Print tensor ScaleAlphaVec.")
+                ("print-tensor-device-alpha",    po::value<bool>()->default_value(false), "Print tensor DeviceAlpha.")
                 ("print-tensor-amaxd",              po::value<bool>()->default_value(false), "Print tensor AmaxD value from both CPU and GPU.")
 
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
@@ -371,7 +371,7 @@ namespace TensileLite
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
-                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
+                ("use-deviceAlpha",         po::value<int>()->default_value(0), "Use deviceAlpha.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
@@ -523,7 +523,7 @@ namespace TensileLite
             DUMP_OPT("init-scaleB", InitMode);
             DUMP_OPT("init-scaleC", InitMode);
             DUMP_OPT("init-scaleD", InitMode);
-            DUMP_OPT("init-scaleAlphaVec", InitMode);
+            DUMP_OPT("init-deviceAlpha", InitMode);
             DUMP_OPT("pristine-on-gpu", bool);
             DUMP_OPT("c-equal-d", bool);
             DUMP_OPT("num-elements-to-validate", int);
@@ -612,7 +612,7 @@ namespace TensileLite
             DUMP_OPT("bias-source", int);
             DUMP_OPT("use-scaleAB", std::string);
             DUMP_OPT("use-scaleCD", bool);
-            DUMP_OPT("use-scaleAlphaVec", int);
+            DUMP_OPT("use-deviceAlpha", int);
             DUMP_VEC("bias-type-args", rocisa::DataType);
             DUMP_VEC("factor-dim-args", int);
             DUMP_VEC("icache-flush-args", bool);

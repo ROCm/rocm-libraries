@@ -17,7 +17,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   NumElementsToValidate: -1
   BoundsCheck: 2
 
@@ -40,7 +40,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s]
     - # BenchmarkProblemSizeGroup - Standard
@@ -112,7 +112,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s]
     - # BenchmarkProblemSizeGroup - Standard
@@ -174,7 +174,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s]
     - # BenchmarkProblemSizeGroup - Standard
@@ -222,7 +222,7 @@ BenchmarkProblems:
           - [Enum: none]
 
 #####################################################
-# FP8HS + Bias S + ScaleAlphaVec + SVW=16 for bpl 64
+# FP8HS + Bias S + DeviceAlpha + SVW=16 for bpl 64
 #####################################################
 
   - 
@@ -237,7 +237,7 @@ BenchmarkProblems:
       UseBeta: True
       BiasDataTypeList: [s]
       UseBias: 1
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Batched: True
       #Activation: True
       #ActivationHPA: True

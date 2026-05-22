@@ -20,7 +20,7 @@ GlobalParameters:
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
-  DataInitTypeScaleAlphaVec: 3
+  DataInitTypeDeviceAlpha: 3
 
 BenchmarkProblems:
   ########################################
@@ -41,7 +41,7 @@ BenchmarkProblems:
       OutputAmaxD: True
       UseScaleAB: "Scalar" # scale is available only for fp8 type
       UseScaleCD: True # scale is available only for fp8 type
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: True # must be true if there is any of bias scale
       ActivationType: all
       BiasDataTypeList: ['h'] #
@@ -112,7 +112,7 @@ BenchmarkProblems:
       OutputAmaxD: True
       UseScaleAB: "Scalar" # scale is available only for fp8 type
       UseScaleCD: True # scale is available only for fp8 type
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: True # must be true if there is any of bias scale
       ActivationType: all
       BiasDataTypeList: ['h'] #
@@ -182,7 +182,7 @@ BenchmarkProblems:
       OutputAmaxD: True
       UseScaleAB: "Scalar" # scale is available only for fp8 type
       UseScaleCD: True # scale is available only for fp8 type
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: True # must be true if there is any of bias scale
       ActivationType: all
       BiasDataTypeList: ['h'] #
@@ -253,7 +253,7 @@ BenchmarkProblems:
       OutputAmaxD: True
       UseScaleAB: "Scalar" # scale is available only for fp8 type
       UseScaleCD: True # scale is available only for fp8 type
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       Activation: True # must be true if there is any of bias scale
       ActivationType: all
       BiasDataTypeList: ['h'] #

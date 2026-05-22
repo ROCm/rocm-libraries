@@ -11,7 +11,7 @@ GlobalParameters:
   DataInitTypeE: 16
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  DataInitTypeScaleAlphaVec: 2
+  DataInitTypeDeviceAlpha: 2
   NewClient: 2
   Device: 0
   CSVExportWinner: 1

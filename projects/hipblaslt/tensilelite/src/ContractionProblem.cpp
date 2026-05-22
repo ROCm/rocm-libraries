@@ -113,7 +113,7 @@ namespace TensileLite
         TensorDescriptor scaleB("scaleB");
         TensorDescriptor scaleC("scaleC");
         TensorDescriptor scaleD("scaleD");
-        TensorDescriptor scaleAlphaVec("scaleAlphaVec");
+        TensorDescriptor deviceAlpha("deviceAlpha");
 
         TensorOps nop;
 
@@ -127,7 +127,7 @@ namespace TensileLite
                                        scaleB,
                                        scaleC,
                                        scaleD,
-                                       scaleAlphaVec,
+                                       deviceAlpha,
                                        free,
                                        batch,
                                        bound,
@@ -230,7 +230,7 @@ namespace TensileLite
         TensorDescriptor scaleB("scaleB");
         TensorDescriptor scaleC("scaleC");
         TensorDescriptor scaleD("scaleD");
-        TensorDescriptor scaleAlphaVec("scaleAlphaVec");
+        TensorDescriptor deviceAlpha("deviceAlpha");
 
         return ContractionProblemGemm(a,
                                       b,
@@ -242,7 +242,7 @@ namespace TensileLite
                                       scaleB,
                                       scaleC,
                                       scaleD,
-                                      scaleAlphaVec,
+                                      deviceAlpha,
                                       freeIndices,
                                       batchIndices,
                                       boundIndices,
@@ -543,7 +543,7 @@ namespace TensileLite
         TensorDescriptor scaleB("scaleB");
         TensorDescriptor scaleC("scaleC");
         TensorDescriptor scaleD("scaleD");
-        TensorDescriptor scaleAlphaVec("scaleAlphaVec");
+        TensorDescriptor deviceAlpha("deviceAlpha");
 
         return ContractionProblemGemm(a,
                                       b,
@@ -555,7 +555,7 @@ namespace TensileLite
                                       scaleB,
                                       scaleC,
                                       scaleD,
-                                      scaleAlphaVec,
+                                      deviceAlpha,
                                       freeIndices,
                                       batchIndices,
                                       boundIndices,
@@ -579,8 +579,8 @@ namespace TensileLite
         gemm.m_tensors[ContractionProblemGemm::TENSOR::SCALEB] = TensorDescriptor("scaleB");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::SCALEC] = TensorDescriptor("scaleC");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::SCALED] = TensorDescriptor("scaleD");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
-            = TensorDescriptor("scaleAlphaVec");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::DEVICEALPHA]
+            = TensorDescriptor("deviceAlpha");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]      = TensorDescriptor("amaxD");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
@@ -599,7 +599,7 @@ namespace TensileLite
                                                    TensorDescriptor const& scaleB,
                                                    TensorDescriptor const& scaleC,
                                                    TensorDescriptor const& scaleD,
-                                                   TensorDescriptor const& scaleAlphaVec,
+                                                   TensorDescriptor const& deviceAlpha,
                                                    FreeIndices const&      freeIndices,
                                                    BatchIndices const&     batchIndices,
                                                    BoundIndices const&     boundIndices,
@@ -625,7 +625,7 @@ namespace TensileLite
         m_tensors[ContractionProblemGemm::TENSOR::SCALEB]        = scaleB;
         m_tensors[ContractionProblemGemm::TENSOR::SCALEC]        = scaleC;
         m_tensors[ContractionProblemGemm::TENSOR::SCALED]        = scaleD;
-        m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] = scaleAlphaVec;
+        m_tensors[ContractionProblemGemm::TENSOR::DEVICEALPHA] = deviceAlpha;
         m_tensors[ContractionProblemGemm::TENSOR::D].setAsOutput(true); // Set d as output
         m_betaRestriction = toScalarValueEnum(
             m_beta); // Set enum using beta to potentially allow for faster solutions
@@ -644,7 +644,7 @@ namespace TensileLite
                                                    TensorDescriptor const& scaleB,
                                                    TensorDescriptor const& scaleC,
                                                    TensorDescriptor const& scaleD,
-                                                   TensorDescriptor const& scaleAlphaVec,
+                                                   TensorDescriptor const& deviceAlpha,
                                                    FreeIndices const&      freeIndices,
                                                    BatchIndices const&     batchIndices,
                                                    BoundIndices const&     boundIndices,
@@ -675,7 +675,7 @@ namespace TensileLite
         m_tensors[ContractionProblemGemm::TENSOR::SCALEB]        = scaleB;
         m_tensors[ContractionProblemGemm::TENSOR::SCALEC]        = scaleC;
         m_tensors[ContractionProblemGemm::TENSOR::SCALED]        = scaleD;
-        m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] = scaleAlphaVec;
+        m_tensors[ContractionProblemGemm::TENSOR::DEVICEALPHA] = deviceAlpha;
         m_tensors[ContractionProblemGemm::TENSOR::D].setAsOutput(true); // Set d as output
         m_betaRestriction = toScalarValueEnum(
             m_beta); // Set enum using beta to potentially allow for faster solutions
@@ -1641,14 +1641,14 @@ namespace TensileLite
         TensileLite::TensorDescriptor scaleB("scaleB");
         TensileLite::TensorDescriptor scaleC("scaleC");
         TensileLite::TensorDescriptor scaleD("scaleD");
-        TensileLite::TensorDescriptor scaleAlpha{"scaleAlpha"};
+        TensileLite::TensorDescriptor deviceAlpha{"deviceAlpha"};
         TensorOps                     nop;
 
         // The ContractionProblemGemm
         TensileLite::ContractionProblemGemm problem{
             a,          b,         c,          d,          e,
             bias,       scaleA,    scaleB,     scaleC,     scaleD,
-            scaleAlpha, freeIndex, batchIndex, boundIndex, beta,
+            deviceAlpha, freeIndex, batchIndex, boundIndex, beta,
             aOps,       bOps,      cOps,       dOps,       maxWorkspaceBytes};
 
         problem.setComputeInputTypeA(typeComputeInputA);
@@ -1744,7 +1744,7 @@ namespace TensileLite
                                          void const*          _scaleB,
                                          void const*          _scaleC,
                                          void const*          _scaleD,
-                                         void const*          _scaleAlphaVec,
+                                         void const*          _deviceAlpha,
                                          void*                _ws,
                                          void*                _Synchronizer,
                                          unsigned char const* _metadata,
@@ -1766,7 +1766,7 @@ namespace TensileLite
         , scaleB(_scaleB)
         , scaleC(_scaleC)
         , scaleD(_scaleD)
-        , scaleAlphaVec(_scaleAlphaVec)
+        , deviceAlpha(_deviceAlpha)
         , ws(_ws)
         , Synchronizer(_Synchronizer)
         , metadata(_metadata)

@@ -17,7 +17,7 @@ GlobalParameters:
   # DataInitTypeBias: 0
   # DataInitTypeA: 1
   # DataInitTypeB: 8
-  # DataInitTypeScaleAlphaVec: 1
+  # DataInitTypeDeviceAlpha: 1
   # PruneSparseMode: 1
   # PrintTensorA: 1
   # PrintTensorB: 1
@@ -44,7 +44,7 @@ BenchmarkProblems:
       Batched: True
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -125,7 +125,7 @@ BenchmarkProblems:
       Batched: True
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -206,7 +206,7 @@ BenchmarkProblems:
       Batched: True
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -287,7 +287,7 @@ BenchmarkProblems:
       Batched: True
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard

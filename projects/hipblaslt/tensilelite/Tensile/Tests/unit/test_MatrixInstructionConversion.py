@@ -52,7 +52,7 @@ ProblemType:
     TransposeB: False
     UseBias: 1
     Activation: True
-    UseScaleAlphaVec: 1
+    UseDeviceAlpha: 1
     UseBeta: True
     Batched: True
     GroupedGemm:   True
@@ -140,7 +140,7 @@ custom.config:
       TransposeB: False
       UseBias: 1
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBeta: True
       Batched: True
       GroupedGemm:   True

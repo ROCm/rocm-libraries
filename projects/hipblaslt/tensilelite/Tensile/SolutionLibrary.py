@@ -528,7 +528,7 @@ class MasterSolutionLibrary:
                     placeholderName += '_SABV'
                 if problemType.useScaleCD:
                     placeholderName += '_SCD'
-                if problemType.useScaleAlphaVec:
+                if problemType.useDeviceAlpha:
                     placeholderName += '_SAV'
                 if problemType.sparse:
                     placeholderName += '_SPB' if problemType.sparse == 2 else '_SPA'

@@ -102,7 +102,7 @@ BenchmarkProblems:
       BiasDataTypeList: [s,b]
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
 
     - # Grid
       InitialSolutionParameters:

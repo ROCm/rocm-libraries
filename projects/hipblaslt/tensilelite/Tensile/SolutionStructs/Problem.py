@@ -427,7 +427,7 @@ _defaultProblemType = {
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
     "UseScaleCD": False,  # =True use scaleC, scaleD
-    "UseScaleAlphaVec": 0,  # =1 M-vector, =2 N-vector, =3 M+N vector, =4 device scalar, =7 all modes
+    "UseDeviceAlpha": 0,  # =1 M-vector, =2 N-vector, =3 M+N vector, =4 device scalar, =7 all modes
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,  # Keep kernel names the same for HPA mode.  Useful for testing.
     "Sparse": 0,  # 4:2 Structured Sparse A Matrix, 0=Non Sparse, 1=Sparse Matrix A, 2=Sparse Matrix B
@@ -996,9 +996,9 @@ class ProblemType(Mapping):
         elif self["ActivationType"] == 'none' and self["UseE"] == True:
           printWarning("Use E is disabled cause Activation is disabled.")
           self["UseE"] = False
-        # if self["UseScaleAlphaVec"]:
-        #   printWarning("Use scaleAlphaVec is disabled cause Gradient is enabled.")
-        #   self["UseScaleAlphaVec"] = False
+        # if self["UseDeviceAlpha"]:
+        #   printWarning("Use deviceAlpha is disabled cause Gradient is enabled.")
+        #   self["UseDeviceAlpha"] = False
       self["Gradient"] = config["Gradient"]
 
     # Need gradient info
@@ -1288,7 +1288,7 @@ class ProblemType(Mapping):
       if self["BiasSrc"] and self["Gradient"]: # Show bias src if gradient = True
         name.append(f"{self['BiasSrc']}")
 
-    factorDim = max(self["UseScaleAlphaVec"], self["UseBias"])
+    factorDim = max(self["UseDeviceAlpha"], self["UseBias"])
     if factorDim > 1 :
         s = ("N" if factorDim == 2 else "MN")
         name.append(f"FD{s}")
@@ -1330,7 +1330,7 @@ class ProblemType(Mapping):
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
     if self["UseScaleCD"]: name.append("SCD")
-    if self["UseScaleAlphaVec"]: name.append("SAV")
+    if self["UseDeviceAlpha"]: name.append("SAV")
 
     if self["SupportUserArgs"]: name.append("UserArgs")
 

@@ -79,7 +79,7 @@ namespace TensileLite
         void*    scaleB;
         void*    scaleC;
         void*    scaleD;
-        void*    scaleAlphaVec;
+        void*    deviceAlpha;
         void*    bias;
         int      biasType;
         uint32_t reserved;
@@ -571,7 +571,7 @@ namespace TensileLite
             bool             useE                      = false;
             std::string      useScaleAB                = "";
             bool             useScaleCD                = false;
-            int              useScaleAlphaVec          = 0;
+            int              useDeviceAlpha          = 0;
             bool             useInitialStridesAB       = false;
             bool             useInitialStridesCD       = false;
             bool             stridedBatched            = true;

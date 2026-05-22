@@ -58,7 +58,7 @@ BenchmarkProblems:
       # Activation: 1 # Disable in BiadSrcA; Default False
       # ActivationType: hipblaslt_all; Default none
       # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
-      # UseScaleAlphaVec: 1; Default False
+      # UseDeviceAlpha: 1; Default False
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -120,7 +120,7 @@ BenchmarkProblems:
       # Activation: 1 # Disable in BiadSrcA; Default False
       # ActivationType: hipblaslt_all; Default none
       # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
-      # UseScaleAlphaVec: 1; Default False
+      # UseDeviceAlpha: 1; Default False
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -182,7 +182,7 @@ BenchmarkProblems:
       # Activation: 1 # Disable in BiadSrcA; Default False
       # ActivationType: hipblaslt_all; Default none
       # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
-      # UseScaleAlphaVec: 1; Default False
+      # UseDeviceAlpha: 1; Default False
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -244,7 +244,7 @@ BenchmarkProblems:
       # Activation: 1 # Disable in BiadSrcA; Default False
       # ActivationType: hipblaslt_all; Default none
       # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
-      # UseScaleAlphaVec: 1; Default False
+      # UseDeviceAlpha: 1; Default False
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

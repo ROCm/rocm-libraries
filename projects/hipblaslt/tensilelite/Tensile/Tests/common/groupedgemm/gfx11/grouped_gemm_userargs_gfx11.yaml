@@ -13,7 +13,7 @@ GlobalParameters:
   DataInitTypeE: 16
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  DataInitTypeScaleAlphaVec: 2
+  DataInitTypeDeviceAlpha: 2
   NewClient: 2
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
@@ -147,7 +147,7 @@ BenchmarkProblems:
       UseE:          False
       Activation:    False
       GroupedGemm:   True
-      #UseScaleAlphaVec: 1
+      #UseDeviceAlpha: 1
       SupportUserArgs: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

@@ -41,7 +41,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   NumElementsToValidate: -1
   BoundsCheck: 2
 
@@ -61,7 +61,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -135,7 +135,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -210,7 +210,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -285,7 +285,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:

@@ -19,7 +19,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   NumElementsToValidate: -1
   BoundsCheck: 2
 
@@ -42,7 +42,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -104,7 +104,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -166,7 +166,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -231,7 +231,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -292,7 +292,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -353,7 +353,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -415,7 +415,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -480,7 +480,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -541,7 +541,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -602,7 +602,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard
@@ -664,7 +664,7 @@ BenchmarkProblems:
       Activation:    True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [s,b]
     - # BenchmarkProblemSizeGroup - Standard

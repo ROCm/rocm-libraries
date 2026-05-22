@@ -34,7 +34,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -95,7 +95,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -166,7 +166,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -238,7 +238,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -309,7 +309,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseBias: 3
-      UseScaleAlphaVec: 3
+      UseDeviceAlpha: 3
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

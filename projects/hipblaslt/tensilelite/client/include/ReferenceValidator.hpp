@@ -151,7 +151,7 @@ namespace TensileLite
             bool m_printTensorD;
             bool m_printTensorRef;
             bool m_printTensorBias;
-            bool m_printTensorScaleAlphaVec;
+            bool m_printTensorDeviceAlpha;
             bool m_printTensorAmaxD;
             bool m_printAny;
 

@@ -87,7 +87,7 @@ namespace TensileLite
             {
                 m_reporter->report(ResultKey::BiasType, "None");
             }
-            if(problem.useScaleAlphaVec() || problem.useBias())
+            if(problem.useDeviceAlpha() || problem.useBias())
             {
                 m_reporter->report(ResultKey::FactorDim, problem.getParams().factorDim());
             }

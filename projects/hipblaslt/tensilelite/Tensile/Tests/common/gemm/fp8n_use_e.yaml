@@ -17,7 +17,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   NumElementsToValidate: -1
   BoundsCheck: 2
 
@@ -40,7 +40,7 @@ BenchmarkProblems:
       UseE: True
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [h]
     - # BenchmarkProblemSizeGroup - Standard
@@ -106,7 +106,7 @@ BenchmarkProblems:
       DataTypeE: h
       UseScaleAB: "Scalar"
       UseScaleCD: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseBias: 1
       BiasDataTypeList: [h]
     - # BenchmarkProblemSizeGroup - Standard

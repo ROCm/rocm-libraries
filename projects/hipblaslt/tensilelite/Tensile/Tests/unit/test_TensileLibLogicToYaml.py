@@ -111,7 +111,7 @@ VALID_LIBLOGIC_FILE_CONTENT = """
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 1
+  UseDeviceAlpha: 1
   UseScaleCD: false
 - - 1LDSBuffer: 0
     ActivationAlt: false
@@ -400,7 +400,7 @@ BenchmarkProblems:
     TransposeA: true
     TransposeB: false
     UseBias: 1
-    UseScaleAlphaVec: 1
+    UseDeviceAlpha: 1
   - InitialSolutionParameters:
     BenchmarkCommonParameters:
     - KernelLanguage: [Assembly]

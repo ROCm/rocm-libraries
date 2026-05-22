@@ -249,7 +249,7 @@ namespace TensileLite
             arg.scaleC        = const_cast<void*>(inputs.grouped[i].scaleC);
             arg.scaleD        = const_cast<void*>(inputs.grouped[i].scaleD);
             arg.bias          = const_cast<void*>(inputs.grouped[i].bias);
-            arg.scaleAlphaVec = const_cast<void*>(inputs.grouped[i].scaleAlphaVec);
+            arg.deviceAlpha = const_cast<void*>(inputs.grouped[i].deviceAlpha);
             arg.e             = const_cast<void*>(inputs.grouped[i].e);
             arg.biasType      = (uint32_t)problems[i].bias().dataType();
             if(problems[i].useE())
@@ -296,7 +296,7 @@ namespace TensileLite
                 std::cout << "   " << "strideB2: " << args[i].strideB2 << std::endl;
                 std::cout << "   " << "Alpha: " << alphaPrint << std::endl;
                 std::cout << "   " << "Beta: " << betaPrint << std::endl;
-                std::cout << "   " << "scaleAlphaVec: " << args[i].scaleAlphaVec << std::endl;
+                std::cout << "   " << "deviceAlpha: " << args[i].deviceAlpha << std::endl;
                 std::cout << "   " << "bias: " << args[i].bias << std::endl;
                 std::cout << "   " << "e: " << args[i].e << std::endl;
                 std::cout << "   " << "strideE1: " << args[i].strideE1 << std::endl;
@@ -859,9 +859,9 @@ namespace TensileLite
             args.template append<void const*>("scaleD", inputs.scaleD);
         }
 
-        if(problemType.useScaleAlphaVec) //kernel input data
+        if(problemType.useDeviceAlpha) //kernel input data
         {
-            args.template append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
+            args.template append<void const*>("deviceAlpha", inputs.deviceAlpha);
         }
 
         bool runActivation = false;
@@ -902,7 +902,7 @@ namespace TensileLite
             }
         }
 
-        if(problemType.useScaleAlphaVec >= 3 || problemType.useBias == 3)
+        if(problemType.useDeviceAlpha >= 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
                                            static_cast<uint32_t>(problem.getParams().factorDim()));
@@ -1850,10 +1850,10 @@ namespace TensileLite
             rv.args.append<void const*>("scaleC", inputs.scaleC);
             rv.args.append<void const*>("scaleD", inputs.scaleD);
         }
-        if(problemType.useScaleAlphaVec && sizeMapping.globalAccumulation == 0)
+        if(problemType.useDeviceAlpha && sizeMapping.globalAccumulation == 0)
         {
-            rv.args.append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
-            if(problemType.useScaleAlphaVec >= 3)
+            rv.args.append<void const*>("deviceAlpha", inputs.deviceAlpha);
+            if(problemType.useDeviceAlpha >= 3)
                 enableFactorDim = true;
         }
 
@@ -1945,9 +1945,9 @@ namespace TensileLite
         if(sizeMapping.globalAccumulation == 0)
         {
             if(!problemType.useGradient)
-                factorDim = problemType.useScaleAlphaVec | problemType.useBias;
+                factorDim = problemType.useDeviceAlpha | problemType.useBias;
             else
-                factorDim = problemType.useScaleAlphaVec;
+                factorDim = problemType.useDeviceAlpha;
         }
         if(problemType.useBias && sizeMapping.globalAccumulation == 0 && (!problemType.useGradient))
         {
@@ -2040,9 +2040,9 @@ namespace TensileLite
             args.template append<void const*>("scaleC", inputs.scaleC);
             args.template append<void const*>("scaleD", inputs.scaleD);
         }
-        if(problemType.useScaleAlphaVec) // GSU dep
+        if(problemType.useDeviceAlpha) // GSU dep
         {
-            args.template append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
+            args.template append<void const*>("deviceAlpha", inputs.deviceAlpha);
         }
 
         if(sizeMapping.globalAccumulation == 2 || sizeMapping.streamK > 0)
@@ -2141,7 +2141,7 @@ namespace TensileLite
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
-        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec)
+        if((useBias && problemType.useBias == 3) || problemType.useDeviceAlpha)
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
@@ -2500,7 +2500,7 @@ namespace TensileLite
         }
 
         int factorDim
-            = std::max(problemType.useGradient ? 0 : problemType.useBias, problemType.useScaleAlphaVec);
+            = std::max(problemType.useGradient ? 0 : problemType.useBias, problemType.useDeviceAlpha);
         if(factorDim)
         {
             if(factorDim == 2)
@@ -2563,9 +2563,9 @@ namespace TensileLite
             name += ("_ScaleCD");
         }
 
-        if(problemType.useScaleAlphaVec)
+        if(problemType.useDeviceAlpha)
         {
-            name += ("_ScaleAlphaVec");
+            name += ("_DeviceAlpha");
         }
 
         uint32_t gsuTemp = gsu - 1;

@@ -2810,7 +2810,7 @@ namespace TensileLite
             inputs->scaleB        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEB];
             inputs->scaleC        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEC];
             inputs->scaleD        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALED];
-            inputs->scaleAlphaVec = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEALPHAVEC];
+            inputs->deviceAlpha = (void*)ptrs[ContractionProblemGemm::TENSOR::DEVICEALPHA];
             inputs->mxsa          = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSA];
             inputs->mxsb          = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSB];
             inputs->metadata      = (unsigned char*)ptrs[ContractionProblemGemm::TENSOR::METADATA];
@@ -2917,11 +2917,11 @@ namespace TensileLite
                         offsets[ContractionProblemGemm::TENSOR::SCALED][idx],
                         problem.tensors()[ContractionProblemGemm::TENSOR::SCALED].elementBytes());
                 }
-                if(u8Ptr[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] != nullptr)
+                if(u8Ptr[ContractionProblemGemm::TENSOR::DEVICEALPHA] != nullptr)
                 {
-                    u8Ptr[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] += multiplyElementSize(
-                        offsets[ContractionProblemGemm::TENSOR::SCALEALPHAVEC][idx],
-                        problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
+                    u8Ptr[ContractionProblemGemm::TENSOR::DEVICEALPHA] += multiplyElementSize(
+                        offsets[ContractionProblemGemm::TENSOR::DEVICEALPHA][idx],
+                        problem.tensors()[ContractionProblemGemm::TENSOR::DEVICEALPHA]
                             .elementBytes());
                 }
                 if(u8Ptr[ContractionProblemGemm::TENSOR::Synchronizer] != nullptr)
@@ -3041,9 +3041,9 @@ namespace TensileLite
                 rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::BIAS]
                                     .totalAllocatedBytes();
             }
-            if(inputs.scaleAlphaVec != nullptr)
+            if(inputs.deviceAlpha != nullptr)
             {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
+                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::DEVICEALPHA]
                                     .totalAllocatedBytes();
             }
             if(inputs.metadata != nullptr)
@@ -3121,10 +3121,10 @@ namespace TensileLite
                 problem.tensors()[ContractionProblemGemm::TENSOR::BIAS].totalAllocatedBytes(),
                 offset,
                 stream);
-            newInputs.scaleAlphaVec
-                = copyRotatingInput(newInputs.scaleAlphaVec,
+            newInputs.deviceAlpha
+                = copyRotatingInput(newInputs.deviceAlpha,
                                     rotatingPtr,
-                                    problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
+                                    problem.tensors()[ContractionProblemGemm::TENSOR::DEVICEALPHA]
                                         .totalAllocatedElements(),
                                     offset,
                                     stream);
@@ -3198,7 +3198,7 @@ namespace TensileLite
                         newInputs.d                 = mem[i + 1][3].data.get();
                         newInputs.e                 = mem[i + 1][4].data.get();
                         newInputs.bias              = mem[i + 1][5].data.get();
-                        newInputs.scaleAlphaVec     = mem[i + 1][6].data.get();
+                        newInputs.deviceAlpha     = mem[i + 1][6].data.get();
                         newInputs.metadata          = (unsigned char*)mem[i + 1][7].data.get();
                         inputArr.push_back(static_pointer_cast<ProblemInputs>(
                             std::make_shared<ContractionInputs>(newInputs)));
@@ -3273,7 +3273,7 @@ namespace TensileLite
                         newSingleInput.d             = (void*)((uint8_t*)mem[i + 1][3].data.get() + offsets[3]); offsets[3] += problem.tensors()[ContractionProblemGemm::TENSOR::D].totalAllocatedBytes();
                         newSingleInput.e             = (void*)((uint8_t*)mem[i + 1][4].data.get() + offsets[4]); offsets[4] += problem.tensors()[ContractionProblemGemm::TENSOR::E].totalAllocatedBytes();
                         newSingleInput.bias          = (void*)((uint8_t*)mem[i + 1][5].data.get() + offsets[5]); offsets[5] += problem.tensors()[ContractionProblemGemm::TENSOR::BIAS].totalAllocatedBytes();
-                        newSingleInput.scaleAlphaVec = (void*)((uint8_t*)mem[i + 1][6].data.get() + offsets[6]); offsets[6] += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC].totalAllocatedBytes();
+                        newSingleInput.deviceAlpha = (void*)((uint8_t*)mem[i + 1][6].data.get() + offsets[6]); offsets[6] += problem.tensors()[ContractionProblemGemm::TENSOR::DEVICEALPHA].totalAllocatedBytes();
                         newSingleInput.metadata      = (unsigned char*)mem[i + 1][7].data.get() + offsets[7];    offsets[7] += problem.tensors()[ContractionProblemGemm::TENSOR::METADATA].totalAllocatedBytes();
                         // clang-format on
                         newInputs.grouped.push_back(newSingleInput);

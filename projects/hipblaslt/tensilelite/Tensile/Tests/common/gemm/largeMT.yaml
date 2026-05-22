@@ -35,7 +35,7 @@ BenchmarkProblems:
       UseBias: 1
       Activation: True
       ActivationType: hipblaslt_all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -122,7 +122,7 @@ BenchmarkProblems:
       UseBias: 1
       Activation: True
       ActivationType: hipblaslt_all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -213,7 +213,7 @@ BenchmarkProblems:
       UseBias: 1
       Activation: True
       ActivationType: hipblaslt_all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -298,7 +298,7 @@ BenchmarkProblems:
       UseBias: 1
       Activation: True
       ActivationType: hipblaslt_all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       BiasDataTypeList: [s, b]
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:

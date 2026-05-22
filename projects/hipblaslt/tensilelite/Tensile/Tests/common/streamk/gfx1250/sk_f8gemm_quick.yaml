@@ -16,7 +16,7 @@ GlobalParameters:
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
-  DataInitTypeScaleAlphaVec: 21
+  DataInitTypeDeviceAlpha: 21
   MaxWorkspaceSize: 134217728
   # PrintSolutionRejectionReason: True
   ISA: [[12, 5, 0]]

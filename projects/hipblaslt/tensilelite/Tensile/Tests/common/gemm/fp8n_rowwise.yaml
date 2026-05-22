@@ -20,7 +20,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeScaleA: 21
   DataInitTypeScaleB: 21
-  DataInitTypeScaleAlphaVec: 1
+  DataInitTypeDeviceAlpha: 1
   BoundsCheck: 2
 
 BenchmarkProblems:
@@ -44,7 +44,7 @@ BenchmarkProblems:
       UseE:          False
       Activation:    True
       UseScaleAB: "Vector"
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       # SupportUserArgs: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -106,7 +106,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseScaleAB: "Vector"
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       # SupportUserArgs: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

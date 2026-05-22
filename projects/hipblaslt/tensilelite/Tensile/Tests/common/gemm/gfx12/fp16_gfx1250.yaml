@@ -36,7 +36,7 @@ BenchmarkProblems:
       SupportUserArgs: True
       UseBias: 0
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       BiasDataTypeList: ['s', 'h']
       ActivationType:  hipblaslt_all
 
@@ -105,7 +105,7 @@ BenchmarkProblems:
       SupportUserArgs: True
       UseBias: 1
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       BiasDataTypeList: ['s', 'h']
       ActivationType:  hipblaslt_all
 
@@ -173,7 +173,7 @@ BenchmarkProblems:
       SupportUserArgs: True
       UseBias: 1
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       BiasDataTypeList: ['s', 'h']
       ActivationType:  hipblaslt_all
 
@@ -242,7 +242,7 @@ BenchmarkProblems:
       SupportUserArgs: True
       UseBias: 1
       Activation: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       BiasDataTypeList: ['s', 'h']
       ActivationType:  hipblaslt_all
 

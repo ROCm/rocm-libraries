@@ -58,7 +58,7 @@ BenchmarkProblems:
       Activation: 1
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -120,7 +120,7 @@ BenchmarkProblems:
       Activation: 1
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -182,7 +182,7 @@ BenchmarkProblems:
       Activation: 1
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -244,7 +244,7 @@ BenchmarkProblems:
       Activation: 1
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
-      # UseScaleAlphaVec: 1
+      # UseDeviceAlpha: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

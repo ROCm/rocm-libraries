@@ -39,7 +39,7 @@ class AddrCalculation:
     #    packed index for the 0 coordinate of the C/D matrix.
     # coord1Vgpr : VGPR which tracks the last coord1 calculation.
     #          If this is new coord1, just overwrite it with latest calc.
-    def __init__(self, kernelWriter, ss, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrScaleAlphaVecVgpr, element, \
+    def __init__(self, kernelWriter, ss, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrDeviceAlphaVgpr, element, \
         coordOffset0, coord1Vgpr, coordOffset1, rowInc, newCoord1, vectorDataTypes):
         self.kernelWriter = kernelWriter
 
@@ -51,7 +51,7 @@ class AddrCalculation:
         self.addrBiasVgpr = addrBiasVgpr
         self.addrScaleAVecVgpr = addrScaleAVecVgpr
         self.addrScaleBVecVgpr = addrScaleBVecVgpr
-        self.addrScaleAlphaVecVgpr = addrScaleAlphaVecVgpr
+        self.addrDeviceAlphaVgpr = addrDeviceAlphaVgpr
         self.coord1Vgpr = coord1Vgpr # vgpr that stores coord1Vgpr
 
         self.element = element
@@ -65,15 +65,15 @@ class AddrCalculation:
         self.biasOffset = [0, 0, 0]
         self.scaleAVecOffset = 0
         self.scaleBVecOffset = 0
-        self.scaleAlphaVecOffset = [0, 0, 0]
+        self.deviceAlphaOffset = [0, 0, 0]
         if ss.optSingleColVgpr:
             # optimized stores use the load offset for coordOffset0 calculations.
             self.biasOffset[0]   = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.bias(0).ldsOffset
             self.biasOffset[1]   = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.bias(1).ldsOffset
             self.scaleAVecOffset = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleA.ldsOffset
             self.scaleBVecOffset = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleB.ldsOffset
-            self.scaleAlphaVecOffset[0]   = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleAlpha(0).ldsOffset
-            self.scaleAlphaVecOffset[1]   = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleAlpha(1).ldsOffset
+            self.deviceAlphaOffset[0]   = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.deviceAlpha(0).ldsOffset
+            self.deviceAlphaOffset[1]   = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.deviceAlpha(1).ldsOffset
             self.globalOffset  = coordOffset0 * kernelWriter.states.bpeCexternal
             self.globalOffsetE = coordOffset0 * kernelWriter.states.bpeE
             self.globalOffsetInternal = coordOffset0 * kernelWriter.states.bpeCinternal
@@ -83,8 +83,8 @@ class AddrCalculation:
             self.biasOffset[1]   = self.vectorDataTypes.bias(1).ldsOffset
             self.scaleAVecOffset = self.vectorDataTypes.scaleA.ldsOffset
             self.scaleBVecOffset = self.vectorDataTypes.scaleB.ldsOffset
-            self.scaleAlphaVecOffset[0] = self.vectorDataTypes.scaleAlpha(0).ldsOffset
-            self.scaleAlphaVecOffset[1] = self.vectorDataTypes.scaleAlpha(1).ldsOffset
+            self.deviceAlphaOffset[0] = self.vectorDataTypes.deviceAlpha(0).ldsOffset
+            self.deviceAlphaOffset[1] = self.vectorDataTypes.deviceAlpha(1).ldsOffset
             self.globalOffset = 0
             self.globalOffsetE = 0
             self.globalOffsetInternal = 0
@@ -262,7 +262,7 @@ class AddrCalculation:
         updatedAddr = False
 
         # scale and set final address:
-        stride0 = kw.strideRef('D', 0) if ((tc == 'Bias') or (tc == 'ScaleAlphaVec') or (tc == 'ScaleAVec') or (tc == 'ScaleBVec')) else kw.strideRef(tc, 0)
+        stride0 = kw.strideRef('D', 0) if ((tc == 'Bias') or (tc == 'DeviceAlpha') or (tc == 'ScaleAVec') or (tc == 'ScaleBVec')) else kw.strideRef(tc, 0)
         if kw.isConstUnitStride(stride0):
             elementVgpr = self.coord0Vgpr
         else:
@@ -307,19 +307,19 @@ class AddrCalculation:
                                              comment="add lds offset"))
                         ss.singleColBiasAddrUpdated = True
                         return module
-                    if tc == 'ScaleAlphaVec' and kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                        if self.addrScaleAlphaVecVgpr:
+                    if tc == 'DeviceAlpha' and kernel["ProblemType"]["UseDeviceAlpha"] and isSingleKernel:
+                        if self.addrDeviceAlphaVgpr:
                             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                             coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
-                            module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
-                            module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                            module.add(VSubU32(dst=vgpr(self.addrDeviceAlphaVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
+                            module.add(VLShiftLeftB32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                                     shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
-                                                    src=vgpr(self.addrScaleAlphaVecVgpr), \
-                                                    comment="ScaleAlpha address scaled by BPE"))
+                                                    src=vgpr(self.addrDeviceAlphaVgpr), \
+                                                    comment="DeviceAlpha address scaled by BPE"))
                             if kernel["LdsOffsetBias"] != 0:
-                                module.add(VAddU32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                                module.add(VAddU32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                                    src0=(kernel["LdsOffsetBias"]), \
-                                                   src1=vgpr(self.addrScaleAlphaVecVgpr), \
+                                                   src1=vgpr(self.addrDeviceAlphaVgpr), \
                                                    comment="add lds offset"))
                         return module
                     if tc == 'ScaleAVec' and (kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -379,19 +379,19 @@ class AddrCalculation:
                                            src1=vgpr(self.addrBiasVgpr), \
                                            comment="add lds offset"))
                     return module
-                if tc == 'ScaleAlphaVec' and kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                    if self.addrScaleAlphaVecVgpr:
+                if tc == 'DeviceAlpha' and kernel["ProblemType"]["UseDeviceAlpha"] and isSingleKernel:
+                    if self.addrDeviceAlphaVgpr:
                         module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                         coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
-                        module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
-                        module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                        module.add(VSubU32(dst=vgpr(self.addrDeviceAlphaVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
+                        module.add(VLShiftLeftB32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                                 shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
-                                                src=vgpr(self.addrScaleAlphaVecVgpr), \
-                                                comment="ScaleAlpha address scaled by BPE"))
+                                                src=vgpr(self.addrDeviceAlphaVgpr), \
+                                                comment="DeviceAlpha address scaled by BPE"))
                         if kernel["LdsOffsetBias"] != 0:
-                            module.add(VAddU32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                            module.add(VAddU32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                                src0=(kernel["LdsOffsetBias"]), \
-                                               src1=vgpr(self.addrScaleAlphaVecVgpr), \
+                                               src1=vgpr(self.addrDeviceAlphaVgpr), \
                                                comment="add lds offset"))
                     return module
                 if tc == 'ScaleAVec' and (kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -449,19 +449,19 @@ class AddrCalculation:
                                        src1=vgpr(self.addrBiasVgpr), \
                                        comment="add lds offset"))
                 return module
-            if tc == 'ScaleAlphaVec' and kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.addrScaleAlphaVecVgpr:
+            if tc == 'DeviceAlpha' and kernel["ProblemType"]["UseDeviceAlpha"] and isSingleKernel:
+                if self.addrDeviceAlphaVgpr:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                     coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
-                    module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
-                    module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                    module.add(VSubU32(dst=vgpr(self.addrDeviceAlphaVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
+                    module.add(VLShiftLeftB32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                             shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
-                                            src=vgpr(self.addrScaleAlphaVecVgpr), \
-                                            comment="ScaleAlpha address scaled by BPE"))
+                                            src=vgpr(self.addrDeviceAlphaVgpr), \
+                                            comment="DeviceAlpha address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
-                        module.add(VAddU32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                        module.add(VAddU32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                            src0=(kernel["LdsOffsetBias"]), \
-                                           src1=vgpr(self.addrScaleAlphaVecVgpr), \
+                                           src1=vgpr(self.addrDeviceAlphaVgpr), \
                                            comment="add lds offset"))
                 return module
             if tc == 'ScaleAVec' and (kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -701,7 +701,7 @@ class AddrCalculation:
         if kernel["BufferStore"]:
             module.add(self.emitScaleToBpe(kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim))
             if edge and (not kernel["StoreRemapVectorWidth"] or (kernel["StoreRemapVectorWidth"] and (beta or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"))) and \
-                (tc != 'ScaleAlphaVec' and (not (tc == 'Bias' and self.kernelWriter.states.useBias == DataDirection.READ)) and tc != 'ScaleAVec' and tc != 'ScaleBVec'):
+                (tc != 'DeviceAlpha' and (not (tc == 'Bias' and self.kernelWriter.states.useBias == DataDirection.READ)) and tc != 'ScaleAVec' and tc != 'ScaleBVec'):
                 module.add(VCndMaskB32(dst=vgpr(addrVgpr), src0=vgpr(bufferOOB), src1=vgpr(addrVgpr), \
                                src2=sgpr(mask,laneSGPRCount), comment="LD%s clip if OOB. offset" % tc ))
             # dot2: for every NumWaveSplitK contiguous threads, only the rightmost (with the largest threadIdx) one need to write value to D matrix.
@@ -726,19 +726,19 @@ class AddrCalculation:
                                        src0=(kernel["LdsOffsetBias"]), \
                                        src1=vgpr(self.addrBiasVgpr), \
                                        comment="add lds offset"))
-            elif tc == 'ScaleAlphaVec' and kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.addrScaleAlphaVecVgpr:
+            elif tc == 'DeviceAlpha' and kernel["ProblemType"]["UseDeviceAlpha"] and isSingleKernel:
+                if self.addrDeviceAlphaVgpr:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                     coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
-                    module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
-                    module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                    module.add(VSubU32(dst=vgpr(self.addrDeviceAlphaVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
+                    module.add(VLShiftLeftB32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                             shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
-                                            src=vgpr(self.addrScaleAlphaVecVgpr), \
-                                            comment="ScaleAlpha address scaled by BPE"))
+                                            src=vgpr(self.addrDeviceAlphaVgpr), \
+                                            comment="DeviceAlpha address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
-                        module.add(VAddU32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
+                        module.add(VAddU32(dst=vgpr(self.addrDeviceAlphaVgpr), \
                                            src0=(kernel["LdsOffsetBias"]), \
-                                           src1=vgpr(self.addrScaleAlphaVecVgpr), \
+                                           src1=vgpr(self.addrDeviceAlphaVgpr), \
                                            comment="add lds offset"))
             elif tc == 'ScaleA' and (kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
                 if self.addrScaleAVecVgpr:

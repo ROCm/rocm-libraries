@@ -76,7 +76,7 @@
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 1
+  UseDeviceAlpha: 1
   UseScaleCD: false
 - - 1LDSBuffer: 0
     ActivationAlt: false

@@ -340,7 +340,7 @@ BenchmarkProblems:
       UseBias: 1
       Activation: True
       ActivationType: all
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
       UseScaleAB: "Scalar"
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -414,7 +414,7 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       ActivationHPA: True
-      UseScaleAlphaVec: 1
+      UseDeviceAlpha: 1
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:

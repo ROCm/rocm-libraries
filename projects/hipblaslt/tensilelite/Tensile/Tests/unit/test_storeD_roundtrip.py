@@ -277,7 +277,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     # ProblemType extras
     kernel["ProblemType"]["UseE"] = False
     kernel["ProblemType"]["UseScaleAB"] = ""
-    kernel["ProblemType"]["UseScaleAlphaVec"] = False
+    kernel["ProblemType"]["UseDeviceAlpha"] = False
     kernel["ProblemType"]["UseScaleCD"] = False
     kernel["ProblemType"]["OutputAmaxD"] = False
     kernel["ProblemType"]["UseBias"] = False
