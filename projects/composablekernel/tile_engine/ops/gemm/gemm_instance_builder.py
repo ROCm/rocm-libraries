@@ -172,6 +172,8 @@ class GemmKernelBuilder:
             default_pipeline = "compv4"
         elif self.kernel_name_prefix == "grouped_gemm_rowcolquant":
             default_pipeline = "compv3"
+        elif self.kernel_name_prefix == "grouped_gemm_tensorquant":
+            default_pipeline = "compv3"
 
         configs = []
         for tile_m in tile_m_values:

@@ -8,8 +8,6 @@ GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
 GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 
-GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
-
 LAYOUT_MAP = {
     "r": "ck_tile::tensor_layout::gemm::RowMajor",
     "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
@@ -232,8 +230,11 @@ def is_trait_combination_valid(
     pipeline: str, epilogue: str, scheduler: str, kernel_name_prefix: str = ""
 ) -> bool:
     """Check if a trait combination is valid."""
-    if kernel_name_prefix == "grouped_gemm_rowcolquant":
-        # rowcolquant only supports compv3 + intrawave + cshuffle
+    if (
+        kernel_name_prefix == "grouped_gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_tensorquant"
+    ):
+        # rowcolquant and tensorquant only supports compv3 + intrawave + cshuffle
         if pipeline != "compv3" or scheduler != "intrawave" or epilogue != "cshuffle":
             return False
         return True
@@ -558,27 +559,32 @@ def is_tile_config_valid(
 
     # Additional operator-specific validation (runs after pipeline validation)
 
-    if kernel_name_prefix == "grouped_gemm_rowcolquant":
-        rowcolquant_valid, rowcolquant_valid_error = validate_gemm_rowcolquant(
-            tile_m,
-            tile_n,
-            tile_k,
-            warp_m,
-            warp_n,
-            warp_k,
-            warp_tile_m,
-            warp_tile_n,
-            warp_tile_k,
-            a_datatype,
-            b_datatype,
-            c_datatype,
-            pipeline,
-            layout,
-            gpu_target,
+    if (
+        kernel_name_prefix == "grouped_gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_tensorquant"
+    ):
+        rowcolquant_valid, rowcolquant_valid_error = (
+            validate_gemm_rowcolquant_tensorquant(
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_k,
+                warp_tile_m,
+                warp_tile_n,
+                warp_tile_k,
+                a_datatype,
+                b_datatype,
+                c_datatype,
+                pipeline,
+                layout,
+                gpu_target,
+            )
         )
         if not rowcolquant_valid:
             logging.debug(
-                f"GEMM RowColQuant validation failed: {rowcolquant_valid_error}"
+                f"GEMM RowColQuant/TensorQuant validation failed: {rowcolquant_valid_error}"
             )
             return False
 
@@ -1086,7 +1092,7 @@ def validate_m0_m1_m2_configuration(
         return False, f"Error in M0/M1/M2 validation: {str(e)}"
 
 
-def validate_gemm_rowcolquant(
+def validate_gemm_rowcolquant_tensorquant(
     tile_m: int,
     tile_n: int,
     tile_k: int,
