@@ -8,7 +8,6 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
-
 // NOTE: Frontend allows broadcastable shapes for scale/bias.
 // Backend providers (e.g. MIOpen) may still reject unsupported shapes.
 TEST(TestBatchnormNode, PreValidateAcceptsBroadcastableScaleBias)
@@ -40,7 +39,7 @@ TEST(TestBatchnormNode, PreValidateAcceptsBroadcastableScaleBias)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
-TEST(TestBatchnormNode, PreValidateRejectsMismatchedScaleBiasShapes)
+TEST(TestBatchnormNode, PreValidateAcceptsMismatchedScaleBiasShapes)
 {
     BatchnormAttributes batchnormAttributes;
 
@@ -55,7 +54,7 @@ TEST(TestBatchnormNode, PreValidateRejectsMismatchedScaleBiasShapes)
     batchnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({32}); 
+    biasTensor->set_dim({32}); // intentionally different
     batchnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -66,7 +65,7 @@ TEST(TestBatchnormNode, PreValidateRejectsMismatchedScaleBiasShapes)
     const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
 TEST(TestBatchnormNode, PreValidateAcceptsRank2BroadcastableScaleBias)
@@ -111,11 +110,11 @@ TEST(TestBatchnormNode, PreValidateAcceptsDifferentBroadcastRanks)
 
     // Example broadcastable shapes
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({64});  // rank-1
+    scaleTensor->set_dim({64}); // rank-1
     batchnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({64});   // still must match scale
+    biasTensor->set_dim({64}); // same shape in this example (not required)
     batchnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();

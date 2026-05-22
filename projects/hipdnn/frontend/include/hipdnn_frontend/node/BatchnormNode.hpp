@@ -60,14 +60,6 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing x for pre-validation");
 
-        HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
-                               ErrorCode::ATTRIBUTE_NOT_SET,
-                               "BatchnormNode missing scale for pre-validation");
-
-        HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
-                               ErrorCode::ATTRIBUTE_NOT_SET,
-                               "BatchnormNode missing bias for pre-validation");
-
         HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing y for pre-validation");
@@ -83,12 +75,22 @@ public:
         auto bias = attributes.get_bias();
         auto epsilon = attributes.get_epsilon();
 
-        // SECTION 2: Validate Required Parameter Dimensions
-        // Why: All required parameters (x, scale, bias, epsilon) must have dimensions
-        // set by user. Validate them upfront before proceeding with shape checks.
+        // SECTION 2: Validate Parameter Dimensions
+        // Why:
+        // - Required parameters ( x, y and epsilon) must have valid dimensions.
+        // - Optional parameters (scale and bias) are validated only if provided.
+        // - This ensures correctness of shape-based validation while allowing flexible usage
+        //   of scale and bias tensors.
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
+        if(scale)
+        {
+            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
+        }
+
+        if(bias)
+        {
+            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
+        }
 
         // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
@@ -97,28 +99,26 @@ public:
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
-        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
-        // Why: BN parameters (scale, bias, mean, variance) are typically associated with channels.
-        // Previously, scale and bias were required to have shape [1, C, 1, 1, ...].
-        // Now, scale and bias may use any broadcastable shape. Backend providers may
-        // still enforce stricter constraints.
-        // - Each channel c has its own statistics: mean_c, var_c
-        // - Each channel c has its own learnable parameters: scale_c, bias_c
-        //   - scale_c controls feature importance/gain after normalization
-        //   - bias_c controls activation threshold (e.g., for ReLU: active when scale_c*xhat + bias_c > 0)
+        // Why:
+        // - BatchNorm operates per-channel: statistics (mean, variance) are computed for each channel.
+        // - Learnable parameters (scale and bias) are also associated with channels, but may now
+        //   use any broadcastable shape.
+        // - Mean and inverse variance tensors remain strictly per-channel (channel-only shape).
+        // - Backend providers may enforce additional constraints on scale and bias shapes.
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
         const int64_t channels = xDims[1];
 
-        // Validate that scale and bias tensors have matching shapes
-        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
-
         // Validate optional mean and inv_variance tensors (only if dimensions set)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(attributes.get_inv_variance(), channels, "Inverse variance tensor"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
+            attributes.get_inv_variance(), channels, "Inverse variance tensor"));
 
         // SECTION 5: Validate Running Stats Consistency
         // Why: Running statistics are updated together during training:
