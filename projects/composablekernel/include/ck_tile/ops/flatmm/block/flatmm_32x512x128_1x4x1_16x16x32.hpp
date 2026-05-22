@@ -467,9 +467,8 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_BF16 : public Flatmm_32x512x128_1x4x1_16
             fp32x4_t v_acc[32]{.0f};
 
             // B nr->kr
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Winline-asm"
 #endif
             // clang-format off
@@ -486,7 +485,7 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_BF16 : public Flatmm_32x512x128_1x4x1_16
                 : _EXPAND_ASM_ARGS_CLOBBER, "s24", "s25", "s26", "s27"
             );
             // clang-format on
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 
@@ -514,9 +513,8 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_BF16 : public Flatmm_32x512x128_1x4x1_16
             fp32x4_t v_acc[16]{.0f};
 
             // B nr->kr
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Winline-asm"
 #endif
             // clang-format off
@@ -528,7 +526,7 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_BF16 : public Flatmm_32x512x128_1x4x1_16
                 : _EXPAND_ASM_ARGS_CLOBBER
             );
             // clang-format on
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 
@@ -614,9 +612,8 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_FP16 : public Flatmm_32x512x128_1x4x1_16
             fp32x4_t v_acc[32]{.0f};
 
             // B nr->kr
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Winline-asm"
 #endif
             // clang-format off
@@ -633,7 +630,7 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_FP16 : public Flatmm_32x512x128_1x4x1_16
                 : _EXPAND_ASM_ARGS_CLOBBER, "s24", "s25", "s26", "s27"
             );
             // clang-format on
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 
@@ -661,9 +658,8 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_FP16 : public Flatmm_32x512x128_1x4x1_16
             fp32x4_t v_acc[16]{.0f};
 
             // B nr->kr
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Winline-asm"
 #endif
             // clang-format off
@@ -675,7 +671,7 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_FP16 : public Flatmm_32x512x128_1x4x1_16
                 : _EXPAND_ASM_ARGS_CLOBBER
             );
             // clang-format on
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 

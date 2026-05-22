@@ -1301,7 +1301,6 @@ __device__ T* cast_pointer_to_generic_address_space(T CK_TILE_CONSTANT_ADDRESS_S
     // only c-style pointer cast seems be able to be compiled
 #ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     return (T*)(p); // NOLINT(old-style-cast)
@@ -1317,7 +1316,6 @@ __host__ __device__ T CK_TILE_CONSTANT_ADDRESS_SPACE* cast_pointer_to_constant_a
     // only c-style pointer cast seems be able to be compiled;
 #ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     return (T CK_TILE_CONSTANT_ADDRESS_SPACE*)p; // NOLINT(old-style-cast)

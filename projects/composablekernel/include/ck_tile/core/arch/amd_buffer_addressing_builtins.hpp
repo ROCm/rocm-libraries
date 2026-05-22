@@ -113,9 +113,8 @@ struct buffer_store;
 template <index_t bytes>
 struct buffer_store_if;
 
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-reinterpret-cast"
 #endif
 // TODO: strict aliasing rule seems fail when reinterpret_cast between vector type
@@ -502,7 +501,7 @@ struct buffer_load_if<1, pre_nop>
     }
 };
 #endif
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif // "-Wundefined-reinterpret-cast"
 template <index_t bytes>
@@ -1990,7 +1989,6 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
 
 #ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     // Use C-style cast to change address space without dropping llvm noalias attribute
@@ -3274,7 +3272,6 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
 
 #ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     // Use C-style cast to change address space without dropping llvm noalias attribute

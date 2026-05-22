@@ -13,7 +13,6 @@
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
 #endif
 using namespace ck::tensor_layout::convolution; // Import tensor layout names (NHWGC, GKYXC, etc.)

@@ -9,7 +9,6 @@ namespace host {
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
 const std::string config_header = "";

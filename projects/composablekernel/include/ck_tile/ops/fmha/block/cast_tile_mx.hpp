@@ -51,9 +51,8 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
                 // These builtins require the old value, and will generate a v_mov_b32
                 // vxxx [old] before cvt, which result in unwanted ISA so we prepare an
                 // uninitialized variable x purposely, and turn off the warning
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wuninitialized"
 #endif
                 vec_t x;
@@ -82,7 +81,7 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
                     scale,
                     3); // byte 3
                 dst_tensor.get_thread_buffer().template set_as<vec_t>(number<i * 4 + j>{}, x);
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
             });
@@ -124,9 +123,8 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
                 // These builtins require the old value, and will generate a v_mov_b32
                 // vxxx [old] before cvt, which result in unwanted ISA so we prepare an
                 // uninitialized variable x purposely, and turn off the warning
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wuninitialized"
 #endif
                 vec_t x;
@@ -161,7 +159,7 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
                         true); // true -> WORD1
                 }
                 dst_tensor.get_thread_buffer().template set_as<vec_t>(number<i * 4 + j>{}, x);
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
             });

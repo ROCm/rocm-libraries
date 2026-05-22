@@ -20,7 +20,6 @@
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 #endif
 namespace ck {
@@ -706,16 +705,15 @@ struct DeviceGemmGemm_Wmma_CShuffleV3_Common_Invoker_Arg
         auto print          = [&curFunc](const char* format, ...) -> void {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
 #endif
                 va_list args;
                 va_start(args, format);
                 std::vfprintf(stdout, format, args);
                 va_end(args);
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
                 std::cout << "In file: " << __FILE__ << ", function: " << curFunc << "\n";
