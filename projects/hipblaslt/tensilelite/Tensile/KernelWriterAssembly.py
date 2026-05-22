@@ -428,9 +428,15 @@ class KernelWriterAssembly(KernelWriter):
       elif tChar == "B":
         localReadWidth = (self.states.lrvwUnrollB * tP["bpeDS"]) / bpr
       elif tChar == "MXSA":
-        localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
+        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
+          localReadWidth = (self.states.lrvwUnrollMXSA * kernel["VectorWidthA"] * tP["bpeDS"]) / bpr
+        else:
+          localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
       elif tChar == "MXSB":
-        localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr
+        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
+          localReadWidth = (self.states.lrvwUnrollMXSB * kernel["VectorWidthB"] * tP["bpeDS"]) / bpr
+        else:
+          localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr
       elif tChar == "Metadata":
         localReadWidth = (self.states.lrvwUnrollMetadata * tP["bpeDS"]) / bpr
       else:
@@ -4843,7 +4849,7 @@ class KernelWriterAssembly(KernelWriter):
           "padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
       self.vgprPool.checkIn(tmpVgpr)
 
-    if tc in ("B", "MXSA", "MXSB", "Metadata"):
+    if tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
       if kernel["LdsOffset%s" % tc] != 0:
         module.add(VAddCOU32(
             dst=vgpr(destVgpr), \
@@ -4929,9 +4935,9 @@ class KernelWriterAssembly(KernelWriter):
           comment="Copy lds write address VGPR to SGPR"))
         module.add(SMulI32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
                          src1=int((kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%s"%tc]+kernel["LdsPad%s"%tc]) * tP["bpeGR"]) ))
-        if tc == 'B':
+        if tc in ('A', 'B') and kernel["LdsOffset%s" % tc] != 0:
           module.add(SAddU32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
-                         src1=kernel["LdsOffsetB"] ))
+                         src1=kernel["LdsOffset%s" % tc] ))
         self.vgprPool.checkIn(tmpv)
       self.vgprPool.checkIn(destVgpr)
 
@@ -17317,15 +17323,20 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["Multicast"] and enableCluster:
       mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    with self.allocTmpSgpr(2) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
+      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+      dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor) + round(mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
-                "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor) + (mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize)"))
-      else:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
+        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
+                f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
+        mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
+                f"padBytes = numPadBlocks * ({ldsPadSize=})"))
+        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
+                "woffset += padBytes"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
@@ -17445,16 +17456,20 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["Multicast"] and enableCluster:
       mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    with self.allocTmpSgpr(2) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
+      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)) + 1, sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // 2"))
+      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor) + round(mt // numComp * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
-                "woffset = wId * (mt // numComp * du * bpe + mt // numComp * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
-      else:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor), "woffset = wId * (mt // numComp * du * bpe)"))
-
+        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
+                f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
+        mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
+                f"padBytes = numPadBlocks * ({ldsPadSize=})"))
+        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
+                "woffset += padBytes"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 

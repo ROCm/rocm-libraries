@@ -43,6 +43,8 @@ table Graph {
 	tensors: [TensorAttributes];
 	nodes: [Node];
 	preferred_engine_id: long = null;
+	// Graph-level opt-in for execute-time override shapes.
+	is_override_shape_enabled: bool = false;
 }
 
 root_type Graph;
