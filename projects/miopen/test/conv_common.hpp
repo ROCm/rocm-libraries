@@ -33,6 +33,7 @@
 #include <miopen/tensor_layout.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/find_db.hpp>
+#include <miopen/cpu_conv.hpp>
 
 #include "driver.hpp"
 #include "get_handle.hpp"
