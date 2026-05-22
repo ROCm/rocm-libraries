@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <string>
@@ -644,5 +645,31 @@ void getConvolutionAttribute(const DataT& data,
                               std::string(errorPrefix) + ": attributeName not supported");
     }
 }
+
+void setResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix);
+
+void getResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix);
+
+void setPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode& target,
+                    hipdnnBackendAttributeType_t attributeType,
+                    int64_t elementCount,
+                    const void* arrayOfElements,
+                    const char* errorPrefix);
+
+void getPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode source,
+                    hipdnnBackendAttributeType_t attributeType,
+                    int64_t requestedElementCount,
+                    int64_t* elementCount,
+                    void* arrayOfElements,
+                    const char* errorPrefix);
 
 } // namespace hipdnn_backend

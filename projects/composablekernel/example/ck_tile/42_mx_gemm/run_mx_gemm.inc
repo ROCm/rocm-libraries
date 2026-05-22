@@ -124,29 +124,42 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
         ck_tile::host_tensor_descriptor(M, scale_k_size, stride_scale_a, is_row_major(ALayout{})));
     ck_tile::HostTensor<ScaleType> scale_b_host(
         ck_tile::host_tensor_descriptor(scale_k_size, N, stride_scale_b, is_row_major(BLayout{})));
-    int seed = 1234;
+
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<std::uint32_t> fill_seed(0, 500);
+
+    auto gen_scales = [&](auto& scales, float range_min, float range_max) {
+        // e8m0_t is basically an exponent of float32
+        ck_tile::HostTensor<float> pow2(scales.get_lengths());
+        ck_tile::FillUniformDistributionIntegerValue<float>{range_min, range_max, fill_seed(gen)}(
+            pow2);
+        scales.ForEach([&](auto& self, const auto& i) {
+            self(i) = static_cast<ScaleType>(std::exp2(pow2(i)));
+        });
+    };
+
     switch(init_method)
     {
     case 0:
         // Initialize A, B, and scales to random values
-        ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, seed++}(a_host);
-        ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, seed++}(b_host);
-        ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_a_host);
-        ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_b_host);
+        ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, fill_seed(gen)}(a_host);
+        ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, fill_seed(gen)}(b_host);
+        gen_scales(scale_a_host, -2, 2);
+        gen_scales(scale_b_host, -2, 2);
         break;
     case 1:
         // Initialize A, B, and scales to 1.0
         ck_tile::FillConstant<ADataType>{ADataType(1.f)}(a_host);
         ck_tile::FillConstant<BDataType>{BDataType(1.f)}(b_host);
-        ck_tile::FillConstant<ScaleType>{ScaleType(1.f)}(scale_a_host);
-        ck_tile::FillConstant<ScaleType>{ScaleType(1.f)}(scale_b_host);
+        gen_scales(scale_a_host, 0, 0);
+        gen_scales(scale_b_host, 0, 0);
         break;
     case 2:
         // Initialize A and B with random values but with constant 1.0 scales
-        ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, seed++}(a_host);
-        ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, seed++}(b_host);
-        ck_tile::FillConstant<ScaleType>{ScaleType(0.1f)}(scale_a_host);
-        ck_tile::FillConstant<ScaleType>{ScaleType(0.1f)}(scale_b_host);
+        ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, fill_seed(gen)}(a_host);
+        ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, fill_seed(gen)}(b_host);
+        gen_scales(scale_a_host, 0, 0);
+        gen_scales(scale_b_host, 0, 0);
         break;
     }
 
@@ -162,7 +175,7 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
     constexpr ck_tile::index_t NXdlPackEff = (NIterPerWarp_ >= 2 && NIterPerWarp_ % 2 == 0) ? 2 : 1;
     constexpr ck_tile::index_t KXdlPackEff = (KIterPerWarp_ >= 2 && KIterPerWarp_ % 2 == 0) ? 2 : 1;
 
-    // Pack scales: [M, K/32] e8m0_t → [M/MXdlPackEff, K/32/KXdlPackEff] int32_t
+    // Pack scales: [M, K/32] e8m0_t -> [M/MXdlPackEff, K/32/KXdlPackEff] int32_t
     // Original unpacked tensors are kept for CPU reference validation
     constexpr ck_tile::index_t XdlMNThread = GemmConfig::M_Warp_Tile;
     constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
@@ -229,8 +242,9 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
         c_m_n_host_ref.SetZero();
 
-        ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, AccDataType, CDataType>(
-            a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_host);
+        ck_tile::
+            reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
+                a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_host);
 
         const float max_accumulated_value =
             *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
@@ -247,6 +261,7 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
     return pass ? 0 : -1;
 }
 
+template <typename GemmConfig>
 int run_mx_gemm_example(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
@@ -267,7 +282,7 @@ int run_mx_gemm_example(int argc, char* argv[])
             return run_mx_gemm_with_layouts<ck_tile::pk_fp4_t,
                                             ck_tile::pk_fp4_t,
                                             float,
-                                            MXfp4_GemmConfig16,
+                                            GemmConfig,
                                             true>(argc, argv, Row{}, Col{}, Row{});
         }
         else if(mx_prec == "fp8" || mx_prec == "fp8xfp8")
@@ -275,7 +290,7 @@ int run_mx_gemm_example(int argc, char* argv[])
             return run_mx_gemm_with_layouts<ck_tile::fp8_t,
                                             ck_tile::fp8_t,
                                             float,
-                                            MXfp8_GemmConfig16,
+                                            GemmConfig,
                                             true>(argc, argv, Row{}, Col{}, Row{});
         }
         else
