@@ -25,3 +25,13 @@ st.func @buffer_load_b32_off_vaddr() {
 ^entry:
   v0 = "st.buffer_load_b32"(off, s[4:7], s3) { issueCycles = 1, latencyCycles = 100 }
 }
+
+#--- MUBUF scope modifier: IR round-trip must preserve scope for asm emission
+# CHECK-LABEL: @buffer_store_b32_scope
+# CHECK: mod.mubuf
+# CHECK-SAME: scope = "SCOPE_DEV"
+
+st.func @buffer_store_b32_scope() {
+^entry:
+  "st.buffer_store_b32"(v12, v32, s[60:63], s46) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_DEV" } }
+}

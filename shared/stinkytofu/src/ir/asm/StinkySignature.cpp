@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -311,7 +312,7 @@ std::string SignatureArgument::toString() const {
 SignatureKernelDescriptor::SignatureKernelDescriptor(
     const std::string& name, const std::array<int, 3>& isaVersion, int groupSegSize,
     const std::array<int, 3>& sgprWorkGroup, int vgprWorkItem, int wavefrontSize, int totalVgprs,
-    int totalAgprs, int totalSgprs, bool preloadKernArgs)
+    int totalAgprs, int totalSgprs, int numSgprPreload)
     : kernelName(name),
       totalVgprs(totalVgprs),
       totalAgprs(totalAgprs),
@@ -321,7 +322,7 @@ SignatureKernelDescriptor::SignatureKernelDescriptor(
       groupSegSize(groupSegSize),
       sgprWorkGroup(sgprWorkGroup),
       vgprWorkItem(vgprWorkItem),
-      enablePreloadKernArgs(preloadKernArgs),
+      numSgprPreload(numSgprPreload),
       isaVersion(isaVersion),
       wavefrontSize(wavefrontSize) {
     bool hasArchAccUnifiedRegs =
@@ -357,6 +358,10 @@ void SignatureKernelDescriptor::setGprs(int totalVgprs, int totalAgprs, int tota
     originalTotalVgprs = totalVgprs;
     this->totalAgprs = totalAgprs;
     this->totalSgprs = totalSgprs;
+}
+
+void SignatureKernelDescriptor::setTotalInstructionBytes(int64_t totalBytes) {
+    totalInstructionBytes = totalBytes;
 }
 
 void SignatureKernelDescriptor::setOptimizationConfig(const std::array<int, 2>& tt,
@@ -423,13 +428,26 @@ std::string SignatureKernelDescriptor::toString() const {
     kStr += kdIndent + ".amdhsa_float_denorm_mode_32 3\n";
     kStr += kdIndent + ".amdhsa_float_denorm_mode_16_64 3\n";
 
-    if (enablePreloadKernArgs) {
-        int numWorkgroupSgpr = sgprWorkGroup[0] + sgprWorkGroup[1] + sgprWorkGroup[2];
-        kStr +=
-            kdIndent + ".amdhsa_user_sgpr_count " + std::to_string(16 - numWorkgroupSgpr) + "\n";
+    if (totalInstructionBytes >= 0) {
+        uint64_t prefSize =
+            std::min(static_cast<uint64_t>(totalInstructionBytes) / 128, uint64_t(255));
+        kStr += kdIndent + ".amdhsa_inst_pref_size " + std::to_string(prefSize) + "\n";
+    }
+
+    if (numSgprPreload > 0) {
+        kStr += kdIndent + ".amdhsa_user_sgpr_count " + std::to_string(numSgprPreload + 2) + "\n";
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_length " +
-                std::to_string(14 - numWorkgroupSgpr) + "\n";
+                std::to_string(numSgprPreload) + "\n";
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_offset 0\n";
+    }
+
+    // Emit pass-through directives captured by RawAsmParser (.amdhsa_* lines
+    // not modelled by the structured fields above). Each entry is already
+    // formatted verbatim (with its source indentation) and includes no
+    // trailing newline.
+    for (const auto& d : extraKernelDirectives) {
+        kStr += d;
+        if (d.empty() || d.back() != '\n') kStr += "\n";
     }
 
     kStr += ".end_amdhsa_kernel\n";
@@ -537,9 +555,9 @@ SignatureBase::SignatureBase(const std::string& kernelName, const std::array<int
                              int kernArgsVersion, const std::string& codeObjectVersion,
                              int groupSegmentSize, const std::array<int, 3>& sgprWorkGroup,
                              int vgprWorkItem, int flatWorkGroupSize, int wavefrontSize,
-                             int totalVgprs, int totalAgprs, int totalSgprs, bool preloadKernArgs)
+                             int totalVgprs, int totalAgprs, int totalSgprs, int numSgprPreload)
     : kernelDescriptor(kernelName, isaVersion, groupSegmentSize, sgprWorkGroup, vgprWorkItem,
-                       wavefrontSize, totalVgprs, totalAgprs, totalSgprs, preloadKernArgs),
+                       wavefrontSize, totalVgprs, totalAgprs, totalSgprs, numSgprPreload),
       codeMeta(kernelName, kernArgsVersion, groupSegmentSize, flatWorkGroupSize, wavefrontSize,
                codeObjectVersion, totalVgprs, totalSgprs),
       descriptionTopic("") {}
@@ -577,6 +595,10 @@ void SignatureBase::setOptimizationConfig(const std::array<int, 2>& tt,
                                           int glvwB, bool d2lA, bool d2lB, int useSgprForGRO) {
     kernelDescriptor.setOptimizationConfig(tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB,
                                            useSgprForGRO);
+}
+
+void SignatureBase::setTotalInstructionBytes(int64_t totalBytes) {
+    kernelDescriptor.setTotalInstructionBytes(totalBytes);
 }
 
 std::string SignatureBase::toString() const {

@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
 #include "stinkytofu/core/AnalysisManager.hpp"
 
@@ -29,15 +30,7 @@ namespace stinkytofu {
 /// Analysis pass that computes dominator tree and dominance frontiers.
 /// Wraps computeDominanceInfo().
 struct DominanceAnalysis {
-    static inline AnalysisKey Key;
-
-    static AnalysisKey* ID() {
-        return &Key;
-    }
-
-    static const char* name() {
-        return "DominanceAnalysis";
-    }
+    STINKYTOFU_ANALYSIS_KEY("DominanceAnalysis")
 
     using Result = DominanceInfo;
 

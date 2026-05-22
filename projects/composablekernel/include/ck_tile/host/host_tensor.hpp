@@ -18,6 +18,7 @@
 #include "ck_tile/host/ranges.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -599,6 +600,8 @@ struct HostTensor
     typename Data::const_pointer data() const { return mData.data(); }
 
     typename Data::size_type size() const { return mData.size(); }
+
+    bool empty() const { return mData.empty(); }
 
     T max() const { return *std::max_element(mData.begin(), mData.end()); }
 

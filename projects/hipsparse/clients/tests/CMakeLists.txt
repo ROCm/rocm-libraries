@@ -90,6 +90,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_const_dnvec_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo_aos.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_sell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpby.cpp"
