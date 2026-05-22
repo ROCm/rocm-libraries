@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,9 @@
 #include <rocrand/rocrand.h>
 
 #include <iostream>
+
+namespace rocrand_parity
+{
 
 #define HIP_CHECK(condition)                                                                     \
     {                                                                                            \
@@ -65,7 +68,7 @@ static rocrand_rng_type rng_type_to_rocrand(const generator_type rng_type)
 }
 
 template<typename T, typename F>
-static std::vector<T> generate(const test_case& test_case, F callback)
+static std::vector<T> test_generate_impl(const test_case& test_case, F callback)
 {
     T* data;
     HIP_CHECK(hipMalloc(&data, test_case.size * sizeof(T)));
@@ -102,12 +105,17 @@ static std::vector<T> generate(const test_case& test_case, F callback)
     return results;
 }
 
-std::vector<unsigned int> test_rocrand_generate(const test_case& test_case)
+std::vector<unsigned int> test_generate(const test_case& test_case)
 {
-    return generate<unsigned int>(test_case, rocrand_generate);
+    return test_generate_impl<unsigned int>(test_case, rocrand_generate);
 }
 
-std::vector<unsigned long long> test_rocrand_generate_long_long(const test_case& test_case)
+std::vector<unsigned long long> test_generate_long_long(const test_case& test_case)
 {
-    return generate<unsigned long long>(test_case, rocrand_generate_long_long);
+    return test_generate_impl<unsigned long long>(test_case, rocrand_generate_long_long);
 }
+
+#undef HIP_CHECK
+#undef ROCRAND_CHECK
+
+} // namespace rocrand_parity

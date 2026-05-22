@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,9 @@
 #include <curand.h>
 
 #include <iostream>
+
+namespace curand_parity
+{
 
 #define CUDA_CHECK(condition)                                                                \
     {                                                                                        \
@@ -62,10 +65,11 @@ static curandRngType rng_type_to_curand(const generator_type rng_type)
         case generator_type::SOBOL64: return CURAND_RNG_QUASI_SOBOL64;
         case generator_type::SCRAMBLED_SOBOL64: return CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
     }
+    return CURAND_RNG_TEST;
 }
 
 template<typename T, typename F>
-static std::vector<T> generate(const test_case& test_case, F callback)
+static std::vector<T> test_generate_impl(const test_case& test_case, F callback)
 {
     T* data;
     CUDA_CHECK(cudaMalloc(&data, test_case.size * sizeof(T)));
@@ -102,12 +106,17 @@ static std::vector<T> generate(const test_case& test_case, F callback)
     return results;
 }
 
-std::vector<unsigned int> test_curand_generate(const test_case& test_case)
+std::vector<unsigned int> test_generate(const test_case& test_case)
 {
-    return generate<unsigned int>(test_case, curandGenerate);
+    return test_generate_impl<unsigned int>(test_case, curandGenerate);
 }
 
-std::vector<unsigned long long> test_curand_generate_long_long(const test_case& test_case)
+std::vector<unsigned long long> test_generate_long_long(const test_case& test_case)
 {
-    return generate<unsigned long long>(test_case, curandGenerateLongLong);
+    return test_generate_impl<unsigned long long>(test_case, curandGenerateLongLong);
 }
+
+#undef CUDA_CHECK
+#undef ROCRAND_CHECK
+
+} // namespace curand_parity
