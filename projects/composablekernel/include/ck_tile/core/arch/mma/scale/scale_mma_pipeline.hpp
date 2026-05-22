@@ -32,7 +32,7 @@ namespace ck_tile::core::arch::mma {
  * @tparam WaveTileN       Mma WaveTile N dimension
  * @tparam WaveTileK       Mma WaveTile K dimension
  * @tparam AccumPolicy     The fragment order of the accum. registers (row or col major frag order)
- * @tparam CTranspose       Swaps A and B input vectors and interprets C with transposed layout.
+ * @tparam CTranspose      Swaps A and B input vectors and interprets C with transposed layout.
  * @tparam SwizzleFactor   Swizzlefactor for Tile Distribution Encoding calculation.
  * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
@@ -97,7 +97,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     static_assert(!MmaOpTraits<MmaOp>::IsSupported || FragsM == 1);
     static_assert(!MmaOpTraits<MmaOp>::IsSupported || FragsN == 1);
 
-    // TODO: k iteration with scales makes not sense with current exec implementation...
+    // TODO: k iteration with scales makes no sense with current exec implementation...
     static_assert(!MmaOpTraits<MmaOp>::IsSupported || FragsK == 1);
 
     // K0 or kABKPerLane (plus MmaPipeline k iter!)
@@ -135,23 +135,11 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     using BWarpTensor = static_distributed_tensor<BDataType, BWarpDstr>;
     using CWarpTensor = static_distributed_tensor<CDataType, CWarpDstr>;
 
-    // We use these thread_buffer types internally in a number of places, because it allow us to
+    // We use these thread_buffer types internally in a number of places, because it allows us to
     // directly select the ext_vectors for individual MmaOp calls.
     using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
     using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
     using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
-
-    // Old types only for pipeline tests. TODO: Remove and update pipeline tests with newer
-    // definitions.
-    // --------------------------------------------------------------------------------------------
-    using AVecType = typename MmaOp::AVecType[FragsM][FragsK];
-    using BVecType = typename MmaOp::BVecType[FragsN][FragsK];
-    using CVecType = typename MmaOp::CVecType[FragsM][FragsN];
-
-    static constexpr uint32_t FragM = MmaOp::kM;
-    static constexpr uint32_t FragN = MmaOp::kM;
-    static constexpr uint32_t FragK = MmaOp::kM;
-    // --------------------------------------------------------------------------------------------
 
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;

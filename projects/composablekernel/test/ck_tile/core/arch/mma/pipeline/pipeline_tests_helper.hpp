@@ -110,10 +110,8 @@ void apply_sparse_pattern(std::vector<T>& A, uint32_t M, uint32_t K)
 }
 
 // Fill per-lane A fragments from logical A[M][K] matrix.
-// For dense pipelines: AVecType = InternalAVecT[FragsM][FragsK]
-// For sparse pipelines: AVecType = ExternalAFragVecT[FragsM][FragsK] (uncompressed)
 template <typename Pipeline, typename AScalar>
-void fill_a_fragments(typename Pipeline::AVecType* a_per_lane,
+void fill_a_fragments(typename Pipeline::AWarpTensor* a_per_lane,
                       const std::vector<AScalar>& A_matrix,
                       uint32_t K,
                       uint32_t waveSize)
@@ -122,8 +120,8 @@ void fill_a_fragments(typename Pipeline::AVecType* a_per_lane,
     using ARegMap     = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::AWarpDstrEncoding>;
     using AFragScalar = typename vector_traits<typename MmaOp::AVecType>::scalar_type;
 
-    constexpr uint32_t FragM  = Pipeline::FragM;
-    constexpr uint32_t FragK  = Pipeline::FragK;
+    constexpr uint32_t FragM  = Pipeline::MmaOp::kM;
+    constexpr uint32_t FragK  = Pipeline::MmaOp::kK;
     constexpr uint32_t FragsM = Pipeline::FragsM;
     constexpr uint32_t FragsK = Pipeline::FragsK;
 
@@ -187,9 +185,8 @@ void fill_a_fragments(typename Pipeline::AVecType* a_per_lane,
 }
 
 // Fill per-lane B fragments from logical B[K][N] matrix.
-// BVecType = InternalBVecT[FragsN][FragsK]
 template <typename Pipeline, typename BScalar>
-void fill_b_fragments(typename Pipeline::BVecType* b_per_lane,
+void fill_b_fragments(typename Pipeline::BWarpTensor* b_per_lane,
                       const std::vector<BScalar>& B_matrix,
                       uint32_t N,
                       uint32_t waveSize)
@@ -198,8 +195,8 @@ void fill_b_fragments(typename Pipeline::BVecType* b_per_lane,
     using BRegMap     = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::BWarpDstrEncoding>;
     using BFragScalar = typename vector_traits<typename MmaOp::BVecType>::scalar_type;
 
-    constexpr uint32_t FragN  = Pipeline::FragN;
-    constexpr uint32_t FragK  = Pipeline::FragK;
+    constexpr uint32_t FragN  = Pipeline::MmaOp::kN;
+    constexpr uint32_t FragK  = Pipeline::MmaOp::kK;
     constexpr uint32_t FragsN = Pipeline::FragsN;
     constexpr uint32_t FragsK = Pipeline::FragsK;
 
@@ -234,9 +231,8 @@ void fill_b_fragments(typename Pipeline::BVecType* b_per_lane,
 }
 
 // Extract C matrix from per-lane C fragments.
-// CVecType = InternalCVecT[FragsM][FragsN]
 template <typename Pipeline, typename CScalar>
-void extract_c_matrix(const typename Pipeline::CVecType* c_per_lane,
+void extract_c_matrix(const typename Pipeline::CWarpTensor* c_per_lane,
                       std::vector<CScalar>& C_matrix,
                       uint32_t N,
                       uint32_t waveSize)
@@ -245,8 +241,8 @@ void extract_c_matrix(const typename Pipeline::CVecType* c_per_lane,
     using CRegMap     = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::CWarpDstrEncoding>;
     using CFragScalar = typename vector_traits<typename MmaOp::CVecType>::scalar_type;
 
-    constexpr uint32_t FragM  = Pipeline::FragM;
-    constexpr uint32_t FragN  = Pipeline::FragN;
+    constexpr uint32_t FragM  = Pipeline::MmaOp::kM;
+    constexpr uint32_t FragN  = Pipeline::MmaOp::kN;
     constexpr uint32_t FragsM = Pipeline::FragsM;
     constexpr uint32_t FragsN = Pipeline::FragsN;
 
@@ -346,20 +342,20 @@ void run_pipeline_matrix_test_impl(uint32_t M,
 
     reference_matmul(C_expected, A_matrix, B_matrix, M, N, K);
 
-    using AVecType = typename Pipeline::AVecType;
-    using BVecType = typename Pipeline::BVecType;
-    using CVecType = typename Pipeline::CVecType;
+    using AWarpTensor = typename Pipeline::AWarpTensor;
+    using BWarpTensor = typename Pipeline::BWarpTensor;
+    using CWarpTensor = typename Pipeline::CWarpTensor;
 
-    const size_t a_buf_size = waveSize * sizeof(AVecType);
-    const size_t b_buf_size = waveSize * sizeof(BVecType);
-    const size_t c_buf_size = waveSize * sizeof(CVecType);
+    const size_t a_buf_size = waveSize * sizeof(AWarpTensor);
+    const size_t b_buf_size = waveSize * sizeof(BWarpTensor);
+    const size_t c_buf_size = waveSize * sizeof(CWarpTensor);
 
     std::vector<uint8_t> h_a(a_buf_size, 0);
     std::vector<uint8_t> h_b(b_buf_size, 0);
     std::vector<uint8_t> h_c(c_buf_size, 0);
 
-    fill_a_fragments<Pipeline>(reinterpret_cast<AVecType*>(h_a.data()), A_matrix, K, waveSize);
-    fill_b_fragments<Pipeline>(reinterpret_cast<BVecType*>(h_b.data()), B_matrix, N, waveSize);
+    fill_a_fragments<Pipeline>(reinterpret_cast<AWarpTensor*>(h_a.data()), A_matrix, K, waveSize);
+    fill_b_fragments<Pipeline>(reinterpret_cast<BWarpTensor*>(h_b.data()), B_matrix, N, waveSize);
 
     void *d_a, *d_b, *d_c;
     HIP_CHECK_ERROR(hipMalloc(&d_a, a_buf_size));
@@ -376,7 +372,7 @@ void run_pipeline_matrix_test_impl(uint32_t M,
 
     HIP_CHECK_ERROR(hipMemcpy(h_c.data(), d_c, c_buf_size, hipMemcpyDeviceToHost));
     extract_c_matrix<Pipeline>(
-        reinterpret_cast<const CVecType*>(h_c.data()), C_actual, N, waveSize);
+        reinterpret_cast<const CWarpTensor*>(h_c.data()), C_actual, N, waveSize);
 
     for(uint32_t m = 0; m < M; ++m)
     {
