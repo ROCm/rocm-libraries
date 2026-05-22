@@ -2797,7 +2797,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
 }
 
 template <int MAX_THDS, typename T, typename I, typename S, typename U>
-__global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
+__global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                                                                      const rocblas_int nb,
                                                                      U AA,
                                                                      const rocblas_stride shiftA,
@@ -3183,8 +3183,8 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         // Shared memory: tau_j[1] | pSmem[256] | pSz1[k] | pSz2[k]. z1/z2 live in global work.
         // LDS is O(1) in n (k=nb, default 64) — eliminates the occupancy cliff at large n.
         // Parts B/C/E read v directly from global memory; only Parts A/D need LDS (j<=k-1 elems).
-        constexpr rocblas_int NAIVE_THDS = 256;
-        const size_t lmemsize_fused = (1 + NAIVE_THDS + 2 * k) * sizeof(T);
+        constexpr rocblas_int FUSED_THDS = 256;
+        const size_t lmemsize_fused = (1 + FUSED_THDS + 2 * k) * sizeof(T);
         const bool is_batched = batch_count > 1;
         bool use_fused_kernel = select_coop_launch && !is_batched
             && !rocblas_is_complex<T> && (lmemsize_fused <= props->sharedMemPerBlock);
@@ -3215,7 +3215,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             HIP_TRACE(hipMemsetAsync((void*)W, 0, size_W, stream));
             rocblas_int j = 0;
 
-            /* ROCSOLVER_LAUNCH_KERNEL((latrd_lower_kernel_naive<256, T>), dim3(1, 1, batch_count), */
+            /* ROCSOLVER_LAUNCH_KERNEL((latrd_lower_kernel_fused<256, T>), dim3(1, 1, batch_count), */
             /*                         dim3(256), lmemsize_small, stream, n, k, A, */
             /*                         shiftA + idx2D(j, j, lda), lda, strideA, E + j, strideE, */
             /*                         tau + j, strideP, W, shiftW, ldw, strideW, work); */
@@ -3241,16 +3241,16 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
 
             // Compute grid width: enough blocks to cover n rows, capped by cooperative-launch limit.
             // hipLaunchCooperativeKernel requires gridDim.x * gridDim.z <= max resident blocks.
-            void* kernel_fn = (void*)(latrd_lower_kernel_naive<NAIVE_THDS, T, rocblas_int, S, U>);
+            void* kernel_fn = (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U>);
             int max_blocks_per_sm = 0;
             HIP_TRACE(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, kernel_fn,
-                                                                   NAIVE_THDS, lmemsize_fused));
+                                                                   FUSED_THDS, lmemsize_fused));
             rocblas_int max_total_blocks = max_blocks_per_sm * props->multiProcessorCount;
             rocblas_int max_grid_x = std::max(1, max_total_blocks / batch_count);
             // LATRD_COOP_GRID_X allows GPU-specific tuning of grid width.
             static const rocblas_int env_grid_x = []() {
                 const char* v = std::getenv("LATRD_COOP_GRID_X");
-                return v ? std::atoi(v) : NAIVE_THDS;
+                return v ? std::atoi(v) : FUSED_THDS;
             }();
             rocblas_int want_grid_x = std::max(1, env_grid_x);
             rocblas_int grid_x = std::min(want_grid_x, max_grid_x);
@@ -3261,7 +3261,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                              max_blocks_per_sm, max_total_blocks, grid_x);
 
             HIP_TRACE(hipLaunchCooperativeKernel(kernel_fn, dim3(grid_x, 1, batch_count),
-                                                 dim3(NAIVE_THDS), kernelArgs, lmemsize_fused,
+                                                 dim3(FUSED_THDS), kernelArgs, lmemsize_fused,
                                                  stream));
 
             HIP_TRACE(hipDeviceSynchronize());
