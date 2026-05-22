@@ -1,70 +1,106 @@
-# CK DSL hipDNN Provider — Session Handoff
+# CK DSL hipDNN Provider — M1 Complete
 
-**Resume on:** node with gfx950 (MI350-series) GPU access.
-
-## Where things stand
-
-Branch: `users/dahawkin/ck-dsl-provider`, cut from `users/vanantha/ck-dsl-prototype`.
-HEAD: `0fcec098917`.
-
-```
-0fcec098917 [CK DSL] Hold GIL while releasing CompileServiceBridge module ref.
-2fa22bc9c8e [CK DSL] Add Python compile-service bridge (M1 step I-3).
-e980348fcab [CK DSL] Embed CPython interpreter in provider plugin (M1 step I-2).
-73116d68404 [CK DSL] Add provider skeleton (M1 step I-1).
-bf7546ed99e [CK DSL] Add hipDNN provider implementation plan.   ← branch base
-```
-
-Working tree clean. `WIP/` is untracked and contains logs + the prep findings doc.
+Branch: `users/dahawkin/ck-dsl-provider`.
+Cut from `users/vanantha/ck-dsl-prototype` at `bf7546ed99e`.
 
 ## Plan progress (per plan v0.9 §6.2)
 
 | Step | Status |
 |---|---|
-| Prep P-1 … P-7 | done, synthesis in `WIP/prep_findings/PREP_FINDINGS.md` |
-| I-1 skeleton | ✅ committed |
-| I-2 embedded interpreter | ✅ committed |
-| I-3 compile-service bridge | ✅ committed (+ reviewer GIL-dtor fix) |
-| I-4 KernelArtifact / HipModule round-trip | **next — needs GPU** |
-| I-5 JitCache | needs GPU |
-| I-6 ConvImplicitGemmAdapter + Spec | host-only, can run pre-GPU |
-| I-7 PlanBuilder | needs GPU |
-| I-8 Plan::execute | needs GPU |
-| I-9 PerfMeasurement | needs GPU |
-| I-10 Integration test | needs GPU |
-| I-11 CI / pre-commit clean | terminal step |
+| Prep P-1 … P-7 | done; synthesis in `WIP/prep_findings/PREP_FINDINGS.md` |
+| I-1 skeleton | ✅ `73116d68404` |
+| I-2 embedded interpreter | ✅ `e980348fcab` |
+| I-3 compile-service bridge | ✅ `2fa22bc9c8e` (+ GIL-dtor fix `0fcec098917`) |
+| I-4 KernelArtifact / HipModule | ✅ `a0f8288e395` |
+| I-5 JitCache | ✅ `c6c8b480f37` |
+| I-6 ConvImplicitGemmAdapter + Spec | ✅ `9f1a92afe58` |
+| I-7 PlanBuilder + JIT path | ✅ `a82e0f72c57` |
+| I-8 Plan::execute | ✅ `87f45907093` |
+| I-9 PerfMeasurement | ✅ `0cbf119bcc7` |
+| I-10 Integration test | ✅ `de7bcf4873b` |
+| I-11 CI / pre-commit clean | ✅ (this commit) |
 
-## Hardware constraint discovered this session
+## M1 result
 
-**ck_dsl is gfx950-only.** Defaults in `runtime/comgr.py:210`, `helpers/compile.py:68,82,129`, and `examples/bake_off_implicit_gemm.py:44` all hardcode `amdgcn-amd-amdhsa--gfx950`. The DSL emits gfx950-specific instructions broadly (MFMA 32×32×16 fp16, `ds_swizzle_b32`, `v_permlane32_swap_b32`, `ds_read_b64_tr_b{8,16}`, scaled FP8/BF8 converts), not just MFMA hot paths. M1 hardware target is **MI350-series**. No fallback to MI300/MI250.
+End-to-end JIT path works on gfx950 (MI350-series):
 
-## What I-4 needs to do (next step)
+- `ninja ck-dsl-provider-unit-check` — green (42 tests, ~10 s wall)
+- `ninja ck-dsl-provider-integration-check` — green (1 test, ~9 s wall)
+- `IntegrationGpuCkDslConvFp16.BakeOffConv` reports **131 TFLOPS median**
+  on the bake-off shape (N=8, 56×56×64→64, 3×3, s=1, p=1, FP16, NHWC).
+  Numerical agreement against `CpuFpReferenceConvolution::fprop`
+  passes at 5e-2 absolute tolerance over all ~1.6M output elements.
+- `pre-commit run` over the full provider tree — clean.
 
-Per plan §6.2 step I-4 — KernelArtifact / HipModule round-trip from a known blob:
+The bake-off example documents 248 TFLOPS on MI300X for the same
+configuration (`bake_off_implicit_gemm.py:69-72`). Closing that gap
+on MI350 is M2 autotuning work.
 
-1. **Python side** — extend `dnn-providers/ck-dsl-provider/python/ck_dsl_provider/compile_service.py` with a `compile_smoke()` that uses `ck_dsl.helpers.compile.compile_kernel` to produce a trivial HSACO (no MFMA, but isa still gfx950) and returns bytes + minimal launch metadata.
-2. **C++ side** under `dnn-providers/ck-dsl-provider/src/runtime/`:
-   - `KernelArtifact.{hpp,cpp}` — struct per P-1 recommendation in `WIP/prep_findings/PREP_FINDINGS.md`.
-   - `HipModule.{hpp,cpp}` — RAII wrapper around `hipModule_t` + `hipFunction_t`.
-   - `LaunchAbi.{hpp,cpp}` — schema-driven arg packing (replaces the launcher.cpp's hardcoded-per-kind packing). The pack signature recommendation is in P-1.
-3. Extend `CompileServiceBridge` with a `compileSmoke()` method that calls into the Python side and returns a `KernelArtifact`.
-4. Unit test: load the HSACO via `hipModuleLoadData`, get the kernel function, launch over a 1-element buffer, verify no `hipError`. Gate on `hipGetDeviceCount() > 0` so the host-only CI lane stays green.
+## What M1 ships
 
-After I-4 → I-7 inherits the runtime layer; I-6 (adapter) is independent and can run in parallel.
+`dnn-providers/ck-dsl-provider/`:
 
-## Files the next session should read first
+```
+CMakeLists.txt                         finalize_test_targets("ck-dsl-provider")
+cmake/                                 version + Python-path helpers
+python/ck_dsl_provider/
+    compile_service.py                 dispatch on op_kind, conv-igemm builder
+src/
+    CkDslContainer.{hpp,cpp}           one engine per CK DSL op (M5+ adds siblings)
+    CkDslHandle.{hpp,cpp}              stream + container reference + detached buffers
+    CkDslContext.hpp                   plan + settings storage
+    CkDslPluginPublic.cpp              the only C-ABI source (5 macros + .inl include)
+    adapters/conv_implicit_gemm/
+        ConvImplicitGemmSpec.hpp       pure-C++ mirror of the dataclass (P-5 defaults)
+        ConvImplicitGemmAdapter.cpp    FB ConvolutionFwdAttributes -> Spec
+        ConvImplicitGemmPayload.cpp    Spec -> py::dict (Python boundary)
+    engines/conv_implicit_gemm/
+        CkDslConvImplicitGemmEngine    IEngine -> plan builder
+        ConvImplicitGemmPlanBuilder    isApplicable + buildPlan via JitCache
+        ConvImplicitGemmPlan           IPlan::execute (uid -> DevPtr -> launch)
+    graph/
+        GraphSignature                 FNV-1a over op_kind + dtypes + shape + DSL SHA
+    perf/
+        PerfMeasurement                hipEvent warmup/timed; [CkDslPerf] log line
+    python/
+        EmbeddedInterpreter            singleton libpython init
+        CompileServiceBridge           noopSmoke + compileSmoke + compile(opKind, payload)
+        PythonError                    py::error_already_set -> HipdnnPluginException
+    runtime/
+        KernelArtifact + ArgSchema     P-1's schema-driven HSACO + launch ABI
+        LaunchAbi                      contiguous-buffer arg packing
+        HipModule                      RAII hipModule_t + hipFunction_t + launch
+        JitCache                       mutex-guarded SignatureHash -> shared_ptr<HipModule>
+tests/                                 unit tests (host-only + GPU-gated)
+integration_tests/                     ninja ck-dsl-provider-integration-check
+```
 
-Listed in dependency order (fastest on-ramp):
+Build artifact: `build/lib/hipdnn_plugins/engines/libck_dsl_provider_plugin.so`.
 
-1. `WIP/STATUS.md` (this file)
-2. `WIP/prep_findings/PREP_FINDINGS.md` — all design decisions + the P-1 `KernelArtifact` shape that I-4 will instantiate
-3. `projects/composablekernel/python/ck_dsl/dsl_docs/hipdnn_provider/plan.md` v0.9 — especially §6.2 step I-4 and §6.5 risk register
-4. The four existing commits' diffs — for the established patterns (GIL discipline, sys.path injection, test conventions)
+## Deferred to M1.5 / M2
 
-## Gotchas to carry forward
+- **Frontend Graph API + .so plugin loader.** The integration test
+  drives `ConvImplicitGemmPlanBuilder` directly rather than going
+  through the hipDNN backend's plugin-loader path. The plan-builder
+  surface is the same code the backend would call after `dlopen`;
+  wiring `hipdnnSetEnginePluginPaths_ext` + `hipdnn_frontend::graph::
+  Graph` is additive on top of what M1 already proves.
+- **Autotuning.** The constexpr defaults in `ConvImplicitGemmSpec`
+  ship the bake-off values verbatim (P-5). Adapter knob surfacing is
+  M2.
+- **Second op.** M2 adds `CkDslGemmEngine` (or similar) as a sibling
+  engine -- the M1 file layout (`engines/<op>/`, `adapters/<op>/`) was
+  designed so this is additive.
+- **On-disk HSACO cache.** M3 (plan §3.4): `$XDG_CACHE_HOME/
+  ck-dsl-provider/<hash>.hsaco`, invalidated on
+  `CK_DSL_PROVIDER_VERSION_STRING` change (the same key the in-memory
+  cache already uses).
 
-- **CMake `Python3` discovery** must keep the pin to `/usr/bin/python3` with `Python3_FIND_STRATEGY=LOCATION` — otherwise a uv-managed Python in `~/.local` hijacks it. Already in `dnn-providers/ck-dsl-provider/CMakeLists.txt`.
-- **cmake-lint docstring convention** is `# ` line comments *immediately preceding* `function(...)`, not `#[==[ ]==]` and not inside the body. VersionUtils.cmake style.
-- **pybind11 dtor with `py::object` members** must acquire the GIL. Pattern in `CompileServiceBridge::~CompileServiceBridge()` is the template — replicate for any future class that holds `py::object`/`py::module_`/`py::dict` members.
-- **ck_dsl has no `__version__`** and **no `pyproject.toml`** — cache-key uses git SHA (already baked into the version header via `CkDslProviderVersion.cmake`); package discovery uses CMake-baked `sys.path` prepend (`ckdsl_provider_paths.h`).
-- **Engine naming is per-op** (v0.9 amendment): `CkDslConvImplicitGemmEngine`, not `CkDslEngine`. M5+ adds siblings, not a refactor.
+## Hardware constraint to carry forward
+
+`ck_dsl` is gfx950-only (`runtime/comgr.py:210`,
+`helpers/compile.py:68,82,129`, `examples/bake_off_implicit_gemm.py:44`
+all hardcode `amdgcn-amd-amdhsa--gfx950`; the DSL also emits
+MFMA-32×32×16-fp16, `ds_swizzle_b32`, `v_permlane32_swap_b32`,
+`ds_read_b64_tr_b{8,16}`, and scaled FP8/BF8 converts unconditionally).
+M1 hardware target is **MI350-series**. No fallback to MI300/MI250.

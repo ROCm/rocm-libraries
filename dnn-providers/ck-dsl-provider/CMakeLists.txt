@@ -145,16 +145,26 @@ target_include_directories(ck_dsl_provider_impl
 # translation unit sees CK_DSL_PROVIDER_VERSION_STRING.
 ck_dsl_provider_generate_version_header(ck_dsl_provider_impl)
 
-# I-2 unit tests for the embedded interpreter. Guarded so packagers and
-# the superbuild can opt out via -DCKDSLPROVIDER_SKIP_TESTS=ON.
+# Unit and integration tests for the provider. Guarded so packagers
+# and the superbuild can opt out via -DCKDSLPROVIDER_SKIP_TESTS=ON.
+# Both lanes share the GTest dependency fetched here.
+#
+# Test labels (see ../cmake/Tests.cmake):
+#   * tests/  uses add_unit_test_target -> label "unit_test"
+#     -> ninja ck-dsl-provider-unit-check
+#   * integration_tests/ uses add_integration_test_target
+#     -> label "integration_test"
+#     -> ninja ck-dsl-provider-integration-check
+# finalize_test_targets wires the prefixed ctest targets that the M1
+# capstone (I-11) advertises.
 if(NOT CKDSLPROVIDER_SKIP_TESTS)
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/Dependencies.cmake)
     fetch_gtest_dependency()
     add_subdirectory(tests)
+    add_subdirectory(integration_tests)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/Tests.cmake)
+    finalize_test_targets("ck-dsl-provider")
 endif()
-
-# integration_tests/ deliberately omitted from the I-1 skeleton.
-# The integration test (IntegrationGpuCkDslConvFp16) is milestone I-10.
 
 if(NOT DEFINED HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR "HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR was not set by hipdnn_data_sdk package import.")
