@@ -129,6 +129,19 @@ class Pooling2DSpec:
     block_size: int = 256
     vec: int = 1
     name: str = "ck_dsl_pooling2d"
+    # P81: when > 1, each thread owns one (c, ho) tile of multiple wo
+    # outputs instead of just one wo. Lets the descriptor reuse
+    # ``hi = ho*sH + y*dH`` across ``wo``. Defaults to 1 (one wo per
+    # thread, the historical layout); flip to 2/4/8 to amortise the
+    # per-output-window math across multiple outputs.
+    tile_n: int = 1
+    # P82: when ``Block_N > 1`` (multiple lanes share a window's K-axis
+    # reduction), the inner reduction benefits from the warp-XOR +
+    # cross-warp shape used in :mod:`ck_dsl.helpers.reduction`. Today
+    # one thread owns one output so the reduction is a register chain;
+    # ``use_warp_xor_reduce=True`` opts into the wave butterfly when
+    # ``tile_n`` widens lane work-per-output.
+    use_warp_xor_reduce: bool = False
 
     def kernel_name(self) -> str:
         return kernel_name_join(

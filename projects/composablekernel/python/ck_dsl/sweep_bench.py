@@ -340,5 +340,68 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 0
 
 
+def fmha_sweep_manifest(
+    *,
+    head_sizes: Sequence[int] = (64, 128, 256),
+    seqlen_q_set: Sequence[int] = (16, 64, 256, 1024),
+    seqlen_k_set: Sequence[int] = (1024, 4096),
+    dtypes: Sequence[str] = ("f16", "bf16"),
+    num_query_heads: int = 64,
+    num_kv_heads: int = 8,
+) -> List[Dict[str, object]]:
+    """Build a Python list of FMHA sweep entries for use with the
+    runtime launcher (B07 — fills the FMHA manifest gap that
+    ``sweep_bench.py``'s GEMM-only manifest path didn't cover).
+
+    Each entry is a dict ``{"kernel": "fmha_fwd_<variant>", "shape":
+    (head_size, seqlen_q, seqlen_k, dtype), ...}`` matching the
+    keyword surface that
+    :func:`ck_dsl.examples.parity_extended_kernels` builders consume.
+    Used by FMHA before/after benchmarking for P67 / P68 / P69.
+
+    Returns a list rather than emitting a JSON file so callers can
+    filter / extend the entries in-process before serialising.
+    """
+    out: List[Dict[str, object]] = []
+    for hs in head_sizes:
+        for sq in seqlen_q_set:
+            for sk in seqlen_k_set:
+                for dt in dtypes:
+                    out.append(
+                        {
+                            "kernel": "fmha_fwd_paged_prefill",
+                            "head_size": int(hs),
+                            "seqlen_q": int(sq),
+                            "seqlen_k": int(sk),
+                            "dtype": dt,
+                            "num_query_heads": int(num_query_heads),
+                            "num_kv_heads": int(num_kv_heads),
+                        }
+                    )
+                    out.append(
+                        {
+                            "kernel": "fmha_fwd_splitkv_decode",
+                            "head_size": int(hs),
+                            "seqlen_q": 1,
+                            "seqlen_k": int(sk),
+                            "dtype": dt,
+                            "num_query_heads": int(num_query_heads),
+                            "num_kv_heads": int(num_kv_heads),
+                        }
+                    )
+                    out.append(
+                        {
+                            "kernel": "fmha_bwd",
+                            "head_size": int(hs),
+                            "seqlen_q": int(sq),
+                            "seqlen_k": int(sk),
+                            "dtype": dt,
+                            "num_query_heads": int(num_query_heads),
+                            "num_kv_heads": int(num_kv_heads),
+                        }
+                    )
+    return out
+
+
 if __name__ == "__main__":
     sys.exit(main())
