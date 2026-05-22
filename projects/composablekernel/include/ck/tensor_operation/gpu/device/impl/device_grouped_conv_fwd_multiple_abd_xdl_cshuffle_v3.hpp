@@ -32,6 +32,8 @@
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_abd_xdl_cshuffle_v3.hpp"
 #endif
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -2212,3 +2214,4 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 } // namespace tensor_operation
 } // namespace ck
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

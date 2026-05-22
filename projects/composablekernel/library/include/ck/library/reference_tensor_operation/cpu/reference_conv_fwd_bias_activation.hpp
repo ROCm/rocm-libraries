@@ -9,6 +9,8 @@
 #include "ck/tensor_operation/gpu/device/device_base.hpp"
 #include "ck/library/utility/host_tensor.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -196,3 +198,4 @@ struct ReferenceConvFwd_Bias_Activation : public device::BaseOperator
 } // namespace ck
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

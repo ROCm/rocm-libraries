@@ -11,6 +11,8 @@
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -240,3 +242,4 @@ struct ReferenceMXGemm : public device::BaseOperator
 } // namespace tensor_operation
 } // namespace ck
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

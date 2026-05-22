@@ -12,6 +12,8 @@
 
 #include "ck/library/utility/convolution_parameter.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -248,3 +250,4 @@ inline bool load_and_populate_test_cases(const std::vector<std::string>& csv_pat
 } // namespace test
 } // namespace ck
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

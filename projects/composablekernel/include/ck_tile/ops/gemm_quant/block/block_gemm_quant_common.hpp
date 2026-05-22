@@ -5,6 +5,8 @@
 
 #include "ck_tile/core.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -229,3 +231,4 @@ struct AQPickerCommon : public BlockGemmQuantBase
 };
 } // namespace ck_tile
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

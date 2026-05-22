@@ -12,6 +12,8 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/numeric/numeric.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -956,3 +958,4 @@ CK_TILE_HOST_DEVICE constexpr auto chain_tensor_adaptors(const X& x, const Xs&..
                               remove_cvref_t<decltype(top_dim_ids)>>{trans};                       \
     }()
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

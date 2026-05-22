@@ -5,6 +5,8 @@
 #include "ck/utility/data_type.hpp"
 #include "ck/utility/math.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -856,3 +858,4 @@ using pk_i4x8_t = typename vector_type<pk_i4_t, 8>::type;
 
 } // namespace ck
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

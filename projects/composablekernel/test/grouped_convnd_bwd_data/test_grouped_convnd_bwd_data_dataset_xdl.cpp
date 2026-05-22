@@ -15,6 +15,8 @@ using namespace ck::tensor_layout::convolution; // Import tensor layout names (G
 static ck::index_t param_mask     = 0xffff;
 static ck::index_t instance_index = -1;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -344,3 +346,4 @@ int main(int argc, char** argv)
     return RUN_ALL_TESTS();
 }
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

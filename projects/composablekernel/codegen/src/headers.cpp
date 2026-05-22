@@ -7,11 +7,14 @@
 namespace ck {
 namespace host {
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 const std::string config_header = "";
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 
 std::unordered_map<std::string_view, std::string_view> GetHeaders()
 {

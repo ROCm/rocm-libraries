@@ -22,6 +22,8 @@
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_batched_gemm_softmax_gemm_xdl_cshuffle_v1.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -1210,3 +1212,4 @@ struct DeviceBatchedGemmSoftmaxGemm_Xdl_CShuffle
 } // namespace ck
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

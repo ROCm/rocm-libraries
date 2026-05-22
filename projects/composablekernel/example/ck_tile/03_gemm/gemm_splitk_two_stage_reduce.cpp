@@ -16,6 +16,8 @@
 #include "gemm_utils.hpp"
 #include "run_gemm_example.inc"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -980,3 +982,4 @@ int main(int argc, char* argv[])
 }
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

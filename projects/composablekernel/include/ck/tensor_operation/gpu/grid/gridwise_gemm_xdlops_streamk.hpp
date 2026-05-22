@@ -20,6 +20,8 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #include "ck/host_utility/device_prop.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -1213,3 +1215,4 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
 } // namespace ck
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

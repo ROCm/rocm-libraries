@@ -113,6 +113,8 @@ struct buffer_store;
 template <index_t bytes>
 struct buffer_store_if;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-reinterpret-cast"
@@ -500,7 +502,8 @@ struct buffer_load_if<1, pre_nop>
     }
 };
 #endif
-#pragma clang diagnostic pop // "-Wundefined-reinterpret-cast"
+#pragma clang diagnostic pop
+#pragma GCC diagnostic pop // "-Wundefined-reinterpret-cast"
 template <index_t bytes>
 struct buffer_store;
 
@@ -1984,6 +1987,8 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
     if constexpr(oob_conditional_check)
         v_offset = flag ? v_offset : 0x7fffffff; // large offset to cause OOB access
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
@@ -1996,6 +2001,7 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
                                              /*imm*/ IMM,
                                              static_cast<index_t>(coherence));
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 }
 
 template <index_t N,
@@ -3264,12 +3270,15 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
     static_assert(__has_builtin(__builtin_amdgcn_raw_buffer_load_b32),
                   "We need to have the compatible compiler version to build this instruction");
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
     // Use C-style cast to change address space without dropping llvm noalias attribute
     const auto in_ptr_ = (__LDS_ADDR T*)(const_cast<T*>(in_ptr));
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
     if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::half_t>)
     {
 #if defined(__gfx950__)

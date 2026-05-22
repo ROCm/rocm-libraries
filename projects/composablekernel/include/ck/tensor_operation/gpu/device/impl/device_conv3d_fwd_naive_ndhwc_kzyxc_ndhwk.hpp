@@ -14,6 +14,8 @@
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_fwd_gpu.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -267,3 +269,4 @@ struct DeviceConv3dFwdNaive_Input_N_Di_Hi_Wi_C_Weight_K_Z_Y_X_C_Output_N_Do_Ho_W
 #endif
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

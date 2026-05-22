@@ -15,6 +15,8 @@
 #include "ck_tile/host.hpp"
 #include "grouped_gemm_common.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -265,3 +267,4 @@ void gemm_host_reference_grouped(int verify,
     }
 }
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

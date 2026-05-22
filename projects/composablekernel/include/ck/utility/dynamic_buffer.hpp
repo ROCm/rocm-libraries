@@ -16,6 +16,8 @@
 #include "generic_memory_space_atomic.hpp"
 #include "data_cache_prefetch.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -552,3 +554,4 @@ make_dynamic_buffer(T* p, ElementSpaceSize element_space_size, X invalid_element
 } // namespace ck
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

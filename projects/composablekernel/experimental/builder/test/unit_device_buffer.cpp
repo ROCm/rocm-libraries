@@ -50,6 +50,8 @@ TEST(DeviceBuffer, AutoFree)
 
     // In this test we are explicitly testing a pointer that is out of scope, so
     // we have to disable the clang compiler's lifestime safety checks.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-permissive"
@@ -61,6 +63,7 @@ TEST(DeviceBuffer, AutoFree)
     // Trying to use a pointer after freeing should return en error in HIP.
     EXPECT_THAT(hipMemset(ptr, 0xFF, size), HipError(hipErrorInvalidValue));
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 
     // Reset internal HIP error state.
     // Otherwise, the error may leak into other tests, triggering anything that

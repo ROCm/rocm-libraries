@@ -19,6 +19,7 @@ CK_TILE_DEVICE __attribute__((address_space(1))) T* to_global(const T* ptr)
 #pragma clang diagnostic ignored "-Wcast-qual"
     return (__attribute__((address_space(1))) T*)(ptr);
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 }
 
 template <typename T>
@@ -28,6 +29,7 @@ CK_TILE_DEVICE __attribute__((address_space(3))) T* to_lds(T* ptr)
 #pragma clang diagnostic ignored "-Wold-style-cast"
     return (__attribute__((address_space(3))) T*)(ptr);
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 }
 #endif // __gfx1250__
 

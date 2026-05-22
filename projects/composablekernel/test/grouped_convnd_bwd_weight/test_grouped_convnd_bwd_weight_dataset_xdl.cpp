@@ -15,6 +15,8 @@
 #include "profiler/profile_grouped_conv_bwd_weight_impl.hpp" // The actual GPU profiler that does convolution work
 #include "../common/csv_test_loader.hpp"                     // Shared CSV test case loader
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
@@ -283,3 +285,4 @@ int main(int argc, char** argv)
     return RUN_ALL_TESTS();
 }
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

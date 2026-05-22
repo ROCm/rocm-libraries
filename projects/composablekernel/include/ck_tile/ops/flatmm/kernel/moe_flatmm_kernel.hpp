@@ -10,6 +10,8 @@
 #include "ck_tile/ops/gemm/kernel/gemm_tile_partitioner.hpp"
 #include "ck_tile/host.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -1500,3 +1502,4 @@ struct MoeFlatmmKernel
 } // namespace ck_tile
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

@@ -12,6 +12,8 @@
 #include "ck/utility/functional.hpp"
 #include "ck/utility/math.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -1028,6 +1030,7 @@ using uniform_sequence_gen_t = typename uniform_sequence_gen<NSize, I>::type;
 } // namespace ck
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 
 #if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
 template <ck::index_t... Is>

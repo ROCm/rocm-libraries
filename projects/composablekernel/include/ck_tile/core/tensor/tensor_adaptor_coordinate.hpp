@@ -14,6 +14,8 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/print.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -348,11 +350,14 @@ struct CK_PRINT_X_<str_literal<PREFIXChars...>, str_literal<SUFFIXChars...>>
                                   Args&&... args) const
     {
         constexpr auto fmt_wrap_v = get_prefix() + str_literal<FMTChars...>{} + get_suffix();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
         printf(fmt_wrap_v.data, get_thread_id(), args..., targs.at(number<Is>())...);
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
     }
     template <typename T, typename... Args>
     CK_TILE_HOST_DEVICE void operator()(T&& x, Args&&... args) const
@@ -373,3 +378,4 @@ CK_TILE_HOST_DEVICE void print(const tensor_adaptor_coordinate<N, B, T>& coord)
 }
 } // namespace ck_tile
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

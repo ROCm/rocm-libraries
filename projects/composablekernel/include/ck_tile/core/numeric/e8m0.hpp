@@ -6,6 +6,8 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/mxfp_convert.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -105,3 +107,4 @@ CK_TILE_HOST_DEVICE constexpr e8m0_bexp_t::operator float() const
 
 } // namespace ck_tile
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

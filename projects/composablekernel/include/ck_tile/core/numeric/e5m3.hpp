@@ -96,3 +96,4 @@ CK_TILE_HOST_DEVICE e5m3_bexp_t::operator float() const
 
 } // namespace ck_tile
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

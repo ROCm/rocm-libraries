@@ -12,6 +12,8 @@
 #include "ck_tile/core/numeric/mxfp_scale.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -737,3 +739,4 @@ CK_TILE_HOST_DEVICE constexpr bf8x2_t pk_fp4_t::to_bf8x2(float scale) const
 
 } // namespace ck_tile
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

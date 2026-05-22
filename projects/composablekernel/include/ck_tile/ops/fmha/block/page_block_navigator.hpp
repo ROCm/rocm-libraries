@@ -6,6 +6,8 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/tensor/tile_window.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -362,3 +364,4 @@ CK_TILE_HOST_DEVICE auto make_page_block_navigator(copy_const_t<DataType, void>*
 } // namespace ck_tile
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

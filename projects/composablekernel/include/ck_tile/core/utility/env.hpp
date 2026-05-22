@@ -6,6 +6,8 @@
 #include <iostream>
 #include <string>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -129,6 +131,7 @@ struct EnvVar
         }
     }
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 };
 } // end namespace internal
 
@@ -221,3 +224,4 @@ void UpdateEnvVar(EnvVar, const std::string_view& val)
 // export CK_TILE_LOGGING=ON or CK_TILE_LOGGING=1 or CK_TILE_LOGGING=ENABLED
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_LOGGING)
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

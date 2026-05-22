@@ -1299,11 +1299,14 @@ __device__ T* cast_pointer_to_generic_address_space(T CK_TILE_CONSTANT_ADDRESS_S
 {
     // cast a pointer in "Constant" address space (4) to "Generic" address space (0)
     // only c-style pointer cast seems be able to be compiled
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
     return (T*)(p); // NOLINT(old-style-cast)
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 }
 
 template <typename T>
@@ -1311,11 +1314,14 @@ __host__ __device__ T CK_TILE_CONSTANT_ADDRESS_SPACE* cast_pointer_to_constant_a
 {
     // cast a pointer in "Generic" address space (0) to "Constant" address space (4)
     // only c-style pointer cast seems be able to be compiled;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
     return (T CK_TILE_CONSTANT_ADDRESS_SPACE*)p; // NOLINT(old-style-cast)
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 }
 
 CK_TILE_HOST_DEVICE constexpr index_t get_smem_capacity()

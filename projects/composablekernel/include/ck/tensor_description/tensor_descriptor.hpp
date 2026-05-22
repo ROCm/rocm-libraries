@@ -7,6 +7,8 @@
 #include "ck/utility/sequence_helper.hpp"
 #include "ck/tensor_description/multi_index_transform.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -643,3 +645,4 @@ using TensorCoordinateStep_t = decltype(make_tensor_coordinate_step(
 
 } // namespace ck
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

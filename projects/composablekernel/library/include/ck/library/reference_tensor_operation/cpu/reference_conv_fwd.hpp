@@ -23,6 +23,8 @@
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -573,3 +575,4 @@ struct ReferenceConvFwd : public device::BaseOperator
 } // namespace ck
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop

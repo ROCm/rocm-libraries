@@ -10,6 +10,8 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/flatmm/kernel/flatmm_kernel.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
@@ -474,3 +476,4 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
 } // namespace ck_tile
 
 #pragma clang diagnostic pop
+#pragma GCC diagnostic pop
