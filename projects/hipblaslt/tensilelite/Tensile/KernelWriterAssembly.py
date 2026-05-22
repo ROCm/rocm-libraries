@@ -42,7 +42,7 @@ from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
-  BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
+  BufferLoadB16, BufferLoadU16, BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
   BufferStoreB8, BufferStoreD16HIB16, CommonInstruction, DSBPermuteB32, DSLoadB128, \
   DSLoadB16, DSLoadB32, DSLoadB64, DSLoadU16, DSStoreB128, DSStoreB16, DSStoreB32, \
@@ -4492,13 +4492,121 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=strideF,
                          comment="numLine * stride (element units)"))
 
-      # limit_elems = m_stride_elems + K_rem  (K_rem in sgpr(loopCounterName), elements)
+      # limit_elems = m_stride_elems + K_rem (full tail, including odd trailing
+      # element so the boundary DTL load doesn't need to bump Srd+2).
       module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(loopCounterName),
-                         comment="+ K_rem (tail loop remainder in elements)"))
+                         comment="+ K_rem"))
 
+      # TMP for debug: force soffset to 0 to test boundary load path
+      module.add(SMovB32(dst=sgpr(stmp+0), src=int(0)))
       # Srd+2 = limit_elems * bpeGR (bytes)
       module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
                                    comment="buffer_load limit for %s (tail-loop tight)"%tc))
+
+    return module
+
+  ##############################################################################
+  # Single 16-bit DTL boundary load before the tail loop.
+  #
+  # computeTailLoopSrdLimit tightens Srd{tc}+2 to (numLine*strideF + K_rem) *
+  # bpe — i.e. the byte count from the SRD base to the byte *after* the last
+  # in-bounds K element (including the odd trailing 16-bit when K_rem is odd).
+  # We expose that boundary element with a single buffer_load_ushort lds=1:
+  #
+  #   soffset = Srd{tc}+2 - bpe        (last in-bounds 16-bit byte position)
+  #   vaddr   = a vgpr holding 0       (uniform across all lanes — no per-lane
+  #                                    GRO/prepad games)
+  #   EXEC    = 0x1                    (only lane 0 writes one 16-bit LDS slot)
+  #   m0      = LocalWriteBaseAddr{tc} + (numLine*DepthU + K_rem - 1) * bpe
+  #
+  # No Srd+2 bump is required — the boundary byte is already in-bounds.
+  #
+  # Same gates as computeTailLoopSrdLimit (bf16 / UseSubtileImpl / A or B /
+  # groOffsetInMacroTile=1 / non-unit stride). Other paths get an empty Module.
+  ##############################################################################
+  def tailLoopBoundaryDtlLoad(self, kernel, tP):
+    module = Module("tailLoopBoundaryDtlLoad")
+    tc = tP["tensorChar"]
+
+    if not kernel.get("UseSubtileImpl"):
+      return module
+    if tc not in ("A", "B"):
+      return module
+    if not kernel["ProblemType"]["DataType"].isBFloat16():
+      return module
+    if self.states.groOffsetInMacroTile != 1:
+      return module
+
+    strideF = self.strideRef(tc, tP['tileIdx'])
+    if self.isConstUnitStride(strideF):
+      return module
+
+    bpe = tP["bpeGR"]
+    depthU = kernel["DepthU"]
+    mt = kernel[tP["mt"]]
+    tileIdx = tP["tileIdx"]
+    loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
+    module.add(Label("sebB%s"%tc,""))
+    with self.allocTmpSgpr(3) as tmpSgprInfo:
+      stmp = tmpSgprInfo.idx
+      # stmp+0 : soffset_bytes  (= old Srd+2; the odd 16-bit byte position)
+      # stmp+1 : m0Offset_bytes (LDS byte offset)
+      # stmp+2 : numLine (0-based last line index)
+
+      module.addComment1("Tail-loop boundary DTL load for %s (lane 0, 16-bit)" % tc)
+
+      #TMP for debug: force soffset to 0 to test boundary load path
+      module.add(SMovB32(dst=sgpr("Srd%s+2" % tc), src=int(6)))
+      # --- soffset = Srd+2 - bpe (last in-bounds 16-bit element) ----------
+      # Srd+2 already covers the full tail (numLine*strideF + K_rem) bytes, so
+      # no bump is needed — the boundary byte is the last in-bounds slot.
+      module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr("Srd%s+2" % tc), src1=int(bpe),
+                         comment="soffset = Srd%s+2 - bpe (boundary byte position)" % tc))
+      #TMP for debug: force soffset to 0 to test boundary load path
+      # module.add(SMovB32(dst=sgpr(stmp+0), src=int(4)))
+
+      # --- numLine = min(SizeI/J - WG*MT, MT) - 1 --------------------------
+      module.add(SMulI32(dst=sgpr(stmp+2), src0=sgpr(tP["wg"]), src1=mt,
+                         comment="WG%s * MT(%u)" % (tP["wg"][-1], mt)))
+      module.add(SSubU32(dst=sgpr(stmp+2), src0=self.sizeRef(tileIdx), src1=sgpr(stmp+2),
+                         comment="numToEnd = Size%s - WG*MT" % self.states.indexChars[tileIdx]))
+      module.add(SMinU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=mt,
+                         comment="min(numToEnd, MT)"))
+      module.add(SSubU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=1,
+                         comment="numLine = min - 1 (0-based)"))
+
+      # --- LDS byte offset: (numLine * DepthU + K_rem - 1) * bpe -----------
+      module.add(SMulI32(dst=sgpr(stmp+1), src0=sgpr(stmp+2), src1=depthU,
+                         comment="numLine * DepthU (LDS line stride)"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(loopCounterName),
+                         comment="+ K_rem"))
+      module.add(SSubU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=1,
+                         comment="- 1 (last K element index)"))
+      module.add(scalarMultiplyBpe(stmp+1, stmp+1, float(bpe),
+                                   comment="LDS byte offset for m0"))
+
+      # --- m0 = LocalWriteBaseAddr{tc} + LDS byte offset --------------------
+      module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
+                         src1=sgpr(stmp+1),
+                         comment="m0 = LocalWriteBaseAddr%s + boundary LDS offset" % tc))
+
+      # --- uniform vaddr=0 so every lane forms address (base + soffset) ----
+      vAddr0 = self.vgprPool.checkOut(1, "tailBoundaryVAddr0")
+      module.add(VMovB32(dst=vgpr(vAddr0), src=0, comment="vaddr=0 (uniform across lanes)"))
+
+      # --- EXEC = lane 0 only, emit DTL load, wait, restore EXEC -----------
+      module.add(SMovB64(dst=EXEC(), src=0x1, comment="EXEC = lane 0 only"))
+
+      mubuf = MUBUFModifiers(offen=True, offset12=0, glc=False, slc=False, nt=False, lds=True)
+      module.add(BufferLoadU16(dst=None, vaddr=vgpr(vAddr0),
+                               saddr=sgpr("Srd%s" % tc, 4),
+                               soffset=sgpr(stmp+0), mubuf=mubuf,
+                               comment="boundary 16-bit DTL load (ushort) -> LDS@m0"))
+
+      module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
+      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
+      module.add(SBarrier())
+      self.vgprPool.checkIn(vAddr0)
 
     return module
 

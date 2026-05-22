@@ -59,7 +59,8 @@ class InstructionEmitter:
                  tileInfoA, tileInfoB, dtileInfo,
                  vgprTilesA, vgprTilesB,
                  scaleTileInfoA=None, scaleTileInfoB=None,
-                 vgprTilesSA=None, vgprTilesSB=None):
+                 vgprTilesSA=None, vgprTilesSB=None,
+                 tensorParametersA=None, tensorParametersB=None):
         self.writer = writer
         self.kernel = kernel
         self.config = config
@@ -70,6 +71,11 @@ class InstructionEmitter:
         self.vgprTilesB = vgprTilesB
         self.vgprTilesSA = vgprTilesSA or []
         self.vgprTilesSB = vgprTilesSB or []
+        self.tensorParametersMap = {}
+        if tensorParametersA is not None:
+            self.tensorParametersMap['A'] = tensorParametersA
+        if tensorParametersB is not None:
+            self.tensorParametersMap['B'] = tensorParametersB
 
         # Derived state
         self.hasScale = scaleTileInfoA is not None and scaleTileInfoB is not None
@@ -91,6 +97,7 @@ class InstructionEmitter:
             'gr_inc':           lambda em, ui: self.emit_gr_inc(em.source),
             'skip':             lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
+            'tail_boundary':  lambda em, ui: self.emit_tail_boundary(em.source),
         }
 
         # Sentinel for the long-lived per-lane diff vgpr. Set by
@@ -210,6 +217,20 @@ class InstructionEmitter:
 
     def emit_sync(self):
         return [SBarrier(comment="Barrier")]
+
+    def emit_tail_boundary(self, source):
+        """Emit the wave-0/lane-0 16-bit DTL boundary load for one tensor.
+
+        Returns an empty list when the writer's tailLoopBoundaryDtlLoad
+        gates out (non-bf16, non-Subtile, etc.) or when no tP was provided.
+        """
+        tP = self.tensorParametersMap.get(source.tensor)
+        if tP is None:
+            return []
+        mod = self.writer.tailLoopBoundaryDtlLoad(self.kernel, tP)
+        items = list(mod.flatitems())
+        items.append(Label("seb1_%s" % source.tensor, ""))
+        return items
 
     def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor."""

@@ -453,6 +453,23 @@ class SkipOp(BaseOp):
 
 
 @dataclass
+class TailBoundaryLoadOp(BaseOp):
+    """Wave-0 lane-0 16-bit DTL boundary load for the trailing odd K element.
+
+    Emitted in the tail-loop preamble between WaitGROp and SyncOp so the
+    boundary `ushort` overwrites the zero that the OOB dwordx4 wrote into
+    the same LDS slot.
+    """
+    tensor: str = ""
+
+    def __post_init__(self):
+        self.kind = 'tail_boundary'
+
+    def __str__(self):
+        return f"tail_boundary({self.tensor})"
+
+
+@dataclass
 class Dep:
     """Dependency on another placement (annotate_deps output)."""
     ref: Union[LRPlacement, GRPlacement]
@@ -2066,8 +2083,14 @@ class LogicalScheduler:
             'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
         }
         preamble.extend(self._make_gr_all_tensors(0, all_tiles))
-        # waitcount 0 + sync
+        # waitcount 0 + boundary 16-bit DTL load (bf16 odd K_rem) + sync.
+        # The boundary load MUST sit after WaitGR (the dwordx4 OOB write to
+        # LDS@boundary has retired) and before SyncOp (other waves stay in
+        # sync). For non-bf16 / non-Subtile paths this is a no-op Module.
+        #preamble.append(TailBoundaryLoadOp(tensor='B'))
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
+        preamble.append(SyncOp())
+        preamble.append(TailBoundaryLoadOp(tensor='A'))
         preamble.append(SyncOp())
 
         # Loop over partitions to re-use vgpr tile maps.
@@ -2559,7 +2582,9 @@ class LogicalScheduler:
 
     def populate_instructions(self, writer, kernel,
                               tileInfoA, tileInfoB, dtileInfo,
-                              scaleTileInfoA=None, scaleTileInfoB=None) -> None:
+                              scaleTileInfoA=None, scaleTileInfoB=None,
+                              tensorParametersA=None,
+                              tensorParametersB=None) -> None:
         """Populate EmittedModule.instructions from placements and preOps.
 
         Uses per-tensor VGPR tile lists (vgprTilesA/B/SA/SB) indexed by
@@ -2577,6 +2602,8 @@ class LogicalScheduler:
             self.vgprTilesA, self.vgprTilesB,
             scaleTileInfoA, scaleTileInfoB,
             self.vgprTilesSA, self.vgprTilesSB,
+            tensorParametersA=tensorParametersA,
+            tensorParametersB=tensorParametersB,
         )
 
         # Rebuild all loop variants from current _emitted (which now has

@@ -1256,7 +1256,9 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
-      scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+      scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+      tensorParametersA=tensorParametersA,
+      tensorParametersB=tensorParametersB)
 
   module.add(scheduler.emitMainAndExitLoops(writer, kernel))
 
@@ -1268,7 +1270,7 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
     # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
     # (no-op outside UseSubtileImpl bf16 A/B).
     module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA))
-    module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB))
+    # module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB))
     module.add(Label("seb", ""))
     module.add(scheduler.emitTailLoop(writer, kernel))
     module.add(writer.closeLoop(
