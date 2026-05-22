@@ -13,26 +13,62 @@ the per-tile load distribution for B (which expects a preshuffled
 layout that fuses the strided ``ds_write`` of the standard pipeline
 into the global load).
 
-For ck_dsl v1 we ship the **same body as batched_gemm**: the spec /
-kernel name carry the ``flatmm`` tag so callers and benchmarks can
-distinguish the two configurations, but the kernel body is shared.
-The preshuffled-B load distribution is a v2 feature (it lands with
-'s ``preshuffle-B`` helper, alongside the FP8 block-scaled GEMM
-that also wants the same primitive).
+Where the tile-level ops live
+=============================
+
+There is **no scalar inner loop in this file**. The compute body is
+:func:`ck_dsl.instances.build_batched_gemm` (which delegates to
+:func:`ck_dsl.instances.build_universal_gemm`), which:
+
+* drives the K-loop with ``scf_for_iter`` and per-K-tile MFMA atom
+  invocations (no scalar FMUL/FADD per output cell);
+* loads A/B tiles via :class:`~ck_dsl.helpers.loads.CoalescedTileLoader`
+  / :class:`~ck_dsl.helpers.loads.AsyncTileLoader` (vector
+  ``buffer_load_vN_f16`` / ``raw_ptr_buffer_load_lds`` rather than
+  per-element scalar loads);
+* picks the **K-packed** MFMA atom (``f16_32x32x16`` on f16 by
+  default; ``f16_16x16x32`` for the 16x16 hero), halving the K-loop
+  trip count vs. the legacy 32x32x8 / 16x16x16 atoms -- same lever CK
+  Tile's ``FlatmmConfig32`` selects via ``K_Warp_Tile = sizeof(f16) ==
+  2 ? 16 : 32`` (see
+  ``example/ck_tile/18_flatmm/flatmm_basic.hpp::FlatmmConfig32``);
+* writes the f32 accumulator to LDS via the ``cshuffle`` epilogue
+  (vector ``buffer_store_vN_f16`` per thread instead of scalar
+  ``buffer_store_short`` per output cell).
+
+So the v1 spec / wrapper carries the **dispatch knobs** (tile shape,
+warp grid, pipeline, epilogue, preshuffle intent); the tile-level
+ops live one layer down in ``gemm_universal``.
+
+Preshuffled-B layout
+====================
+
+The preshuffled-B *layout descriptor* lives in
+:mod:`ck_dsl.helpers.preshuffle` today; :func:`flatmm_preshuffle_b_layout`
+exposes it through this module so a host-side launcher can permute B
+into ``[k_tiles, n_tiles, block_n, block_k]`` layout *before* the
+kernel launch -- that is the host side of the FlatMM contract. The
+matching kernel-side per-lane preshuffled-B load path lives in
+``helpers/preshuffle.py::emit_preshuffleb_offset`` and is the v2
+hook ``gemm_universal`` consumes once the FlatMM pipeline body lands;
+``build_flatmm`` continues to reject ``preshuffle_b=True`` at IR-build
+time until then.
 
 If you need flat-non-batched matmul today, the right move is one of:
 
-* ``build_universal_gemm`` (single-batch, the canonical hero path) -- the
- same kernel CK Tile's ``03_gemm`` ``Preshuffle`` config produces.
-* ``build_batched_gemm`` (multi-batch) -- if FlatMM's API surface is
- what you want.
-* ``build_flatmm`` (this file) -- if you want a kernel name + spec
- that documents the FlatMM intent so a sweep / dispatcher can route
- it appropriately.
+* :func:`ck_dsl.instances.build_universal_gemm` (single-batch, the
+  canonical hero path) -- the same kernel CK Tile's ``03_gemm``
+  ``Preshuffle`` config produces.
+* :func:`ck_dsl.instances.build_batched_gemm` (multi-batch) -- if
+  FlatMM's API surface is what you want.
+* :func:`build_flatmm` (this file) -- if you want a kernel name + spec
+  that documents the FlatMM intent so a sweep / dispatcher can route
+  it appropriately.
 
-Once lands ``helpers/preshuffle.py`` and the FP8 block-scaled
-GEMM, FlatMM gains its own kernel body and stops aliasing
-``batched_gemm``.
+Once the preshuffled-B kernel body lands in ``gemm_universal``,
+FlatMM gains its own kernel body and stops aliasing ``batched_gemm``;
+the spec surface (``preshuffle_b``, ``flatmm_preshuffle_b_layout``)
+stays unchanged so callers don't need to follow the cutover.
 """
 
 from __future__ import annotations
@@ -41,6 +77,8 @@ from dataclasses import dataclass, field
 from typing import Tuple
 
 from ..core.ir import KernelDef
+from ..helpers.atoms import MfmaAtom, mfma_atom
+from ..helpers.preshuffle import PreshuffleBSpec, host_preshuffle_layout
 from .batched_gemm import (
     BatchedGemmSpec,
     batched_gemm_grid,
@@ -63,11 +101,13 @@ class FlatMMSpec:
     shared) with two FlatMM-specific extras:
 
     * ``name`` defaults to ``ck_dsl_flatmm`` so the kernel symbol
-    carries the FlatMM tag.
+      carries the FlatMM tag.
     * ``preshuffle_b`` (default False) is on the spec surface so
-    callers can write the FlatMM-with-preshuffle intent today; v1
-    rejects ``True`` at build time, v2 wires the
-    preshuffled-B load distribution.
+      callers can write the FlatMM-with-preshuffle intent today. v1
+      rejects ``True`` at IR build time; the host-side preshuffle
+      layout descriptor is reachable via
+      :func:`flatmm_preshuffle_b_layout` so the permuted-B tensor
+      can be built ahead of the v2 kernel landing.
     """
 
     tile: TileSpec
@@ -106,11 +146,73 @@ class FlatMMSpec:
         return self.to_batched_spec().kernel_name()
 
 
+# ---------------------------------------------------------------------
+# Spec convenience constructors mirroring CK Tile's flatmm_basic.hpp
+# ---------------------------------------------------------------------
+
+
+def flatmm_config32(dtype: str = "f16") -> TileSpec:
+    """``FlatmmConfig32`` mirror: 32x32 hero atom, K-packed when on f16.
+
+    Drop-in match for the upstream
+    ``example/ck_tile/18_flatmm/flatmm_basic.hpp::FlatmmConfig32``
+    defaults: ``M_Tile=N_Tile=128``, ``M_Warp=1, N_Warp=4``, MFMA
+    ``32x32x16`` for f16 / bf16 (the K-packed atom; ``K_Warp_Tile =
+    sizeof(DataType) == 2 ? 16 : 32`` in the CK Tile config).
+
+    Use as::
+
+        spec = FlatMMSpec(tile=flatmm_config32("f16"),
+                          trait=TraitSpec(epilogue="cshuffle"))
+    """
+    if dtype not in ("f16", "fp16", "bf16"):
+        raise ValueError(
+            f"flatmm_config32 ships f16 / bf16 today (got {dtype!r}); "
+            "fp8 / bf8 wire through helpers.atoms.mfma_atom('fp8', ...)"
+        )
+    return TileSpec(
+        tile_m=128,
+        tile_n=128,
+        tile_k=128 // 2,  # 128 bytes / sizeof(f16)
+        warp_m=1,
+        warp_n=4,
+        warp_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+    )
+
+
+def flatmm_config16(dtype: str = "f16") -> TileSpec:
+    """``FlatmmConfig16`` mirror: 16x16 atom, K=32 K-packed for f16/bf16.
+
+    Mirror of ``FlatmmConfig16`` in CK Tile's ``flatmm_basic.hpp`` for
+    the 16x16 hero shape (``K_Warp_Tile = sizeof(DataType) == 2 ? 32 :
+    64``). Useful when the 32x32 atom's 16-float accumulator pushes
+    occupancy below break-even -- the 16x16 atom keeps the per-lane
+    accumulator at 4 floats.
+    """
+    if dtype not in ("f16", "fp16", "bf16"):
+        raise ValueError(f"flatmm_config16 ships f16 / bf16 today (got {dtype!r})")
+    return TileSpec(
+        tile_m=128,
+        tile_n=128,
+        tile_k=128 // 2,
+        warp_m=1,
+        warp_n=4,
+        warp_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+    )
+
+
 def is_valid_spec(spec: FlatMMSpec) -> Tuple[bool, str]:
     if spec.preshuffle_b:
         return False, (
-            "preshuffle_b=True is a feature (waiting on "
-            "helpers/preshuffle.py); shipping as v2"
+            "preshuffle_b=True is gated by the v2 preshuffled-B kernel "
+            "body in gemm_universal; the host-side layout descriptor is "
+            "available today via flatmm_preshuffle_b_layout(spec, N, K)"
         )
     from .batched_gemm import is_valid_spec as _bgemm_valid
 
@@ -127,6 +229,13 @@ def build_flatmm(spec: FlatMMSpec) -> KernelDef:
     FlatMM kernel name. The runtime ABI is identical, so any launcher
     that already understands the batched_gemm signature can drive a
     FlatMM kernel unchanged.
+
+    The underlying kernel body is tile-level: vector tile loads
+    (``CoalescedTileLoader`` / ``AsyncTileLoader``), K-packed MFMA atom
+    in the K-loop (``f16_32x32x16`` by default; see
+    :func:`flatmm_atom_shape`), and the cshuffle epilogue's wide
+    ``buffer_store_vN_f16``. There is no scalar per-element code path
+    in this flow.
     """
     ok, why = is_valid_spec(spec)
     if not ok:
@@ -144,10 +253,77 @@ def flatmm_signature(spec: FlatMMSpec):
     return batched_gemm_signature(spec.to_batched_spec())
 
 
+# ---------------------------------------------------------------------
+# Tile-level introspection helpers
+# ---------------------------------------------------------------------
+
+
+def flatmm_atom_shape(spec: FlatMMSpec) -> Tuple[int, int, int]:
+    """Return ``(m, n, k)`` of the per-warp MFMA atom this spec resolves to.
+
+    Useful when sanity-checking a FlatMM config against the K-packed
+    atom catalog: ``(32, 32, 16)`` for the canonical hero (CK Tile
+    ``FlatmmConfig32`` on f16) and ``(16, 16, 32)`` for the 16x16
+    K-packed atom (``FlatmmConfig16``).
+    """
+    t = spec.tile
+    return (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
+
+
+def flatmm_atom(spec: FlatMMSpec) -> MfmaAtom:
+    """Return the :class:`~ck_dsl.helpers.atoms.MfmaAtom` this spec resolves to.
+
+    Hands back the same :class:`MfmaAtom` ``build_universal_gemm`` will
+    invoke for the K-loop, so a caller can introspect per-lane operand
+    widths / accumulator footprint before launching.
+    """
+    return mfma_atom("f16", *flatmm_atom_shape(spec))
+
+
+def flatmm_preshuffle_b_spec(spec: FlatMMSpec) -> PreshuffleBSpec:
+    """Build the :class:`~ck_dsl.helpers.preshuffle.PreshuffleBSpec` for
+    this FlatMM config.
+
+    Uses the per-block tile dims from ``spec.tile`` and ``elem_bytes=2``
+    for the f16 / bf16 family. The descriptor feeds both the host-side
+    permutation pass (via :func:`flatmm_preshuffle_b_layout`) and the
+    kernel-side per-lane address calculator
+    (:func:`ck_dsl.helpers.emit_preshuffleb_offset`) once the v2
+    preshuffled-B kernel body lands.
+    """
+    t = spec.tile
+    return PreshuffleBSpec(block_n=t.tile_n, block_k=t.tile_k, elem_bytes=2)
+
+
+def flatmm_preshuffle_b_layout(
+    spec: FlatMMSpec, *, n: int, k: int
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """Host-side preshuffled-B layout for the launcher to permute B with.
+
+    Returns ``(shape, strides)`` describing the
+    ``[k_tiles, n_tiles, block_n, block_k]`` packed layout the v2
+    FlatMM kernel body expects. Available **today** so a host-side
+    launcher can build the permuted B tensor (e.g. ``b_pre =
+    b_natural.view(k_tiles, block_k, n_tiles, block_n).permute(0, 2, 3,
+    1).contiguous()``) before the v2 body lands -- at which point the
+    only kernel-side change is wiring ``preshuffle_b=True``.
+
+    Wraps :func:`ck_dsl.helpers.host_preshuffle_layout` with the
+    PreshuffleBSpec derived from this FlatMM config.
+    """
+    return host_preshuffle_layout(flatmm_preshuffle_b_spec(spec), n=n, k=k)
+
+
 __all__ = [
     "FlatMMSpec",
     "build_flatmm",
+    "flatmm_atom",
+    "flatmm_atom_shape",
+    "flatmm_config16",
+    "flatmm_config32",
     "flatmm_grid",
+    "flatmm_preshuffle_b_layout",
+    "flatmm_preshuffle_b_spec",
     "flatmm_signature",
     "is_valid_spec",
     # Re-exports for caller convenience.

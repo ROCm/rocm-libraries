@@ -6,19 +6,19 @@
 Direct port of CK Tile's ``BatchedTransposePipeline``
 (``include/ck_tile/ops/batched_transpose``) "pipeline=0" path that
 the reference C++ kernel measures at ~5.5 TB/s on MI355X for a
-4096×4096 fp16 transpose. The win comes from a single observation:
+4096x4096 fp16 transpose. The win comes from a single observation:
 
     A square sub-tile owned by one lane can be transposed entirely
     in that lane's register file. No LDS staging, no inter-lane
     shuffle, no barrier.
 
 Pipeline (one wave64 per CTA, one ``[TILE_M, TILE_N]`` tile per CTA;
-default ``TILE_M = TILE_N = 64`` so each lane owns an 8×8 sub-tile):
+default ``TILE_M = TILE_N = 64`` so each lane owns an 8x8 sub-tile):
 
     1. Lane ``t = (lr, lc)`` (``lr = t / 8``, ``lc = t % 8``) issues
        8 wide ``global_load_v8_f16`` from
        ``X[block_m + lr*8 + i, block_n + lc*8 .. lc*8 + 7]`` for
-       ``i in 0..7``. After the loads each lane holds an 8×8 fp16
+       ``i in 0..7``. After the loads each lane holds an 8x8 fp16
        sub-tile spread across 8 ``<8 x half>`` registers.
     2. In-register transpose: build 8 output registers where
        ``out[i] = (rows[0][i], rows[1][i], ..., rows[7][i])``. With
@@ -32,8 +32,47 @@ default ``TILE_M = TILE_N = 64`` so each lane owns an 8×8 sub-tile):
        ``Y[block_n + lc*8 + i, block_m + lr*8 .. lr*8 + 7]`` for
        ``i in 0..7`` -- the transposed sub-tile.
 
-For an ``M × K`` input the grid is ``(M / 64, K / 64, 1)`` -- one
-wave64 per output 64×64 tile, plenty for any practical shape.
+For an ``M x K`` input the grid is ``(M / 64, K / 64, 1)`` -- one
+wave64 per output 64x64 tile, plenty for any practical shape.
+
+Scalar -> tile/vector replacements (v2 vs v1)
+---------------------------------------------
+
+The v1 hand-walked the per-row global addresses with
+``b.global_load_vN(X, b.add(b.mul(b.add(my_m, b.const_i32(i)), K),
+my_n), io_ty, n=VEC)``: one ``mul`` and two ``add``\\s of fresh SSA
+per VEC iteration on each of the load and store loops. That is
+``VEC * (1 mul + 2 add) * 2`` = 32 IR ops per lane for plain address
+arithmetic at VEC=8, on top of the 8 vmem loads + 8 vmem stores
+themselves. The LLVM AMDGPU backend folds most of this into
+``s_add`` / ``v_add_co_u32`` chains, but the SSA was opaque to the
+CK Tile coordinate-movement helpers and to readers tracing the
+algorithm.
+
+This v2 replaces the manual address arithmetic with a CK Tile-style
+:class:`TensorView` + :class:`TensorCoordinate` pair:
+
+* :func:`make_global_view` / :func:`make_buffer_view` builds the
+  per-operand descriptor + address-space-aware load/store dispatch.
+  The ``vmem_view.load_vec_at(b, off, n=VEC)`` /
+  ``vmem_view.store_vec_at`` calls collapse the global vs buffer
+  branch into one site (the existing code had to duplicate every
+  load and store inside ``if use_buffer_io`` branches).
+* :func:`make_tensor_coordinate` seeds a per-row coordinate at the
+  first lane element; subsequent rows are stepped via
+  :func:`move_tensor_coordinate` with deltas ``(1, 0)`` so the cached
+  offset bumps by exactly ``K`` (input) / ``M`` (output) per
+  iteration -- one ``add`` instead of one ``mul + 2 add`` per VEC
+  step. The CK Tile equivalent is ``move_tensor_coordinate(in_coord,
+  make_array(1, 0))``; see ``include/ck_tile/core/tensor/tensor_coordinate.hpp``.
+* The in-register transpose still uses :func:`IRBuilder.vec_extract`
+  + :func:`IRBuilder.vec_pack`, which lowers to the same
+  ``v_perm_b32`` byte-permute chain CK Tile's
+  ``transpose_vectors_apply_impl(..., bytesize2_2x2_tag)`` emits
+  with ``__builtin_amdgcn_perm`` -- this is the gold pattern and we
+  don't need to change it. (The :class:`TileWindow` abstraction
+  doesn't yet expose ``perm_b32`` directly; that's tracked in the
+  ``ds_swizzle_xor``-family proposal below.)
 
 Measured perf vs CK Tile's ``tile_example_batched_transpose
 -pipeline=0`` on MI355X (gfx950, fp16, square shapes, 2000-iter tight
@@ -42,12 +81,12 @@ loop, ``no_fence`` launches so per-call overhead doesn't dominate):
 ==================== ============== ============== ===========
 shape                this kernel    CK Tile p=0    ratio
 ==================== ============== ============== ===========
-4096 × 4096          ~5470 GB/s     ~5470 GB/s     1.00×
-8192 × 8192          ~5810 GB/s     ~6150 GB/s     0.95×
-16384 × 16384        ~4060 GB/s     ~4200 GB/s     0.97×
+4096 x 4096          ~5470 GB/s     ~5470 GB/s     1.00x
+8192 x 8192          ~5810 GB/s     ~6150 GB/s     0.95x
+16384 x 16384        ~4060 GB/s     ~4200 GB/s     0.97x
 ==================== ============== ============== ===========
 
-Below 4096² a *single* Python-launched kernel is enqueue/replay bound:
+Below 4096^2 a *single* Python-launched kernel is enqueue/replay bound:
 the GPU finishes the kernel faster than Python can submit the next
 launch, so event timing over a Python loop includes empty stream gaps.
 Capturing a graph that contains many transpose launches exposes the
@@ -56,9 +95,9 @@ actual GPU kernel time and closes the gap:
 ==================== ============== ============== ===========
 shape                graph-batched  CK Tile p=0    ratio
 ==================== ============== ============== ===========
-1024 × 1024          ~2.0 us        ~2.9 us        1.45×
-2048 × 2048          ~3.3 us        ~4.0 us        1.20×
-4096 × 4096          ~11.8 us       ~12.1 us       1.03×
+1024 x 1024          ~2.0 us        ~2.9 us        1.45x
+2048 x 2048          ~3.3 us        ~4.0 us        1.20x
+4096 x 4096          ~11.8 us       ~12.1 us       1.03x
 ==================== ============== ============== ===========
 
 This is the same launch-overhead fix used by
@@ -87,7 +126,7 @@ Validation contract:
 
 * ``f16`` / ``bf16``;
 * ``M`` and ``K`` must be multiples of ``tile_m`` / ``tile_n``;
-* default tile is 64 × 64 (one lane = one 8 × 8 sub-tile, vec = 8).
+* default tile is 64 x 64 (one lane = one 8 x 8 sub-tile, vec = 8).
   Other ``(tile_m, tile_n, vec)`` tuples are accepted as long as
   ``tile_m % vec == 0``, ``tile_n % vec == 0``, and the resulting
   per-lane sub-tile is a square (``tile_m / vec == tile_n / vec``)
@@ -106,6 +145,13 @@ from ..helpers.spec import (
     SignatureBuilder,
     kernel_name_join,
 )
+from ..helpers.tensor_view import (
+    make_buffer_resource,
+    make_buffer_view,
+    make_global_view,
+    make_tensor_coordinate,
+    move_tensor_coordinate,
+)
 
 
 DType = Literal["f16", "bf16"]
@@ -115,8 +161,8 @@ DType = Literal["f16", "bf16"]
 class TransposeBcSpec:
     """Configuration for the no-LDS in-register transpose kernel.
 
-    Default tile ``64 × 64`` with ``vec = 8`` puts one wave64 per
-    CTA, with each of the 64 lanes owning an 8 × 8 sub-tile and
+    Default tile ``64 x 64`` with ``vec = 8`` puts one wave64 per
+    CTA, with each of the 64 lanes owning an 8 x 8 sub-tile and
     transposing it entirely in registers (8 vmem reads + 8 vmem
     writes per lane).
     """
@@ -130,7 +176,7 @@ class TransposeBcSpec:
     vec: int = 8
     """Halves per global vector op (= sub-tile side length).
 
-    Each lane's sub-tile is ``vec × vec`` halves: ``vec`` rows of
+    Each lane's sub-tile is ``vec x vec`` halves: ``vec`` rows of
     ``vec`` contiguous columns, loaded as ``vec`` separate
     ``global_load_v{vec}_f16`` ops. The in-register transpose
     builds ``vec`` output registers by gathering element ``i`` of
@@ -223,11 +269,11 @@ def build_transpose_bc(spec: TransposeBcSpec) -> KernelDef:
 
     Kernel signature: ``(X: ptr, Y: ptr, M: i32, K: i32)``.
 
-    Layout (default ``tile = 64×64``, ``vec = 8``):
+    Layout (default ``tile = 64x64``, ``vec = 8``):
 
-    * Grid: ``(K / 64, M / 64, 1)``. One CTA per output 64×64 tile.
+    * Grid: ``(K / 64, M / 64, 1)``. One CTA per output 64x64 tile.
     * Block: ``(64, 1, 1)`` -- a single wave64.
-    * Each lane owns an 8×8 sub-tile of the input tile and writes
+    * Each lane owns an 8x8 sub-tile of the input tile and writes
       its transposed sub-tile to the output. No LDS, no barrier.
     """
     ok, why = is_valid_spec(spec)
@@ -236,7 +282,7 @@ def build_transpose_bc(spec: TransposeBcSpec) -> KernelDef:
 
     io_ty = io_ir_type(spec.dtype)
     TM, TN, VEC, BS = spec.tile_m, spec.tile_n, spec.vec, spec.block_size
-    # Per-lane sub-tile: (VEC × VEC) halves. ``LANES_N`` is the
+    # Per-lane sub-tile: (VEC x VEC) halves. ``LANES_N`` is the
     # number of lanes laid out along the N axis (a square wave64
     # requires ``LANES_M == LANES_N`` which the validator enforces).
     LANES_N = spec.lanes_per_row  # TN // VEC
@@ -250,6 +296,13 @@ def build_transpose_bc(spec: TransposeBcSpec) -> KernelDef:
     K = b.param("K", I32)
 
     use_buffer_io = spec.use_buffer_io and spec.dtype == "f16"
+    # Per-operand :class:`TensorView`: the CK Tile-style address-
+    # space-aware load / store dispatcher. ``make_buffer_view``
+    # wraps an AMDGPU buffer resource (raw_ptr_buffer_load/store
+    # path), while ``make_global_view`` emits plain flat global
+    # ops. Both expose the same ``load_vec_at`` /
+    # ``store_vec_at`` API so the per-row loop below stays branch-
+    # free w.r.t. the buffer / global mode.
     if use_buffer_io:
         # Match CK Tile's no-LDS pipeline: raw_ptr_buffer_load/store
         # with 32-bit byte offsets and one SGPR buffer resource per
@@ -258,13 +311,20 @@ def build_transpose_bc(spec: TransposeBcSpec) -> KernelDef:
         # shapes where address math can otherwise dominate the
         # 16-byte vmem payload.
         num_bytes = b.mul(b.mul(M, K), b.const_i32(2))
-        x_rsrc = b.buffer_rsrc(X, num_bytes)
-        y_rsrc = b.buffer_rsrc(Y, num_bytes)
-        zero_soffset = b.const_i32(0)
+        x_rsrc = make_buffer_resource(b, X, num_bytes=num_bytes)
+        y_rsrc = make_buffer_resource(b, Y, num_bytes=num_bytes)
+        # The view shape is the *kernel-launch* (M, K) / (K, M).
+        # Strides are packed (K for X, M for Y) -- this matches CK
+        # Tile's ``make_naive_tensor_descriptor_packed`` used by
+        # ``make_tile_window<address_space::buffer>``.
+        x_view = make_buffer_view(x_rsrc, shape=(1, 1), dtype=io_ty, strides=(K, 1))
+        y_view = make_buffer_view(y_rsrc, shape=(1, 1), dtype=io_ty, strides=(M, 1))
     else:
-        x_rsrc = None
-        y_rsrc = None
-        zero_soffset = None
+        # Plain flat-global path; same descriptor algebra, different
+        # IR primitive (``memref.global_load_vN`` vs
+        # ``memref.raw_ptr_buffer_load``).
+        x_view = make_global_view(X, shape=(1, 1), dtype=io_ty, strides=(K, 1))
+        y_view = make_global_view(Y, shape=(1, 1), dtype=io_ty, strides=(M, 1))
 
     tid = b.thread_id_x()
     c_lanes_n = b.const_i32(LANES_N)
@@ -298,18 +358,20 @@ def build_transpose_bc(spec: TransposeBcSpec) -> KernelDef:
     # X[my_m + i, my_n .. my_n + VEC - 1]. Issued as VEC independent
     # ``global_load_v{VEC}_f16`` ops; the GCN scheduler issues them
     # out-of-order so the per-lane vmem latency overlaps freely.
+    #
+    # Address arithmetic uses the CK Tile incremental-offset idiom
+    # (:func:`move_tensor_coordinate`): seed a coordinate at
+    # ``(my_m, my_n)`` and bump the row by ``(1, 0)`` between
+    # iterations so the cached offset advances by exactly ``K`` per
+    # row rather than recomputing ``(my_m + i) * K + my_n`` from
+    # scratch each time.
+    in_coord = make_tensor_coordinate(b, x_view.desc, (my_m, my_n))
+    row_step = (b.const_i32(1), b.const_i32(0))
     rows = []
     for i in range(VEC):
-        row_idx = b.add(my_m, b.const_i32(i)) if i > 0 else my_m
-        # X is row-major with stride K halves per row.
-        off = b.add(b.mul(row_idx, K), my_n)
-        if use_buffer_io:
-            byte_off = b.mul(off, b.const_i32(2))
-            rows.append(
-                b.buffer_load_vN_f16(x_rsrc, byte_off, zero_soffset, dwords=VEC // 2)
-            )
-        else:
-            rows.append(b.global_load_vN(X, off, io_ty, n=VEC))
+        if i > 0:
+            in_coord = move_tensor_coordinate(b, in_coord, row_step)
+        rows.append(x_view.load_vec_at(b, in_coord.offset(b), n=VEC))
 
     # ----- Phase 2: in-register transpose.
     # ``out_rows[i]`` should be ``<VEC x half>`` holding
@@ -329,17 +391,15 @@ def build_transpose_bc(spec: TransposeBcSpec) -> KernelDef:
         out_rows.append(b.vec_pack(elems, io_ty))
 
     # ----- Phase 3: scatter VEC rows of VEC contiguous halves each.
-    # Y is ``[K, M]`` row-major with stride M halves per row.
+    # Y is ``[K, M]`` row-major with stride M halves per row. Same
+    # incremental-offset idiom as Phase 1, just stepping along the
+    # output's row axis (which is the input's column axis: ``my_n``
+    # plays the role of the row base).
+    out_coord = make_tensor_coordinate(b, y_view.desc, (my_n, my_m))
     for i in range(VEC):
-        out_row_idx = b.add(my_n, b.const_i32(i)) if i > 0 else my_n
-        off = b.add(b.mul(out_row_idx, M), my_m)
-        if use_buffer_io:
-            byte_off = b.mul(off, b.const_i32(2))
-            b.buffer_store_vN_f16(
-                y_rsrc, byte_off, zero_soffset, out_rows[i], dwords=VEC // 2
-            )
-        else:
-            b.global_store_vN(Y, off, out_rows[i], VEC)
+        if i > 0:
+            out_coord = move_tensor_coordinate(b, out_coord, row_step)
+        y_view.store_vec_at(b, out_coord.offset(b), out_rows[i], n=VEC)
 
     return b.kernel
 

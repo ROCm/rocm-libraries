@@ -593,9 +593,37 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     def _issue_fp8_dequant_loads(
         kv_tile_idx: Value, buf_idx: Value, lds_token: str
     ) -> None:
+        """Sync per-thread fp8 -> f32 -> *scale -> bf16/fp16 -> LDS.
+
+        Uses gfx950's packed ``v_cvt_pk_f32_fp8`` (via
+        :meth:`IRBuilder.cvt_pk_f32_fp8x4`) instead of 8 scalar
+        ``v_cvt_f32_fp8`` per chunk. The 2D sync sibling
+        ``_issue_fp8_dequant_loads`` (in ``attention_tiled_2d.py``)
+        documents the rationale: the compiler does NOT fuse 8 scalar
+        cvts into 2 packed cvts on its own (ISA inspection of the
+        round-1 sync loader confirmed 8 scalar emits per chunk), and
+        AITER's production paged-attention FP8 K/V dequant uses the
+        packed primitive too (see
+        ``csrc/include/attention_common.cuh::to_float_fp8x4``).
+
+        The scale is applied **unfused** as a plain ``v_pk_mul``
+        against an f32 scale, NOT via the gfx950 fused
+        ``v_cvt_scalef32_pk_f32_fp8`` intrinsic. The fused form
+        interprets ``scale`` as an E8M0 micro-scaling exponent and
+        silently truncates arbitrary per-tensor scales like
+        ``k_scale = max_abs / 448`` to the nearest power of two,
+        giving ~0.71x of expected magnitude on production traces. See
+        the comment block in the 2D sync loader (~lines 1600-1630) for
+        the full correctness argument.
+        """
         scale = k_scale_p if lds_token == "K" else v_scale_p
         lds = K_lds if lds_token == "K" else V_lds
         src = key if lds_token == "K" else value
+        assert fp8_elems_per_chunk == 8, (
+            f"FP8 dequant loader expects 8-elem chunks (got "
+            f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
+            f"to split cleanly into 2× <4 x fp8> sub-chunks."
+        )
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
@@ -613,11 +641,29 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
             fp8_vec = b.global_load_vN(
                 src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
             )
+            # Split <8 x fp8> into 2x <4 x fp8> for the packed cvt; the
+            # backend collapses the extract+pack chain back into a
+            # bitcast-equivalent shuffle once it sees the
+            # cvt.pk.f32.fp8 operand is whole-i32.
+            lo_quad = b.vec_pack(
+                [b.vec_extract(fp8_vec, i) for i in range(4)],
+                FP8E4M3,
+            )
+            hi_quad = b.vec_pack(
+                [b.vec_extract(fp8_vec, i) for i in range(4, 8)],
+                FP8E4M3,
+            )
+            lo_f32x4 = b.cvt_pk_f32_fp8x4(lo_quad)
+            hi_f32x4 = b.cvt_pk_f32_fp8x4(hi_quad)
             dequanted = []
-            for i in range(fp8_elems_per_chunk):
-                fp8_v = b.vec_extract(fp8_vec, i)
-                f32_v = b.fmul(b.cvt_fp8_to_f32(fp8_v), scale)
-                dequanted.append(b.cast_f32_to(f32_v, dtype))
+            for i in range(4):
+                dequanted.append(
+                    b.cast_f32_to(b.fmul(b.vec_extract(lo_f32x4, i), scale), dtype)
+                )
+            for i in range(4):
+                dequanted.append(
+                    b.cast_f32_to(b.fmul(b.vec_extract(hi_f32x4, i), scale), dtype)
+                )
             packed = b.vec_pack(dequanted, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
 

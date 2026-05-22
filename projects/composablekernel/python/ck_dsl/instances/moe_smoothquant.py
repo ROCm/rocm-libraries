@@ -34,14 +34,33 @@ What we cover today:
 * ``out_dtype`` (QY) : ``i8`` / ``fp8e4m3`` / ``bf8e5m2``
 * ``topk`` : compile-time positive int (same as CK Tile's ``-k`` arg)
 * ``experts`` : compile-time positive int (sized for SmScale stride)
+
+Optimization notes (mirror the sibling :mod:`smoothquant`):
+
+* Pass-1 per-chunk absmax uses a balanced :func:`_tree_fmax` reduction
+  so the per-element ``|y|`` chain has ``O(log VEC)`` critical-path
+  depth, enabling the AMDGPU backend's ``v_max3_f32`` pattern-match
+  (matches CK Tile's ``UseMax3`` inline-asm path).
+* Pass-2 quantise+store packs ``VEC`` f32 lanes into one i32/i64 store
+  per chunk via :func:`_pack_quant_chunk_f32` +
+  :func:`_store_packed_chunk`. For ``fp8e4m3`` / ``bf8e5m2`` the cvt
+  uses the packed ``v_cvt_pk_{fp8,bf8}_f32`` AMDGPU intrinsics, which
+  is the AITER ``q8x4_t`` vec4 path from
+  ``csrc/include/quant_common.cuh``.
+* The per-CTA ``i_expert`` lookup pins the result in SGPR via
+  :func:`IRBuilder.to_sgpr_u32` (wave-uniform; one ``s_load_dword``).
+  The ``i_expert * N`` SmScale row base is pre-computed once outside
+  the chunk loop and reused as the row-stride add, so every chunk's
+  SmScale gather is a single ``s_add + global_load`` rather than a
+  fresh multiply-accumulate.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import List, Literal, Tuple
 
-from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from ..core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
 from ..helpers.io import io_ir_type
 from ..helpers.quant import QDType, quant_ir_type, quant_max_abs, quantize_scalar_f32
 from ..helpers.reduction import block_lds_reduce
@@ -54,10 +73,106 @@ from ..helpers.spec import (
 )
 from ..helpers.sweep import sweep_row_chunks
 from ..helpers.tensor_view import (
+    make_global_view,
     make_lds_view,
     make_naive_tensor_view_packed,
     make_tile_window,
 )
+
+
+# ---------------------------------------------------------------------
+# Local helpers (kept inside this instance file to honour the
+# "instance files only" optimisation scope). These mirror the helpers
+# in :mod:`ck_dsl.instances.smoothquant`; we cannot share through a
+# private module without expanding the optimisation scope, and the
+# logic is small enough that duplication is preferable to a
+# cross-file import dance.
+# ---------------------------------------------------------------------
+
+
+def _tree_fmax(b: IRBuilder, values: List[Value]) -> Value:
+    """Balanced pairwise ``fmax`` reduction (see sibling smoothquant
+    helper for the rationale)."""
+    cur = list(values)
+    while len(cur) > 1:
+        nxt: List[Value] = []
+        for i in range(0, len(cur) - 1, 2):
+            nxt.append(b.fmax(cur[i], cur[i + 1]))
+        if len(cur) % 2:
+            nxt.append(cur[-1])
+        cur = nxt
+    return cur[0]
+
+
+def _pack_quant_chunk_f32(
+    b: IRBuilder,
+    scaled_f32: List[Value],
+    *,
+    q_ty,
+    out_dtype: QDType,
+) -> Value:
+    """Quantise + vec-pack a chunk of ``y * inv_yscale`` f32 scalars.
+
+    Dispatches on ``out_dtype`` exactly like the sibling helper in
+    :mod:`ck_dsl.instances.smoothquant`: packed ``v_cvt_pk_fp8_f32``
+    / ``v_cvt_pk_bf8_f32`` for the fp8/bf8 paths, per-element
+    ``cvt_f32_to_i8_sat`` (with the [-127, 127] clamp) + ``vec_pack``
+    for the i8 path.
+    """
+    n = len(scaled_f32)
+    if n not in (2, 4, 8):
+        raise ValueError(f"_pack_quant_chunk_f32 expects n in {{2,4,8}}, got {n}")
+
+    if out_dtype in ("fp8e4m3", "bf8e5m2") and n % 4 == 0:
+        cvt = b.cvt_pk_fp8_f32x4 if out_dtype == "fp8e4m3" else b.cvt_pk_bf8_f32x4
+        packed_chunks: List[Value] = []
+        for off in range(0, n, 4):
+            quad = b.vec_pack(scaled_f32[off : off + 4], F32)
+            packed_chunks.append(cvt(quad))
+        if len(packed_chunks) == 1:
+            return packed_chunks[0]
+        out = packed_chunks[0]
+        for chunk in packed_chunks[1:]:
+            out = b.vec_concat(out, chunk)
+        return out
+
+    qs: List[Value] = []
+    for sf in scaled_f32:
+        if out_dtype == "i8":
+            qs.append(
+                b.cvt_f32_to_i8_sat(
+                    b.clamp_f32(sf, b.const_f32(-127.0), b.const_f32(127.0))
+                )
+            )
+        elif out_dtype == "fp8e4m3":
+            qs.append(b.cvt_f32_to_fp8(sf))
+        elif out_dtype == "bf8e5m2":
+            qs.append(b.cvt_f32_to_bf8(sf))
+        else:
+            raise ValueError(f"unsupported out_dtype {out_dtype!r}")
+    return b.vec_pack(qs, q_ty)
+
+
+def _store_packed_chunk(
+    b: IRBuilder,
+    qy_ptr: Value,
+    byte_off: Value,
+    packed: Value,
+    *,
+    n: int,
+) -> None:
+    """Bitcast ``<n x q_ty>`` (8-bit elements) to i32/i64 and emit a
+    single global store (see sibling smoothquant helper for details)."""
+    if n == 4:
+        as_int = b.bitcast(packed, I32)
+        idx = b.lshr(byte_off, b.const_i32(2))
+        b.global_store(qy_ptr, idx, as_int, align=4)
+    elif n == 8:
+        as_int = b.bitcast(packed, I64)
+        idx = b.lshr(byte_off, b.const_i32(3))
+        b.global_store(qy_ptr, idx, as_int, align=8)
+    else:
+        raise ValueError(f"_store_packed_chunk supports n in {{4, 8}}, got {n}")
 
 
 DType = Literal["f16", "bf16"]
@@ -182,28 +297,41 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec) -> KernelDef:
     i_expert = b.to_sgpr_u32(b.global_load_i32(TopkIds, topkids_idx))
 
     # CK Tile-style views. X is a flat (tokens, N) packed view; QY
-    # is a (topk*tokens, N) packed view; SmScale is a 2D (experts, N)
-    # packed view (so the per-expert row stride is exactly N).
+    # is a (topk*tokens, N) packed view. SmScale is exposed as a flat
+    # 1D ``(experts * N,)`` view; the per-expert row-base offset
+    # ``i_expert * N`` is pre-computed once below and kept in SGPR via
+    # :func:`IRBuilder.to_sgpr_u32`. Every chunk's SmScale gather is
+    # then just ``sm_view[i_expert*N + n_off]`` -- one ``s_add`` (the
+    # per-expert base hoist) and one ``global_load_vN_f32`` (the
+    # column gather), no per-chunk multiply-accumulate.
     x_view = make_naive_tensor_view_packed(X, shape=(1, N), dtype=io_ty)
     qy_view = make_naive_tensor_view_packed(QY, shape=(1, N), dtype=q_ty)
-    sm_view = make_naive_tensor_view_packed(SmScale, shape=(spec.experts, N), dtype=F32)
+    sm_view = make_global_view(SmScale, shape=(spec.experts * N,), dtype=F32)
     x_tile = make_tile_window(x_view, lengths=(1, N), origin=(i_token, b.const_i32(0)))
     qy_tile = make_tile_window(
         qy_view, lengths=(1, N), origin=(out_row, b.const_i32(0))
     )
 
+    sm_row_base = b.to_sgpr_u32(b.mul(i_expert, b.const_i32(N)))
+
     lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_amax").base
 
     # Pass 1: stream x, multiply by SmScale[i_expert, :], reduce amax.
+    # Mirror :mod:`ck_dsl.instances.smoothquant`'s tree-fmax pattern so
+    # the per-element ``|y|`` chain is ``O(log VEC)`` deep on the
+    # critical path.
     s_amax = b.const_f32(0.0)
 
     def pass1_body(n_off, x_scalars):
         nonlocal s_amax
-        sm_scalars = sm_view.load_vec_as_f32(b, [i_expert, n_off], n=VEC)
+        sm_off = b.add(sm_row_base, n_off)
+        sm_scalars = sm_view.load_vec_as_f32(b, [sm_off], n=VEC)
+        abs_ys: List[Value] = []
         for i in range(VEC):
             y = b.fmul(x_scalars[i], sm_scalars[i])
-            abs_y = b.fmax(y, b.fneg(y))
-            s_amax = b.fmax(s_amax, abs_y)
+            abs_ys.append(b.fmax(y, b.fneg(y)))
+        chunk_amax = _tree_fmax(b, abs_ys)
+        s_amax = b.fmax(s_amax, chunk_amax)
 
     sweep_res = sweep_row_chunks(
         b,
@@ -226,21 +354,39 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec) -> KernelDef:
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
             b.global_store(YScale, out_row, yscale, align=4)
 
-    # Pass 2: quantise + store.
+    # Pass 2: quantise + packed store. See sibling smoothquant for the
+    # rationale; the only MoE-specific bit is the SmScale gather
+    # through ``sm_row_base`` (pre-hoisted ``i_expert * N``).
     cached = sweep_res.cached
     chunks = spec.elems_per_thread // VEC
     c_vec = b.const_i32(VEC)
+    use_packed_store = VEC in (4, 8)
+    row_base_byte_off = b.mul(out_row, b.const_i32(N))
     for k in range(chunks):
         n_off = b.add(b.mul(b.const_i32(k * BS), c_vec), b.mul(tid, c_vec))
-        sm_scalars = sm_view.load_vec_as_f32(b, [i_expert, n_off], n=VEC)
-        for i in range(VEC):
-            x_f32 = cached[k * VEC + i]
-            y_f32 = b.fmul(x_f32, sm_scalars[i])
-            q = quantize_scalar_f32(
-                b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
+        sm_off = b.add(sm_row_base, n_off)
+        sm_scalars = sm_view.load_vec_as_f32(b, [sm_off], n=VEC)
+        if use_packed_store:
+            scaled_f32: List[Value] = []
+            for i in range(VEC):
+                x_f32 = cached[k * VEC + i]
+                y_f32 = b.fmul(x_f32, sm_scalars[i])
+                scaled_f32.append(b.fmul(y_f32, inv_yscale))
+            packed = _pack_quant_chunk_f32(
+                b, scaled_f32, q_ty=q_ty, out_dtype=spec.out_dtype
             )
-            col = b.add(n_off, b.const_i32(i))
-            qy_tile.store_scalar(b, b.const_i32(0), col, value=q)
+            byte_off = b.add(row_base_byte_off, n_off)
+            _store_packed_chunk(b, QY, byte_off, packed, n=VEC)
+        else:
+            # VEC == 2: per-element scalar quant + store fallback.
+            for i in range(VEC):
+                x_f32 = cached[k * VEC + i]
+                y_f32 = b.fmul(x_f32, sm_scalars[i])
+                q = quantize_scalar_f32(
+                    b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
+                )
+                col = b.add(n_off, b.const_i32(i))
+                qy_tile.store_scalar(b, b.const_i32(0), col, value=q)
 
     return b.kernel
 

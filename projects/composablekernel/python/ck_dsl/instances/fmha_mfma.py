@@ -135,25 +135,23 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec) -> KernelDef:
     kv_head_idx = kb.kv_head_idx
     batch_idx = kb.batch_idx
 
-    # block_id_x is the Q-tile index; q_tile_base is its first Q row.
+    # block_id_x is the Q-tile index; q_tile_local is its first Q row
+    # within the current batch.
     q_tile_idx = kb.q_token  # reuses block_id_x; semantically a tile, not a token
-    q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
+    q_tile_local = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
 
-    # For batched inputs, the per-batch offset gets absorbed into
-    # k_token_offset / v_token_offset, q_tile_base, and the O offset.
-    # Q / O are batched along the first dim with stride
-    # ``seqlen_q * stride_q_token``.
-    q_batch_offset = b.mul(b.mul(batch_idx, seqlen_q), kb.stride_token("q"))
-    o_batch_offset = b.mul(b.mul(batch_idx, seqlen_q), kb.stride_token("o"))
+    # Per-batch shift in rows (for Q and O). The helper multiplies
+    # the row index by stride_q_token / stride_o_token internally, so
+    # we only need to pass the row offset -- the previous duplicate
+    # ``q_batch_offset = batch_idx * seqlen_q * stride_q_token``
+    # multiply was dead and has been removed (the helper does that
+    # same multiplication once via ``q_row * stride_q_token``). For
+    # K / V we still need byte / element offsets because the helper
+    # treats ``k_token_offset_elems`` as an additive element offset
+    # rather than as a row index.
+    batch_row_q = b.mul(batch_idx, seqlen_q)
     k_batch_offset = b.mul(b.mul(batch_idx, seqlen_k), kb.stride_token("k"))
     v_batch_offset = b.mul(b.mul(batch_idx, seqlen_k), kb.stride_token("v"))
-
-    # Stride math: q_token's offset = (q_tile_base * stride_q_token +
-    # batch * seqlen_q * stride_q_token + head * stride_q_head).
-    # The helper does ``q_row * stride_q_token`` so we need to absorb
-    # the batch offset into q_tile_base (effectively shifting it by
-    # batch * seqlen_q). Easiest: pre-shift q_tile_base in elements.
-    # Same trick for K / V via ``k_token_offset_elems``.
 
     causal_ctx = b.const_i32(0)  # self-attention: no cache offset
 
@@ -165,7 +163,14 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec) -> KernelDef:
         O=kb.tensor("O"),
         head_size=s.head_size,
         seqlen_k=seqlen_k,
-        q_tile_base=b.add(q_tile_base, b.mul(batch_idx, seqlen_q)),
+        # q_tile_base = local Q row + per-batch row shift. The helper
+        # does ``(q_tile_base + m_in_atom) * stride_q_token`` for both
+        # Q and O, which is the equivalent of folding
+        # ``batch_idx * seqlen_q * stride_{q,o}_token`` into the row
+        # index up front. Saves one multiply per axis vs the previous
+        # ``b.mul(b.mul(batch_idx, seqlen_q), stride_{q,o}_token)``
+        # which the helper then ignored.
+        q_tile_base=b.add(q_tile_local, batch_row_q),
         head_idx=head_idx,
         kv_head_idx=kv_head_idx,
         stride_q_token=kb.stride_token("q"),
@@ -184,9 +189,6 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec) -> KernelDef:
         k_token_offset_elems=k_batch_offset,
         v_token_offset_elems=v_batch_offset,
     )
-    # Unused offsets q/o_batch_offset are absorbed into q_tile_base
-    # and stride math above; reference them so lint stays happy.
-    _ = (q_batch_offset, o_batch_offset)
     b.ret()
     return kb.kernel
 
