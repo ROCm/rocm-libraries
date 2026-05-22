@@ -67,7 +67,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
+  VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
 
 from .Component import Component, TensorDataMover
 from .Components.TensorDataMover import TensorDataMoverLoad
@@ -4497,8 +4497,6 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(loopCounterName),
                          comment="+ K_rem"))
 
-      # TMP for debug: force soffset to 0 to test boundary load path
-      module.add(SMovB32(dst=sgpr(stmp+0), src=int(0)))
       # Srd+2 = limit_elems * bpeGR (bytes)
       module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
                                    comment="buffer_load limit for %s (tail-loop tight)"%tc))
@@ -4506,23 +4504,28 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  # Single 16-bit DTL boundary load before the tail loop.
+  # Single 16-bit DTL boundary load before the tail loop. (Option C1)
   #
-  # computeTailLoopSrdLimit tightens Srd{tc}+2 to (numLine*strideF + K_rem) *
-  # bpe — i.e. the byte count from the SRD base to the byte *after* the last
-  # in-bounds K element (including the odd trailing 16-bit when K_rem is odd).
-  # We expose that boundary element with a single buffer_load_ushort lds=1:
+  # The regular tail-loop dwordx4 loads use per-lane swizzled vaddr vgprs
+  # (sharedVgprGROffset[i]) so that contiguous LDS writes at m0+L*16 land in the
+  # correct (post-swizzle) slot. The trailing odd 16-bit K element is in the
+  # 16-byte chunk of exactly one lane — we discover that lane at runtime, then
+  # issue a single-lane buffer_load_ushort:
   #
-  #   soffset = Srd{tc}+2 - bpe        (last in-bounds 16-bit byte position)
-  #   vaddr   = a vgpr holding 0       (uniform across all lanes — no per-lane
-  #                                    GRO/prepad games)
-  #   EXEC    = 0x1                    (only lane 0 writes one 16-bit LDS slot)
-  #   m0      = LocalWriteBaseAddr{tc} + (numLine*DepthU + K_rem - 1) * bpe
+  #   K_rem_m1 = K_rem - 1
+  #   intra_K_byte   = (K_rem_m1 & 7) * bpe        # which 16-bit slot within 16B
+  #   aligned_K_byte = (K_rem_m1 & ~7) * bpe       # 16B-aligned K byte
+  #   sTarget = numLine * strideF * bpe + aligned_K_byte - soffset
+  #            (= the value vaddr[Lboundary] holds)
+  #   v_cmp_eq_u32  vccPair, sTarget, v[vaddr_vgpr]   # one lane wins
+  #   sLaneId = ff1(vccPair)                          # 64-bit ff1 (two-step)
+  #   EXEC = 0x1
+  #   vaddr  = vTmp (= sTarget + intra_K_byte)
+  #   m0     = LocalWriteBaseAddr + sLaneId*16 + intra_K_byte
+  #   buffer_load_ushort vTmp, Srd, soffset offen offset:0 lds:1
   #
-  # No Srd+2 bump is required — the boundary byte is already in-bounds.
-  #
-  # Same gates as computeTailLoopSrdLimit (bf16 / UseSubtileImpl / A or B /
-  # groOffsetInMacroTile=1 / non-unit stride). Other paths get an empty Module.
+  # Restricted to loadRatioGR=1, numGRPerSubtile=1, single subtile (the test
+  # case). Other paths get an empty Module.
   ##############################################################################
   def tailLoopBoundaryDtlLoad(self, kernel, tP):
     module = Module("tailLoopBoundaryDtlLoad")
@@ -4541,29 +4544,39 @@ class KernelWriterAssembly(KernelWriter):
     if self.isConstUnitStride(strideF):
       return module
 
-    bpe = tP["bpeGR"]
-    depthU = kernel["DepthU"]
+    # Pull subtile state — we need the per-lane vaddr vgpr and the soffset sgpr
+    # the regular dwordx4 load uses for this subtile.
+    tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
+    if float(tileInfo.loadRatioGR) != 1.0:
+      return module
+    if tileInfo.numGRPerSubtile != 1:
+      return module
+    regList = tileInfo.localSubtilesRegister[0]
+    # If the first regList is empty, the regular load uses soffset=0 (immediate);
+    # otherwise it must be an sgpr-typed list. Bail on the vgpr-soffset path.
+    if len(regList) > 0 and not regList.is_sgpr:
+      return module
+    hasSoffsetSgpr = (len(regList) > 0)
+
+    bpe = int(tP["bpeGR"])
+    elemsPerLane = 16 // bpe   # bf16: 8
     mt = kernel[tP["mt"]]
     tileIdx = tP["tileIdx"]
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
+    waveSize = kernel["WavefrontSize"]
+    vaddrVgprIdx   = tileInfo.sharedVgprGROffset[0]
+    soffsetSgprIdx = regList.indices[0] if hasSoffsetSgpr else None
+
     module.add(Label("sebB%s"%tc,""))
-    with self.allocTmpSgpr(3) as tmpSgprInfo:
+    module.addComment1("Tail-loop boundary DTL load for %s (Option C1: v_cmp + readlane)" % tc)
+
+    with self.allocTmpSgpr(6, 2) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
-      # stmp+0 : soffset_bytes  (= old Srd+2; the odd 16-bit byte position)
-      # stmp+1 : m0Offset_bytes (LDS byte offset)
-      # stmp+2 : numLine (0-based last line index)
-
-      module.addComment1("Tail-loop boundary DTL load for %s (lane 0, 16-bit)" % tc)
-
-      #TMP for debug: force soffset to 0 to test boundary load path
-      module.add(SMovB32(dst=sgpr("Srd%s+2" % tc), src=int(6)))
-      # --- soffset = Srd+2 - bpe (last in-bounds 16-bit element) ----------
-      # Srd+2 already covers the full tail (numLine*strideF + K_rem) bytes, so
-      # no bump is needed — the boundary byte is the last in-bounds slot.
-      module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr("Srd%s+2" % tc), src1=int(bpe),
-                         comment="soffset = Srd%s+2 - bpe (boundary byte position)" % tc))
-      #TMP for debug: force soffset to 0 to test boundary load path
-      # module.add(SMovB32(dst=sgpr(stmp+0), src=int(4)))
+      # stmp+0 : sTarget       (numLine*stride*bpe + alignedK_byte - soffset)
+      # stmp+1 : K_rem - 1     (then intra_K_byte, aligned_K_byte)
+      # stmp+2 : numLine
+      # stmp+3 : sLaneId / scratch
+      # stmp+4, +5 : v_cmp result (sgpr pair, even-aligned for wave64)
 
       # --- numLine = min(SizeI/J - WG*MT, MT) - 1 --------------------------
       module.add(SMulI32(dst=sgpr(stmp+2), src0=sgpr(tP["wg"]), src1=mt,
@@ -4575,38 +4588,95 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SSubU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=1,
                          comment="numLine = min - 1 (0-based)"))
 
-      # --- LDS byte offset: (numLine * DepthU + K_rem - 1) * bpe -----------
-      module.add(SMulI32(dst=sgpr(stmp+1), src0=sgpr(stmp+2), src1=depthU,
-                         comment="numLine * DepthU (LDS line stride)"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(loopCounterName),
-                         comment="+ K_rem"))
-      module.add(SSubU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=1,
-                         comment="- 1 (last K element index)"))
-      module.add(scalarMultiplyBpe(stmp+1, stmp+1, float(bpe),
-                                   comment="LDS byte offset for m0"))
+      # --- K_rem_m1 = K_rem - 1, derive intra / aligned K bytes -----------
+      module.add(SSubU32(dst=sgpr(stmp+1), src0=sgpr(loopCounterName), src1=1,
+                         comment="K_rem_m1 = K_rem - 1"))
+      # intra_K_byte = (K_rem_m1 & 7) * bpe  -> kept in stmp+3
+      module.add(SAndB32(dst=sgpr(stmp+3), src0=sgpr(stmp+1), src1=hex(elemsPerLane-1),
+                         comment="K_rem_m1 & (elemsPerLane-1)"))
+      module.add(SLShiftLeftB32(dst=sgpr(stmp+3), shiftHex=log2(bpe), src=sgpr(stmp+3),
+                                comment="intra_K_byte = (K_rem_m1 & 7) * bpe"))
+      # aligned_K_byte = (K_rem_m1 & ~(elemsPerLane-1)) * bpe  -> stmp+1
+      module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1),
+                         src1=-int(elemsPerLane),
+                         comment="K_rem_m1 & ~(elemsPerLane-1)"))
+      module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(bpe), src=sgpr(stmp+1),
+                                comment="aligned_K_byte = (K_rem_m1 & ~7) * bpe"))
 
-      # --- m0 = LocalWriteBaseAddr{tc} + LDS byte offset --------------------
+      # --- sTarget = numLine * strideF * bpe + aligned_K_byte - soffset ---
+      module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+2), src1=strideF,
+                         comment="numLine * stride (elements)"))
+      module.add(scalarMultiplyBpe(stmp+0, stmp+0, float(bpe),
+                                   comment="-> bytes"))
+      module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1),
+                         comment="+ aligned_K_byte"))
+      if hasSoffsetSgpr:
+        module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(soffsetSgprIdx),
+                           comment="- soffset (per-lane vaddr space)"))
+
+      # --- Find the lane: v_cmp_eq_u32 vccPair, sTarget, v[vaddr_vgpr] -----
+      # Intra_K_byte lives in stmp+3 across the v_cmp/ff1 (we use stmp+4,+5 for
+      # the cmp pair and reuse stmp+0 for sLaneId after sTarget is no longer
+      # needed in scalar form).
+      sCmpLo = stmp + 4
+      sCmpHi = stmp + 5
+      sLaneId = stmp + 0   # reuse stmp+0 after we no longer need sTarget
+      if waveSize == 64:
+        module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
+                             src1=vgpr(vaddrVgprIdx),
+                             comment="find lane whose vaddr == sTarget"))
+        # 64-bit ff1: lo half first; if lo == -1, use ff1(hi)+32.
+        module.add(SFf1B32(dst=sgpr(stmp+1), src=sgpr(sCmpHi),
+                           comment="ff1(vcc_hi)"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=32,
+                           comment="+ 32 (hi-half lane offset)"))
+        module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                           comment="ff1(vcc_lo) — -1 if no bit in lo"))
+        module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
+                             comment="SCC=1 if lo had no match"))
+        module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+1), src1=sgpr(sLaneId),
+                               comment="sLaneId = lo_match==-1 ? hi+32 : lo"))
+      else:
+        module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
+                             src1=vgpr(vaddrVgprIdx),
+                             comment="find lane whose vaddr == sTarget"))
+        module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                           comment="sLaneId = ff1(vcc)"))
+
+      # --- m0 = LocalWriteBaseAddr + sLaneId*16 + intra_K_byte -------------
+      # intra_K_byte in stmp+3, sLaneId in stmp+0 (=sLaneId).
+      module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(16), src=sgpr(sLaneId),
+                                comment="sLaneId * 16 (per-lane LDS stride)"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
+                         comment="+ intra_K_byte"))
       module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
                          src1=sgpr(stmp+1),
-                         comment="m0 = LocalWriteBaseAddr%s + boundary LDS offset" % tc))
+                         comment="m0 = LocalWriteBaseAddr%s + laneId*16 + intra_K_byte" % tc))
 
-      # --- uniform vaddr=0 so every lane forms address (base + soffset) ----
-      vAddr0 = self.vgprPool.checkOut(1, "tailBoundaryVAddr0")
-      module.add(VMovB32(dst=vgpr(vAddr0), src=0, comment="vaddr=0 (uniform across lanes)"))
+      # --- vaddr = (per-lane vaddr at lane sLaneId) + intra_K_byte ---------
+      # Use v_readlane to grab that lane's (already swizzled) vaddr directly,
+      # then add the intra-16B byte so the ushort load picks the right slot.
+      vTmp = self.vgprPool.checkOut(1, "tailBoundaryVTmp")
+      module.add(VReadlaneB32(dst=sgpr(stmp+1), src0=vgpr(vaddrVgprIdx),
+                              src1=sgpr(sLaneId),
+                              comment="sTarget = v[vaddr][sLaneId] (per-lane vaddr)"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
+                         comment="+ intra_K_byte (within 16B chunk)"))
+      module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1),
+                         comment="vaddr = sTarget + intra_K_byte"))
 
       # --- EXEC = lane 0 only, emit DTL load, wait, restore EXEC -----------
       module.add(SMovB64(dst=EXEC(), src=0x1, comment="EXEC = lane 0 only"))
-
       mubuf = MUBUFModifiers(offen=True, offset12=0, glc=False, slc=False, nt=False, lds=True)
-      module.add(BufferLoadU16(dst=None, vaddr=vgpr(vAddr0),
+      ldSoffset = sgpr(soffsetSgprIdx) if hasSoffsetSgpr else 0
+      module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
                                saddr=sgpr("Srd%s" % tc, 4),
-                               soffset=sgpr(stmp+0), mubuf=mubuf,
-                               comment="boundary 16-bit DTL load (ushort) -> LDS@m0"))
-
+                               soffset=ldSoffset, mubuf=mubuf,
+                               comment="boundary 16-bit DTL load -> LDS@m0"))
       module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
       module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
       module.add(SBarrier())
-      self.vgprPool.checkIn(vAddr0)
+      self.vgprPool.checkIn(vTmp)
 
     return module
 
