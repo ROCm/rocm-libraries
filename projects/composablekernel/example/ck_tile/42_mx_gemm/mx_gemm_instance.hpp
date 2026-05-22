@@ -101,7 +101,7 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          false,           // DoubleSmemBuffer_ (Default)
                                          ComputeDataType, // AComputeDataType
                                          ComputeDataType, // BComputeDataType
-                                         true>>;          // TilesPacked_ (because of packed scales)
+                                         !GemmConfig::Preshuffle>>;
 
     using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 

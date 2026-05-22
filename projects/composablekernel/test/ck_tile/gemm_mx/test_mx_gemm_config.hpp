@@ -81,24 +81,14 @@ struct MxGemmConfig
     static constexpr bool TiledMMAPermuteN = false;
 };
 
-struct MXfp4_GemmConfig16 : MxGemmConfig
+struct MX_GemmConfig16 : MxGemmConfig
 {
     static constexpr ck_tile::index_t M_Tile = 64;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 256;
 };
 
-struct MXfp4_GemmConfig16_Preshuffle : MXfp4_GemmConfig16
-{
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 512;
-    static constexpr ck_tile::index_t K_Tile = 256;
-    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
-    static constexpr bool Preshuffle         = true;
-    static constexpr ck_tile::index_t BContiguousItemsPerAccess = 32;
-};
-
-struct MXfp8_GemmConfig16 : MxGemmConfig
+struct MX_GemmConfigEightWaves : MxGemmConfig
 {
     static constexpr ck_tile::index_t M_Warp = 4;
     static constexpr ck_tile::index_t N_Warp = 2; // NWarps == 2 for ping-pong!
@@ -111,8 +101,23 @@ struct MXfp8_GemmConfig16 : MxGemmConfig
     static constexpr int kBlockPerCu = 2;
 };
 
-struct MXfp8_GemmConfig16_Preshuffle : MXfp8_GemmConfig16
+struct MXfp4_GemmConfig_Preshuffle : MxGemmConfig
 {
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 512;
+    static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess = 32;
+};
+
+struct MXfp8_GemmConfig_Preshuffle : MxGemmConfig
+{
+    // For FP8 Preshuffle:
+    // The theoretical functional minimum is N_Tile =  N_Warp * N_Warp_Tile * NXdlPack = 4*16*2 =
+    // 128 . For better performance, we would choose N_Repeat = 2 which would yield N_Tile = 128 * 2
+    // = 256 . Note: If we use fewer waves, the minimum theoretical N_Tile can be even smaller,
+    // reduced to N_Tile = 32 for 1 single wave.
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 256;
     static constexpr ck_tile::index_t K_Tile = 256;

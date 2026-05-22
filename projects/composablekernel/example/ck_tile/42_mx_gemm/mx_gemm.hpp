@@ -119,7 +119,11 @@ struct MXfp4_GemmConfig16_Preshuffle : MxGemmConfig
 
 struct MXfp8_GemmConfig16_Preshuffle : MxGemmConfig
 {
-    // Smallest possible N_Tile is 256 for fp8 preshuffle
+    // For FP8 Preshuffle:
+    // The theoretical functional minimum is N_Tile =  N_Warp * N_Warp_Tile * NXdlPack = 4*16*2 =
+    // 128 . For better performance, we would choose N_Repeat = 2 which would yield N_Tile = 128 * 2
+    // = 256 . Note: If we use fewer waves, the minimum theoretical N_Tile can be even smaller,
+    // reduced to N_Tile = 32 for 1 single wave.
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 256;
     static constexpr ck_tile::index_t K_Tile = 256;
