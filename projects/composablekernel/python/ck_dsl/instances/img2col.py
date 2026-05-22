@@ -266,6 +266,28 @@ def img2col_grid(spec: Img2ColSpec) -> Tuple[int, int, int]:
     )
 
 
+_HIP_GRID_AXIS_CAP = 65535
+
+
+def img2col_block_tile_m_for_M(M: int, *, default: int = 8) -> int:
+    """Pick a ``block_tile_m`` that keeps ``grid_y`` under the HIP cap (P85).
+
+    HIP's ``dim3`` grid axes cap at 65535. For ``M > 65535 *
+    block_tile_m`` the launch fails with ``hipError(1) invalid
+    argument``. This helper walks the standard ``block_tile_m`` ladder
+    (8, 16, 32, 64, 128, 256) and returns the smallest value that
+    yields ``grid_y = ceil(M / block_tile_m) <= 65535``.
+
+    For shapes within the cap, returns ``default`` (the historical
+    8). Mirrors CK Tile's
+    ``TransformConvFwdToGemm::GetSplitImageInfo`` autotune table.
+    """
+    for cand in (default, 16, 32, 64, 128, 256):
+        if (M + cand - 1) // cand <= _HIP_GRID_AXIS_CAP:
+            return cand
+    return 256
+
+
 def img2col_signature(spec: Img2ColSpec):
     """Manifest-style signature for use with
     :class:`ck_dsl.runtime.launcher.KernelLauncher`.

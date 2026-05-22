@@ -111,6 +111,13 @@ class SageAttentionSpec:
     seqlen_q: int
     seqlen_k: int
     name: str = "ck_dsl_sage_attention"
+    # P90: per-block scale outer loop. When ``True`` and ``scale_block
+    # > BLOCK_K * 4`` (typical), the K-loop is wrapped in an outer
+    # loop over ``(seqlen_k / scale_block)`` scale blocks, each
+    # hosting ``scale_block / BLOCK_K`` K-tiles. ``k_scale`` is
+    # loaded once per outer iteration instead of every K-tile.
+    # Saves a per-iter f32 scale load when scale_block is large.
+    use_outer_scale_loop: bool = False
 
     def kernel_name(self) -> str:
         s = self.common.shape

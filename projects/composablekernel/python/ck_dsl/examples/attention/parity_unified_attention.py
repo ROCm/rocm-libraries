@@ -49,6 +49,7 @@ try:
     from aiter.ops.triton.attention.unified_attention import (  # noqa: E402
         unified_attention,
     )
+
     _AITER_IMPORT_ERROR = None
 except Exception as e:  # pragma: no cover - optional for CK-only runs
     _uam = None
@@ -1137,7 +1138,12 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
                 return False
             if s.num_query_heads != 64 or s.num_kv_heads != 8:
                 return False
-            if s.softcap > 0 or problem.use_fp8 or problem.use_alibi or problem.use_qq_bias:
+            if (
+                s.softcap > 0
+                or problem.use_fp8
+                or problem.use_alibi
+                or problem.use_qq_bias
+            ):
                 return False
             if data["max_query_len"] <= 256:
                 return False
@@ -1237,7 +1243,9 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         def call_once():
             launcher(vals, config=cfg)
 
-        ms = _time_lane_ms(call_once, warmup=warmup, attempts=attempts, stream=hip_stream)
+        ms = _time_lane_ms(
+            call_once, warmup=warmup, attempts=attempts, stream=hip_stream
+        )
         return output, ms
 
     def call_once():
@@ -1613,13 +1621,31 @@ def main() -> int:
                     f"  {row['scenario']:32s}  {t_ms * 1000:9.2f}us {c_ms * 1000:9.2f}us {sp:8.2f}x"
                 )
             else:
-                t_str = f"{t_ms * 1000:9.2f}us" if t_ms else "      err "
+                # B06: emit the captured exception reason instead of a
+                # generic "err" so per-scenario coverage is visible at
+                # a glance (matters for gating algorithmic flips like
+                # P73 / P77 that opt-in per scenario).
+                t_status = row.get("triton_2d_status")
+                c_status = row.get("ck_2d_status")
+                t_str = (
+                    f"{t_ms * 1000:9.2f}us"
+                    if t_ms
+                    else (
+                        " skip(tri) "
+                        if t_status and t_status[0] == "skip"
+                        else f"err({t_status[1][:18]})"
+                        if t_status
+                        else "      err "
+                    )
+                )
                 c_str = (
                     f"{c_ms * 1000:9.2f}us"
                     if c_ms
                     else (
                         " skip(ck) "
-                        if row.get("ck_2d_status", (None,))[0] == "skip"
+                        if c_status and c_status[0] == "skip"
+                        else f"err({c_status[1][:18]})"
+                        if c_status
                         else "      err "
                     )
                 )
@@ -1637,13 +1663,27 @@ def main() -> int:
                     f"  {row['scenario']:32s}  {t_ms * 1000:9.2f}us {c_ms * 1000:9.2f}us {sp:8.2f}x"
                 )
             else:
-                t_str = f"{t_ms * 1000:9.2f}us" if t_ms else "      err "
+                t_status = row.get("triton_3d_status")
+                c_status = row.get("ck_3d_status")
+                t_str = (
+                    f"{t_ms * 1000:9.2f}us"
+                    if t_ms
+                    else (
+                        " skip(tri) "
+                        if t_status and t_status[0] == "skip"
+                        else f"err({t_status[1][:18]})"
+                        if t_status
+                        else "      err "
+                    )
+                )
                 c_str = (
                     f"{c_ms * 1000:9.2f}us"
                     if c_ms
                     else (
                         " skip(ck) "
-                        if row.get("ck_3d_status", (None,))[0] == "skip"
+                        if c_status and c_status[0] == "skip"
+                        else f"err({c_status[1][:18]})"
+                        if c_status
                         else "      err "
                     )
                 )

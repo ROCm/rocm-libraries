@@ -101,6 +101,15 @@ class ElementwiseSpec:
     def is_binary(self) -> bool:
         return self.op in ("add", "sub", "mul", "max", "min", "swiglu", "geglu")
 
+    def is_bias(self) -> bool:
+        """P80: ``op`` names with the ``bias_`` prefix are 3-operand
+        ``(x, bias, ...)`` ops where ``bias`` is broadcast along the
+        batch axis (stride 0). Currently shipped: ``"bias_add"``,
+        ``"bias_add_relu"``, ``"bias_add_silu"``, ``"bias_add_gelu_tanh"``.
+        Mirrors CK Tile ``21_elementwise``'s multi-D operand convention.
+        """
+        return self.op.startswith("bias_")
+
     def kernel_name(self) -> str:
         return kernel_name_join(
             self.name,
