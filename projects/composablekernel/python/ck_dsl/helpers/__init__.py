@@ -80,6 +80,7 @@ from __future__ import annotations
 
 from .atoms import (
     MFMA_ATOMS,
+    MFMA_BF16_ATOMS,
     MFMA_F16_ATOMS,
     MFMA_FP8_ATOMS,
     MfmaAtom,
@@ -365,6 +366,7 @@ __all__ = [
     "Attention2DConfig",
     "Attention3DConfig",
     "MFMA_ATOMS",
+    "MFMA_BF16_ATOMS",
     "MFMA_F16_ATOMS",
     "MFMA_FP8_ATOMS",
     "MfmaAtom",

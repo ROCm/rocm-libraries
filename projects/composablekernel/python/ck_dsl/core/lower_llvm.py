@@ -187,6 +187,48 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
+    "fabs.f32": "declare float @llvm.fabs.f32(float)",
+    "fabs.f16": "declare half @llvm.fabs.f16(half)",
+    "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
+    "fmuladd.f32": "declare float @llvm.fmuladd.f32(float, float, float)",
+    "fmuladd.f16": "declare half @llvm.fmuladd.f16(half, half, half)",
+    "fmuladd.bf16": "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)",
+    # Packed FMA — used by P08's ``vector.fma`` lowering. The AMDGPU
+    # backend selects ``v_pk_fma_f32`` / ``v_fma_f16`` chains.
+    "fmuladd.v2f32": (
+        "declare <2 x float> @llvm.fmuladd.v2f32(<2 x float>, <2 x float>, <2 x float>)"
+    ),
+    "fmuladd.v4f32": (
+        "declare <4 x float> @llvm.fmuladd.v4f32(<4 x float>, <4 x float>, <4 x float>)"
+    ),
+    "fmuladd.v8f32": (
+        "declare <8 x float> @llvm.fmuladd.v8f32(<8 x float>, <8 x float>, <8 x float>)"
+    ),
+    "fmuladd.v16f32": (
+        "declare <16 x float> @llvm.fmuladd.v16f32("
+        "<16 x float>, <16 x float>, <16 x float>)"
+    ),
+    "fmuladd.v2f16": (
+        "declare <2 x half> @llvm.fmuladd.v2f16(<2 x half>, <2 x half>, <2 x half>)"
+    ),
+    "fmuladd.v4f16": (
+        "declare <4 x half> @llvm.fmuladd.v4f16(<4 x half>, <4 x half>, <4 x half>)"
+    ),
+    "fmuladd.v8f16": (
+        "declare <8 x half> @llvm.fmuladd.v8f16(<8 x half>, <8 x half>, <8 x half>)"
+    ),
+    "fmuladd.v2bf16": (
+        "declare <2 x bfloat> @llvm.fmuladd.v2bf16("
+        "<2 x bfloat>, <2 x bfloat>, <2 x bfloat>)"
+    ),
+    "fmuladd.v4bf16": (
+        "declare <4 x bfloat> @llvm.fmuladd.v4bf16("
+        "<4 x bfloat>, <4 x bfloat>, <4 x bfloat>)"
+    ),
+    "fmuladd.v8bf16": (
+        "declare <8 x bfloat> @llvm.fmuladd.v8bf16("
+        "<8 x bfloat>, <8 x bfloat>, <8 x bfloat>)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
@@ -260,6 +302,15 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "readfirstlane.i64": ("declare i64 @llvm.amdgcn.readfirstlane.i64(i64)"),
     "ballot.i64": ("declare i64 @llvm.amdgcn.ballot.i64(i1)"),
     "ds.bpermute": ("declare i32 @llvm.amdgcn.ds.bpermute(i32, i32)"),
+    # gfx9+ ``v_mov_b32_dpp`` row-shift primitive (1 cycle, no LDS).
+    # The ``update.dpp`` family takes (old, src, dpp_ctrl, row_mask,
+    # bank_mask, bound_ctrl); we use the i32 specialisation because
+    # ``row_shr`` / ``row_shl`` payloads are always lane-int values
+    # in the kernels that need it (topk_softmax cumsum, moe_sort scan).
+    "update.dpp.i32": (
+        "declare i32 @llvm.amdgcn.update.dpp.i32("
+        "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)"
+    ),
     # Packed bf16 atomic add (gfx940+). Two bf16 lanes per atomic transaction.
     # Used by FMHA-bwd's dQ accumulate path when the caller wants to
     # land bf16 directly in HBM rather than running a separate f32 -> bf16
@@ -272,6 +323,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
     "ds.read.tr16.b64": (
         "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"
+    ),
+    # gfx950 ``ds_read_b128_tr_b16`` — wide transposed-LDS read returning
+    # ``<8 x i16>`` per lane (the K-packed MFMA B-operand layout for the
+    # 16x16x32 / 32x32x16 atoms; one LDS op vs two paired b64 reads).
+    "ds.read.tr16.b128": (
+        "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"
     ),
     "sched.barrier": ("declare void @llvm.amdgcn.sched.barrier(i32 immarg)"),
     "sched.group.barrier": (
@@ -299,6 +356,15 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "raw.ptr.buffer.load.i32": (
         "declare i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    # 2-byte buffer load. Returns i16 (vs the i32 4-byte load), so the
+    # AMDGPU OOB clamp fires per-element instead of clamping a 4-byte
+    # window. Required by P10 to bit-fix the trailing-element corruption
+    # in ``img2col vec_k=1`` and ``pooling vec=1 avg`` (see
+    # ``PROPOSALS_PLAN.md::P10`` for the LLVM bug pattern).
+    "raw.ptr.buffer.load.i16": (
+        "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.i32": (
@@ -347,6 +413,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rint.f32": "declare float @llvm.rint.f32(float)",
     "smax.i32": "declare i32 @llvm.smax.i32(i32, i32)",
     "smin.i32": "declare i32 @llvm.smin.i32(i32, i32)",
+    # AMDGPU ``v_perm_b32`` byte-select. Used by P09's packed i8 quant
+    # to fuse four clamped i32s into one i32 in 2 perm calls (lo half +
+    # hi half) followed by one perm to interleave.
+    "amdgcn.perm": ("declare i32 @llvm.amdgcn.perm(i32, i32, i32)"),
     # gfx950 fused FP8/BF8 dequant + scale. SINGLE instruction
     # ``v_cvt_scalef32_pk_f32_fp8`` does ``<2 x f32> = scale * fp8x2``
     # — the same operation our current path takes 3 separate instructions
@@ -435,6 +505,8 @@ def _llvm_type(t: Type) -> str:
             return "ptr addrspace(1)"
         if t.space == "lds":
             return "ptr addrspace(3)"
+        if t.space == "constant":
+            return "ptr addrspace(4)"
         return "ptr"
     if isinstance(t, VectorType):
         return f"<{t.count} x {_llvm_type(t.elem)}>"
@@ -446,6 +518,8 @@ def _llvm_type(t: Type) -> str:
         return "i1"
     if t.name == "i8":
         return "i8"
+    if t.name == "i16":
+        return "i16"
     if t.name == "i32":
         return "i32"
     if t.name == "i64":
@@ -669,6 +743,95 @@ class _Lowerer:
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = fneg {_llvm_type(v.type)} {self._operand(v)}"
+        )
+
+    def _op_arith_fabs(self, op: Op) -> None:
+        """Lower ``arith.fabs`` to ``llvm.fabs.<ty>`` so the AMDGPU
+        backend can fold the absolute-value modifier into the
+        consumer (free) instead of materialising ``-a`` and a
+        ``v_max_f32(a, -a)`` pair (the historical idiom).
+        """
+        (v,) = op.operands
+        ty_name = v.type.name
+        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        if llvm_ty is None:
+            raise NotImplementedError(f"fabs: unsupported FP type {ty_name!r}")
+        self._need(f"fabs.{ty_name}")
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} @llvm.fabs.{ty_name}("
+            f"{llvm_ty} {self._operand(v)})"
+        )
+
+    def _op_arith_fma(self, op: Op) -> None:
+        """Lower ``arith.fma`` to ``llvm.fmuladd.<ty>`` so the AMDGPU
+        MachineCombiner always picks ``v_fma_f32``.
+
+        The intrinsic accepts ``contract`` semantics by default;
+        unlike a bare ``fmul`` + ``fadd`` pair, we don't rely on the
+        scheduler proving safety.
+        """
+        a, b, c = op.operands
+        ty_name = a.type.name
+        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        if llvm_ty is None:
+            raise NotImplementedError(f"fma: unsupported FP type {ty_name!r}")
+        self._need(f"fmuladd.{ty_name}")
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} @llvm.fmuladd.{ty_name}("
+            f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)}, "
+            f"{llvm_ty} {self._operand(c)})"
+        )
+
+    def _op_arith_fmax3(self, op: Op) -> None:
+        """Lower ``arith.fmax3(a, b, c)`` -> ``maxnum(a, maxnum(b, c))``.
+
+        Two back-to-back ``llvm.maxnum`` calls; the AMDGPU peephole
+        folds the chain into ``v_max3_f32`` (single-cycle on gfx9+).
+        Same semantics as the ``fmax(fmax(a, b), c)`` idiom but emitted
+        once and tagged for the combiner.
+        """
+        a, b, c = op.operands
+        ty_name = a.type.name
+        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        intrin_key = {
+            "f32": "maxnum.f32",
+            "f16": "maxnum.f16",
+            "bf16": "maxnum.bf16",
+        }.get(ty_name)
+        if llvm_ty is None or intrin_key is None:
+            raise NotImplementedError(f"fmax3: unsupported FP type {ty_name!r}")
+        self._need(intrin_key)
+        inner = self._fresh("fmax3.bc")
+        self._current().emit(
+            f"  {inner} = call {llvm_ty} @llvm.maxnum.{ty_name}("
+            f"{llvm_ty} {self._operand(b)}, {llvm_ty} {self._operand(c)})"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} @llvm.maxnum.{ty_name}("
+            f"{llvm_ty} {self._operand(a)}, {llvm_ty} {inner})"
+        )
+
+    def _op_arith_fmin3(self, op: Op) -> None:
+        """Sibling of :meth:`_op_arith_fmax3` for three-way min."""
+        a, b, c = op.operands
+        ty_name = a.type.name
+        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        intrin_key = {
+            "f32": "minnum.f32",
+            "f16": "minnum.f16",
+            "bf16": "minnum.bf16",
+        }.get(ty_name)
+        if llvm_ty is None or intrin_key is None:
+            raise NotImplementedError(f"fmin3: unsupported FP type {ty_name!r}")
+        self._need(intrin_key)
+        inner = self._fresh("fmin3.bc")
+        self._current().emit(
+            f"  {inner} = call {llvm_ty} @llvm.minnum.{ty_name}("
+            f"{llvm_ty} {self._operand(b)}, {llvm_ty} {self._operand(c)})"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} @llvm.minnum.{ty_name}("
+            f"{llvm_ty} {self._operand(a)}, {llvm_ty} {inner})"
         )
 
     def _op_arith_cmp(self, op: Op) -> None:
@@ -1039,6 +1202,67 @@ class _Lowerer:
         self._current().emit(
             f"  {packed} = call i32 @llvm.amdgcn.cvt.pk.bf8.f32("
             f"float {elems[2]}, float {elems[3]}, i32 {lo}, i1 true)"
+        )
+        self._current().emit(f"  {op.result.name} = bitcast i32 {packed} to <4 x i8>")
+
+    def _op_arith_cvt_pk_i8_f32x4(self, op: Op) -> None:
+        """Packed <4 x f32> -> <4 x i8> saturating cvt.
+
+        Per-element pipeline mirrors :meth:`_op_arith_cvt_f32_to_i8_sat`
+        (``rint`` -> ``fptosi`` -> ``smax`` -> ``smin``) but is run on
+        all four elements before the final pack via
+        ``llvm.amdgcn.perm`` byte-select. AMDGPU's pattern matcher
+        folds the four ``smax`` / ``smin`` calls into 2-3
+        ``v_med3_i32`` plus the ``v_perm_b32`` byte-select; the
+        scalar four-element chain is ~20 instructions, this is ~6-8.
+        """
+        (v,) = op.operands
+        self._need("rint.f32")
+        self._need("smax.i32")
+        self._need("smin.i32")
+        self._need("amdgcn.perm")
+        clamped = []
+        for i in range(4):
+            e = f"{op.result.name}e{i}"
+            r = f"{op.result.name}r{i}"
+            ai = f"{op.result.name}i{i}"
+            mx = f"{op.result.name}mx{i}"
+            mn = f"{op.result.name}mn{i}"
+            self._current().emit(
+                f"  {e} = extractelement <4 x float> {self._operand(v)}, i32 {i}"
+            )
+            self._current().emit(f"  {r} = call float @llvm.rint.f32(float {e})")
+            self._current().emit(f"  {ai} = fptosi float {r} to i32")
+            self._current().emit(
+                f"  {mx} = call i32 @llvm.smax.i32(i32 -128, i32 {ai})"
+            )
+            self._current().emit(f"  {mn} = call i32 @llvm.smin.i32(i32 127, i32 {mx})")
+            clamped.append(mn)
+        # Pack four 32-bit clamped ints into a single i32 via the
+        # AMDGPU ``v_perm_b32`` byte-select. The selector ``0x0c080400``
+        # picks byte 0 of {clamped[0], clamped[1], clamped[2], clamped[3]}
+        # in order; ``llvm.amdgcn.perm(low, hi, sel)`` reads bytes from
+        # the concatenated ``hi:low`` 64-bit value.
+        lo_hilo = f"{op.result.name}lh"
+        hi_hilo = f"{op.result.name}hh"
+        packed = f"{op.result.name}p"
+        # First combine bytes 0,1: lo = perm(c1, c0, 0x05010400) selects
+        # byte 0 of c0, byte 0 of c1, then zero, zero.
+        self._current().emit(
+            f"  {lo_hilo} = call i32 @llvm.amdgcn.perm(i32 {clamped[1]}, "
+            f"i32 {clamped[0]}, i32 1284)"  # 0x00000504 -> bytes c0[0], c1[0], 0, 0
+        )
+        # Second combine bytes 2,3: hi = perm(c3, c2, ...).
+        self._current().emit(
+            f"  {hi_hilo} = call i32 @llvm.amdgcn.perm(i32 {clamped[3]}, "
+            f"i32 {clamped[2]}, i32 1284)"  # 0x00000504 -> bytes c2[0], c3[0], 0, 0
+        )
+        # Combine the two halves: bytes [c0, c1, c2, c3].
+        # selector 0x05040100: byte 0 = lo[0], byte 1 = lo[1],
+        # byte 2 = hi[0], byte 3 = hi[1].
+        self._current().emit(
+            f"  {packed} = call i32 @llvm.amdgcn.perm(i32 {hi_hilo}, "
+            f"i32 {lo_hilo}, i32 84148480)"  # 0x05040100
         )
         self._current().emit(f"  {op.result.name} = bitcast i32 {packed} to <4 x i8>")
 
@@ -1671,6 +1895,76 @@ class _Lowerer:
             f"i32 {self._operand(addr)}, i32 {self._operand(data)})"
         )
 
+    def _op_tile_ds_bpermute_b64(self, op: Op) -> None:
+        """Packed-i64 ``ds_bpermute`` — two 32-bit ds_bpermute calls
+        on the high / low halves of an i64 payload, recombined.
+
+        AMDGPU's hardware ``ds_bpermute_b32`` is the only LDS-shuffle
+        primitive on gfx9; the i64 form is synthesised at the LLVM
+        level. The benefit is that a SINGLE IR op declares the
+        paired permute (``(val, idx)`` for argmax butterflies) which
+        keeps the high-level kernel readable and lets a future
+        gfx12 / wave32 backend swap in a true 64-bit primitive.
+        """
+        addr, data = op.operands
+        self._need("ds.bpermute")
+        lo32 = self._fresh("bp64.lo")
+        hi32 = self._fresh("bp64.hi")
+        sh = self._fresh("bp64.sh")
+        plo = self._fresh("bp64.plo")
+        phi = self._fresh("bp64.phi")
+        wide_lo = self._fresh("bp64.wlo")
+        wide_hi = self._fresh("bp64.whi")
+        shifted = self._fresh("bp64.sh2")
+        self._current().emit(f"  {lo32} = trunc i64 {self._operand(data)} to i32")
+        self._current().emit(f"  {sh} = lshr i64 {self._operand(data)}, 32")
+        self._current().emit(f"  {hi32} = trunc i64 {sh} to i32")
+        self._current().emit(
+            f"  {plo} = call i32 @llvm.amdgcn.ds.bpermute("
+            f"i32 {self._operand(addr)}, i32 {lo32})"
+        )
+        self._current().emit(
+            f"  {phi} = call i32 @llvm.amdgcn.ds.bpermute("
+            f"i32 {self._operand(addr)}, i32 {hi32})"
+        )
+        self._current().emit(f"  {wide_lo} = zext i32 {plo} to i64")
+        self._current().emit(f"  {wide_hi} = zext i32 {phi} to i64")
+        self._current().emit(f"  {shifted} = shl i64 {wide_hi}, 32")
+        self._current().emit(f"  {op.result.name} = or i64 {wide_lo}, {shifted}")
+
+    def _op_tile_mov_dpp(self, op: Op) -> None:
+        """``v_mov_b32_dpp`` row-shift — single-cycle intra-row-group
+        shift. Used by topk / cumsum scan kernels in place of the
+        slower ``ds_bpermute``-based shift.
+
+        The DPP control word encoding follows the AMDGPU ISA Manual:
+        ``0x100 | (shift & 0xF)`` for ``row_shr`` and
+        ``0x110 | (shift & 0xF)`` for ``row_shl``. ``bound_ctrl=true``
+        zero-fills lanes that would shift in from outside the
+        16-lane row-group; otherwise the lane retains its old VGPR
+        value (``bound_ctrl=false``, the LLVM default).
+        """
+        (data,) = op.operands
+        self._need("update.dpp.i32")
+        # The intrinsic signature is
+        #   i32 update.dpp.i32(i32 old, i32 src, i32 dpp_ctrl,
+        #                      i32 row_mask, i32 bank_mask, i1 bound_ctrl)
+        # We pass `src` itself as `old` (so unfilled lanes retain
+        # their input — matches the historical hand-written assembly).
+        bound_ctrl = bool(op.attrs.get("bound_ctrl", False))
+        if "row_shr" in op.attrs:
+            shift = int(op.attrs["row_shr"])
+            dpp_ctrl = 0x110 | (shift & 0xF)
+        else:
+            shift = int(op.attrs["row_shl"])
+            dpp_ctrl = 0x100 | (shift & 0xF)
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {dpp_ctrl}, i32 15, i32 15, i1 "
+            f"{'true' if bound_ctrl else 'false'})"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
 
@@ -1738,6 +2032,35 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         self._current().emit(
             f"  {op.result.name} = bitcast <4 x i16> {raw} to <4 x {elem_ty}>"
+        )
+
+    def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
+        """``ds_read_b128_tr_b16`` -- gfx950 wide transpose-read.
+
+        Reads twice the bytes per lane vs the b64 sibling. The
+        intrinsic returns ``<8 x i16>`` (= 16 bytes per lane), which
+        we bitcast to ``<8 x half>`` / ``<8 x bfloat>`` to match the
+        IR result type.
+        """
+        smem = op.operands[0]
+        indices = list(op.operands[1:])
+        gname, stype = self._smem_global_name(smem)
+        agg_ty = _smem_storage_type(stype)
+        base = self._fresh("trw.base")
+        idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
+        self._current().emit(
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"{', '.join(idx_strs)}"
+        )
+        self._need("ds.read.tr16.b128")
+        raw = self._fresh("trw.raw")
+        self._current().emit(
+            f"  {raw} = call <8 x i16> @llvm.amdgcn.ds.read.tr16.b128("
+            f"ptr addrspace(3) {base})"
+        )
+        elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
+        self._current().emit(
+            f"  {op.result.name} = bitcast <8 x i16> {raw} to <8 x {elem_ty}>"
         )
 
     def _op_tile_ds_read_tr_b8(self, op: Op) -> None:
@@ -2044,23 +2367,32 @@ class _Lowerer:
             )
 
     def _op_tile_buffer_load_f16(self, op: Op) -> None:
-        """Scalar half buffer load via `raw_ptr_buffer_load_u16` -> trunc i16
-        -> bitcast to half. The amdgpu intrinsic for a u16 element load
-        returns i32 (the low 16 bits hold the half); we trunc to i16 and
-        bitcast to half. OOB returns 0 (clamped by the rsrc bounds)."""
+        """Scalar half buffer load via the 2-byte ``raw.ptr.buffer.load.i16``
+        intrinsic.
+
+        Previously the lowering went through the 4-byte
+        ``raw.ptr.buffer.load.i32`` then truncated, which is a
+        correctness bug at ``byte_offset = num_bytes - 2``: the i32
+        read straddles the buffer end, the AMDGPU OOB check clamps
+        the entire i32 to zero, and the trailing f16 returns 0.0
+        instead of the in-bounds value. Switching to the 2-byte
+        intrinsic makes the OOB clamp fire per-element so trailing
+        loads return the correct value.
+
+        Bit-fixes ``img2col vec_k=1`` and ``pooling vec=1 avg`` (the
+        P10 patch in PROPOSALS_PLAN).
+        """
         rsrc, voffset, soffset = op.operands
-        self._need("raw.ptr.buffer.load.i32")
+        self._need("raw.ptr.buffer.load.i16")
         tmp = self._fresh("blu16")
         self._current().emit(
-            f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+            f"  {tmp} = call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
             f"i32 0)"
         )
-        trunc = self._fresh("trunc16")
-        self._current().emit(f"  {trunc} = trunc i32 {tmp} to i16")
-        self._current().emit(f"  {op.result.name} = bitcast i16 {trunc} to half")
+        self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
 
     def _op_tile_buffer_store_vN_f16(self, op: Op) -> None:
         """raw_ptr_buffer_store of <2*dwords x half> via bitcast to
@@ -2223,9 +2555,17 @@ class _Lowerer:
         elem_name = (
             val.type.elem.name if isinstance(val.type, VectorType) else val.type.name
         )
-        elem_bytes = {"i8": 1, "f16": 2, "bf16": 2, "i32": 4, "f32": 4, "i64": 8}.get(
-            elem_name, 2
-        )
+        elem_bytes = {
+            "i8": 1,
+            "fp8e4m3": 1,
+            "bf8e5m2": 1,
+            "i16": 2,
+            "f16": 2,
+            "bf16": 2,
+            "i32": 4,
+            "f32": 4,
+            "i64": 8,
+        }.get(elem_name, 2)
         align = vec * elem_bytes
         ty = _llvm_type(val.type)
         self._current().emit(
@@ -2341,6 +2681,40 @@ class _Lowerer:
     def _op_vector_mul(self, op: Op) -> None:
         elem = op.result.type.elem.name  # type: ignore[attr-defined]
         self._vector_binop(op, "fmul" if elem in ("f16", "bf16", "f32") else "mul")
+
+    def _op_vector_sub(self, op: Op) -> None:
+        elem = op.result.type.elem.name  # type: ignore[attr-defined]
+        self._vector_binop(op, "fsub" if elem in ("f16", "bf16", "f32") else "sub")
+
+    def _op_vector_fma(self, op: Op) -> None:
+        """Packed FMA via the ``llvm.fmuladd.v<N>x<elem>`` intrinsic.
+
+        Lowers ``vector.fma(a, b, c)`` -> ``a*b + c`` element-wise as a
+        single intrinsic call. The AMDGPU MachineCombiner picks
+        ``v_pk_fma_f32`` / ``v_fma_f32`` chains for the common
+        f16/bf16/f32 element types.
+        """
+        a, b, c = op.operands
+        vec_ty = a.type
+        count = vec_ty.count  # type: ignore[attr-defined]
+        elem_ty = vec_ty.elem  # type: ignore[attr-defined]
+        elem_name = elem_ty.name
+        if elem_name not in ("f16", "bf16", "f32"):
+            raise NotImplementedError(
+                f"vector_fma: unsupported element type {elem_name!r}"
+            )
+        intrin_key = f"fmuladd.v{count}{elem_name}"
+        self._need(intrin_key)
+        elem_llvm = _llvm_type(elem_ty)
+        vec_llvm = _llvm_type(vec_ty)
+        self._current().emit(
+            f"  {op.result.name} = call {vec_llvm} @llvm.fmuladd.v{count}{elem_name}("
+            f"{vec_llvm} {self._operand(a)}, {vec_llvm} {self._operand(b)}, "
+            f"{vec_llvm} {self._operand(c)})"
+        )
+        # Touch elem_llvm to silence the unused-variable static analyser
+        # (the intrinsic name carries the type already).
+        del elem_llvm
 
     def _op_vector_max(self, op: Op) -> None:
         a, b = op.operands
@@ -2751,9 +3125,22 @@ class _Lowerer:
         if self._needs_intrin:
             out.append("")
 
-        # Function header.
+        # Function header. Pointer parameters can override their address
+        # space via the ``addr_space`` attr (P17): ``"constant"`` →
+        # ``ptr addrspace(4)`` for descriptor tables, otherwise the
+        # default ``ptr addrspace(1)`` (global).
+        def _param_type_str(p):
+            t = _llvm_type(p.type)
+            if isinstance(p.type, PtrType):
+                ovr = p.attrs.get("addr_space")
+                if ovr == "constant":
+                    t = "ptr addrspace(4)"
+                elif ovr == "global":
+                    t = "ptr addrspace(1)"
+            return t
+
         params = [
-            f"{_llvm_type(p.type)}{_param_attrs(p.attrs, p.type)} %{p.name}"
+            f"{_param_type_str(p)}{_param_attrs(p.attrs, p.type)} %{p.name}"
             for p in self.kernel.params
         ]
         out.append(

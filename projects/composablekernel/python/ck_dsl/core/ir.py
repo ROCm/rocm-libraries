@@ -41,6 +41,7 @@ class Type:
 
 I1 = Type("i1")
 I8 = Type("i8")
+I16 = Type("i16")
 I32 = Type("i32")
 I64 = Type("i64")
 BF16 = Type("bf16")
@@ -204,6 +205,24 @@ class IRBuilder:
     # ----- params -----
 
     def param(self, name: str, t: Type, **attrs: Any) -> Value:
+        """Declare a kernel parameter.
+
+        Standard ``attrs`` recognised by the lowering:
+
+        * ``noalias`` (bool) — emit ``noalias`` on the LLVM kernel arg.
+        * ``readonly`` (bool) — emit ``readonly``.
+        * ``writeonly`` (bool) — emit ``writeonly``.
+        * ``align`` (int) — emit ``align N``.
+        * ``addr_space`` (str) — for ``PtrType`` params, override the
+          pointee address space:
+
+          * ``"global"`` (default) → ``ptr addrspace(1)``
+          * ``"constant"`` → ``ptr addrspace(4)`` (kernel-arg
+            constant memory; AMDGPU backend uses scalar
+            ``s_load_dwordxN`` instead of per-lane VMEM loads).
+            Used by descriptor tables (P17): grouped-GEMM
+            ``gemm_descs_const``, per-expert pointer arrays, etc.
+        """
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
         v = Value(name=f"%{name}", type=t)
@@ -328,6 +347,69 @@ class IRBuilder:
 
     def fneg(self, a: Value) -> Value:
         return self._op("arith.fneg", [a], [a.type], result_name_hint="fneg").result
+
+    def fabs(self, a: Value) -> Value:
+        """Floating-point absolute value (single-instruction on AMDGPU).
+
+        Lowers to ``llvm.fabs.f32`` (or the matching f16 / bf16
+        variant). On the AMDGPU backend this becomes a free input
+        modifier on the consumer or a single-cycle ``v_max_f32 a, -a``
+        — strictly cheaper than the historical ``fmax(a, fneg(a))``
+        idiom which materialises ``-a`` as an SSA value and prevents
+        the ``abs`` modifier from firing under multi-use of ``a``.
+
+        Used by smoothquant / moe_smoothquant / add_rmsnorm /
+        layernorm / rmsnorm amax sites (~30 sites today).
+        """
+        return self._op("arith.fabs", [a], [a.type], result_name_hint="fabs").result
+
+    def fma(self, a: Value, b: Value, c: Value) -> Value:
+        """Floating-point fused multiply-add: ``a * b + c``.
+
+        Lowers to ``llvm.fmuladd.f32`` so the AMDGPU MachineCombiner
+        always picks ``v_fma_f32`` (vs. the bare ``fmul`` + ``fadd``
+        pair, which only fuses when the scheduler can prove
+        ``contract`` semantics for both ops).
+        """
+        if not (a.type == b.type == c.type):
+            raise ValueError(
+                f"fma expects matching types; got {a.type.name}, "
+                f"{b.type.name}, {c.type.name}"
+            )
+        return self._op("arith.fma", [a, b, c], [a.type], result_name_hint="fma").result
+
+    def fmax3(self, a: Value, b: Value, c: Value) -> Value:
+        """Three-way floating-point max — ``max(a, max(b, c))``.
+
+        Lowers to ``llvm.amdgcn.fmed3.f32`` rearranged form when the
+        AMDGPU backend can prove ordered semantics, otherwise to a
+        single ``v_max3_f32`` op (gfx9+). One cycle vs the two-cycle
+        ``fmax(fmax(a, b), c)`` chain. Used by smoothquant /
+        add_rmsnorm amax + softmax pre-reduce.
+        """
+        if not (a.type == b.type == c.type):
+            raise ValueError(
+                f"fmax3 expects matching types; got {a.type.name}, "
+                f"{b.type.name}, {c.type.name}"
+            )
+        return self._op(
+            "arith.fmax3", [a, b, c], [a.type], result_name_hint="fmax3"
+        ).result
+
+    def fmin3(self, a: Value, b: Value, c: Value) -> Value:
+        """Three-way floating-point min — ``min(a, min(b, c))``.
+
+        Sibling of :meth:`fmax3`. Lowers to ``v_min3_f32`` (single
+        cycle) on AMDGPU. Used by topk / smin epilogue chains.
+        """
+        if not (a.type == b.type == c.type):
+            raise ValueError(
+                f"fmin3 expects matching types; got {a.type.name}, "
+                f"{b.type.name}, {c.type.name}"
+            )
+        return self._op(
+            "arith.fmin3", [a, b, c], [a.type], result_name_hint="fmin3"
+        ).result
 
     def cmp_lt(self, a: Value, b: Value) -> Value:
         return self._op(
@@ -671,6 +753,32 @@ class IRBuilder:
             result_name_hint="qb8x4",
         ).result
 
+    def cvt_pk_i8_f32x4(self, v: Value) -> Value:
+        """Round + saturate <4 x f32> to <4 x i8> as a single packed
+        primitive (vs four scalar :meth:`cvt_f32_to_i8_sat`).
+
+        The lowering uses ``llvm.rint.f32`` + ``smin`` / ``smax`` on
+        the i32 result and then a ``llvm.amdgcn.perm`` byte-select to
+        pack four i8 lanes into one i32, which is bitcast back to
+        <4 x i8>. AMDGPU's pattern matcher folds the rint+min/max
+        quad into 2-3 ``v_med3_i32`` plus a ``v_perm_b32`` -- ~6-8
+        instructions vs ~20 for the scalar chain.
+        """
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "f32"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_pk_i8_f32x4 expects vec<f32x4> input, got {v.type.name}"
+            )
+        return self._op(
+            "arith.cvt_pk_i8_f32x4",
+            [v],
+            [VectorType(I8, 4)],
+            result_name_hint="qi8x4",
+        ).result
+
     def cvt_f32_to_i8_sat(self, v: Value) -> Value:
         """Round + saturate one f32 element to i8 (round-to-nearest-even).
 
@@ -996,29 +1104,39 @@ class IRBuilder:
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
-        Supports `f16` / `bf16` (N in {2,4,8}) and `fp8e4m3` / `bf8e5m2`
-        (N in {2,4,8,16}) on this LLVM target. The fp8 case lowers to a
-        single ``load <N x i8>`` from ``addrspace(1)``; AMDGPU's backend
-        coalesces these into a single 1/2/4/16-byte VMEM load when the
-        address is naturally aligned.
+        Supports the full element-type catalog the LLVM lowering already
+        accepts: ``f16`` / ``bf16`` (N in {2, 4, 8}), ``f32`` / ``i32``
+        (N in {2, 4, 8}), ``i16`` (N in {2, 4, 8}), ``fp8e4m3`` /
+        ``bf8e5m2`` / ``i8`` (N in {2, 4, 8, 16}).
+
+        Lowers to a single ``load <N x elem>`` from ``addrspace(1)``;
+        AMDGPU's backend coalesces these into a single VMEM transaction
+        (``global_load_dwordxN``) when the address is naturally aligned.
 
         The per-element size is folded into the default alignment so the
-        common case (8 fp8 → 8-byte load) does not need an explicit
-        ``align=`` kwarg.
+        common case (8 fp8 → 8-byte load, 4 f32 → 16-byte load) does
+        not need an explicit ``align=`` kwarg.
         """
-        if dtype.name in ("f16", "bf16"):
+        if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
             if n not in (2, 4, 8):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
-        elif dtype.name in ("fp8e4m3", "bf8e5m2"):
+        elif dtype.name in ("f32", "i32"):
+            elem_bytes = 4
+            if n not in (2, 4, 8):
+                raise ValueError(
+                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
+                )
+        elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
             if n not in (2, 4, 8, 16):
                 raise ValueError(
-                    f"unsupported vector width for fp8 global_load_vN: {n}"
+                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         else:
             raise ValueError(
-                f"global_load_vN supports f16/bf16/fp8e4m3/bf8e5m2, got {dtype.name}"
+                "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, "
+                f"got {dtype.name}"
             )
         return self._op(
             "memref.global_load_vN",
@@ -1047,6 +1165,23 @@ class IRBuilder:
 
     def vector_max(self, a: Value, b: Value) -> Value:
         return self.vector_binary("max", a, b)
+
+    def vector_sub(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("sub", a, b)
+
+    def vector_fma(self, a: Value, b: Value, c: Value) -> Value:
+        """Packed FMA — ``a * b + c`` over matching vector operands.
+
+        Lowers to ``llvm.fmuladd.v<N>x<elem>`` so the AMDGPU
+        MachineCombiner picks ``v_pk_fma_f32`` / ``v_fma_f32`` chains
+        without relying on the scheduler proving ``contract``
+        semantics on a separate ``vector.mul`` + ``vector.add`` pair.
+        """
+        if not (isinstance(a.type, VectorType) and a.type == b.type == c.type):
+            raise ValueError("vector_fma expects three matching vector operands")
+        return self._op(
+            "vector.fma", [a, b, c], [a.type], result_name_hint="vfma"
+        ).result
 
     def vector_sum(self, v: Value) -> Value:
         if not isinstance(v.type, VectorType):
@@ -1521,6 +1656,78 @@ class IRBuilder:
             result_name_hint="sw",
         ).result
 
+    def mov_dpp(
+        self,
+        data: Value,
+        *,
+        row_shr: Optional[int] = None,
+        row_shl: Optional[int] = None,
+        bound_ctrl: bool = False,
+    ) -> Value:
+        """``v_mov_b32_dpp`` row-shift primitive (gfx9+).
+
+        ``row_shr={1,2,4,8,15}`` shifts each lane's value RIGHT inside
+        its 16-lane row-group (lanes 0..15, 16..31, …). ``row_shl`` is
+        the symmetric LEFT shift. ``bound_ctrl=True`` zero-fills lanes
+        that would shift in from outside the row-group (default: passes
+        the consumer's old VGPR through).
+
+        Cycle cost on AMDGPU is ~1 (vs ~3 for ``ds_bpermute``); used by
+        AITER / CK Tile cumsum + warp-XOR scan kernels for the inner
+        row-shift stage. Currently only one of ``row_shr`` / ``row_shl``
+        may be set per call.
+        """
+        if (row_shr is None) == (row_shl is None):
+            raise ValueError(
+                "mov_dpp requires exactly one of row_shr / row_shl to be set"
+            )
+        if row_shr is not None and row_shr not in (1, 2, 4, 8, 15):
+            raise ValueError(
+                f"mov_dpp row_shr must be in {{1,2,4,8,15}}, got {row_shr}"
+            )
+        if row_shl is not None and row_shl not in (1, 2, 4, 8, 15):
+            raise ValueError(
+                f"mov_dpp row_shl must be in {{1,2,4,8,15}}, got {row_shl}"
+            )
+        if data.type.name != "i32":
+            raise ValueError("mov_dpp requires i32 data")
+        attrs = {"bound_ctrl": bool(bound_ctrl)}
+        if row_shr is not None:
+            attrs["row_shr"] = int(row_shr)
+        else:
+            attrs["row_shl"] = int(row_shl)
+        return self._op(
+            "tile.mov_dpp",
+            [data],
+            [I32],
+            attrs=attrs,
+            result_name_hint="dpp",
+        ).result
+
+    def ds_bpermute_b64(self, addr: Value, data: Value) -> Value:
+        """Packed 64-bit ``ds_bpermute`` — single LDS op for paired
+        ``(val, idx)`` cross-lane shuffles (gfx9+).
+
+        ``addr`` is the per-lane source-lane index (same encoding as
+        :meth:`ds_bpermute`). ``data`` must be ``i64`` (typically built
+        from ``vec_concat(i32, i32)`` or a bitcast of two ``i32`` lanes
+        of payload). Returns the permuted ``i64``; consumer can split
+        back into the ``(val, idx)`` pair.
+
+        Halves the LDS-op count vs two separate ``ds_bpermute`` calls
+        in topk-softmax / argmax butterflies (``_wave_argmax_butterfly``).
+        """
+        if addr.type.name != "i32":
+            raise ValueError("ds_bpermute_b64 requires i32 addr")
+        if data.type.name != "i64":
+            raise ValueError("ds_bpermute_b64 requires i64 data")
+        return self._op(
+            "tile.ds_bpermute_b64",
+            [addr, data],
+            [I64],
+            result_name_hint="bp64",
+        ).result
+
     def permlane32_swap(self, lo: Value, hi: Value):
         """`__builtin_amdgcn_permlane32_swap(lo, hi)` — swap the values
         of two registers across the 32-lane half boundary.
@@ -1653,6 +1860,31 @@ class IRBuilder:
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
             result_name_hint="tr16",
+        ).result
+
+    def ds_read_tr16_b128(
+        self, smem: Value, *indices: Value, dtype: Type = F16
+    ) -> Value:
+        """``ds_read_b128_tr_b16`` — gfx950 wide transpose-read.
+
+        Same shape as :meth:`ds_read_tr16_b64` but reads 16 bytes per
+        lane instead of 8. Per-lane result is ``<8 x f16>`` (or bf16),
+        delivering the MFMA B-operand layout for the K-packed atoms
+        (``f16_16x16x32`` / ``bf16_16x16x32``) in a single LDS op
+        instead of two paired ``b64`` reads.
+
+        Used by transpose phase-2 and the PV-V LDS read in
+        ``attention_tiled_2d`` 32x32 path: 8 scalar ``ds_read_u16``
+        per lane → 1 transposed read.
+        """
+        if not indices:
+            raise ValueError("ds_read_tr16_b128 needs at least one index")
+        return self._op(
+            "tile.ds_read_tr16_b128",
+            [smem, *indices],
+            [VectorType(dtype, 8)],
+            attrs={"rank": len(indices), "elem_type": dtype.name},
+            result_name_hint="tr16w",
         ).result
 
     def ds_read_tr_b8(
@@ -2062,20 +2294,44 @@ class IRBuilder:
         *,
         align: Optional[int] = None,
     ) -> None:
-        """Vectorised `<N x 16-bit>` global store for f16/bf16."""
-        if n not in (1, 2, 4, 8):
-            raise ValueError(f"global_store_vN n must be 1, 2, 4, or 8 (got {n})")
+        """Vectorised global store of N consecutive elements.
+
+        Supports the full element-type catalog the LLVM lowering already
+        emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32``
+        (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
+        a single ``store <N x elem>`` and AMDGPU coalesces into one
+        ``global_store_dwordxN`` transaction.
+        """
+        if n not in (1, 2, 4, 8, 16):
+            raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
         elem_name = (
             value.type.elem.name
             if isinstance(value.type, VectorType)
             else value.type.name
         )
-        if elem_name not in ("f16", "bf16"):
-            raise ValueError(f"global_store_vN supports f16/bf16, got {elem_name}")
+        if elem_name in ("f16", "bf16", "i16"):
+            elem_bytes = 2
+            if n == 16:
+                raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
+        elif elem_name in ("f32", "i32"):
+            elem_bytes = 4
+            if n == 16:
+                raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
+        elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
+            elem_bytes = 1
+        else:
+            raise ValueError(
+                "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, "
+                f"got {elem_name}"
+            )
         self._op(
             "memref.global_store_vN",
             [ptr, idx, value],
-            attrs={"elem_type": elem_name, "vec": n, "align": int(align or (n * 2))},
+            attrs={
+                "elem_type": elem_name,
+                "vec": n,
+                "align": int(align or (n * elem_bytes)),
+            },
         )
 
     # ----- atomics (for split-K) -----

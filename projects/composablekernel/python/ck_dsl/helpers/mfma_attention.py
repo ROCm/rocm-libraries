@@ -183,17 +183,17 @@ def mfma_attention_fwd_inner_body(
         )
     if dtype not in ("f16", "fp16", "bf16"):
         raise ValueError(f"mfma_attention dtype must be f16/bf16, got {dtype!r}")
-    if dtype == "bf16":
-        raise NotImplementedError(
-            "bf16 MFMA attention requires the bf16 MfmaAtom factory; "
-            "f16 path ships today, bf16 lands once the atom is exposed"
-        )
 
     # Q dtype is the activation dtype; K / V dtype can be fp8e4m3 /
     # bf8e5m2 (when ``kv_dtype`` is set). The QK MFMA atom picks
-    # ``f16 ⊗ f16 → f32`` or ``fp8 ⊗ fp8 → f32`` based on K/V dtype.
+    # ``f16 ⊗ f16 → f32``, ``bf16 ⊗ bf16 → f32`` (gfx940+ via
+    # ``mfma_f32_16x16x16_bf16``) or ``fp8 ⊗ fp8 → f32`` based on K/V
+    # dtype.
     if kv_dtype is None or kv_dtype == dtype:
-        atom = MfmaAtom.f16_16x16x16()
+        if dtype == "bf16":
+            atom = MfmaAtom.bf16_16x16x16()
+        else:
+            atom = MfmaAtom.f16_16x16x16()
         kv_dtype_eff = dtype
     elif kv_dtype == "fp8e4m3":
         atom = MfmaAtom.fp8_16x16x32()

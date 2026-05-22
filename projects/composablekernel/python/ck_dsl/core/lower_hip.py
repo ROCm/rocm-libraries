@@ -31,6 +31,7 @@ from .ir import (
 _HIP_TYPE = {
     "i1": "bool",
     "i8": "int8_t",
+    "i16": "int16_t",
     "i32": "int",
     "i64": "int64_t",
     "f16": "fp16",
@@ -57,6 +58,8 @@ def _type_to_hip(t) -> str:
             return f"f32x{t.count}"
         if elem == "i32":
             return f"i32x{t.count}"
+        if elem == "i16":
+            return f"i16x{t.count}"
         if elem == "i8":
             return f"i8x{t.count}"
         if elem == "fp8e4m3":
@@ -110,6 +113,8 @@ _CKDSL_VEC(float, f32x, 1); _CKDSL_VEC(float, f32x, 2); _CKDSL_VEC(float, f32x, 
 _CKDSL_VEC(float, f32x, 8); _CKDSL_VEC(float, f32x, 16);
 _CKDSL_VEC(int, i32x, 1); _CKDSL_VEC(int, i32x, 2); _CKDSL_VEC(int, i32x, 3);
 _CKDSL_VEC(int, i32x, 4); _CKDSL_VEC(int, i32x, 8);
+_CKDSL_VEC(int16_t, i16x, 1); _CKDSL_VEC(int16_t, i16x, 2);
+_CKDSL_VEC(int16_t, i16x, 4); _CKDSL_VEC(int16_t, i16x, 8);
 _CKDSL_VEC(int8_t, i8x, 4); _CKDSL_VEC(int8_t, i8x, 8); _CKDSL_VEC(int8_t, i8x, 16);
 _CKDSL_VEC(bool, boolx, 2); _CKDSL_VEC(bool, boolx, 4); _CKDSL_VEC(bool, boolx, 8);
 _CKDSL_VEC(bool, boolx, 16);
@@ -133,6 +138,10 @@ typedef short i16x4_raw __attribute__((ext_vector_type(4)));
 __device__ extern "C" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(
  const __attribute__((address_space(3))) void*)
  __asm("llvm.amdgcn.ds.read.tr16.b64");
+typedef short i16x8_raw __attribute__((ext_vector_type(8)));
+__device__ extern "C" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(
+ const __attribute__((address_space(3))) void*)
+ __asm("llvm.amdgcn.ds.read.tr16.b128");
 // ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to
 // {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},
 // which is what async-DMA pipelines (compv4 / split-KV attention) need.
@@ -687,6 +696,57 @@ class _Lowerer:
         (v,) = op.operands
         self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = -{_name(v)};")
 
+    def _op_arith_fabs(self, op: Op) -> None:
+        (v,) = op.operands
+        ty = _type_to_hip(op.result.type)
+        # `__builtin_fabsf` lowers to a free `abs` modifier on AMDGPU
+        # (exactly what the LLVM `llvm.fabs.f32` intrinsic produces);
+        # for f16/bf16 the matching builtin yields the same modifier.
+        helper = {
+            "f32": "fabsf",
+            "f16": "__builtin_fabsf",
+            "bf16": "__builtin_fabsf",
+        }.get(op.result.type.name, "fabsf")
+        self._emit(f"{ty} {_name(op.result)} = ({ty}){helper}((float){_name(v)});")
+
+    def _op_arith_fma(self, op: Op) -> None:
+        a, b, c = op.operands
+        ty = _type_to_hip(op.result.type)
+        # `fmaf(a, b, c)` lowers to `v_fma_f32` on AMDGPU for f32; for
+        # f16/bf16 we promote to f32, fma, and demote — semantically
+        # identical to the IR-level `arith.fma` and matches the
+        # `llvm.fmuladd` lowering.
+        self._emit(
+            f"{ty} {_name(op.result)} = ({ty})fmaf("
+            f"(float){_name(a)}, (float){_name(b)}, (float){_name(c)});"
+        )
+
+    def _op_arith_fmax3(self, op: Op) -> None:
+        a, b, c = op.operands
+        ty = _type_to_hip(op.result.type)
+        # Two ternary ops in one statement; on AMDGPU the chain folds
+        # into a single `v_max3_f32`.
+        self._emit(
+            f"{ty} {_name(op.result)} = "
+            f"(({_name(b)} > {_name(c)}) ? {_name(b)} : {_name(c)});"
+        )
+        self._emit(
+            f"{_name(op.result)} = "
+            f"({_name(a)} > {_name(op.result)}) ? {_name(a)} : {_name(op.result)};"
+        )
+
+    def _op_arith_fmin3(self, op: Op) -> None:
+        a, b, c = op.operands
+        ty = _type_to_hip(op.result.type)
+        self._emit(
+            f"{ty} {_name(op.result)} = "
+            f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});"
+        )
+        self._emit(
+            f"{_name(op.result)} = "
+            f"({_name(a)} < {_name(op.result)}) ? {_name(a)} : {_name(op.result)};"
+        )
+
     def _op_arith_fmax(self, op: Op) -> None:
         a, b = op.operands
         # Ternary works for fp16/bf16/f32 in C++ and folds to v_max on AMDGPU.
@@ -864,6 +924,118 @@ class _Lowerer:
             f"{_name(v)}, 0.0f, 0u, false);"
         )
         self._emit(f"bf8e5m2 {_name(op.result)} = (bf8e5m2)({tmp} & 0xffu);")
+
+    def _op_arith_cvt_pk_f32_fp8x4(self, op: Op) -> None:
+        """Packed <4 x fp8e4m3> -> <4 x f32> via two
+        ``__builtin_amdgcn_cvt_pk_f32_fp8`` calls.
+
+        e4m3 sibling of :meth:`_op_arith_cvt_pk_f32_bf8x4`; mirrors the
+        LLVM lowering's two-packed-cvt + concat shape but in HIP
+        builtin form so the debug source compiles with hipcc.
+        """
+        (v,) = op.operands
+        nice = _name(op.result)
+        packed = f"{nice}_p"
+        lo = f"{nice}_lo"
+        hi = f"{nice}_hi"
+        self._emit(
+            f"unsigned int {packed}; "
+            f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
+        )
+        self._emit(f"float2 {lo} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, false);")
+        self._emit(f"float2 {hi} = __builtin_amdgcn_cvt_pk_f32_fp8({packed}, true);")
+        self._emit(f"vec<f32x4> {nice};")
+        self._emit(f"{nice}[0] = {lo}.x;")
+        self._emit(f"{nice}[1] = {lo}.y;")
+        self._emit(f"{nice}[2] = {hi}.x;")
+        self._emit(f"{nice}[3] = {hi}.y;")
+
+    def _op_arith_cvt_pk_f32_bf8x4(self, op: Op) -> None:
+        """e5m2 sibling of :meth:`_op_arith_cvt_pk_f32_fp8x4`."""
+        (v,) = op.operands
+        nice = _name(op.result)
+        packed = f"{nice}_p"
+        lo = f"{nice}_lo"
+        hi = f"{nice}_hi"
+        self._emit(
+            f"unsigned int {packed}; "
+            f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
+        )
+        self._emit(f"float2 {lo} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, false);")
+        self._emit(f"float2 {hi} = __builtin_amdgcn_cvt_pk_f32_bf8({packed}, true);")
+        self._emit(f"vec<f32x4> {nice};")
+        self._emit(f"{nice}[0] = {lo}.x;")
+        self._emit(f"{nice}[1] = {lo}.y;")
+        self._emit(f"{nice}[2] = {hi}.x;")
+        self._emit(f"{nice}[3] = {hi}.y;")
+
+    def _op_arith_cvt_pk_fp8_f32x4(self, op: Op) -> None:
+        """Packed <4 x f32> -> <4 x fp8e4m3> via two
+        ``__builtin_amdgcn_cvt_pk_fp8_f32`` calls (mirrors the LLVM
+        lowering's pack-byte0/1 then byte2/3 shape).
+
+        The intrinsic returns an i32 with the chosen byte pair filled;
+        the second call takes the first call's i32 as ``old`` and
+        fills bytes 2,3. The final i32 is memcpy'd into the result
+        vector. ``_type_to_hip`` maps ``VectorType(FP8E4M3, 4)`` to
+        ``i8x4`` (fp8e4m3 is stored as raw bytes in the prologue),
+        which is the type the HIP MFMA fp8 builtins also consume.
+        """
+        (v,) = op.operands
+        nice = _name(op.result)
+        lo = f"{nice}_lo"
+        packed = f"{nice}_p"
+        res_t = _type_to_hip(op.result.type)
+        self._emit(
+            f"unsigned int {lo} = __builtin_amdgcn_cvt_pk_fp8_f32("
+            f"{_name(v)}[0], {_name(v)}[1], 0u, false);"
+        )
+        self._emit(
+            f"unsigned int {packed} = __builtin_amdgcn_cvt_pk_fp8_f32("
+            f"{_name(v)}[2], {_name(v)}[3], {lo}, true);"
+        )
+        self._emit(
+            f"{res_t} {nice}; __builtin_memcpy(&{nice}, &{packed}, sizeof({nice}));"
+        )
+
+    def _op_arith_cvt_pk_bf8_f32x4(self, op: Op) -> None:
+        """e5m2 sibling of :meth:`_op_arith_cvt_pk_fp8_f32x4`."""
+        (v,) = op.operands
+        nice = _name(op.result)
+        lo = f"{nice}_lo"
+        packed = f"{nice}_p"
+        res_t = _type_to_hip(op.result.type)
+        self._emit(
+            f"unsigned int {lo} = __builtin_amdgcn_cvt_pk_bf8_f32("
+            f"{_name(v)}[0], {_name(v)}[1], 0u, false);"
+        )
+        self._emit(
+            f"unsigned int {packed} = __builtin_amdgcn_cvt_pk_bf8_f32("
+            f"{_name(v)}[2], {_name(v)}[3], {lo}, true);"
+        )
+        self._emit(
+            f"{res_t} {nice}; __builtin_memcpy(&{nice}, &{packed}, sizeof({nice}));"
+        )
+
+    def _op_arith_cvt_pk_i8_f32x4(self, op: Op) -> None:
+        """Packed <4 x f32> -> <4 x i8> saturating cvt.
+
+        Per-element ``rintf`` + clamp + cast loop; AMDGPU's pattern
+        matcher in hipcc folds the chain into ``v_med3_i32`` plus a
+        single ``v_perm_b32`` byte-select on the production path. Same
+        semantics as the LLVM lowering's ``llvm.amdgcn.perm`` shape.
+        """
+        (v,) = op.operands
+        nice = _name(op.result)
+        res_t = _type_to_hip(op.result.type)
+        self._emit(f"{res_t} {nice};")
+        for i in range(4):
+            r = f"{nice}_r{i}"
+            ai = f"{nice}_i{i}"
+            self._emit(f"float {r} = rintf({_name(v)}[{i}]);")
+            self._emit(f"int {ai} = (int){r};")
+            self._emit(f"{ai} = ({ai} < -128) ? -128 : (({ai} > 127) ? 127 : {ai});")
+            self._emit(f"{nice}[{i}] = (int8_t){ai};")
 
     def _op_arith_cvt_f32_to_i8_sat(self, op: Op) -> None:
         # Saturating f32 -> i8 round-to-nearest-even. ``rintf`` honours
@@ -1099,6 +1271,45 @@ class _Lowerer:
             f"__builtin_amdgcn_ds_bpermute({_name(addr)}, {_name(data)});"
         )
 
+    def _op_tile_ds_bpermute_b64(self, op: Op) -> None:
+        """Synthesise the 64-bit ``ds_bpermute`` from two 32-bit calls.
+
+        Mirrors the LLVM lowering's split: take low/high 32 bits, run
+        ``__builtin_amdgcn_ds_bpermute`` on each, recombine. AMDGPU
+        gfx9 has no native 64-bit ``ds_bpermute``; the IR-level op
+        keeps the kernel author's intent visible for future
+        backends.
+        """
+        addr, data = op.operands
+        nice = _name(op.result)
+        lo = f"{nice}_lo"
+        hi = f"{nice}_hi"
+        plo = f"{nice}_plo"
+        phi = f"{nice}_phi"
+        self._emit(f"int {lo} = (int)((uint64_t){_name(data)} & 0xffffffffu);")
+        self._emit(f"int {hi} = (int)((uint64_t){_name(data)} >> 32);")
+        self._emit(f"int {plo} = __builtin_amdgcn_ds_bpermute({_name(addr)}, {lo});")
+        self._emit(f"int {phi} = __builtin_amdgcn_ds_bpermute({_name(addr)}, {hi});")
+        self._emit(
+            f"int64_t {nice} = ((int64_t)(uint32_t){phi} << 32) | (uint32_t){plo};"
+        )
+
+    def _op_tile_mov_dpp(self, op: Op) -> None:
+        """``v_mov_b32_dpp`` row-shift via the AMDGPU update_dpp builtin."""
+        (data,) = op.operands
+        bound_ctrl = bool(op.attrs.get("bound_ctrl", False))
+        if "row_shr" in op.attrs:
+            shift = int(op.attrs["row_shr"])
+            dpp_ctrl = 0x110 | (shift & 0xF)
+        else:
+            shift = int(op.attrs["row_shl"])
+            dpp_ctrl = 0x100 | (shift & 0xF)
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, "
+            f"{1 if bound_ctrl else 0});"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` XOR butterfly via SWAP-mode encoding.
 
@@ -1161,6 +1372,25 @@ class _Lowerer:
             f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
         )
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
+
+    def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
+        # ``ds_read_b128_tr_b16`` -- wide gfx950 transpose-read.
+        # Same shape as the b64 variant, ``<8 x i16>`` per lane.
+        smem = op.operands[0]
+        indices = op.operands[1:]
+        storage = smem.op.attrs.get("_storage")
+        if storage is None:
+            raise RuntimeError("ds_read_tr16_b128 before smem_alloc was lowered")
+        idx_str = "][".join(_name(i) for i in indices)
+        elem = op.attrs.get("elem_type", "f16")
+        vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")
+        nice = _name(op.result)
+        raw_tmp = f"_trraw_{nice.lstrip('%')}"
+        self._emit(
+            f"i16x8_raw {raw_tmp} = _llvm_amdgcn_ds_read_tr16_b128("
+            f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
+        )
+        self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands
@@ -1246,6 +1476,45 @@ class _Lowerer:
         self._emit(f"{cpp_t} {nice} = {_name(v)}[0];")
         for i in range(1, n):
             self._emit(f"{nice} = {nice} + {_name(v)}[{i}];")
+
+    def _op_vector_add(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] + {_name(bb)}[{i}];")
+
+    def _op_vector_mul(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] * {_name(bb)}[{i}];")
+
+    def _op_vector_sub(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] - {_name(bb)}[{i}];")
+
+    def _op_vector_fma(self, op: Op) -> None:
+        a, bb, cc = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(
+                f"{nice}[{i}] = fmaf((float){_name(a)}[{i}], "
+                f"(float){_name(bb)}[{i}], (float){_name(cc)}[{i}]);"
+            )
 
     def _op_vector_reduce_max(self, op: Op) -> None:
         (v,) = op.operands

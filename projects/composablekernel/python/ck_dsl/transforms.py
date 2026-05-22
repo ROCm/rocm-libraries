@@ -698,6 +698,50 @@ class TensorDescriptor:
                     seen.add(n)
         return replace(self, chain=new_chain, upper_names=tuple(ordered))
 
+    def unmerge_lower(
+        self,
+        b: IRBuilder,
+        **upper_values: Value,
+    ) -> Dict[str, Value]:
+        """Run the descriptor's transform chain in topological order
+        and return the lowered coordinate map.
+
+        Equivalent to :meth:`offset`'s prologue but stops before the
+        final ``base_strides`` reduction: callers get the dict of
+        ``{lower_name: i32 SSA value}`` for every coord produced by
+        any applicable transform plus the original upper coords.
+
+        This is the public accessor for the ``Unmerge``-driven
+        ``(n, ho, wo) <- m`` decomposition that conv kernels do
+        inline today (P56). Calling
+        ``desc.unmerge_lower(b, m=...)`` lets conv ``chunk_meta``
+        replace its inline ``b.div`` / ``b.mod`` chain with one
+        descriptor call.
+        """
+        coords: Dict[str, CoordVar] = {
+            name: CoordVar(name, val) for name, val in upper_values.items()
+        }
+        remaining: List[Transform] = list(self.chain)
+        while remaining:
+            progress = False
+            next_remaining: List[Transform] = []
+            for t in remaining:
+                if all(name in coords for name in t.upper):
+                    produced = t.apply(b, coords)
+                    for n, v in produced.items():
+                        coords[n] = v
+                    progress = True
+                else:
+                    next_remaining.append(t)
+            remaining = next_remaining
+            if not progress:
+                # No more applicable transforms — return whatever we
+                # produced so far. Callers asking for partial lowering
+                # of a sub-chain (e.g. only one ``Unmerge``) get a
+                # complete answer for the coords that were producible.
+                break
+        return {name: cv.value for name, cv in coords.items()}
+
     def offset(
         self,
         b: IRBuilder,

@@ -613,7 +613,9 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # atoms gives ``4 * M_ATOMS_PER_WARP`` slots per lane per N-tile.
     REGS_PER_LANE = spec.regs_per_lane  # 4 for M=16, 8 for M=32
     SOFTMAX_STATE_SLOTS = (
-        1 if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_SCALAR_STATE else REGS_PER_LANE
+        1
+        if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_SCALAR_STATE
+        else REGS_PER_LANE
     )
 
     name = spec.kernel_name()
@@ -2633,14 +2635,18 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                             )
                             tr_col32 = b.add(
                                 col_group16,
-                                b.mul(b.mod(lane_col32, b.const_i32(4)), b.const_i32(4)),
+                                b.mul(
+                                    b.mod(lane_col32, b.const_i32(4)), b.const_i32(4)
+                                ),
                             )
                             tr_row_base32 = b.add(
                                 b.add(
                                     b.const_i32(k * 16),
                                     b.mul(lane_half32, b.const_i32(4)),
                                 ),
-                                b.mod(b.div(lane_col32, b.const_i32(4)), b.const_i32(4)),
+                                b.mod(
+                                    b.div(lane_col32, b.const_i32(4)), b.const_i32(4)
+                                ),
                             )
                             A_r0 = b.ds_read_tr16_b64(
                                 V_lds,

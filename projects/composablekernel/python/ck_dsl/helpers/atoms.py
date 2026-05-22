@@ -250,6 +250,60 @@ class MfmaAtom:
             name="mfma_f32_32x32x16_bf8",
         )
 
+    # ---- BF16 atoms (gfx940+; same shapes as f16, different intrinsic) ----
+    #
+    # The bf16 MFMA family is a 1:1 mirror of the f16 family at the
+    # (m, n, k) catalog (gfx940 ships the same set). Per-lane vector
+    # widths and accumulator footprints are identical. The only
+    # differences vs f16 are the LLVM intrinsic name and the input
+    # element dtype — both surface through ``MfmaAtom.emit`` dispatch
+    # and the ``dtype_in="bf16"`` tag.
+
+    @classmethod
+    def bf16_16x16x16(cls) -> "MfmaAtom":
+        """BF16 sibling of :meth:`f16_16x16x16` (legacy CDNA atom)."""
+        return cls(
+            m=16,
+            n=16,
+            k=16,
+            a_per_lane=4,
+            b_per_lane=4,
+            c_per_lane=4,
+            dtype_in="bf16",
+            dtype_out="f32",
+            name="mfma_f32_16x16x16_bf16",
+        )
+
+    @classmethod
+    def bf16_16x16x32(cls) -> "MfmaAtom":
+        """BF16 sibling of :meth:`f16_16x16x32` (gfx950+ K-packed)."""
+        return cls(
+            m=16,
+            n=16,
+            k=32,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=4,
+            dtype_in="bf16",
+            dtype_out="f32",
+            name="mfma_f32_16x16x32_bf16",
+        )
+
+    @classmethod
+    def bf16_32x32x16(cls) -> "MfmaAtom":
+        """BF16 sibling of :meth:`f16_32x32x16` (gfx950+ K-packed 32x32)."""
+        return cls(
+            m=32,
+            n=32,
+            k=16,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=16,
+            dtype_in="bf16",
+            dtype_out="f32",
+            name="mfma_f32_32x32x16_bf16",
+        )
+
     @classmethod
     def f16_4x4x4(cls) -> "MfmaAtom":
         """The tiny f16 atom. One MFMA emits 16 independent 4x4x4 matmuls per wave.
@@ -292,6 +346,12 @@ class MfmaAtom:
             return b.mfma_f32_32x32x16_f16(a, bb, c)
         if (self.m, self.n, self.k, self.dtype_in) == (4, 4, 4, "f16"):
             return b.mfma_f32_4x4x4_f16(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 16, "bf16"):
+            return b.mfma_f32_16x16x16_bf16(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "bf16"):
+            return b.mfma_f32_16x16x32_bf16(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "bf16"):
+            return b.mfma_f32_32x32x16_bf16(a, bb, c)
         if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "fp8e4m3"):
             return b.mfma_f32_16x16x32_fp8(a, bb, c)
         if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "bf8e5m2"):
@@ -385,6 +445,12 @@ MFMA_F16_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.f16_32x32x16(),
 )
 
+MFMA_BF16_ATOMS: Tuple[MfmaAtom, ...] = (
+    MfmaAtom.bf16_16x16x16(),
+    MfmaAtom.bf16_16x16x32(),
+    MfmaAtom.bf16_32x32x16(),
+)
+
 MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_16x16x32(),
     MfmaAtom.fp8_32x32x16(),
@@ -394,10 +460,10 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
 
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
-# factory; ``MFMA_F16_ATOMS`` and ``MFMA_FP8_ATOMS`` are kept as
-# narrower subset accessors for callers that want to walk only the
-# fp16 or fp8/bf8 families.
-MFMA_ATOMS: Tuple[MfmaAtom, ...] = MFMA_F16_ATOMS + MFMA_FP8_ATOMS
+# factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
+# are kept as narrower subset accessors for callers that want to walk
+# only the fp16, bf16, or fp8/bf8 families.
+MFMA_ATOMS: Tuple[MfmaAtom, ...] = MFMA_F16_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,
 # ``bf8`` -> ``bf8e5m2``. Keeps Triton-ported and CK Tile-ported
@@ -409,6 +475,8 @@ _DTYPE_ALIAS = {
     "bf8e5m2": "bf8e5m2",
     "f16": "f16",
     "fp16": "f16",
+    "bf16": "bf16",
+    "bfloat16": "bf16",
 }
 
 _BY_SHAPE: Dict[Tuple[str, int, int, int], MfmaAtom] = {
