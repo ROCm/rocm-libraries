@@ -1299,13 +1299,13 @@ __device__ T* cast_pointer_to_generic_address_space(T CK_TILE_CONSTANT_ADDRESS_S
 {
     // cast a pointer in "Constant" address space (4) to "Generic" address space (0)
     // only c-style pointer cast seems be able to be compiled
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     return (T*)(p); // NOLINT(old-style-cast)
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 }
@@ -1315,13 +1315,13 @@ __host__ __device__ T CK_TILE_CONSTANT_ADDRESS_SPACE* cast_pointer_to_constant_a
 {
     // cast a pointer in "Generic" address space (0) to "Constant" address space (4)
     // only c-style pointer cast seems be able to be compiled;
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
     return (T CK_TILE_CONSTANT_ADDRESS_SPACE*)p; // NOLINT(old-style-cast)
-#if __clang_major__ >= 23
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 }
