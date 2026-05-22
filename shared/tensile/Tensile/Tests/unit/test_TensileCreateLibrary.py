@@ -419,6 +419,7 @@ def test_generateMasterFileList():
         assert t[1].data == (idx + 2), "Incorrect data."
 
 
+@pytest.mark.requires_compiler
 def test_logicDataAndSolutionsConstruction(initGlobalParametersForTCL):
 
     def testCase1(logicFiles: List[LibraryIO.LibraryLogic], separateArch: bool):
@@ -570,6 +571,7 @@ def setupSolutionsAndKernels(
     return solutions, kernels, kernelWriterAssembly, kernelWriterSource
 
 
+@pytest.mark.requires_compiler
 def test_prepAsm(setupSolutionsAndKernels):
     solutions, kernels, kernelWriterAssembly, kernelWriterSource = setupSolutionsAndKernels
     buildPath = Path("no-commit-prep-asm")
@@ -709,6 +711,7 @@ def test_filterProcessingErrors(setupSolutionsAndKernels):
         tcl.filterProcessingErrors(kernels, solutions, results, printLevel=1, ignoreErr=False)
 
 
+@pytest.mark.requires_compiler
 def test_processKernelSource(setupSolutionsAndKernels):
     _, kernels, kernelWriterAssembly, kernelWriterSource = setupSolutionsAndKernels
 

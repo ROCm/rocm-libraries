@@ -72,6 +72,7 @@ def test_ReadCustomKernelConfig(objs):
     except:
         assert False
 
+@pytest.mark.requires_compiler
 @pytest.mark.parametrize("objs", [("TestKernel", testKernelDir)])
 def test_CreateSolutionFromCustomKernel(objs):
     # try:
