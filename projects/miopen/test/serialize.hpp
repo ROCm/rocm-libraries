@@ -27,13 +27,8 @@
 #ifndef MIOPEN_GUARD_TEST_SERIALIZE_HPP
 #define MIOPEN_GUARD_TEST_SERIALIZE_HPP
 
-#include <miopen/rank.hpp>
-#include <miopen/each_args.hpp>
-#include <half/half.hpp>
+#include <miopen/tensor_holder.hpp>
 #include <fstream>
-#include <string>
-#include <tuple>
-#include <vector>
 
 template <class T>
 struct is_trivial_serializable : std::is_trivially_copy_constructible<T>

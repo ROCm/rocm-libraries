@@ -28,7 +28,7 @@
 #include <miopen/fusionHost.hpp>
 #include <miopen/cpu_bias.hpp>
 
-#include "gtes_common.hpp"
+#include "gtest_common.hpp"
 #include "conv_test_base.hpp"
 
 template <typename T = float, typename TestCaseType = ConvTestCaseBase>

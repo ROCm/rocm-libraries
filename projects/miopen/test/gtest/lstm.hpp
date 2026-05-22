@@ -24,27 +24,20 @@
  *******************************************************************************/
 #pragma once
 
-#include <miopen/rnn.hpp>
-#include "dropout_util.hpp"
-#include "rnn_util.hpp"
-#include "cpu_rnn.hpp"
-#include "workspace.hpp"
-#include "verify.hpp"
-#include "gtest_desc_guard.hpp"
-#include "gtest_handle_guard.hpp"
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
-#include <tuple>
-#include <numeric>
-#include <algorithm>
-#include <gtest/gtest.h>
+#include "get_handle.hpp"
+#include "workspace.hpp"
+#include "rnn_util.hpp"
 
 #define MIO_LSTM_TEST_DEBUG 0
 #define MIO_RNN_TIME_EVERYTHING 0
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
 #include <iostream>
 #endif
-#if(MIO_RNN_TIME_EVERYTHING > 0)
+#if (MIO_RNN_TIME_EVERYTHING > 0)
 #include <chrono>
 #endif
 
@@ -419,7 +412,7 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> cpu() const
     {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -439,10 +432,10 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
-                              outputDescs,
-                              batch_seq,
-                              hiddenSize * ((dirMode != 0) ? 2 : 1),
-                              miopen::deref(rnnDesc).dataType);
+                                      outputDescs,
+                                      batch_seq,
+                                      hiddenSize * ((dirMode != 0) ? 2 : 1),
+                                      miopen::deref(rnnDesc).dataType);
         miopenGetRNNInputTensorSize(&handle, rnnDesc, seqLength, outputDescs.data(), &out_sz);
         miopenGetRNNTrainingReserveSize(
             &handle, rnnDesc, seqLength, inputDescs.data(), &reserveSpaceSize);
@@ -489,20 +482,20 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
                          nohx,
                          nocx);
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             std::cout << "CPU outdata[" << i << "]: " << output[i] << std::endl;
         }
 #endif
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: CPU forward inference LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with LSTM forward inference CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -511,7 +504,7 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> gpu() const
     {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -520,16 +513,15 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
-        createTensorDescArray(
-            inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
-                              outputDescs,
-                              batch_seq,
-                              hiddenSize * ((dirMode != 0) ? 2 : 1),
-                              miopen::deref(rnnDesc).dataType);
+                                      outputDescs,
+                                      batch_seq,
+                                      hiddenSize * ((dirMode != 0) ? 2 : 1),
+                                      miopen::deref(rnnDesc).dataType);
 
         size_t workspace_size = 0;
         miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
@@ -583,7 +575,7 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
                                   wspace.ptr(),
                                   wspace.size());
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -591,13 +583,13 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
         }
 #endif
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: GPU forward_infer LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with LSTM forward inference GPU" << std::endl;
 #endif
         return (handle.Read<T>(output_dev, output.size()));
@@ -723,7 +715,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu() const
     {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -733,23 +725,21 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         int bi_stride = bi * hy_h;
         int out_h     = hiddenSize * ((dirMode != 0) ? 2 : 1);
         size_t out_sz = getSuperTensorSize(batch_seq,
-                                           seqLength,
-                                           inputVecLen,
-                                           hiddenSize,
-                                           batch_seq[0],
-                                           dirMode != 0,
-                                           false,
-                                           use_seqPadding);
+                                                   seqLength,
+                                                   inputVecLen,
+                                                   hiddenSize,
+                                                   batch_seq[0],
+                                                   dirMode != 0,
+                                                   false,
+                                                   use_seqPadding);
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
-        createTensorDescArray(
-            inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
-        createTensorDescArray(
-            outputCPPDescs, outputDescs, batch_seq, out_h, miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(outputCPPDescs, outputDescs, batch_seq, out_h, miopen::deref(rnnDesc).dataType);
 
         size_t inputBatchLenSum =
             std::accumulate(batch_seq.begin(), batch_seq.begin() + seqLength, 0ULL);
@@ -780,7 +770,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         {
             size_t packedXInSize, packedYOutSize;
             std::tie(packedXInSize, packedYOutSize) =
-                GetTempPackedBuffersSize(batch_seq, inputVecLen, out_h);
+                miopen::GetTempPackedBuffersSize(batch_seq, inputVecLen, out_h);
 
             converted_input.resize(packedXInSize);
             converted_output.resize(packedYOutSize);
@@ -825,14 +815,14 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                          nohx,
                          nocx);
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             std::cout << "CPU outdata[" << i << "]: " << output[i] << std::endl;
         }
 #endif
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: CPU forward train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
@@ -854,7 +844,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         auto retSet = std::make_tuple(
             output, (nohy ? initHidden : hiddenState), (nocy ? initCell : cellState));
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with LSTM forward train CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -863,34 +853,33 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu() const
     {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
-        createTensorDescArray(
-            inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
         auto input_dev = handle.Write(input);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
-                              outputDescs,
-                              batch_seq,
-                              hiddenSize * ((dirMode != 0) ? 2 : 1),
-                              miopen::deref(rnnDesc).dataType);
+                                      outputDescs,
+                                      batch_seq,
+                                      hiddenSize * ((dirMode != 0) ? 2 : 1),
+                                      miopen::deref(rnnDesc).dataType);
 
         std::vector<T> output(getSuperTensorSize(batch_seq,
-                                                 seqLength,
-                                                 inputVecLen,
-                                                 hiddenSize,
-                                                 batch_seq[0],
-                                                 dirMode != 0,
-                                                 false,
-                                                 use_seqPadding));
+                                                         seqLength,
+                                                         inputVecLen,
+                                                         hiddenSize,
+                                                         batch_seq[0],
+                                                         dirMode != 0,
+                                                         false,
+                                                         use_seqPadding));
         std::fill(output.begin(), output.end(), static_cast<T>(0));
         auto output_dev = handle.Write(output);
 
@@ -949,7 +938,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                                  rspace.ptr(),
                                  rspace.size());
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -964,13 +953,13 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       (nocy ? initCell : handle.Read<T>(cy_dev, cy.size())));
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: GPU forward_train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train GPU" << std::endl;
 #endif
         return retSet;
@@ -1019,7 +1008,7 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::cpu() const
 {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
     auto&& handle = get_handle();
@@ -1032,18 +1021,17 @@ verify_backward_data_lstm<T>::cpu() const
 
     std::vector<miopen::TensorDescriptor> inputCPPDescs;
     std::vector<miopenTensorDescriptor_t> inputDescs;
-    createTensorDescArray(
-        inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
+    createTensorDescArray(inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
     // Outputs ----------
     size_t in_sz = getSuperTensorSize(batch_seq,
-                                      seqLength,
-                                      inputVecLen,
-                                      hiddenSize,
-                                      batch_seq[0],
-                                      dirMode != 0,
-                                      true,
-                                      use_seqPadding);
+                                              seqLength,
+                                              inputVecLen,
+                                              hiddenSize,
+                                              batch_seq[0],
+                                              dirMode != 0,
+                                              true,
+                                              use_seqPadding);
 
     miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
     std::vector<T> workSpace(workspace_size / sizeof(T));
@@ -1089,7 +1077,7 @@ verify_backward_data_lstm<T>::cpu() const
     {
         size_t packedXInSize, packedYOutSize;
         std::tie(packedXInSize, packedYOutSize) =
-            GetTempPackedBuffersSize(batch_seq, inputVecLen, out_h);
+            miopen::GetTempPackedBuffersSize(batch_seq, inputVecLen, out_h);
 
         converted_dinput.resize(packedXInSize);
         converted_output.resize(packedYOutSize);
@@ -1147,7 +1135,7 @@ verify_backward_data_lstm<T>::cpu() const
                          nodhy,
                          nodcy);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Wall clock: CPU backward data LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
@@ -1175,7 +1163,7 @@ verify_backward_data_lstm<T>::cpu() const
     auto retSet =
         std::make_tuple(dx, (nodhx ? initHidden : dhx), (nodcx ? initCell : dcx), workSpace);
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
     std::cout << "Done with LSTM backward data CPU" << std::endl;
     std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1186,23 +1174,22 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::gpu() const
 {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
     auto&& handle = get_handle();
 
     std::vector<miopen::TensorDescriptor> inputCPPDescs;
     std::vector<miopenTensorDescriptor_t> inputDescs;
-    createTensorDescArray(
-        inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
+    createTensorDescArray(inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
     std::vector<miopen::TensorDescriptor> outputCPPDescs;
     std::vector<miopenTensorDescriptor_t> outputDescs;
     createTensorDescArray(outputCPPDescs,
-                          outputDescs,
-                          batch_seq,
-                          hiddenSize * ((dirMode != 0) ? 2 : 1),
-                          miopen::deref(rnnDesc).dataType);
+                                  outputDescs,
+                                  batch_seq,
+                                  hiddenSize * ((dirMode != 0) ? 2 : 1),
+                                  miopen::deref(rnnDesc).dataType);
 
     size_t workspace_size = 0;
     miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
@@ -1300,12 +1287,12 @@ verify_backward_data_lstm<T>::gpu() const
                                   (nodcx ? initCell : handle.Read<T>(dcx_dev, dcx.size())),
                                   wspace.Read<std::vector<T>>());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Wall clock: GPU backward data LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
     std::cout << "Done with LSTM backward data GPU" << std::endl;
 #endif
     return retSet;
@@ -1318,7 +1305,7 @@ verify_backward_data_lstm<T>::gpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
     int bi        = dirMode != 0 ? 2 : 1;
@@ -1341,7 +1328,7 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
     {
         size_t packedXInSize, packedYOutSize;
         std::tie(packedXInSize, packedYOutSize) =
-            GetTempPackedBuffersSize(batch_seq, inputVecLen, out_h);
+            miopen::GetTempPackedBuffersSize(batch_seq, inputVecLen, out_h);
 
         converted_input.resize(packedXInSize);
         converted_doutput.resize(packedYOutSize);
@@ -1392,12 +1379,12 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
                            *wa_shifted_workSpace,
                            nohx);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Wall clock: CPU backward_weights LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
     std::cout << "Done with LSTM backward weights CPU" << std::endl;
     std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1407,23 +1394,23 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 {
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
     auto&& handle = get_handle();
 
     std::vector<miopen::TensorDescriptor> inputCPPDescs;
     std::vector<miopenTensorDescriptor_t> inputDescs;
-    createTensorDescArray(
+    miopen::createTensorDescArray(
         inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
     std::vector<miopen::TensorDescriptor> outputCPPDescs;
     std::vector<miopenTensorDescriptor_t> outputDescs;
-    createTensorDescArray(outputCPPDescs,
-                          outputDescs,
-                          batch_seq,
-                          hiddenSize * ((dirMode != 0) ? 2 : 1),
-                          miopen::deref(rnnDesc).dataType);
+    miopen::createTensorDescArray(outputCPPDescs,
+                                  outputDescs,
+                                  batch_seq,
+                                  hiddenSize * ((dirMode != 0) ? 2 : 1),
+                                  miopen::deref(rnnDesc).dataType);
 
     Workspace wspace{};
     wspace.Write(workSpace);
@@ -1460,12 +1447,12 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
                              rspace.ptr(),
                              rspace.size());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Wall clock: GPU backwards_weights LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if (MIO_LSTM_TEST_DEBUG > 0)
     std::cout << "Done with LSTM backward weights GPU" << std::endl;
 #endif
     auto retvec = handle.Read<T>(dweights_dev, dweights.size());
@@ -1576,8 +1563,8 @@ struct Verifier
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
-                                                                          v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs)
+        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
@@ -1701,7 +1688,7 @@ struct LSTM_test : Verifier
             GTEST_SKIP() << "FAILED: Batch sequence vector length, does not match sequence length.";
         }
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < seqLength; i++)
         {
             std::cout << "batch seq[" << i << "]: " << batchSeq.at(i) << std::endl;
@@ -1776,13 +1763,13 @@ struct LSTM_test : Verifier
         int batch_padding = usePadding ? batchSeq[0] : 0;
 
         std::size_t in_sz = getSuperTensorSize(batchSeq,
-                                               seqLength,
-                                               inVecReal,
-                                               hiddenSize,
-                                               batch_padding,
-                                               dirMode != 0,
-                                               true,
-                                               usePadding);
+                                                       seqLength,
+                                                       inVecReal,
+                                                       hiddenSize,
+                                                       batch_padding,
+                                                       dirMode != 0,
+                                                       true,
+                                                       usePadding);
         std::vector<T> input(in_sz);
         for(std::size_t i = 0; i < in_sz; i++)
         {
@@ -1809,7 +1796,7 @@ struct LSTM_test : Verifier
         }
 
         int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         printf("inputMode: %d, biasMode: %d, dirMode: %d\n", inputMode, biasMode, dirMode);
         printf("hz: %d, batch_n: %d, seqLength: %d, inputLen: %d, numLayers: %d\n",
                hiddenSize,
@@ -1861,24 +1848,24 @@ struct LSTM_test : Verifier
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
-        createTensorDescArray(inputCPPDescs, inputDescs, batchSeq, inVecLen, dataType);
+        miopen::createTensorDescArray(inputCPPDescs, inputDescs, batchSeq, inVecLen, dataType);
         size_t reserveSpaceSize;
         miopenGetRNNTrainingReserveSize(
             &handle, rnnDesc, seqLength, inputDescs.data(), &reserveSpaceSize);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
-        createTensorDescArray(
+        miopen::createTensorDescArray(
             outputCPPDescs, outputDescs, batchSeq, hiddenSize * ((dirMode != 0) ? 2 : 1), dataType);
 
         size_t out_sz = getSuperTensorSize(batchSeq,
-                                           seqLength,
-                                           inVecLen,
-                                           hiddenSize,
-                                           batchSeq[0],
-                                           dirMode != 0,
-                                           false,
-                                           usePadding);
+                                                   seqLength,
+                                                   inVecLen,
+                                                   hiddenSize,
+                                                   batchSeq[0],
+                                                   dirMode != 0,
+                                                   false,
+                                                   usePadding);
 
         size_t workspace_size;
         miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
@@ -1941,7 +1928,7 @@ struct LSTM_test : Verifier
             dyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
         }
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         printf("Running backward data LSTM.\n");
 #endif
         auto bwdDataOutputPair =
@@ -1959,7 +1946,7 @@ struct LSTM_test : Verifier
         // RETURNS:  std::make_tuple(dx, dhx, dcx, reserveSpace, workSpace);
         auto workSpaceBwdData = std::get<3>(bwdDataOutputPair.second);
 
-#if(MIO_LSTM_TEST_DEBUG == 2)
+#if (MIO_LSTM_TEST_DEBUG == 2)
         printf("Running backward weights LSTM.\n");
         printf("reserve sz: %zu, workSpace sz: %zu, weight sz: %d\n",
                rsvcpu.size(),

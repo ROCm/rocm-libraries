@@ -23,11 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "tensor_holder.hpp"
-#include "conv_tensor_gen.hpp"
+#include <miopen/tensor_holder.hpp>
 
-#include <hip_float8.hpp>
 #include <nlohmann/json.hpp>
+#include <gtest/gtest.h>
 
 // disable __device__ qualifiers
 #ifdef FQUALIFIERS

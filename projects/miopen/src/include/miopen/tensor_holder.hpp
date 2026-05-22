@@ -457,27 +457,6 @@ struct tensor
     }
 };
 
-template <class T>
-void serialize(std::istream& s, tensor<T>& x)
-{
-    std::vector<size_t> lens;
-    serialize(s, lens);
-    std::vector<size_t> strides;
-    serialize(s, strides);
-    x.desc = miopen::TensorDescriptor{miopen_type<T>{}, lens, strides};
-    serialize(s, x.data);
-}
-
-template <class T>
-void serialize(std::ostream& s, const tensor<T>& x)
-{
-    const auto& lens    = x.desc.GetLengths();
-    const auto& strides = x.desc.GetStrides();
-    serialize(s, lens);
-    serialize(s, strides);
-    serialize(s, x.data);
-}
-
 struct tensor_generate
 {
     template <class Tensor, class G>

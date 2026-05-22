@@ -8,6 +8,7 @@
 #include "get_handle.hpp"
 #include "network_data.hpp"
 #include "serialize.hpp"
+#include "test.hpp"
 
 #include <miopen/tensor_holder.hpp>
 #include <miopen/filesystem.hpp>

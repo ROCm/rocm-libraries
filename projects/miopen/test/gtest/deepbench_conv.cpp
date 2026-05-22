@@ -23,12 +23,9 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <tuple>
-#include <string_view>
 
 #include "gtest_common.hpp"
-
-#include "../conv2d.hpp"
+#include "conv2d.hpp"
 
 namespace deepbench_conv {
 
