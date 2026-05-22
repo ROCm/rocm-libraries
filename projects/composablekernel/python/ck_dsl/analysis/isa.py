@@ -23,6 +23,12 @@ class IsaStats:
     """Instruction-family counts from final AMDGPU ISA text."""
 
     mfma: int = 0
+    mfma_dest_vgpr: int = 0
+    mfma_dest_agpr: int = 0
+    mfma_c_vgpr: int = 0
+    mfma_c_agpr: int = 0
+    accvgpr_read: int = 0
+    accvgpr_write: int = 0
     buffer_load: int = 0
     buffer_store: int = 0
     buffer_load_lds: int = 0
@@ -37,6 +43,12 @@ class IsaStats:
     def as_dict(self) -> Dict[str, int]:
         return {
             "mfma": self.mfma,
+            "mfma_dest_vgpr": self.mfma_dest_vgpr,
+            "mfma_dest_agpr": self.mfma_dest_agpr,
+            "mfma_c_vgpr": self.mfma_c_vgpr,
+            "mfma_c_agpr": self.mfma_c_agpr,
+            "accvgpr_read": self.accvgpr_read,
+            "accvgpr_write": self.accvgpr_write,
             "buffer_load": self.buffer_load,
             "buffer_store": self.buffer_store,
             "buffer_load_lds": self.buffer_load_lds,
@@ -107,7 +119,9 @@ def _instruction_lines(text: str):
 def parse_isa(text: str) -> IsaStats:
     """Parse final ISA text into coarse instruction-family counts."""
 
-    mfma = buffer_load = buffer_store = buffer_load_lds = 0
+    mfma = mfma_dest_vgpr = mfma_dest_agpr = mfma_c_vgpr = mfma_c_agpr = 0
+    accvgpr_read = accvgpr_write = 0
+    buffer_load = buffer_store = buffer_load_lds = 0
     ds_read = ds_write = s_barrier = s_waitcnt = sched_barrier = 0
     valu = salu = 0
 
@@ -116,6 +130,19 @@ def parse_isa(text: str) -> IsaStats:
         # present as a token in llvm-objdump output.
         if "v_mfma" in line:
             mfma += 1
+            dest_cls, c_cls = _mfma_acc_classes(line)
+            if dest_cls == "v":
+                mfma_dest_vgpr += 1
+            elif dest_cls == "a":
+                mfma_dest_agpr += 1
+            if c_cls == "v":
+                mfma_c_vgpr += 1
+            elif c_cls == "a":
+                mfma_c_agpr += 1
+        if "v_accvgpr_read_b32" in line:
+            accvgpr_read += 1
+        if "v_accvgpr_write_b32" in line:
+            accvgpr_write += 1
         if "buffer_load" in line:
             if "lds" in line:
                 buffer_load_lds += 1
@@ -144,6 +171,12 @@ def parse_isa(text: str) -> IsaStats:
 
     return IsaStats(
         mfma=mfma,
+        mfma_dest_vgpr=mfma_dest_vgpr,
+        mfma_dest_agpr=mfma_dest_agpr,
+        mfma_c_vgpr=mfma_c_vgpr,
+        mfma_c_agpr=mfma_c_agpr,
+        accvgpr_read=accvgpr_read,
+        accvgpr_write=accvgpr_write,
         buffer_load=buffer_load,
         buffer_store=buffer_store,
         buffer_load_lds=buffer_load_lds,
@@ -155,6 +188,29 @@ def parse_isa(text: str) -> IsaStats:
         valu=valu,
         salu=salu,
     )
+
+
+def _mfma_acc_classes(line: str) -> tuple[Optional[str], Optional[str]]:
+    """Return destination and accumulator operand classes for a v_mfma line."""
+
+    mnemonic = _extract_mnemonic(line)
+    if not mnemonic.startswith("v_mfma"):
+        return None, None
+    _, _, operands_text = line.partition(mnemonic)
+    operands = [part.strip() for part in operands_text.split(",")]
+    if not operands:
+        return None, None
+
+    def reg_class(operand: str) -> Optional[str]:
+        if operand.startswith("a[") or re.match(r"^a[0-9]+\\b", operand):
+            return "a"
+        if operand.startswith("v[") or re.match(r"^v[0-9]+\\b", operand):
+            return "v"
+        return None
+
+    dest_cls = reg_class(operands[0])
+    c_cls = reg_class(operands[3]) if len(operands) >= 4 else None
+    return dest_cls, c_cls
 
 
 def _extract_mnemonic(line: str) -> str:

@@ -2783,11 +2783,38 @@ class _Lowerer:
                 else (waves_per_eu, waves_per_eu)
             )
             attr_parts.append(f'"amdgpu-waves-per-eu"="{int(lo)},{int(hi)}"')
+        agpr_alloc = self.kernel.attrs.get("agpr_alloc")
+        if agpr_alloc is not None:
+            attr_parts.append(f'"amdgpu-agpr-alloc"="{_format_agpr_alloc(agpr_alloc)}"')
         out.append(
             "attributes #0 = { " + " ".join(attr_parts) + " norecurse nounwind }"
         )
         out.append("")
         return "\n".join(out)
+
+
+def _format_agpr_alloc(value: object) -> str:
+    """Format a kernel ``agpr_alloc`` attr for LLVM's AMDGPU backend."""
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or text.lower() == "none":
+            raise ValueError("agpr_alloc string must be 'min,max', not empty/'none'")
+        parts = text.split(",")
+    elif isinstance(value, (tuple, list)) and len(value) == 2:
+        parts = [value[0], value[1]]
+    else:
+        raise ValueError("agpr_alloc must be a (min, max) pair or 'min,max' string")
+
+    try:
+        lo, hi = (int(parts[0]), int(parts[1]))
+    except (TypeError, ValueError, IndexError) as exc:
+        raise ValueError("agpr_alloc must contain two unsigned integers") from exc
+    if lo < 0 or hi < 0:
+        raise ValueError("agpr_alloc values must be unsigned")
+    if lo > hi:
+        raise ValueError("agpr_alloc min must be <= max")
+    return f"{lo},{hi}"
 
 
 def _llvm_type_from_name(name: str) -> str:

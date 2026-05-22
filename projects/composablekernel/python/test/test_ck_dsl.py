@@ -55,6 +55,7 @@ from ck_dsl.helpers import (
     WarpGrid,
     make_gemm_manifest,
 )
+from ck_dsl.helpers.compile import _comgr_options_for_kernel
 from ck_dsl.instances import (
     ConvProblem,
     DirectConv4cSpec,
@@ -103,6 +104,20 @@ class TestCoreIR(unittest.TestCase):
         ll = lower_kernel_to_llvm(b.kernel)
         self.assertIn('target triple = "amdgcn-amd-amdhsa"', ll)
         self.assertIn("define amdgpu_kernel void @smoke", ll)
+
+    def test_lower_llvm_emits_agpr_alloc_kernel_attr(self):
+        b = IRBuilder("agpr_attr_smoke")
+        b.kernel.attrs["agpr_alloc"] = (0, 0)
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn('"amdgpu-agpr-alloc"="0,0"', ll)
+
+    def test_zero_agpr_alloc_requests_mfma_vgpr_form(self):
+        b = IRBuilder("agpr_codegen_option_smoke")
+        b.kernel.attrs["agpr_alloc"] = (0, 0)
+        self.assertEqual(
+            _comgr_options_for_kernel(b.kernel),
+            ["-O3", "-mllvm", "-amdgpu-mfma-vgpr-form"],
+        )
 
     def test_static_for_unrolls_without_runtime_loop(self):
         b = IRBuilder("static_for_smoke")
@@ -241,6 +256,9 @@ define amdgpu_kernel void @k() {
     def test_parse_isa_and_resources(self):
         asm = """
 000000000000: v_mfma_f32_32x32x16_f16 a[0:15], v[0:7], v[8:15], a[0:15]
+000000000002: v_mfma_f32_32x32x16_f16 v[32:47], v[0:7], v[8:15], v[32:47]
+000000000003: v_accvgpr_read_b32 v0, a0
+000000000004: v_accvgpr_write_b32 a0, v0
 000000000004: buffer_load_dwordx4 v[0:3], off, s[0:3], 0 offen
 000000000008: buffer_load_lds_dwordx4 off, s[0:3], 0 offen
 00000000000c: ds_read_b128 v[0:3], v0
@@ -253,7 +271,13 @@ define amdgpu_kernel void @k() {
 """
         isa = parse_isa(asm)
         res = parse_resources(asm)
-        self.assertEqual(isa.mfma, 1)
+        self.assertEqual(isa.mfma, 2)
+        self.assertEqual(isa.mfma_dest_agpr, 1)
+        self.assertEqual(isa.mfma_dest_vgpr, 1)
+        self.assertEqual(isa.mfma_c_agpr, 1)
+        self.assertEqual(isa.mfma_c_vgpr, 1)
+        self.assertEqual(isa.accvgpr_read, 1)
+        self.assertEqual(isa.accvgpr_write, 1)
         self.assertEqual(isa.buffer_load, 1)
         self.assertEqual(isa.buffer_load_lds, 1)
         self.assertEqual(isa.ds_read, 1)
@@ -582,6 +606,33 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("_s1_", k.name)
         self.assertIn("_mask1_", k.name)
         self.assertIn("_hlpv", k.name)
+        self.assertNotIn('"amdgpu-agpr-alloc"', ll)
+
+        agpr_spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=0,
+            has_softcap=False,
+            num_seqs=284,
+            num_warps=4,
+            waves_per_eu=2,
+            tile_size=64,
+            block_m_per_warp=32,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_transposed_scalar_state=True,
+            use_transposed_mask_once=True,
+            use_transposed_half_local_pv=True,
+            use_agpr_alloc_zero=True,
+        )
+        agpr_k = build_unified_attention_2d_tiled(agpr_spec)
+        agpr_ll = lower_kernel_to_llvm(agpr_k)
+        self.assertIn("_agpr0", agpr_k.name)
+        self.assertIn('"amdgpu-agpr-alloc"="0,0"', agpr_ll)
 
     def test_unified_attention_2d_tiled_alibi_qq_bias(self):
         """ALiBi/QQ-bias variants emit sitofp + masked global load with clamp."""
