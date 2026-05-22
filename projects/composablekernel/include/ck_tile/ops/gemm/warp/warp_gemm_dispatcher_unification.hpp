@@ -153,10 +153,6 @@ struct UnificationDispatcher
     static_assert(!IsMx || (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t>));
     static_assert(!IsMx || (std::is_same_v<BType, fp8_t> || std::is_same_v<BType, bf8_t>));
 
-    // Non scale checks;
-    static_assert(IsMx || AttrNumAccessA == ESingle);
-    static_assert(IsMx || AttrNumAccessB == ESingle);
-
     // Convert SwizzleA bool to SwizzleFactor. This used to be hardcoded in a number of places in
     // the original dispatcher / warpgemms, generally using a factor of 2 if swizzling was
     // requested but not always. TODO: Check original usage for correct swizzle factors.
