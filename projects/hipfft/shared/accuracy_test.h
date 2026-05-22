@@ -42,27 +42,6 @@
 #include "test_callbacks.h"
 #include "test_params.h"
 
-// skip the test if configured to do so
-static void runtime_err_skip_or_fail(const std::string& msg)
-{
-    ++n_hip_failures;
-    if(skip_runtime_fails)
-    {
-        throw ROCFFT_SKIP{msg};
-    }
-    else
-    {
-        throw ROCFFT_FAIL{msg};
-    }
-}
-
-// always fail the test
-static void runtime_err_fail(const std::string& msg)
-{
-    ++n_hip_failures;
-    throw ROCFFT_FAIL{msg};
-}
-
 // Perform several checks to make sure buffers will fit in device memory
 template <class Tparams>
 inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
@@ -72,10 +51,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
     auto hip_status = hipGetDevice(&dev_id);
     if(hip_status != hipSuccess || dev_id == hipInvalidDeviceId)
     {
-        std::stringstream ss;
-        ss << "hipGetDevice failed with error code " << hip_status << " reporting device ID "
-           << dev_id;
-        runtime_err_skip_or_fail(ss.str());
+        throw hip_runtime_error("hipGetDevice failed", hip_status);
     }
     const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
 
@@ -160,20 +136,12 @@ inline void execute_gpu_fft(Tparams&              params,
     std::vector<void*> store_cb_data;
 
     // Legacy callbacks are provided at execution time
-    if(params.run_callbacks == fft_callback_type_legacy)
+    if(params.run_callbacks)
     {
-        get_rank_load_callbacks(params,
-                                load_cb_func,
-                                load_cb_data,
-                                runtime_err_skip_or_fail,
-                                round_trip_inverse,
-                                all_cb_data);
-        get_rank_store_callbacks(params,
-                                 store_cb_func,
-                                 store_cb_data,
-                                 runtime_err_skip_or_fail,
-                                 round_trip_inverse,
-                                 all_cb_data);
+        get_rank_load_callbacks(
+            params, load_cb_func, load_cb_data, round_trip_inverse, all_cb_data);
+        get_rank_store_callbacks(
+            params, store_cb_func, store_cb_data, round_trip_inverse, all_cb_data);
 
         auto fft_status
             = params.set_callbacks(&load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
@@ -210,7 +178,7 @@ inline void execute_gpu_fft(Tparams&              params,
                                         hipMemcpyDeviceToHost);
             if(hip_status != hipSuccess)
             {
-                runtime_err_skip_or_fail("hipMemcpy failure");
+                throw hip_runtime_error("hipMemcpy failure", hip_status);
             }
         }
     }
@@ -384,16 +352,7 @@ inline void run_round_trip_inverse(Tparams&              params,
     // Create FFT plan - this will also allocate work buffer, but will throw a
     // specific exception if that step fails
     auto plan_status = fft_status_success;
-    try
-    {
-        plan_status = params.create_plan();
-    }
-    catch(fft_params::work_buffer_alloc_failure& e)
-    {
-        std::stringstream ss;
-        ss << "Failed to allocate work buffer (size: " << byte_size_to_str(e.attempted_size) << ")";
-        runtime_err_skip_or_fail(ss.str());
-    }
+    plan_status      = params.create_plan();
     ASSERT_EQ(plan_status, fft_status_success) << "round trip inverse plan creation failed";
 
     auto obuffer_sizes = params.obuffer_sizes();
@@ -411,7 +370,7 @@ inline void run_round_trip_inverse(Tparams&              params,
                 auto hip_status = hipMemset(pobuffer[i], OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
                 if(hip_status != hipSuccess)
                 {
-                    runtime_err_skip_or_fail("hipMemset failure");
+                    throw hip_runtime_error("hipMemset failure", hip_status);
                 }
             }
         }
@@ -595,7 +554,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                    << " (size: " << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
                    << hipError_to_string(hip_status);
             }
-            runtime_err_skip_or_fail(ss.str());
+            throw hip_runtime_error(ss.str(), hip_status);
         }
         pibuffer[i] = ibuffer[i].data();
     }
@@ -622,24 +581,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Create FFT plan - this will also allocate work buffer, but
     // will throw a specific exception if that step fails
     auto plan_status = fft_status_success;
-    try
-    {
-        plan_status = params.create_plan();
-    }
-    catch(fft_params::work_buffer_alloc_failure& e)
-    {
-        ++n_hip_failures;
-        std::stringstream ss;
-        ss << "Work buffer allocation failed (size: " << byte_size_to_str(e.attempted_size) << ")";
-        if(skip_runtime_fails)
-        {
-            throw ROCFFT_SKIP{ss.str()};
-        }
-        else
-        {
-            throw ROCFFT_FAIL{ss.str()};
-        }
-    }
+    plan_status      = params.create_plan();
     ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
 
     if(verbose > 3)
@@ -671,7 +613,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 ss << "hipMalloc failure for output buffer " << i
                    << " (size: " << byte_size_to_str(obuffer_sizes[i]) << ") with code "
                    << hipError_to_string(hip_status);
-                runtime_err_skip_or_fail(ss.str());
+                throw hip_runtime_error(ss.str(), hip_status);
             }
 
             // If we're validating output strides, init the
@@ -686,7 +628,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 {
                     std::stringstream ss;
                     ss << "hipMemset failure with error " << hip_status;
-                    runtime_err_skip_or_fail(ss.str());
+                    throw hip_runtime_error(ss.str(), hip_status);
                 }
             }
         }

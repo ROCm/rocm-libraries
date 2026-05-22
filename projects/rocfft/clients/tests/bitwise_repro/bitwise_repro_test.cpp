@@ -57,26 +57,8 @@ TEST(bitwise_repro_test, compare_precisions)
     {
         bitwise_repro(params_1, params_2);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -106,26 +88,8 @@ TEST(bitwise_repro_test, compare_lengths)
     {
         bitwise_repro(params_1, params_2);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -155,26 +119,8 @@ TEST(bitwise_repro_test, compare_transform_types)
     {
         bitwise_repro(params_1, params_2);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -207,26 +153,8 @@ TEST_P(bitwise_repro_test, compare_to_reference)
     {
         bitwise_repro(params);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
