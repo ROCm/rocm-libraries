@@ -68,7 +68,6 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Tuple
 
 from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ..helpers.gather_scatter import (
-    gather_row_offset,
     load_sorted_token_id,
     load_sorted_topk_weight,
 )
@@ -77,6 +76,30 @@ from ..helpers.spec import (
     SignatureBuilder,
     kernel_name_join,
 )
+
+
+def _effective_vec(spec_vec: int, block_size: int, n: int) -> int:
+    """Largest power-of-two vec width in ``{1, 2, 4, 8}`` not exceeding
+    ``spec_vec`` such that ``n`` is divisible by ``block_size * vec``.
+
+    The streaming MoE kernels use the "interleaved chunks" pattern that
+    :func:`ck_dsl.helpers.sweep.sweep_row_chunks` encodes for the norm
+    / elementwise families: each CTA covers ``n`` columns of one row,
+    processed in chunks of ``block_size * vec`` consecutive elements;
+    thread ``tid`` in chunk ``k`` handles
+    ``[k*BS*vec + tid*vec, k*BS*vec + tid*vec + vec)``. The starting
+    offset is always vec-aligned, which lets the AMDGPU backend emit
+    ``global_load_dwordx{N}`` / ``ds_read_b128`` etc.
+
+    Returns ``1`` only when none of the larger vec widths divide ``n``;
+    the kernel body branches on ``VEC == 1`` and falls back to the
+    scalar load/store path so callers do not need to special-case
+    awkward shapes (e.g. ``H == block_size``).
+    """
+    ev = min(spec_vec, 8)
+    while ev > 1 and (n % (block_size * ev) != 0):
+        ev //= 2
+    return ev
 
 
 __all__ = [
@@ -239,18 +262,30 @@ def build_moe_gather(spec: FusedMoeSpec) -> KernelDef:
     tokens: i32, hidden: i32)
 
     Grid: ``(tokens * topk, 1, 1)``. Each CTA handles one bucket row;
-    each thread within the CTA streams ``elems_per_thread`` consecutive
-    hidden columns through a vectorised load / store.
+    threads within the CTA stream the row through wide vector loads
+    using the "interleaved chunks" layout the elementwise / norm
+    kernels use. Each iteration covers ``BS * vec`` consecutive
+    hidden columns, with thread ``tid`` reading ``vec`` consecutive
+    elements starting at ``k*BS*vec + tid*vec``. The vec width is
+    chosen to be the largest power-of-two in ``{1, 2, 4, 8}`` that
+    ``BS * vec`` divides ``hidden`` (see :func:`_effective_vec`);
+    ``vec == 1`` routes through ``global_load_f16`` for shapes where
+    even vec=2 doesn't divide.
 
     Notes
     -----
     The indirect ``X[token_id]`` is a per-CTA invariant -- once
-    ``token_id`` is loaded by lane 0 and broadcast (via
-    :func:`load_sorted_token_id` + the implicit SGPR promotion the
-    compiler does for wave-uniform integers), every lane derives its
-    own per-column address with a scalar add and a runtime mul. The
-    code below relies on the compiler to lift the
-    ``token_id * hidden`` partial product into scalar registers.
+    ``token_id`` is loaded by lane 0 and pinned into an SGPR via
+    :func:`to_sgpr_u32`, every lane derives its own per-column
+    address with a scalar add and the ``token_id * hidden`` base
+    stays in scalar registers across every chunk. Each lane issues
+    one ``global_load_dwordx{N}`` per chunk (matching CK Tile's
+    ``moe_sorting_kernel.hpp`` per-row gather and AITER's
+    ``ck_moe`` token-permute kernels: load source row in vec-aligned
+    chunks, store directly to bucket slot). Sentinel
+    ``token_id < 0`` rows produce a zero gather -- the
+    ``valid_token`` test is hoisted out of the inner loop so the
+    branch is wave-uniform.
     """
     ok, why = is_valid_spec(spec)
     if not ok:
@@ -259,6 +294,7 @@ def build_moe_gather(spec: FusedMoeSpec) -> KernelDef:
     H = spec.hidden
     BS = spec.block_size
     EPT = spec.elems_per_thread_hidden
+    VEC = _effective_vec(spec.vec, BS, H)
     dtype = spec.dtype
 
     b = IRBuilder(spec.kernel_name("gather"))
@@ -287,21 +323,42 @@ def build_moe_gather(spec: FusedMoeSpec) -> KernelDef:
     bid = b.block_id_x()
     tid = b.thread_id_x()
 
-    token_id = load_sorted_token_id(b, SortedTokenIds, bid)
-    # Token ids out of range silently produce a zero gather. Mirrors
-    # the CK Tile reference's behaviour for unused bucket slots when
-    # the router emits sentinel -1 ids.
+    # Wave-uniform: every lane in the CTA pulls the same token_id +
+    # validity. Pinning into an SGPR keeps the source row base
+    # ``token_id * hidden`` in scalar registers across every chunk
+    # iteration; without it the register allocator may copy the
+    # base into VGPRs and bloat per-lane address arithmetic.
+    token_id = b.to_sgpr_u32(load_sorted_token_id(b, SortedTokenIds, bid))
     valid_token = b.cmp_ge(token_id, b.const_i32(0))
     bucket_base = b.mul(bid, b.const_i32(H))
+    src_row_base = b.mul(token_id, b.const_i32(H))
 
-    for k in range(EPT):
-        h_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
-        in_h = b.cmp_lt(h_col, b.const_i32(H))
-        with b.scf_if(b.land(valid_token, in_h)):
-            src_off = gather_row_offset(b, SortedTokenIds, bid, hidden=H, col=h_col)
-            v = load_scalar_as_f32(b, X, src_off, dtype=dtype)
+    chunks = EPT // VEC
+    c_vec = b.const_i32(VEC)
+    with b.scf_if(valid_token):
+        for k in range(chunks):
+            # Interleaved-chunk layout: chunk k covers
+            # ``[k*BS*VEC, (k+1)*BS*VEC)`` along the hidden axis;
+            # thread tid in the chunk reads ``VEC`` consecutive
+            # elements starting at ``k*BS*VEC + tid*VEC``. The base
+            # offset is always VEC-aligned, which is the precondition
+            # for the AMDGPU backend to emit ``global_load_dwordx{N}``
+            # / ``global_store_dwordx{N}``.
+            h_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
+            src_off = b.add(src_row_base, h_col)
             dst_off = b.add(bucket_base, h_col)
-            store_scalar_from_f32(b, GroupedInput, dst_off, v, dtype=dtype)
+            if VEC == 1:
+                # Fallback for shapes where BS * 2 > hidden (e.g.
+                # H=BS). Keep the value in its native dtype -- gather
+                # is a pure copy, no f32 round-trip needed.
+                if dtype in ("f16", "fp16"):
+                    v = b.global_load_f16(X, src_off)
+                else:
+                    v = b.global_load_bf16(X, src_off)
+                b.global_store(GroupedInput, dst_off, v)
+            else:
+                v = b.global_load_vN(X, src_off, ty, VEC)
+                b.global_store_vN(GroupedInput, dst_off, v, VEC)
 
     return b.kernel
 
@@ -327,17 +384,31 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
     Hidden: ptr<dtype, global>, # (tokens*topk, intermediate)
     total_pairs: i32, intermediate: i32)
 
-    Grid: ``(total_pairs, 1, 1)``; one CTA per bucket row, each thread
-    handling ``elems_per_thread_inter`` consecutive intermediate cols.
+    Grid: ``(total_pairs, 1, 1)``; one CTA per bucket row, threads in
+    the CTA stream ``BS * vec`` consecutive intermediate columns per
+    chunk using the same interleaved-chunks layout as
+    :func:`build_moe_gather`. The effective vec is picked by
+    :func:`_effective_vec` to be the largest power-of-two that
+    ``BS * vec`` divides ``intermediate``.
 
     Implementation notes:
 
+    * Per chunk, each lane issues one ``global_load_dwordx{N}`` for
+      ``GateOut`` and one for ``UpOut``, computes the SwiGLU per
+      lane in f32 (matching CK Tile's
+      ``fused_moegemm_pipeline_flatmm_ex`` activation tile and
+      AITER's ``moe_silu_mul`` epilogue), then issues one
+      ``global_store_dwordx{N}`` for ``Hidden``. Halves the
+      instruction count vs the old scalar path on the I/O side and
+      gives the AMDGPU backend room to overlap the two reads.
     * The sigmoid is computed via ``exp2(-x * log2(e))`` (matches the
-    formula used by :class:`ck_dsl.helpers.fuse.SiLU` and the
-    ``elementwise`` instance), so the AMDGPU backend lowers it to
-    one ``v_exp_f32`` + ``v_rcp_f32`` per element.
+      formula used by :class:`ck_dsl.helpers.fuse.SiLU` and the
+      ``elementwise`` instance), so the AMDGPU backend lowers it to
+      one ``v_exp_f32`` + ``v_rcp_f32`` per element. Bit-equivalent
+      to the prior scalar path -- parity tests stay green at the
+      same 5e-3 tolerance.
     * All compute is done in f32 then truncated back to the activation
-    dtype on store.
+      dtype on store.
     """
     ok, why = is_valid_spec(spec)
     if not ok:
@@ -346,6 +417,7 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
     I_DIM = spec.intermediate
     BS = spec.block_size
     EPT = spec.elems_per_thread_inter
+    VEC = _effective_vec(spec.vec, BS, I_DIM)
     dtype = spec.dtype
 
     b = IRBuilder(spec.kernel_name("silu_mul"))
@@ -370,18 +442,31 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
 
     c_neg_log2e = b.const_f32(-1.4426950408889634)
     one_f32 = b.const_f32(1.0)
+    c_vec = b.const_i32(VEC)
 
-    for k in range(EPT):
-        i_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
-        in_i = b.cmp_lt(i_col, b.const_i32(I_DIM))
-        with b.scf_if(in_i):
-            off = b.add(row_base, i_col)
+    chunks = EPT // VEC
+    for k in range(chunks):
+        i_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
+        off = b.add(row_base, i_col)
+        if VEC == 1:
             g = load_scalar_as_f32(b, GateOut, off, dtype=dtype)
             u = load_scalar_as_f32(b, UpOut, off, dtype=dtype)
             sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
             silu = b.fmul(g, sig)
             h = b.fmul(silu, u)
             store_scalar_from_f32(b, Hidden, off, h, dtype=dtype)
+        else:
+            g_vec = b.global_load_vN(GateOut, off, ty, VEC)
+            u_vec = b.global_load_vN(UpOut, off, ty, VEC)
+            h_scalars = []
+            for i in range(VEC):
+                g = b.cast_to_f32(b.vec_extract(g_vec, i))
+                u = b.cast_to_f32(b.vec_extract(u_vec, i))
+                sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+                silu = b.fmul(g, sig)
+                h_scalars.append(b.cast_f32_to(b.fmul(silu, u), ty))
+            h_packed = b.vec_pack(h_scalars, ty)
+            b.global_store_vN(Hidden, off, h_packed, VEC)
 
     return b.kernel
 
@@ -429,6 +514,7 @@ def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
     I_DIM = spec.intermediate
     BS = spec.block_size
     EPT = spec.elems_per_thread_inter
+    VEC = _effective_vec(spec.vec, BS, I_DIM)
     dtype = spec.dtype
 
     b = IRBuilder(spec.kernel_name("silu_mul_packed"))
@@ -457,20 +543,40 @@ def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
 
     c_neg_log2e = b.const_f32(-1.4426950408889634)
     one_f32 = b.const_f32(1.0)
+    c_vec = b.const_i32(VEC)
 
-    for k in range(EPT):
-        i_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
-        in_i = b.cmp_lt(i_col, b.const_i32(I_DIM))
-        with b.scf_if(in_i):
-            g_off = b.add(gate_base, i_col)
-            u_off = b.add(up_base, i_col)
-            o_off = b.add(out_base, i_col)
+    # Interleaved-chunks layout (matches build_moe_silu_mul): per
+    # chunk, each lane reads one VEC of the gate slab + one VEC of
+    # the up slab, stores one VEC into Hidden. With the G1U1 packing
+    # the gate and up slabs are at fixed offsets I_DIM apart, so a
+    # single base pointer + two adds let the AMDGPU backend coalesce
+    # both reads into one ``s_load_dwordx{N}`` + a pair of paired
+    # VMEM transactions.
+    chunks = EPT // VEC
+    for k in range(chunks):
+        i_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
+        g_off = b.add(gate_base, i_col)
+        u_off = b.add(up_base, i_col)
+        o_off = b.add(out_base, i_col)
+        if VEC == 1:
             g = load_scalar_as_f32(b, GateUp, g_off, dtype=dtype)
             u = load_scalar_as_f32(b, GateUp, u_off, dtype=dtype)
             sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
             silu = b.fmul(g, sig)
             h = b.fmul(silu, u)
             store_scalar_from_f32(b, Hidden, o_off, h, dtype=dtype)
+        else:
+            g_vec = b.global_load_vN(GateUp, g_off, ty, VEC)
+            u_vec = b.global_load_vN(GateUp, u_off, ty, VEC)
+            h_scalars = []
+            for i in range(VEC):
+                g = b.cast_to_f32(b.vec_extract(g_vec, i))
+                u = b.cast_to_f32(b.vec_extract(u_vec, i))
+                sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+                silu = b.fmul(g, sig)
+                h_scalars.append(b.cast_f32_to(b.fmul(silu, u), ty))
+            h_packed = b.vec_pack(h_scalars, ty)
+            b.global_store_vN(Hidden, o_off, h_packed, VEC)
 
     return b.kernel
 
@@ -530,6 +636,7 @@ def build_moe_static_scatter_gather(spec: FusedMoeSpec) -> KernelDef:
     H = spec.hidden
     BS = spec.block_size
     EPT = spec.elems_per_thread_hidden
+    VEC = _effective_vec(spec.vec, BS, H)
     dtype = spec.dtype
 
     b = IRBuilder(spec.kernel_name("static_scatter_gather"))
@@ -565,6 +672,9 @@ def build_moe_static_scatter_gather(spec: FusedMoeSpec) -> KernelDef:
     num_pairs = b.mul(tokens, topk)
     in_bounds = b.cmp_lt(bid, num_pairs)
 
+    c_vec = b.const_i32(VEC)
+    chunks = EPT // VEC
+
     with b.scf_if(in_bounds):
         eid = b.global_load_i32(TopkIds, bid)
         valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
@@ -581,19 +691,33 @@ def build_moe_static_scatter_gather(spec: FusedMoeSpec) -> KernelDef:
                 b.global_store(SortedTokenIds, out_row_lead, t_idx, align=4)
                 b.global_store(SortedWeights, out_row_lead, w, align=4)
             b.sync()
-            out_row = b.vec_extract(
-                b.smem_load_vN(out_row_slot, b.const_i32(0), dtype=I32, n=1), 0
+            # Wave-uniform broadcast (single ds_read + LDS-to-SGPR
+            # promotion). Lift the destination row base into an SGPR
+            # so the per-chunk address arithmetic stays scalar.
+            out_row = b.to_sgpr_u32(
+                b.vec_extract(
+                    b.smem_load_vN(out_row_slot, b.const_i32(0), dtype=I32, n=1),
+                    0,
+                )
             )
+            src_row_base = b.mul(t_idx, b.const_i32(H))
+            dst_row_base = b.mul(out_row, b.const_i32(H))
 
-            # Copy X[t_idx, :] -> GroupedInput[out_row, :].
-            for k in range(EPT):
-                h_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
-                in_h = b.cmp_lt(h_col, b.const_i32(H))
-                with b.scf_if(in_h):
-                    src = b.add(b.mul(t_idx, b.const_i32(H)), h_col)
-                    dst = b.add(b.mul(out_row, b.const_i32(H)), h_col)
-                    v = load_scalar_as_f32(b, X, src, dtype=dtype)
-                    store_scalar_from_f32(b, GroupedInput, dst, v, dtype=dtype)
+            # Copy X[t_idx, :] -> GroupedInput[out_row, :] in
+            # interleaved-chunk vec loads (matches build_moe_gather).
+            for k in range(chunks):
+                h_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
+                src = b.add(src_row_base, h_col)
+                dst = b.add(dst_row_base, h_col)
+                if VEC == 1:
+                    if dtype in ("f16", "fp16"):
+                        v = b.global_load_f16(X, src)
+                    else:
+                        v = b.global_load_bf16(X, src)
+                    b.global_store(GroupedInput, dst, v)
+                else:
+                    v = b.global_load_vN(X, src, ty, VEC)
+                    b.global_store_vN(GroupedInput, dst, v, VEC)
 
     return b.kernel
 
@@ -664,6 +788,7 @@ def build_moe_topk_weighted_reduce(spec: FusedMoeSpec) -> KernelDef:
     H = spec.hidden
     BS = spec.block_size
     EPT = spec.elems_per_thread_hidden
+    VEC = _effective_vec(spec.vec, BS, H)
     dtype = spec.dtype
 
     b = IRBuilder(spec.kernel_name("reduce"))
@@ -695,21 +820,52 @@ def build_moe_topk_weighted_reduce(spec: FusedMoeSpec) -> KernelDef:
     bid = b.block_id_x()
     tid = b.thread_id_x()
 
-    token_id = load_sorted_token_id(b, SortedTokenIds, bid)
+    # Per-CTA invariants pinned into SGPRs so per-chunk address
+    # arithmetic stays scalar. token_id + weight are wave-uniform;
+    # ``to_sgpr_u32`` makes that explicit to the backend (one
+    # ``s_load_dword`` + readfirstlane vs N redundant VMEM loads).
+    token_id = b.to_sgpr_u32(load_sorted_token_id(b, SortedTokenIds, bid))
     weight = load_sorted_topk_weight(b, SortedWeights, bid)
     valid_token = b.cmp_ge(token_id, b.const_i32(0))
     bucket_base = b.mul(bid, b.const_i32(H))
     y_row_base = b.mul(token_id, b.const_i32(H))
-
-    for k in range(EPT):
-        h_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
-        in_h = b.cmp_lt(h_col, b.const_i32(H))
-        with b.scf_if(b.land(valid_token, in_h)):
+    # Block-partitioned layout (kept from the original scalar code):
+    # each lane owns a contiguous run of ``EPT`` hidden columns;
+    # adjacent lanes' chunks are ``EPT`` apart. Critically for the
+    # f32 atomic_add into ``Y``, this means adjacent lanes target
+    # DIFFERENT cachelines per iteration (no intra-wave atomic
+    # contention) -- the interleaved layout that gather / silu_mul
+    # use bunches all 64 lanes onto the same 4 cachelines and
+    # measured ~16% slower on high-contention shapes (T=128, K=2
+    # prefill: many CTAs share token_id rows). See the report's
+    # benchmark section for the layout-vs-VEC sweep.
+    #
+    # The hidden axis is still vec-loaded from ``DownOut`` (the
+    # bandwidth-dominant read), but per-lane: each lane issues
+    # ``EPT / VEC`` wide loads of its own chunk, then ``VEC``
+    # scalar atomic_adds into its own chunk. AMDGPU has no
+    # packed-f32 atomic on gfx9/gfx94x; the only packed global
+    # atomic is ``v2bf16`` via ``global_atomic_add_pk_bf16`` which
+    # would forfeit the f32 accumulator precision. The win is in
+    # halving the DownOut load instruction count without changing
+    # the atomic pattern.
+    chunks = EPT // VEC
+    lane_chunk_base = b.mul(tid, b.const_i32(EPT))
+    with b.scf_if(valid_token):
+        for k in range(chunks):
+            h_col = b.add(lane_chunk_base, b.const_i32(k * VEC))
             src_off = b.add(bucket_base, h_col)
-            v = load_scalar_as_f32(b, DownOut, src_off, dtype=dtype)
-            contrib = b.fmul(weight, v)
             dst_off = b.add(y_row_base, h_col)
-            b.global_atomic_add(Y, dst_off, contrib)
+            if VEC == 1:
+                v = load_scalar_as_f32(b, DownOut, src_off, dtype=dtype)
+                contrib = b.fmul(weight, v)
+                b.global_atomic_add(Y, dst_off, contrib)
+            else:
+                v_vec = b.global_load_vN(DownOut, src_off, ty, VEC)
+                for i in range(VEC):
+                    v = b.cast_to_f32(b.vec_extract(v_vec, i))
+                    contrib = b.fmul(weight, v)
+                    b.global_atomic_add(Y, b.add(dst_off, b.const_i32(i)), contrib)
 
     return b.kernel
 

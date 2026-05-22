@@ -48,6 +48,7 @@ from typing import Tuple
 from ..core.ir import KernelDef
 from ..helpers.spec import SignatureBuilder, kernel_name_join
 from .gemm_multi_d import (
+    DLoadKind,
     GemmMultiDSpec,
     MAX_D,
     build_gemm_multi_d,
@@ -81,6 +82,12 @@ class GemmMultiAbdSpec:
     ``a_operands`` / ``b_operands`` default to a single ``(name, dtype)``
     matching ``base.data.dtype_a`` / ``base.data.dtype_b``, so the
     common case (one A, one B, multiple D's) reads naturally.
+
+    ``d_load_kind``: forwarded to :class:`GemmMultiDSpec` -- see
+    that spec's docstring for the ``"stock"`` / ``"tiled"`` /
+    ``"vector"`` trade-off. Default ``"vector"`` matches the
+    multi-D default (smallest IR, fastest comgr lowering, wall
+    time equivalent to the stock per-element form).
     """
 
     base: UniversalGemmSpec
@@ -89,6 +96,7 @@ class GemmMultiAbdSpec:
     d_operands: Tuple[DOperand, ...] = ()
     d_dtype: str = "fp16"
     name: str = "ck_dsl_gemm_multi_abd"
+    d_load_kind: "DLoadKind" = "vector"
 
     @property
     def num_a(self) -> int:
@@ -179,13 +187,15 @@ def build_gemm_multi_abd(spec: GemmMultiAbdSpec) -> KernelDef:
         )
 
     # Reuse the multi-D path with a renamed base spec so the kernel
-    # symbol carries the multi-ABD suffix.
+    # symbol carries the multi-ABD suffix. Forward the
+    # ``d_load_kind`` knob so the abd builder respects it.
     base_renamed = dataclasses.replace(spec.base, name=spec.kernel_name())
     md_spec = GemmMultiDSpec(
         base=base_renamed,
         d_operands=spec.d_operands,
         d_dtype=spec.d_dtype,
         name=spec.kernel_name(),
+        d_load_kind=spec.d_load_kind,
     )
     if spec.num_d == 0:
         # No D operands -> plain GEMM. Delegate directly so we don't
@@ -197,23 +207,35 @@ def build_gemm_multi_abd(spec: GemmMultiAbdSpec) -> KernelDef:
 
 
 def gemm_multi_abd_signature(spec: GemmMultiAbdSpec):
-    """Manifest-style signature: ``A0 .. A{na-1}, B0 .. B{nb-1}, D0 .. D{nd-1}, C, M, N, K``.
+    """Manifest-style signature for the multi-ABD GEMM kernel.
 
-    v1 (num_a==num_b==1) collapses to ``A, B, D0 .. , C, M, N, K`` —
-    same surface the multi-D launcher already speaks.
+    v1 (``num_a == num_b == 1``) delegates to
+    :func:`build_gemm_multi_d` / :func:`build_universal_gemm`, so the
+    actual kernarg order is identical to the multi-D path::
+
+        A, B, C, M, N, K, [stride_a, stride_b, stride_c?], D0, D1, ...
+
+    The textbook ``A0..,B0..,D0..,C,M,N,K`` order documented in CK
+    Tile's ``22_gemm_multi_abd`` example is the host-side concept;
+    the AMDGPU kernarg buffer the launcher packs must match the
+    order the kernel's ``b.param(...)`` calls produced, which
+    appends the fused-epilogue D pointers *after* the main GEMM
+    params. See :func:`gemm_multi_d_signature` for the same
+    reasoning. The v2 multi-A / multi-B path will need to extend
+    this layout once the load-combine kernel lands.
     """
     sb = SignatureBuilder()
     for name, dtype in spec.a_operands:
         sb.ptr(name, dtype)
     for name, dtype in spec.b_operands:
         sb.ptr(name, dtype)
-    for name, _op in spec.d_operands:
-        sb.ptr(name, spec.d_dtype)
     sb.ptr("C", spec.base.data.dtype_c).scalar("M", "i32").scalar("N", "i32").scalar(
         "K", "i32"
     )
     if spec.base.batched:
         sb.scalar("stride_a", "i32").scalar("stride_b", "i32").scalar("stride_c", "i32")
+    for name, _op in spec.d_operands:
+        sb.ptr(name, spec.d_dtype)
     return sb.build()
 
 
@@ -234,6 +256,7 @@ def gemm_multi_abd_grid(spec: GemmMultiAbdSpec, m: int, n: int, batch: int = 1):
 __all__ = [
     "AOperand",
     "BOperand",
+    "DLoadKind",
     "DOperand",
     "GemmMultiAbdSpec",
     "MAX_A",

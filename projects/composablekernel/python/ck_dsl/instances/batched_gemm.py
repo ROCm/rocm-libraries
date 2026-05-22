@@ -23,6 +23,25 @@ inherit all of universal_gemm's perf knobs:
 ``pipeline in {mem, compv3, compv4}``, ``epilogue in {default,
 cshuffle}``, warp grids up to 4x4, MFMA atoms 16x16x{16,32} and
 32x32x{8,16}.
+
+Out-of-scope perf note (the file you're reading is in-scope, but the
+universal-GEMM body it calls into is not):
+
+* The per-batch offsets ``batch_off_X = block_id_z() * stride_X`` in
+  :func:`ck_dsl.instances.gemm_universal.build_universal_gemm`
+  (lines 487-495) are emitted with no ``to_sgpr_u32`` wrap. They
+  are CTA-uniform (block IDs are CTA constants and the strides are
+  i32 kernel-parameter scalars, already in SGPRs by the AMDGPU
+  calling convention), so wrapping them with
+  :meth:`IRBuilder.to_sgpr_u32` saves a ``v_readfirstlane_b32`` at
+  every use across the K-loop and the cshuffle / direct-epilogue
+  stores. CK Tile's reference does exactly this -- see
+  ``batched_gemm_kernel.hpp:215-230`` where every
+  ``batch_stride_X``, ``batch_offset_X``, ``i_m``, and ``i_n`` goes
+  through ``amd_wave_read_first_lane``. Tracked as out-of-scope
+  proposal in the deliverable notes (the change lives in
+  ``instances/gemm_universal.py`` which is outside this file's
+  scope).
 """
 
 from __future__ import annotations

@@ -7,22 +7,37 @@ Two CK Tile sparse-attention configurations:
 
 * **Jenga block-sparse** (``build_jenga_sparse_attention``) -- the
   caller pre-builds a ``MaskBitmap[q_block, k_block]`` i8 array
-  (``1`` = attend, ``0`` = skip). Each K position's contribution is
-  gated by a runtime check of the mask byte for its enclosing K-block.
+  (``1`` = attend, ``0`` = skip). Each K-tile's contribution is gated
+  by the bitmap byte for its enclosing sparsity K-block.
 
 * **VSA (variable-size attention)** (``build_vsa_sparse_attention``)
   -- each ``q_block`` has its own LUT ``BlockLut[q_block, slot]`` of
   length ``BlockCount[q_block]`` pointing at the K-blocks it should
-  attend to. A small per-K-position lookup checks whether the
-  current K-block index appears in the LUT.
+  attend to. A small per-K-tile lookup checks whether the current
+  K-block index appears in the LUT.
 
-Both kernels reuse :func:`fmha_warp_fwd_inner_body` (warp-distributed
-head-dim, butterfly reductions, no LDS state) and gate the per-K
-softmax update via ``extra_mask_predicate``. The runtime predicate
-forces the score for masked positions to ``-inf`` so the softmax
-exponential collapses to zero -- mathematically identical to skipping
-the position, slightly more bandwidth (the K row still gets loaded)
-but compatible with the dense K-loop's state-threading.
+Both kernels reuse :func:`mfma_attention_fwd_inner_body` (MFMA-tiled
+QK -> softmax -> PV) and gate the per-K-tile softmax update via
+``extra_mask_predicate``. The runtime predicate forces the score for
+masked K-tiles to ``-inf`` so the softmax exponential collapses to
+zero -- mathematically identical to skipping the position, slightly
+more bandwidth (the K row still gets loaded) but compatible with the
+dense K-loop's state-threading. A v2 hoist could short-circuit the
+whole MFMA tile via an outer ``scf.if`` on ``keep_tile``; CK Tile's
+``BlockFmhaPipelineQRKSVSAsyncJenga`` (jenga reference) uses exactly
+that pattern.
+
+Both predicates are powered by an **LDS-staged mask bitmap**:
+
+* The jenga kernel cooperatively loads ``Mask[q_block, :]`` into LDS
+  once per CTA, replacing the per-K-tile global mask byte load.
+* The VSA kernel allocates an LDS i8 bitmap and scatters the per-LUT
+  entries into it (``bitmap[lut_val] = 1``), replacing the original
+  per-K-tile O(``max_blocks_per_q``) global LUT scan with a single
+  LDS byte read. This matches the spirit of CK Tile's
+  ``block_relation_onehot`` pattern (jenga reference) and the LUT
+  walk in the VSA reference, lifted into LDS so the predicate is
+  scalar.
 """
 
 from __future__ import annotations
@@ -30,7 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ..core.ir import I8, IRBuilder, KernelDef
+from ..core.ir import I8, IRBuilder, KernelDef, Value
 from ..helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -52,6 +67,9 @@ __all__ = [
     "vsa_sparse_attention_grid",
     "vsa_sparse_attention_signature",
 ]
+
+
+_BLOCK_SIZE = 64  # one wave64 per CTA (matches mfma_attention helper)
 
 
 @dataclass(frozen=True)
@@ -103,6 +121,10 @@ class VsaSparseSpec:
     @property
     def num_q_blocks(self) -> int:
         return (self.seqlen_q + self.block_q - 1) // self.block_q
+
+    @property
+    def num_k_blocks(self) -> int:
+        return (self.seqlen_k + self.block_k - 1) // self.block_k
 
     def kernel_name(self) -> str:
         s = self.common.shape
@@ -222,6 +244,173 @@ def _declare_vsa_params(kb: FmhaKernelBuilder) -> None:
     kb.add_strides("q", "k", "v", "o")
 
 
+# ---------------------------------------------------------------------
+# LDS bitmap primitives (jenga + VSA share these idioms)
+# ---------------------------------------------------------------------
+
+
+def _const_i8(b: IRBuilder, value: int) -> Value:
+    """Build an i8 constant via ``arith.constant`` (no scalar i8 factory)."""
+    return b._op(  # noqa: SLF001 - the i8 const factory lives at the op layer
+        "arith.constant",
+        result_types=[I8],
+        attrs={"value": int(value), "ity": "i8"},
+        result_name_hint="ci8",
+    ).result
+
+
+def _cooperative_iter(
+    b: IRBuilder,
+    *,
+    tid: Value,
+    total: int,
+    body,
+) -> None:
+    """Run ``body(slot)`` for each ``slot in [0, total)`` distributed across
+    the wave64. For ``total > 64`` we issue a chained ``chunk * 64`` walk;
+    in-range checks are elided when a chunk is fully covered. Used to
+    cooperatively load/zero/scatter LDS arrays.
+    """
+    if total <= 0:
+        return
+    for chunk in range((total + _BLOCK_SIZE - 1) // _BLOCK_SIZE):
+        base = chunk * _BLOCK_SIZE
+        slot = tid if base == 0 else b.add(tid, b.const_i32(base))
+        if base + _BLOCK_SIZE <= total:
+            body(slot)
+        else:
+            in_range = b.cmp_lt(slot, b.const_i32(total))
+            with b.scf_if(in_range):
+                body(slot)
+
+
+def _stage_jenga_mask_to_lds(
+    b: IRBuilder,
+    *,
+    mask_global: Value,
+    mask_row_base: Value,
+    num_k_blocks: int,
+    tid: Value,
+) -> Value:
+    """Cooperatively copy one Q-block's mask row into LDS.
+
+    Returns the LDS allocation handle. After the call (and the
+    accompanying ``b.sync()``) the bitmap can be queried in O(1) per
+    K-tile from the predicate body.
+
+    Reference: CK Tile's ``BlockFmhaPipelineQRKSVSAsyncJenga`` (jenga
+    reference at ``include/ck_tile/ops/sparse_attn/pipeline/
+    block_fmha_pipeline_qr_ks_vs_async_jenga.hpp:260-268``) does the
+    same one-shot LDS stage via ``amd_direct_load_global_to_lds`` of
+    ``block_relation_onehot_ptr``; this is the synchronous-load DSL
+    analog.
+    """
+    mask_lds = b.smem_alloc(I8, [num_k_blocks], name_hint="jenga_mask")
+
+    def _body(slot: Value) -> None:
+        mask_off = b.add(mask_row_base, slot)
+        mask_byte = b.global_load(mask_global, mask_off, I8)
+        b.smem_store_vN(mask_lds, [slot], mask_byte, 1)
+
+    _cooperative_iter(b, tid=tid, total=num_k_blocks, body=_body)
+    return mask_lds
+
+
+def _stage_vsa_bitmap_to_lds(
+    b: IRBuilder,
+    *,
+    block_lut: Value,
+    block_count: Value,
+    q_block_idx: Value,
+    lut_row_base: Value,
+    num_k_blocks: int,
+    max_blocks_per_q: int,
+    tid: Value,
+) -> Value:
+    """Build the per-(q_block) K-attend bitmap in LDS.
+
+    Three cooperative passes:
+
+    1. Allocate ``num_k_blocks`` i8 slots in LDS.
+    2. Zero them (one byte per lane, looped if ``num_k_blocks > 64``).
+    3. For each lane ``l in [0, max_blocks_per_q)`` with ``l <
+       block_count[q_block]``, scatter ``bitmap[lut[q_block, l]] = 1``.
+
+    Concurrent writes from multiple lanes to the same slot are safe
+    because they all store ``1`` (idempotent). After the final
+    ``b.sync()`` the predicate is one LDS byte read.
+
+    Wins vs the previous per-K-tile global scan:
+      * One global LUT load per lane per CTA -> from O(``seqlen_k /
+        block_k`` * ``max_blocks_per_q``) per CTA down to
+        O(``max_blocks_per_q`` / wave + ``seqlen_k / block_k``).
+      * One LDS read per K-tile predicate -> from
+        O(``max_blocks_per_q``) global loads + a chained ``scf.for``
+        per-tile down to O(1) per tile.
+
+    Reference: CK Tile's ``BlockFmhaPipelineQRKSVSAsyncVsa`` (VSA
+    reference at ``include/ck_tile/ops/sparse_attn/pipeline/
+    block_fmha_pipeline_qr_ks_vs_async_vsa.hpp:203, 332``) drives the
+    K-loop directly off ``kv_block_idx_ptr[i_total_loops]``, which is
+    a strictly stronger (tile-skipping) form. The LDS-bitmap mask
+    here is the predicate-gated DSL analog that re-uses
+    ``extra_mask_predicate`` without restructuring the K-loop.
+    """
+    bitmap_lds = b.smem_alloc(I8, [num_k_blocks], name_hint="vsa_bitmap")
+    zero_i8 = _const_i8(b, 0)
+    one_i8 = _const_i8(b, 1)
+
+    # Pass 1: zero the bitmap. With ``num_k_blocks`` typically <= 256
+    # this is a few VALU ops on a single wave.
+    def _zero_body(slot: Value) -> None:
+        b.smem_store_vN(bitmap_lds, [slot], zero_i8, 1)
+
+    _cooperative_iter(b, tid=tid, total=num_k_blocks, body=_zero_body)
+    b.sync()
+
+    # Pass 2: scatter LUT-pointed slots. ``block_count[q_block]`` is a
+    # single i32 load and is wave-uniform.
+    block_count_v = b.global_load_i32(block_count, q_block_idx)
+
+    def _scatter_body(slot: Value) -> None:
+        in_range = b.cmp_lt(slot, block_count_v)
+        with b.scf_if(in_range):
+            slot_off = b.add(lut_row_base, slot)
+            lut_val = b.global_load_i32(block_lut, slot_off)
+            b.smem_store_vN(bitmap_lds, [lut_val], one_i8, 1)
+
+    # The static cooperative iter handles ``max_blocks_per_q > 64`` via
+    # chunked walks; the per-lane in-range guard handles
+    # ``slot >= block_count_v``.
+    for chunk in range((max_blocks_per_q + _BLOCK_SIZE - 1) // _BLOCK_SIZE):
+        base = chunk * _BLOCK_SIZE
+        slot = tid if base == 0 else b.add(tid, b.const_i32(base))
+        # We still need a static-range check for the last partial chunk
+        # so out-of-range lanes do not even issue the global LUT load.
+        if base + _BLOCK_SIZE <= max_blocks_per_q:
+            _scatter_body(slot)
+        else:
+            with b.scf_if(b.cmp_lt(slot, b.const_i32(max_blocks_per_q))):
+                _scatter_body(slot)
+    return bitmap_lds
+
+
+def _lds_bitmap_predicate(
+    b: IRBuilder,
+    bitmap_lds: Value,
+    k_block_idx: Value,
+) -> Value:
+    """``bitmap_lds[k_block_idx] != 0`` -- one LDS byte read + i8 cmp."""
+    loaded = b.smem_load_vN(bitmap_lds, k_block_idx, dtype=I8, n=1)
+    byte_v = b.vec_extract(loaded, 0)
+    return b.cmp_ne(byte_v, _const_i8(b, 0))
+
+
+# ---------------------------------------------------------------------
+# Jenga: build kernel
+# ---------------------------------------------------------------------
+
+
 def build_jenga_sparse_attention(spec: JengaSparseSpec) -> KernelDef:
     """Jenga block-sparse forward kernel (MFMA-tiled).
 
@@ -229,8 +418,14 @@ def build_jenga_sparse_attention(spec: JengaSparseSpec) -> KernelDef:
     bitmap byte for the enclosing sparsity block is zero, the whole
     16-position K-tile is force-masked to ``-inf`` (no softmax
     contribution, no PV contribution). The K loads still fire (no
-    block-level skip in the MFMA inner; that's a v2 hoist with
-    scf.if over the K-tile).
+    block-level skip in the MFMA inner -- a v2 hoist with ``scf.if``
+    over the K-tile that matches the CK Tile reference's
+    ``block_relation_onehot`` skip is a follow-on).
+
+    The mask bitmap is staged to LDS once per CTA so the predicate
+    body is a single LDS byte read (~5 cycle ``ds_read_u8``) instead
+    of a per-K-tile global byte load (~hundreds of cycles on a cold
+    L1 line).
     """
     ok, why = is_valid_jenga_spec(spec)
     if not ok:
@@ -238,7 +433,7 @@ def build_jenga_sparse_attention(spec: JengaSparseSpec) -> KernelDef:
     s = spec.common
 
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
-    kb.block_size(64)
+    kb.block_size(_BLOCK_SIZE)
     _declare_jenga_params(kb)
     kb.decode_grid()
     b = kb.builder
@@ -246,7 +441,7 @@ def build_jenga_sparse_attention(spec: JengaSparseSpec) -> KernelDef:
     Q = kb.tensor("Q")
     K = kb.tensor("K")
     V = kb.tensor("V")
-    O = kb.tensor("O")  # noqa: E741 - standard attention notation (Q,K,V,O)
+    O = kb.tensor("O")  # noqa: E741 - standard attention notation
     mask = kb.ptr("mask")
     scale_log2 = kb.scalar("scale_log2")
     seqlen_k_arg = kb.scalar("seqlen_k")
@@ -258,23 +453,27 @@ def build_jenga_sparse_attention(spec: JengaSparseSpec) -> KernelDef:
     q_block_idx = b.div(q_tile_base, b.const_i32(spec.block_q))
     mask_row_base = b.mul(q_block_idx, b.const_i32(spec.num_k_blocks))
 
+    # Stage the per-Q-block mask row into LDS once. The K-tile predicate
+    # then reads from LDS instead of replaying a global load per tile.
+    tid = b.thread_id_x()
+    mask_lds = _stage_jenga_mask_to_lds(
+        b,
+        mask_global=mask,
+        mask_row_base=mask_row_base,
+        num_k_blocks=spec.num_k_blocks,
+        tid=tid,
+    )
+    b.sync()
+
     # Each MFMA K-tile = ``MFMA_ATTN_BLOCK_K`` K positions = one
     # ``block_k / MFMA_ATTN_BLOCK_K``-th of one sparsity block.
     tiles_per_block_k = spec.block_k // MFMA_ATTN_BLOCK_K
     c_tpbk = b.const_i32(tiles_per_block_k)
 
     def _jenga_tile_predicate(b: IRBuilder, kt):
-        """``MaskBitmap[q_block, kt // tiles_per_block_k] != 0``."""
+        """``MaskBitmap[q_block, kt // tiles_per_block_k] != 0`` from LDS."""
         k_block_idx = b.div(kt, c_tpbk)
-        mask_off = b.add(mask_row_base, k_block_idx)
-        mask_byte = b.global_load(mask, mask_off, I8)
-        zero_i8 = b._op(  # noqa: SLF001 - i8 const factory
-            "arith.constant",
-            result_types=[mask_byte.type],
-            attrs={"value": 0, "ity": "i8"},
-            result_name_hint="cz",
-        ).result
-        return b.cmp_ne(mask_byte, zero_i8)
+        return _lds_bitmap_predicate(b, mask_lds, k_block_idx)
 
     mfma_attention_fwd_inner_body(
         b,
@@ -304,13 +503,26 @@ def build_jenga_sparse_attention(spec: JengaSparseSpec) -> KernelDef:
     return kb.kernel
 
 
+# ---------------------------------------------------------------------
+# VSA: build kernel
+# ---------------------------------------------------------------------
+
+
 def build_vsa_sparse_attention(spec: VsaSparseSpec) -> KernelDef:
     """Variable-size sparse attention forward kernel (MFMA-tiled).
 
-    The VSA LUT lookup happens once per MFMA K-tile (at
-    ``MFMA_ATTN_BLOCK_K`` granularity); when the K-tile's enclosing
-    sparsity block isn't in ``BlockLut[q_block]``, the K-tile is
-    force-masked to ``-inf``.
+    The VSA LUT lookup is **pre-computed** into an LDS bitmap once per
+    CTA: each lane reads one LUT slot (if in range), and stores ``1``
+    at ``bitmap[lut[q_block, slot]]``. Concurrent writes are safe
+    (idempotent stores of ``1``). The predicate then becomes a single
+    LDS byte read per K-tile.
+
+    This replaces the v1 ``scf.for`` slot scan that, for every K-tile,
+    walked all ``max_blocks_per_q`` slots in global memory looking for
+    a hit. The new path issues O(``max_blocks_per_q``) global LUT
+    loads once at the top of the CTA and O(1) LDS reads per K-tile,
+    instead of O(``max_blocks_per_q``) global loads + a chained
+    ``scf.for`` for *every* MFMA K-tile in the dense loop.
     """
     ok, why = is_valid_vsa_spec(spec)
     if not ok:
@@ -318,7 +530,7 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec) -> KernelDef:
     s = spec.common
 
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
-    kb.block_size(64)
+    kb.block_size(_BLOCK_SIZE)
     _declare_vsa_params(kb)
     kb.decode_grid()
     b = kb.builder
@@ -326,7 +538,7 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec) -> KernelDef:
     Q = kb.tensor("Q")
     K = kb.tensor("K")
     V = kb.tensor("V")
-    O = kb.tensor("O")  # noqa: E741 - standard attention notation (Q,K,V,O)
+    O = kb.tensor("O")  # noqa: E741 - standard attention notation
     block_lut = kb.ptr("block_lut")
     block_count = kb.ptr("block_count")
     scale_log2 = kb.scalar("scale_log2")
@@ -337,30 +549,33 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec) -> KernelDef:
     q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
     q_block_idx = b.div(q_tile_base, b.const_i32(spec.block_q))
     lut_row_base = b.mul(q_block_idx, b.const_i32(spec.max_blocks_per_q))
-    block_count_v = b.global_load_i32(block_count, q_block_idx)
+
+    tid = b.thread_id_x()
+    bitmap_lds = _stage_vsa_bitmap_to_lds(
+        b,
+        block_lut=block_lut,
+        block_count=block_count,
+        q_block_idx=q_block_idx,
+        lut_row_base=lut_row_base,
+        num_k_blocks=spec.num_k_blocks,
+        max_blocks_per_q=spec.max_blocks_per_q,
+        tid=tid,
+    )
+    b.sync()
+
     tiles_per_block_k = spec.block_k // MFMA_ATTN_BLOCK_K
     c_tpbk = b.const_i32(tiles_per_block_k)
 
     def _vsa_tile_predicate(b: IRBuilder, kt):
-        """Tile-level VSA predicate -- checks whether
-        ``kt // tiles_per_block_k`` appears in the q_block's LUT.
+        """Tile-level VSA predicate via the LDS-staged bitmap.
+
+        ``kt`` is the MFMA K-tile index; the sparsity-block index is
+        ``kt // tiles_per_block_k``. After the staging step above the
+        whole "is this block in the LUT?" question collapses to one
+        LDS byte read + i8 compare.
         """
         k_block_idx = b.div(kt, c_tpbk)
-        slot_loop = b.scf_for_iter(
-            b.const_i32(0),
-            b.const_i32(spec.max_blocks_per_q),
-            b.const_i32(1),
-            [("found", b.const_i32(0))],
-            iv_name="vsa_slot",
-        )
-        with slot_loop as (slot, (found,)):
-            in_range = b.cmp_lt(slot, block_count_v)
-            slot_off = b.add(lut_row_base, slot)
-            lut_val = b.global_load_i32(block_lut, slot_off)
-            hit_i1 = b.land(in_range, b.cmp_eq(lut_val, k_block_idx))
-            hit_i32 = b.select(hit_i1, b.const_i32(1), b.const_i32(0))
-            b.scf_yield(b.lor(found, hit_i32))
-        return b.cmp_ne(slot_loop.results[0], b.const_i32(0))
+        return _lds_bitmap_predicate(b, bitmap_lds, k_block_idx)
 
     mfma_attention_fwd_inner_body(
         b,

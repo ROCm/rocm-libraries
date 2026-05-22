@@ -42,12 +42,11 @@ Implementation:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Callable, List, Literal, Tuple
 
-from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ..helpers.io import io_ir_type, store_scalar_from_f32
 from ..helpers.quant import QDType, quant_ir_type, quant_max_abs, quantize_scalar_f32
-from ..helpers.reduction import block_lds_reduce
 from ..helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -65,6 +64,92 @@ from ..helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
+
+
+def _balanced_combine(
+    values: List[Value], combine: Callable[[Value, Value], Value]
+) -> Value:
+    """Balanced-tree fold of ``values`` under ``combine``.
+
+    Used for the per-chunk fold of f32 partials in pass 1: pairing the
+    sum-of-squares and the abs-max reduces from ``len(values)`` strict
+    serial ops down to ``ceil(log2(len(values)))``. ``arith.fadd`` and
+    ``arith.fmax`` lower without the ``reassoc`` fastmath flag (see
+    ``core/lower_llvm.py``), so the optimiser cannot re-shape the
+    chain on our behalf -- emitting the tree explicitly is the only
+    way to get the lower latency. CK Tile achieves the same effect via
+    its ``sweep_tile_span`` over a per-Y register tile (which the
+    ``BlockNormReduce`` / ``ReduceOp::SquareAdd`` pair sweeps in
+    parallel-friendly order).
+    """
+    if not values:
+        raise ValueError("_balanced_combine requires at least one value")
+    cur = list(values)
+    while len(cur) > 1:
+        nxt: List[Value] = []
+        i = 0
+        while i + 1 < len(cur):
+            nxt.append(combine(cur[i], cur[i + 1]))
+            i += 2
+        if i < len(cur):
+            nxt.append(cur[i])
+        cur = nxt
+    return cur[0]
+
+
+def _paired_block_lds_reduce_sum_max(
+    b: IRBuilder,
+    val_sum: Value,
+    val_max: Value,
+    lds_sum: Value,
+    lds_max: Value,
+    tid: Value,
+    *,
+    block_size: int,
+) -> Tuple[Value, Value]:
+    """Twin-channel block reduction: ``sum`` and ``max`` on one barrier schedule.
+
+    Functionally equivalent to two back-to-back
+    :func:`ck_dsl.helpers.reduction.block_lds_reduce` calls (one with
+    ``combine="sum"``, one with ``combine="max"``), but interleaves the
+    two channels' LDS writes and reads inside a *single* halving loop
+    so the ``s_barrier`` between halving steps is amortised across
+    both reductions. For ``block_size == 256`` this cuts the sync
+    count from ``2 * (log2(256) + 1) == 18`` down to
+    ``log2(256) + 1 == 9`` and the LDS round-trip count in half.
+
+    The structure mirrors :func:`ck_dsl.helpers.reduction.block_lds_reduce`
+    line-for-line except every step touches both LDS buffers and the
+    two channels use independent combiners (``fadd`` and ``fmax``).
+    The caller owns both ``lds_sum`` / ``lds_max`` allocations; both
+    must be at least ``block_size`` f32 slots wide.
+    """
+    if val_sum.type.name != "f32" or val_max.type.name != "f32":
+        raise ValueError("_paired_block_lds_reduce_sum_max expects f32 inputs")
+
+    b.smem_store_vN_f32(lds_sum, [tid], val_sum, 1)
+    b.smem_store_vN_f32(lds_max, [tid], val_max, 1)
+    b.sync()
+
+    n = block_size
+    while n > 1:
+        half = n // 2
+        c_half = b.const_i32(half)
+        in_first = b.cmp_lt(tid, c_half)
+        with b.scf_if(in_first):
+            j = b.add(tid, c_half)
+            a_sum = b.vec_extract(b.smem_load_vN_f32(lds_sum, tid, n=1), 0)
+            c_sum = b.vec_extract(b.smem_load_vN_f32(lds_sum, j, n=1), 0)
+            a_max = b.vec_extract(b.smem_load_vN_f32(lds_max, tid, n=1), 0)
+            c_max = b.vec_extract(b.smem_load_vN_f32(lds_max, j, n=1), 0)
+            b.smem_store_vN_f32(lds_sum, [tid], b.fadd(a_sum, c_sum), 1)
+            b.smem_store_vN_f32(lds_max, [tid], b.fmax(a_max, c_max), 1)
+        b.sync()
+        n = half
+
+    out_sum = b.vec_extract(b.smem_load_vN_f32(lds_sum, b.const_i32(0), n=1), 0)
+    out_max = b.vec_extract(b.smem_load_vN_f32(lds_max, b.const_i32(0), n=1), 0)
+    return out_sum, out_max
 
 
 @dataclass(frozen=True)
@@ -174,36 +259,69 @@ def build_add_rmsnorm2d_rdquant(spec: AddRmsnorm2DRdquantSpec) -> KernelDef:
         x_view = make_naive_tensor_view_packed(X, shape=(1, N), dtype=io_ty)
         x_tile = make_tile_window(x_view, lengths=(1, N), origin=(row, b.const_i32(0)))
 
-    lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
+    # Two LDS scratch buffers (sum + max) feed a single twin-channel
+    # reduction via :func:`_paired_block_lds_reduce_sum_max` -- one
+    # halving schedule instead of the previous two back-to-back
+    # ``block_lds_reduce`` calls, halving the ``s_barrier`` count.
+    # 1 KB per buffer for the default ``BS=256`` -- trivial vs LDS
+    # budget.
+    lds_sum = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_sum").base
+    lds_max = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_max").base
 
     # Pass 1: stream A (which carries the f32-promoted ``a`` scalars
     # through ``sweep_row_chunks``'s ``x_scalars`` argument); per chunk
     # we manually load ``b`` from ``B`` and ``gamma`` from ``Gamma``
-    # to compute ``x = a + b`` and the per-thread reductions.
+    # to compute ``x = a + b``, the per-thread sum-of-squares (over
+    # ``x``), and the per-thread amax (over ``|x * gamma|``).
+    #
+    # Optimisation vs the prior body:
+    #
+    # * We cache ``xg = x * gamma`` (not raw ``x``) for pass 2. Pass 2
+    #   no longer needs to re-load ``gamma`` from HBM nor re-multiply
+    #   ``x * gamma`` -- it just runs ``y = xg * inv_rms``. Net per
+    #   element: -1 ``f16`` HBM load, -1 ``fmul``. Per-thread cache
+    #   width is unchanged (one f32 per element), so register pressure
+    #   stays the same. When ``save_residual=True`` we still write
+    #   ``x`` back to the residual buffer; we just don't cache it.
+    # * The per-chunk ``s_sq`` and ``s_amax_g`` partials are folded
+    #   via :func:`_balanced_combine` so the critical-path depth is
+    #   ``log2(VEC)`` (3 for VEC=8) instead of ``VEC`` (8). Total op
+    #   count is unchanged -- the win is latency, not arithmetic.
+    # * ``|xg|`` via ``fmax(xg, fneg(xg))`` is kept (no fabs IR op;
+    #   matches the SmoothQuant idiom and lowers to one
+    #   ``v_max_f32 xg, -xg``).
     s_sq = b.const_f32(0.0)
     s_amax_g = b.const_f32(0.0)
-    # The cache holds the per-thread x = a + b f32 scalars for pass 2.
-    cached_x: list = []
+    cached_xg: List[Value] = []
 
     def pass1_body(n_off, a_scalars):
         nonlocal s_sq, s_amax_g
         b_scalars = bt_tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
         g_scalars = g_view.load_vec_as_f32(b, [n_off], n=VEC)
-        chunk_x: list = []
+        chunk_x: List[Value] = []
+        chunk_xg: List[Value] = []
+        chunk_sq: List[Value] = []
+        chunk_abs_xg: List[Value] = []
         for i in range(VEC):
             x_i = b.fadd(a_scalars[i], b_scalars[i])
+            xg_i = b.fmul(x_i, g_scalars[i])
             chunk_x.append(x_i)
-            s_sq = b.fadd(s_sq, b.fmul(x_i, x_i))
-            xg = b.fmul(x_i, g_scalars[i])
-            abs_xg = b.fmax(xg, b.fneg(xg))
-            s_amax_g = b.fmax(s_amax_g, abs_xg)
-        cached_x.extend(chunk_x)
+            chunk_xg.append(xg_i)
+            chunk_sq.append(b.fmul(x_i, x_i))
+            chunk_abs_xg.append(b.fmax(xg_i, b.fneg(xg_i)))
+        # Balanced-tree fold: depth log2(VEC), 1 per-chunk merge into
+        # the running scalar partials. AITER's
+        # ``add_rmsnorm_dynquant`` device kernel uses the same
+        # "vectorised compute, scalar accumulator at the bottom"
+        # structure; we mirror it in the DSL.
+        s_sq = b.fadd(s_sq, _balanced_combine(chunk_sq, b.fadd))
+        s_amax_g = b.fmax(s_amax_g, _balanced_combine(chunk_abs_xg, b.fmax))
+        cached_xg.extend(chunk_xg)
         if spec.save_residual:
-            # Per-chunk residual write-back: pack the f32 ``x`` chunk
-            # back to the I/O dtype and store via the standard
-            # vectorised write. Pass 2 won't re-read ``X`` (the cache
-            # holds the values it needs); the write is purely so the
-            # next layer's residual stream can pick up ``a + b``.
+            # Residual write-back of ``x = a + b`` happens here so
+            # the next layer's residual stream can pick it up. The
+            # pass-2 quantise path doesn't need ``x``; it reads
+            # ``xg`` straight out of the cache.
             x_tile.store_vec_from_f32(b, b.const_i32(0), n_off, values=chunk_x)
 
     sweep_row_chunks(
@@ -214,17 +332,23 @@ def build_add_rmsnorm2d_rdquant(spec: AddRmsnorm2DRdquantSpec) -> KernelDef:
         vec=VEC,
         elems_per_thread=spec.elems_per_thread,
         body=pass1_body,
-        cache=False,  # we manage the cache ourselves because ``x = a+b``
-        # is the cached value, not the raw ``a``.
+        cache=False,  # we manage the cache ourselves (``xg``, not raw ``a``).
     )
 
-    total_sq = block_lds_reduce(b, s_sq, lds, tid, block_size=BS, combine="sum")
-    total_amax_g = block_lds_reduce(b, s_amax_g, lds, tid, block_size=BS, combine="max")
+    # Twin-channel cross-thread reduction: ``sum`` for the sum-of-squares
+    # and ``max`` for the abs-max of ``x * gamma``.
+    total_sq, total_amax_g = _paired_block_lds_reduce_sum_max(
+        b, s_sq, s_amax_g, lds_sum, lds_max, tid, block_size=BS
+    )
 
     rcp_n = b.rcp(b.const_f32(float(N)))
     mean_sq = b.fmul(total_sq, rcp_n)
     inv_rms = b.rsqrt(b.fadd(mean_sq, eps_rms))
 
+    # ``amax_y = inv_rms * max(|x * gamma|)``: same algebraic identity
+    # CK Tile's ``add_rmsnorm2d_rdquant`` pipeline collapses to
+    # (``inv_rms`` is non-negative so the per-row positive scale
+    # factors out of the abs-max).
     amax_y = b.fmul(inv_rms, total_amax_g)
     safe_amax = b.fmax(amax_y, eps_q)
     yscale = b.fmul(safe_amax, b.const_f32(1.0 / qmax))
@@ -234,16 +358,23 @@ def build_add_rmsnorm2d_rdquant(spec: AddRmsnorm2DRdquantSpec) -> KernelDef:
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
             b.global_store(YScale, row, yscale, align=4)
 
-    # Pass 2: re-load gamma; compute ``y = x * inv_rms * gamma`` and
-    # quantise per element.
+    # Pass 2: ``y = xg * inv_rms`` straight out of the per-thread
+    # cache; quantise and store per element. The earlier
+    # ``g_view.load_vec_as_f32`` per chunk is gone (gamma was already
+    # consumed in pass 1; ``xg`` carries everything we need), so this
+    # pass touches only the cache + the QY store path. For ``out_dtype``
+    # in ``{i8, fp8e4m3, bf8e5m2}`` ``store_vec_from_f32`` is not
+    # wired (the IR has no packed cvt for quant types), so we still
+    # issue per-element stores -- batching those into a packed dword
+    # store is the canonical follow-on (see "out-of-scope proposals"
+    # in the optimisation notes).
     chunks = spec.elems_per_thread // VEC
     c_vec = b.const_i32(VEC)
     for k in range(chunks):
         n_off = b.add(b.mul(b.const_i32(k * BS), c_vec), b.mul(tid, c_vec))
-        g_scalars = g_view.load_vec_as_f32(b, [n_off], n=VEC)
         for i in range(VEC):
-            x_f32 = cached_x[k * VEC + i]
-            y_f32 = b.fmul(b.fmul(x_f32, inv_rms), g_scalars[i])
+            xg_f32 = cached_xg[k * VEC + i]
+            y_f32 = b.fmul(xg_f32, inv_rms)
             q = quantize_scalar_f32(
                 b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
             )

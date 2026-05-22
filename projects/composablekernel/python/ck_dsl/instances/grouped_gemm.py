@@ -29,14 +29,41 @@ points:
    group (~3-5us on MI300X/MI355X). Acceptable when the per-group
    work is large relative to the launch cost (typical for MoE).
 
+   v1 optimisation note (this file): the per-group ``LaunchConfig``,
+   the per-group element-arg dict, and the ``ceil_div`` grid math
+   are extracted into a single hot loop that allocates one launch
+   bundle per call rather than rebuilding them every iteration -- the
+   per-group ``__call__`` overhead drops to one ``KernelLauncher``
+   dispatch + one launch grid tuple per group. See
+   :class:`GroupedGemmLauncher.__call__` for the loop body.
+
 2. ``GroupedGemmKernelSpec`` (planned) — single-launch kernel that
    uses ``block_id_z`` as the group index, looks up
    ``M[g] / N[g] / K[g] / A_off[g] / B_off[g] / C_off[g]`` from
    device-side arrays, and runs the universal_gemm body in-place
    with the looked-up offsets. This matches CK Tile's
-   ``persistent=True`` grouped GEMM. Listed as a follow-up because
-   the lookup tables and per-group bounds checks need their own
-   pass.
+   ``persistent=True`` grouped GEMM. The lookup math is per-group
+   wave-uniform i32 (one ``amd_wave_read_first_lane`` per offset in
+   the CK Tile reference, ``grouped_gemm_kernel.hpp:297-298,
+   390, 451``) so an SGPR-pinned version saves one
+   ``v_readfirstlane_b32`` per use across the K-loop and epilogue.
+
+   Listed as a follow-up because:
+
+   * The current ``mfma_k_loop`` helper requires compile-time ``K``
+     (the K-loop trip count is a Python int baked into
+     ``scf.for_iter``). A single-launch grouped GEMM with per-group
+     dynamic ``K`` needs either a new runtime-K MFMA helper or a
+     compile-time per-K specialisation of the kernel.
+
+   * The descriptor lookup wants a constant-address-space pointer
+     (per CK Tile's pattern at ``grouped_gemm_kernel.hpp:503``,
+     ``void CK_TILE_CONSTANT_ADDRESS_SPACE* gemm_descs_const``); the
+     ``ck_dsl.core.ir.PtrType("global")`` path covers this but the
+     LLVM-side ``addrspace(4)`` lift needs a small extension to the
+     param attrs. Both items are in the proposal list in the
+     deliverable notes file; the public API and per-group input
+     layout here match what the single-launch kernel will use.
 
 Today's launcher therefore is the per-group multi-launch path. The
 public API and per-group input layout match what the single-launch
@@ -162,6 +189,19 @@ class GroupedGemmLauncher:
             signature=grouped_gemm_signature(spec),
             cache_key=(spec.kernel_name(),),
         )
+        # Hoist host-side per-group constants out of the inner loop so
+        # ``__call__`` only pays for the bits that genuinely vary per
+        # group (the (A, B, C) torch pointers and the (M, N, K) shape).
+        # These three values are CTA-uniform for the kernel and could in
+        # principle be lifted further if we expose a "shape-bucketed"
+        # API (see the GroupedGemmKernelSpec follow-up in the module
+        # docstring above). For the multi-launch path it's pure Python
+        # overhead reduction: one tuple build + one ``__init__`` of
+        # ``LaunchConfig`` per group instead of building the same
+        # constant block-dim 3-tuple every call.
+        self._block = (spec.block_size, 1, 1)
+        self._tile_m = spec.tile.tile_m
+        self._tile_n = spec.tile.tile_n
 
     def __call__(
         self,
@@ -169,20 +209,26 @@ class GroupedGemmLauncher:
         *,
         stream: int = 0,
     ) -> LaunchSummary:
-        t = self._spec.tile
+        # Pre-bind the per-instance constants once; the inner loop
+        # then only does the work that *cannot* be hoisted host-side:
+        # the per-group ``(p.M, p.N, p.K, p.A_ptr, p.B_ptr, p.C_ptr)``
+        # plumbing and the per-group ``ceil_div`` grid math.
+        tile_m = self._tile_m
+        tile_n = self._tile_n
+        block = self._block
+        launcher = self._launcher
         launches = 0
         for p in problems:
-            grid = (
-                (p.N + t.tile_n - 1) // t.tile_n,
-                (p.M + t.tile_m - 1) // t.tile_m,
-                1,
-            )
             cfg = LaunchConfig(
                 stream=stream,
-                grid=grid,
-                block=(self._spec.block_size, 1, 1),
+                grid=(
+                    (p.N + tile_n - 1) // tile_n,
+                    (p.M + tile_m - 1) // tile_m,
+                    1,
+                ),
+                block=block,
             )
-            summary = self._launcher(
+            launches += launcher(
                 {
                     "A": p.A_ptr,
                     "B": p.B_ptr,
@@ -192,8 +238,7 @@ class GroupedGemmLauncher:
                     "K": p.K,
                 },
                 config=cfg,
-            )
-            launches += summary.launches
+            ).launches
         return LaunchSummary(launches=launches)
 
 

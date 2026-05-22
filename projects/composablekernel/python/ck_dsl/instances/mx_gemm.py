@@ -62,6 +62,7 @@ from ..helpers.mfma_gemm_inner import (
     load_a_row_major_contiguous,
     load_b_col_strided_scalars,
     mfma_k_loop,
+    store_acc_to_global,
 )
 from ..helpers.mx_scale import decode_mx_scale_e8m0
 from ..helpers.quant import quant_ir_type
@@ -262,25 +263,37 @@ def build_mx_gemm(spec: MxGemmSpec) -> KernelDef:
             acc_name="gacc",
         )
 
-        # Scale-and-accumulate the group's MFMA result.
-        scaled = b.zero_vec_f32(atom.c_per_lane)
-        for i in range(atom.c_per_lane):
-            v = b.vec_extract(group_acc, i)
-            old = b.vec_extract(outer_acc, i)
-            new = b.fadd(old, b.fmul(v, ab_scale))
-            scaled = b.vec_insert(scaled, new, i)
-        b.scf_yield(scaled)
+        # Tile-level scale-and-accumulate the group's MFMA result.
+        # ``group_acc`` and ``outer_acc`` are both ``<c_per_lane x f32>``
+        # per-lane vectors; broadcast the scalar ``ab_scale`` to that
+        # width and emit one vector fmul + one vector fadd, which lower
+        # to packed ``v_pk_mul_f32`` / ``v_pk_add_f32`` (or a fused
+        # ``v_pk_fma_f32``) on AMDGPU instead of the c_per_lane scalar
+        # fmul/fadd chain the prior implementation produced.
+        ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
+        scaled_group = b.vector_mul(group_acc, ab_scale_vec)
+        new_outer = b.vector_add(outer_acc, scaled_group)
+        b.scf_yield(new_outer)
 
     acc_final = outer.results[0]
 
-    # Output store: each lane writes c_per_lane cells via the atom's
-    # lane→output mapping.
-    for i in range(atom.c_per_lane):
-        row_in, col_in = atom.lane_to_output(b, lane, i)
-        row = b.add(m_tile_base, row_in)
-        col = b.add(n_tile_base, col_in)
-        addr = b.add(b.mul(row, b.const_i32(spec.N)), col)
-        b.global_store(C, addr, b.vec_extract(acc_final, i), align=4)
+    # Output store via the shared MFMA epilogue helper: each lane
+    # writes its ``c_per_lane`` cells to global via the atom's
+    # ``lane_to_output`` mapping. f32 out (no cast), no atomic add.
+    # The per-cell stores stay scalar because the 16x16 atom places a
+    # lane's 4 outputs at the same column across 4 consecutive rows
+    # (stride = N), which is not vectorisable without an LDS shuffle.
+    store_acc_to_global(
+        b,
+        C=C,
+        atom=atom,
+        lane_decode=lane_decode,
+        m_tile_base=m_tile_base,
+        n_tile_base=n_tile_base,
+        acc=acc_final,
+        N=spec.N,
+        out_dtype="f32",
+    )
     b.ret()
     return b.kernel
 

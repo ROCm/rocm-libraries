@@ -23,6 +23,62 @@ LDS layout: ``[tile_m, tile_n + lds_pad]`` half-words. The default
 ``lds_pad = 8`` rounds each row up to a 16-byte boundary so the
 column-strided reads in step 3 don't pile onto a single LDS bank.
 
+Scalar -> tile/vector replacements (v2 vs v1)
+---------------------------------------------
+
+Two-phase LDS-staged transposes have one residual scalar pattern:
+the *Phase 2 column gather*. Each lane reads ``vec`` halves from one
+LDS column at adjacent rows. With a row-major LDS the addresses are
+``(row + i) * stride_r + col`` for ``i in 0..vec-1``, so they cannot
+collapse to a single ``ds_read_b{N*16}`` op -- the only way to fuse
+them is an "in-LDS transpose" instruction (``ds_read_b{64,96,128}_tr_b16``
+on gfx950, see the CDNA4 chapter of the LDS optimisation skill in
+``FlyDSL/.claude/skills/lds-optimization/SKILL.md``). The DSL's IR
+builder does not yet expose those primitives -- the proposal to add
+them lives at the bottom of this docstring.
+
+What v2 *does* change:
+
+* Both phases now go through the unified
+  :class:`TensorView` / :class:`TileWindow` API, so the body reads
+  literally as the CK Tile pseudocode:
+
+    .. code-block:: text
+
+        x_view = make_tensor_view<addrspace::global>(X, desc)
+        lds_view = make_tensor_view<addrspace::lds>(smem_alloc<T>(), lds_desc)
+        x_tile.load_vec(...); lds_tile.store_vec(...)
+        sync()
+        for i in 0..vec:
+            elem[i] = lds_tile.load_scalar(...)  # scalar gather (proposal: ds_read_tr_b16)
+        y_tile.store_vec(vec_pack(elem))
+
+  The column-strided LDS reads are still scalar (one
+  ``smem_load_vN(n=1)`` per lane per row offset). Without an LDS
+  ``load_scalar_at`` / ``load_vec_tr_at`` helper that could take a
+  precomputed flat offset, the row index has to be recomputed via
+  ``b.add(row_base, b.const_i32(i))`` each iteration -- the LLVM
+  AMDGPU backend pattern-matches the resulting
+  ``%off = %row_idx * stride_r + %col`` SSA into one
+  ``ds_read_b16 %vgpr offset:K`` per step, with the per-row
+  ``v_add_u32`` for ``row_idx`` getting strength-reduced into a
+  running base register. Net IR: same as v1 with a cleaner module
+  shape; the *real* lever to remove the scalar reads needs the
+  ``ds_read_*_tr_*`` IR primitive (proposal below).
+
+Proposal (out of scope for this file)
+-------------------------------------
+
+Expose ``ds_read_b64_tr_b16`` / ``ds_read_b96_tr_b6`` /
+``ds_read_b128_tr_b16`` as :class:`IRBuilder` primitives, mirroring
+CK Tile's ``__builtin_amdgcn_ds_read_tr*`` builtins. With those,
+Phase 2's per-lane scalar gather collapses to one ``ds_read_*_tr_*``
+op, eliminating the residual ``vec``-scalar-LDS-read bottleneck. The
+right home for the IR primitive is :mod:`ck_dsl.core.ir`, with the
+TileWindow-level wrapper landing in
+:func:`ck_dsl.helpers.tensor_view.TensorView.load_vec_tr_at`
+(matches the existing ``load_vec_at`` family).
+
 What we cover today:
   - Dtypes ``f16`` / ``bf16``
   - Square tile ``tile_m == tile_n`` in {16, 32, 64}
@@ -44,7 +100,10 @@ from ..helpers.spec import (
     kernel_name_join,
     validate_io,
 )
-from ..helpers.tensor_view import make_global_view, make_lds_view
+from ..helpers.tensor_view import (
+    make_global_view,
+    make_lds_view,
+)
 
 
 DType = Literal["f16", "bf16"]
@@ -204,7 +263,19 @@ def build_transpose2d(spec: Transpose2DSpec) -> KernelDef:
     row2_base = b.mul(row2_chunk, c_vec)
 
     # Column-strided LDS reads pack into one output vector, then a
-    # single coalesced global store per thread emits the transposed row.
+    # single coalesced global store per thread emits the transposed
+    # row.
+    #
+    # The per-element load is still scalar: the row-strided gather
+    # has no contiguous-LDS chunk to vectorise without a
+    # ``ds_read_*_tr_*`` primitive (the in-LDS transpose family;
+    # see the proposal in the module docstring). The row-index
+    # increment is the canonical "running coord" pattern -- the
+    # constant-folded ``b.add(row2_base, b.const_i32(i))`` produces
+    # one ``v_add_u32`` per row step which the LLVM AMDGPU backend
+    # collapses into a strided load-pair (``ds_read_b16`` with a
+    # ``vgpr+offset`` form). Express it as the loop body the
+    # ``ds_read_*_tr_*`` proposal would directly replace.
     elems = [
         lds_tile.load_scalar(b, b.add(row2_base, b.const_i32(i)), col2)
         for i in range(vec)
