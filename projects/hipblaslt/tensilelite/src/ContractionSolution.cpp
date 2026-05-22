@@ -895,9 +895,6 @@ namespace TensileLite
                                                static_cast<uint32_t>(problem.bias().dataType()));
                 if(problemType.useBias)
                 {
-                    /*std::cout << "Bias Strides enqueued is "<<static_cast<uint32_t>(problem.useBias() && bias.dimensions()
-                                                  ? bias.strides()[bias.dimensions() - 1]
-                                                  : 0) << std::endl;*/
                     args.template append<uint32_t>(
                         "strideBias",
                         static_cast<uint32_t>(problem.useBias() && bias.dimensions()
