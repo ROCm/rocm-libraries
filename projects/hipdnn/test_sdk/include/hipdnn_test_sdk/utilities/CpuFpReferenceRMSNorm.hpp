@@ -294,6 +294,7 @@ public:
             std::vector<int64_t> invRmsIdx = leadingIdx;
             invRmsIdx.resize(rank, 0);
             const auto prstd = static_cast<ComputeDataType>(invRms.getHostValue(invRmsIdx));
+            const auto invRmsCube = prstd * prstd * prstd;
 
             // Compute dx = (dy * scale - meanDyXW * x) * invRms
             hipdnn_data_sdk::utilities::iterateAlongDimensions(
@@ -311,7 +312,7 @@ public:
                     const auto px = static_cast<ComputeDataType>(x.getHostValue(fullIdx));
                     const auto pw = static_cast<ComputeDataType>(scale.getHostValue(scaleIdx));
 
-                    const auto dxVal = (pdy * pw * prstd) - (meanDyXW * px * prstd * prstd * prstd);
+                    const auto dxVal = (pdy * pw * prstd) - (meanDyXW * px * invRmsCube);
 
                     dx.setHostValue(static_cast<DxDataType>(dxVal), fullIdx);
                 });

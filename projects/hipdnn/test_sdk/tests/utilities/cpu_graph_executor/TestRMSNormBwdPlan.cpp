@@ -159,3 +159,78 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
         *directTensorBundle.tensors[attributes.dscale_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.dscale_tensor_uid()].get()));
 }
+
+TEST(TestRMSNormBwdPlan, ExecutePlanWithOptionalDbias)
+{
+    const std::vector<int64_t> dims = {4, 8, 16, 32};
+    const unsigned int seed = getGlobalTestSeed();
+
+    auto graph = buildRMSNormBwdGraph(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
+
+    RMSNormBwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
+    RMSNormBwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
+
+    const auto& attributes
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes>();
+    const auto& tensorMap = graphWrapper.getTensorMap();
+
+    RMSNormBwdParams params(*tensorMap.at(attributes.dy_tensor_uid()),
+                            *tensorMap.at(attributes.x_tensor_uid()),
+                            *tensorMap.at(attributes.scale_tensor_uid()),
+                            *tensorMap.at(attributes.inv_rms_tensor_uid()),
+                            *tensorMap.at(attributes.dx_tensor_uid()),
+                            *tensorMap.at(attributes.dscale_tensor_uid()),
+                            tensorMap.at(attributes.dbias_tensor_uid().value()));
+
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
+
+    auto shallowDyTensor = createShallowTensor<float>(
+        params.dyTensor, directTensorBundle.tensors[attributes.dy_tensor_uid()]->rawHostData());
+    auto shallowXTensor = createShallowTensor<float>(
+        params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
+    auto shallowScaleTensor = createShallowTensor<float>(
+        params.scaleTensor,
+        directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
+    auto shallowInvRmsTensor = createShallowTensor<float>(
+        params.invRmsTensor,
+        directTensorBundle.tensors[attributes.inv_rms_tensor_uid()]->rawHostData());
+
+    auto shallowDxTensor = createShallowTensor<float>(
+        params.dxTensor, directTensorBundle.tensors[attributes.dx_tensor_uid()]->rawHostData());
+    auto shallowDScaleTensor = createShallowTensor<float>(
+        params.dscaleTensor,
+        directTensorBundle.tensors[attributes.dscale_tensor_uid()]->rawHostData());
+    auto shallowDBiasTensor = createShallowTensor<float>(
+        params.dbiasTensor.value(),
+        directTensorBundle.tensors[attributes.dbias_tensor_uid().value()]->rawHostData());
+
+    CpuFpReferenceRMSNorm::backward<float, float, float, float, float>(*shallowDyTensor,
+                                                                       *shallowXTensor,
+                                                                       *shallowScaleTensor,
+                                                                       *shallowInvRmsTensor,
+                                                                       *shallowDxTensor,
+                                                                       *shallowDScaleTensor,
+                                                                       shallowDBiasTensor.get());
+
+    RMSNormBwdPlan<float, float, float, float, float> bwdPlan(std::move(params));
+    bwdPlan.execute(variantPack);
+
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(
+        *directTensorBundle.tensors[attributes.dx_tensor_uid()].get(),
+        *planTensorBundle.tensors[attributes.dx_tensor_uid()].get()));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(
+        *directTensorBundle.tensors[attributes.dscale_tensor_uid()].get(),
+        *planTensorBundle.tensors[attributes.dscale_tensor_uid()].get()));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(
+        *directTensorBundle.tensors[attributes.dbias_tensor_uid().value()].get(),
+        *planTensorBundle.tensors[attributes.dbias_tensor_uid().value()].get()));
+}
