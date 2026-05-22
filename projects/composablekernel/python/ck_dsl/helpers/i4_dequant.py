@@ -47,6 +47,8 @@ from .quant import quantize_scalar_f32
 __all__ = [
     "dequant_i4_byte_to_bf8_pair",
     "dequant_i4_byte_to_fp8_pair",
+    "unpack_fp4_byte_to_pair_f32",
+    "unpack_fp6_bytes_to_quad_f32",
     "unpack_i4_byte_to_pair_f32",
     "unpack_i4_byte_to_pair_i8",
 ]
@@ -152,3 +154,139 @@ def dequant_i4_byte_to_bf8_pair(
     low_bf8 = quantize_scalar_f32(b, low_f32, inv_scale=inv_scale, qdtype="bf8e5m2")
     high_bf8 = quantize_scalar_f32(b, high_f32, inv_scale=inv_scale, qdtype="bf8e5m2")
     return low_bf8, high_bf8
+
+
+# ---------------------------------------------------------------------
+# OCP MX fp4 / fp6 unpack (P54)
+# ---------------------------------------------------------------------
+#
+# fp4 layout per OCP MX spec: 1 sign bit, 2 exponent bits (bias 1), 1
+# mantissa bit. ``00 -> +0``, ``08 -> -0`` (treated as 0 in ML), denormal
+# encoding ``01 -> 0.5``. We implement the canonical 16-entry codebook
+# and lookup directly: simpler + faster than reconstructing the bit
+# fields and matches OCP-spec semantics exactly.
+#
+# fp6 layout per OCP MX spec: 1 sign bit, 3 exponent bits (bias 3), 2
+# mantissa bits. 64-entry codebook keyed by the raw 6-bit value;
+# denormals at exponent 0 become 0.0 (ML convention).
+
+
+_FP4_CODEBOOK = (
+    +0.0,  # 0000
+    +0.5,  # 0001
+    +1.0,  # 0010
+    +1.5,  # 0011
+    +2.0,  # 0100
+    +3.0,  # 0101
+    +4.0,  # 0110
+    +6.0,  # 0111
+    -0.0,  # 1000
+    -0.5,  # 1001
+    -1.0,  # 1010
+    -1.5,  # 1011
+    -2.0,  # 1100
+    -3.0,  # 1101
+    -4.0,  # 1110
+    -6.0,  # 1111
+)
+
+
+def _select_fp4_value(b: IRBuilder, code_i32: Value) -> Value:
+    """Static-codebook select chain for one fp4 nibble.
+
+    Generates a ternary chain of ``b.select`` calls keyed on
+    ``code_i32 == k`` for ``k in 0..15``. Results in 16 selects;
+    AMDGPU's MachineCombiner folds the chain into ``v_cmp_eq`` +
+    ``v_cndmask`` per element which matches the codebook-lookup
+    pattern used by AITER's i4 dequant path.
+    """
+    out = b.const_f32(0.0)
+    for k, fv in enumerate(_FP4_CODEBOOK):
+        is_k = b.cmp_eq(code_i32, b.const_i32(k))
+        out = b.select(is_k, b.const_f32(float(fv)), out)
+    return out
+
+
+def unpack_fp4_byte_to_pair_f32(
+    b: IRBuilder, packed_byte: Value
+) -> Tuple[Value, Value]:
+    """One packed fp4 byte -> two f32 values via the OCP MX codebook.
+
+    Reference: OCP "MX FP4" spec — 1 sign bit + 2 exponent bits + 1
+    mantissa bit. Denormals at exponent 0 are treated as 0.0; the
+    codebook above lists every representable value.
+
+    Layout assumption (matches the i4 unpack convention):
+    ``low = byte & 0xF`` (bits 0..3), ``high = (byte >> 4) & 0xF``
+    (bits 4..7).
+    """
+    if packed_byte.type.name != "i8":
+        raise ValueError(
+            f"unpack_fp4_byte_to_pair_f32 expects i8 packed byte, got "
+            f"{packed_byte.type.name}"
+        )
+    byte_i32 = b.zext(packed_byte, I32)
+    low_code = b.land(byte_i32, b.const_i32(0xF))
+    high_code = b.land(b.lshr(byte_i32, b.const_i32(4)), b.const_i32(0xF))
+    return _select_fp4_value(b, low_code), _select_fp4_value(b, high_code)
+
+
+# 64-entry fp6 codebook per OCP MX spec.
+_FP6_CODEBOOK: Tuple[float, ...] = tuple(
+    (
+        # Positive sign (bit 5 = 0).
+        # Exponent = 0 → all denormals collapse to 0.0 (ML convention).
+        # Exponent in 1..7: value = 2^(e-3) × (1 + m/4).
+        (1.0 if (i & 0b011111) == 0 else 0.0)
+        if ((i >> 2) & 0b111) == 0
+        else (2.0 ** (((i >> 2) & 0b111) - 3) * (1.0 + (i & 0b11) / 4.0))
+    )
+    * (1.0 if (i >> 5) == 0 else -1.0)
+    for i in range(64)
+)
+
+
+def _select_fp6_value(b: IRBuilder, code_i32: Value) -> Value:
+    """Static-codebook select chain for one fp6 6-bit value.
+
+    Same shape as :func:`_select_fp4_value` but 64 entries deep. The
+    ternary chain is unrolled at Python time; at LLVM the AMDGPU
+    backend folds it into ``v_cndmask`` chains. For perf-critical
+    paths a future optimisation is to load the codebook from
+    constant memory (``addrspace(4)``) via P17 and replace the
+    chain with one ``s_load`` + ``v_lshrrev`` index — keeping the
+    helper signature stable.
+    """
+    out = b.const_f32(0.0)
+    for k, fv in enumerate(_FP6_CODEBOOK):
+        is_k = b.cmp_eq(code_i32, b.const_i32(k))
+        out = b.select(is_k, b.const_f32(float(fv)), out)
+    return out
+
+
+def unpack_fp6_bytes_to_quad_f32(
+    b: IRBuilder, packed_lo: Value, packed_hi: Value
+) -> Tuple[Value, Value, Value, Value]:
+    """3-byte (= 4 × fp6) load -> four f32 values.
+
+    OCP MX fp6 packs 4 values into 24 bits. The caller passes two
+    bytes (``packed_lo`` = bits 0-15, ``packed_hi`` = bits 16-23)
+    so the helper can treat them as ``i32`` material with no
+    cross-byte shuffling at the call site.
+
+    Returns ``(v0, v1, v2, v3)`` as f32 scalars.
+    """
+    if packed_lo.type.name != "i8" or packed_hi.type.name != "i8":
+        raise ValueError(
+            "unpack_fp6_bytes_to_quad_f32 expects i8 packed bytes; got "
+            f"({packed_lo.type.name}, {packed_hi.type.name})"
+        )
+    lo_i32 = b.zext(packed_lo, I32)
+    hi_i32 = b.zext(packed_hi, I32)
+    word = b.lor(lo_i32, b.shl(hi_i32, b.const_i32(8)))
+    mask = b.const_i32(0x3F)
+    v0 = _select_fp6_value(b, b.land(word, mask))
+    v1 = _select_fp6_value(b, b.land(b.lshr(word, b.const_i32(6)), mask))
+    v2 = _select_fp6_value(b, b.land(b.lshr(word, b.const_i32(12)), mask))
+    v3 = _select_fp6_value(b, b.land(b.lshr(word, b.const_i32(18)), mask))
+    return v0, v1, v2, v3

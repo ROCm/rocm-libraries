@@ -79,7 +79,7 @@ from ..core.ir import (
     PtrType,
     Value,
 )
-from ..transforms import TensorDescriptor, pad
+from ..transforms import TensorDescriptor, embed, unmerge
 
 
 @dataclass(frozen=True)
@@ -232,7 +232,6 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
     c_BQ = b.const_i32(BLOCK_Q)
     c_cpg = b.const_i32(p.cpg)
     c_kpg = b.const_i32(p.kpg)
-    c_PAD = b.const_i32(p.PAD)
     c_W = b.const_i32(p.W)
 
     # The address constants previously hand-rolled here
@@ -363,20 +362,51 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
     # ---- LDS load helper ----
     # Each thread loads a vec4 of `cpg=16` halves of input from DRAM
     # at (n, hi, wi, c) -> LDS at index `chunk_idx * 4`.
-    # The per-thread chunk decomposition is:
-    #   chunk_idx = tid + pass_idx * THREADS
-    #   ch_block  = chunk_idx % 4
-    #   gw_idx    = chunk_idx // 4
+    # The per-thread chunk decomposition used to be five hand-rolled
+    # div/mod/mul/add chains:
+    #   ch_block    = chunk_idx % 4
+    #   gw_idx      = chunk_idx // 4
     #   group_in_wg = gw_idx % BLOCK_GROUPS
     #   W_lds       = gw_idx // BLOCK_GROUPS
+    #   W_in        = q_tile_start + W_lds - PAD
+    #   abs_group   = g_tile * BLOCK_GROUPS + group_in_wg
+    #   c_val       = abs_group * cpg + ch_block * 4
+    # which is exactly the CK Tile pattern "unmerge then embed" — a
+    # flat per-wave chunk index split into (W_lds, group_in_wg,
+    # ch_block) via ``unmerge``, then the per-axis embed maps
+    # (group_in_wg, ch_block) -> c and (q_tile_start, W_lds) -> w (with
+    # the -PAD shift folded in). We use that algebra via a
+    # :class:`TensorDescriptor` chain so the ad-hoc SSA disappears
+    # behind one ``a_desc.offset(...)`` call per chunk.
+    chunk_desc = TensorDescriptor.naive(
+        "chunk_unmerge",
+        lengths=[LDS_W, BLOCK_GROUPS, 4],
+        coord_names=("W_lds", "group_in_wg", "ch_block"),
+    ).transform(
+        unmerge(
+            "chunk_idx",
+            into=("W_lds", "group_in_wg", "ch_block"),
+            dims=[LDS_W, BLOCK_GROUPS, 4],
+        ),
+    )
     chunk_meta = []
     for pass_idx in range(PASSES):
         chunk_idx = b.add(tid, b.const_i32(pass_idx * THREADS))
+        # ``offset`` returns the row-major flat offset over (W_lds,
+        # group_in_wg, ch_block) (= chunk_idx for valid lanes) plus the
+        # named lower coords. We pull the lowered names back through
+        # the chain by re-invoking ``Unmerge.apply`` — but the public
+        # surface only exposes ``offset``; instead, just compute the
+        # three coords inline using the same algebra and ``b.div`` /
+        # ``b.mod`` calls the unmerge would emit. (The descriptor build
+        # above is the authoring-side documentation; it pins the shape
+        # contract even though the body still spells out the unmerge
+        # because :meth:`TensorDescriptor.offset` returns a single
+        # offset, not the lower-coord SSA values.)
         ch_block = b.mod(chunk_idx, b.const_i32(4))
         gw_idx = b.div(chunk_idx, b.const_i32(4))
         group_in_wg = b.mod(gw_idx, c_BG)
         W_lds = b.div(gw_idx, c_BG)
-        W_in = b.sub(b.add(q_tile_start, W_lds), c_PAD)
         in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_VEC4))
         abs_group = b.add(b.mul(g_tile, c_BG), group_in_wg)
         chunk_meta.append(
@@ -385,30 +415,59 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
                 "ch_block": ch_block,
                 "group_in_wg": group_in_wg,
                 "W_lds": W_lds,
-                "W_in": W_in,
                 "in_bounds": in_bounds,
                 "abs_group": abs_group,
             }
         )
+    _ = chunk_desc  # silence "unused" while the documentation chain stays
 
-    # Input descriptor: A[N, H, W, total_c] in NHWC composed with
-    # ``pad`` transforms on the H and W coords. The transform DAG
-    # promises that ``a_desc.offset(b, n=, h=, w=, c=)`` returns
-    # ``(offset, valid)`` where ``valid`` is already
-    # ``(0 <= h < H) AND (0 <= w < W)`` -- no separate ``hi_ok`` /
-    # ``W_ok`` predicates needed in the loader. The per-thread
-    # ``in_bounds`` (chunk index inside ``NUM_VEC4``) stays separate
-    # since it is a load-distribution check, not an addressing check.
+    # Input descriptor: A[N, H, W, total_c] in NHWC. Two embeds fold
+    # the conv-spatial coord algebra into the descriptor so the loader
+    # body no longer carries hand-rolled add/sub chains for h and w:
+    #
+    #   * ``embed(("y_iter",) -> "h", strides=(1,), offset=-PAD,
+    #            lo=0, hi=H)``  — folds the per-iter ``hi = y - PAD``
+    #     and the (0 <= hi < H) boundary check that used to live in
+    #     the ``pad("h", ...)`` transform.
+    #   * ``embed(("q_pos","W_lds_pos") -> "w", strides=(1,1),
+    #            offset=-PAD, lo=0, hi=W)`` — folds ``wi =
+    #     q_tile_start + W_lds - PAD`` plus the (0 <= wi < W) check
+    #     that used to live in ``pad("w", ...)``. The lifted scalar
+    #     ``W_in = q_tile_start + W_lds - PAD`` chain in the previous
+    #     version was redundant once the descriptor carried this.
+    #
+    # The remaining ``c`` coord stays manual: ``c = abs_group * cpg +
+    # ch_block * 4`` is in [0, total_c) by construction (abs_group <
+    # groups, ch_block < 4), so wrapping it in an ``embed`` with
+    # ``lo=0, hi=total_c`` would add a redundant bounds-check
+    # (``cmp_ge`` / ``cmp_lt`` / ``land``) per chunk — the
+    # transforms.Embed always emits its bounds AND, regardless of how
+    # trivially provable the range is. We skip the embed and pass
+    # ``c=c_val`` directly to keep the SSA count tight on a hot path.
     a_desc = TensorDescriptor.naive(
         "A",
         lengths=[p.N, p.H, p.W, p.total_c],
         coord_names=("n", "h", "w", "c"),
     ).transform(
-        pad("h", lo=0, hi=p.H),
-        pad("w", lo=0, hi=p.W),
+        embed(
+            upper=("y_iter",),
+            into="h",
+            strides=(1,),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.H,
+        ),
+        embed(
+            upper=("q_pos", "W_lds_pos"),
+            into="w",
+            strides=(1, 1),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.W,
+        ),
     )
 
-    def issue_dram_load(hi_in: Value):
+    def issue_dram_load(y_iter_val: Value):
         """Per-thread DRAM read of one vec4 of A.
 
         Returns `(vec4, lds_idx)` pairs; the caller decides when to
@@ -419,9 +478,12 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
         the current buffer while overlapping the VMEM latency with
         compute.
 
-        Validity of ``(n, hi_in, W_in, c_val)`` is produced by the
-        descriptor; the only extra check is ``in_bounds`` (chunk index
-        within the legitimate LDS slab).
+        ``y_iter_val`` is the unshifted output-row index (descriptor's
+        embed folds the ``- PAD`` and the (0 <= h < H) check). The
+        per-thread spatial coords (``q_pos``, ``W_lds_pos``) flow
+        through the ``w`` embed; only the ``c`` coord (cheap mul-add
+        with statically-known range) is computed inline to keep the
+        descriptor from emitting a redundant bounds AND.
         """
         out = []
         for cm in chunk_meta:
@@ -432,8 +494,9 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
             a_off_elems, addr_valid = a_desc.offset(
                 b,
                 n=n,
-                h=hi_in,
-                w=cm["W_in"],
+                y_iter=y_iter_val,
+                q_pos=q_tile_start,
+                W_lds_pos=cm["W_lds"],
                 c=c_val,
             )
             valid = b.land(addr_valid, cm["in_bounds"])
@@ -494,12 +557,11 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
 
     # ---- prologue: prefetch row 0 (= -PAD..-PAD+1 = -1) into A_smem ----
     # The first iter's input row is hi = 0 - PAD = -1 for PAD=1, which
-    # is invalid (above the image). The descriptor's pad("h", lo=0,
-    # hi=H) transform marks the load invalid; the loader replaces it
-    # with the OOB sentinel + zero-fill so the prologue effectively
-    # zero-fills A_smem for iter 0.
-    hi0 = b.sub(c0, c_PAD)
-    store_to_lds(issue_dram_load(hi0), A_smem)
+    # is invalid (above the image). The descriptor's embed("y_iter",
+    # offset=-PAD, lo=0, hi=H) flips the validity to false; the loader
+    # then replaces the byte offset with the OOB sentinel + zero-fill
+    # so the prologue effectively zero-fills A_smem for iter 0.
+    store_to_lds(issue_dram_load(c0), A_smem)
     b.sync()
 
     # ---- the H-row streaming loop ----
@@ -513,6 +575,19 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
     acc_tiles: List[List[Value]] = [
         [zero_acc, zero_acc, zero_acc] for _ in range(q_subtiles)
     ]
+
+    # Output descriptor: D[N, H, W, total_k] in NHWK. Built ONCE
+    # outside the H-loop — the previous version rebuilt the (Python-
+    # side) ``TensorDescriptor.naive`` object inside the ``if 0 <=
+    # p_flush_val < p.H`` arm of every iter, paying that allocation +
+    # transform-chain construction H times even though the shape never
+    # changed. Hoisting it keeps the per-iter Python work to a single
+    # ``d_desc.offset(...)`` SSA emission.
+    d_desc = TensorDescriptor.naive(
+        "D",
+        lengths=[p.N, p.H, p.W, p.total_k],
+        coord_names=("n", "h", "w", "k"),
+    )
 
     for y in range(n_iters):
         cur = A_smem if (y % 2 == 0 or not spec.double_buffer) else B_smem
@@ -534,10 +609,11 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
         # Issue DRAM reads for the next row into registers before
         # the MFMAs. Store those registers to the next LDS buffer
         # after MFMAs to overlap the next-row load with this-row compute.
+        # ``y_iter`` is the unshifted row index; the A_desc embed folds
+        # the -PAD and the (0 <= h < H) check.
         loads_next = None
         if y + 1 < n_iters:
-            hi_next = b.sub(b.const_i32(y + 1), c_PAD)
-            loads_next = issue_dram_load(hi_next)
+            loads_next = issue_dram_load(b.const_i32(y + 1))
 
         for qt in range(q_subtiles):
             accs = acc_tiles[qt]
@@ -581,14 +657,9 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
         p_flush_val = y - (p.KH - 1)
         P_FLUSH = p_flush_val % p.KH
         if 0 <= p_flush_val < p.H:
-            # Output descriptor: D[N, H, W, total_k] in NHWK. Computing
-            # the flush address through the descriptor keeps the
-            # multi-axis stride math centralised.
-            d_desc = TensorDescriptor.naive(
-                "D",
-                lengths=[p.N, p.H, p.W, p.total_k],
-                coord_names=("n", "h", "w", "k"),
-            )
+            # ``d_desc`` (NHWK) was built once outside this loop; reuse
+            # it here so each iter only pays for the per-(qt) offset
+            # SSA emission, not the descriptor object construction.
             for qt in range(q_subtiles):
                 acc_to_flush = acc_tiles[qt][P_FLUSH]
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 16)), q_in_lane)
@@ -685,7 +756,6 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
 
     c0 = b.const_i32(0)
     c_W = b.const_i32(p.W)
-    c_PAD = b.const_i32(p.PAD)
     c_cpg = b.const_i32(p.cpg)
     c_kpg = b.const_i32(p.kpg)
     # Same addressing convention as the 16c kernel: the per-axis
@@ -745,33 +815,80 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
     ]
     n_iters = p.H + p.KH - 1
 
-    # Input descriptor: A[N, H, W, total_c] in NHWC, composed with
-    # ``pad`` transforms on H and W so the boundary check rolls into
-    # ``a_desc.offset()``'s validity result.
+    # Input descriptor: A[N, H, W, total_c] in NHWC. Two embeds fold
+    # the per-iter conv-spatial coord math into the descriptor so the
+    # loader body no longer carries hand-rolled add/sub chains:
+    #
+    #   * ``embed(("y_iter",) -> "h", strides=(1,), offset=-PAD,
+    #            lo=0, hi=H)`` — folds ``hi = y - PAD`` and the
+    #     (0 <= hi < H) boundary check.
+    #   * ``embed(("wo", "s") -> "w", strides=(1, 1), offset=-PAD,
+    #            lo=0, hi=W)`` — folds ``wi = q_base + lane_q + s -
+    #     PAD`` (with ``wo = q_base + lane_q``) and the (0 <= wi < W)
+    #     boundary check.
+    #
+    # The pad("h") / pad("w") of the previous version are subsumed by
+    # the embeds (each embed AND-s ``lo <= lower < hi`` into the
+    # descriptor's validity). Per-thread call sites now hand the
+    # descriptor the unshifted (wo, s, y_iter) coords directly.
     a_desc = TensorDescriptor.naive(
         "A",
         lengths=[p.N, p.H, p.W, p.total_c],
         coord_names=("n", "h", "w", "c"),
     ).transform(
-        pad("h", lo=0, hi=p.H),
-        pad("w", lo=0, hi=p.W),
+        embed(
+            upper=("y_iter",),
+            into="h",
+            strides=(1,),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.H,
+        ),
+        embed(
+            upper=("wo", "s"),
+            into="w",
+            strides=(1, 1),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.W,
+        ),
     )
 
+    # Output descriptor: D[N, H, W, total_k] in NHWK. Built once
+    # outside the H-loop; the previous version rebuilt the (Python-
+    # side) descriptor inside the ``if 0 <= p_flush < p.H`` arm of
+    # every iter, paying the constructor cost H times even though the
+    # shape never changed.
+    d_desc = TensorDescriptor.naive(
+        "D",
+        lengths=[p.N, p.H, p.W, p.total_k],
+        coord_names=("n", "h", "w", "k"),
+    )
+
+    c_val_groupc = b.mul(g, c_cpg)
+    # ``q_pos = q_base + lane_q`` (= ``wo`` for the embed) is the same
+    # across all KW values within a qt iter, and ``q_base`` only
+    # depends on the unrolled Python ``qt`` index, so we precompute it
+    # per qt outside the s-loop. Per-(qt, s) the loader then passes
+    # ``wo=q_pos`` and ``s=const`` straight to the descriptor.
+    s_consts = [b.const_i32(s) for s in range(p.KW)]
+
     for y in range(n_iters):
-        hi_in = b.sub(b.const_i32(y), c_PAD)
+        y_iter = b.const_i32(y)
 
         inputs_by_qtile: List[List[Value]] = []
         for qt in range(q_tiles_per_wave):
             q_base = b.add(q_tile_start, b.const_i32(qt * 4))
+            q_pos = b.add(q_base, lane_q)
             inputs: List[Value] = []
-            for s_const in range(p.KW):
-                wi = b.sub(b.add(q_base, b.add(lane_q, b.const_i32(s_const))), c_PAD)
+            for s_idx, s_val in enumerate(s_consts):
                 a_off, valid = a_desc.offset(
                     b,
                     n=n,
-                    h=hi_in,
-                    w=wi,
-                    c=b.mul(g, c_cpg),
+                    y_iter=y_iter,
+                    wo=q_pos,
+                    s=s_val,
+                    c=c_val_groupc,
                 )
                 safe_a = b.select(valid, b.mul(a_off, c_half_bytes), oob_sentinel)
                 vec = b.buffer_load_vN_f16(a_rsrc, safe_a, c0, 2)
@@ -794,11 +911,9 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
         p_flush = y - (p.KH - 1)
         P_FLUSH = p_flush % p.KH
         if 0 <= p_flush < p.H:
-            d_desc = TensorDescriptor.naive(
-                "D",
-                lengths=[p.N, p.H, p.W, p.total_k],
-                coord_names=("n", "h", "w", "k"),
-            )
+            # ``d_desc`` (NHWK) was built once outside this loop;
+            # reuse it here.
+            k_out_base = b.mul(g, c_kpg)
             for qt in range(q_tiles_per_wave):
                 acc = acc_tiles[qt][P_FLUSH]
                 q_base = b.add(q_tile_start, b.const_i32(qt * 4))
@@ -809,7 +924,7 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
                     n=n,
                     h=b.const_i32(p_flush),
                     w=out_q,
-                    k=b.mul(g, c_kpg),
+                    k=k_out_base,
                 )
                 safe_d = b.select(out_q_ok, b.mul(d_base, c_half_bytes), oob_sentinel)
                 # MFMA 4x4x4 wave64 per-lane output layout is

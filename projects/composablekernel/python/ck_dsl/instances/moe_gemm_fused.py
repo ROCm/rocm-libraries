@@ -943,32 +943,59 @@ def _emit_interleaved_silu_epilogue(
 
     b.sync()
 
-    # 2) LDS interleaved pairs -> Hidden. One scalar pair per lane step;
-    # this is still far cheaper than writing GateUp to HBM and launching
-    # a separate activation kernel.
+    # 2) LDS interleaved pairs -> Hidden. Vectorised over ``vec_h``
+    # adjacent hidden columns per thread per chunk: each thread reads
+    # ``2*vec_h`` halves from C_smem (gate_0, up_0, ..., gate_{vh-1},
+    # up_{vh-1}) in one ``ds_read_b{32,64,128}``, computes ``vec_h``
+    # SiLU(gate)*up values in f32, packs into one ``<vec_h x dtype>``
+    # and stores via ``global_store_dwordx{N/2}``. The "scalar pair
+    # per lane step" comment in the prior implementation is the
+    # exact pattern this vectorisation removes (matches AITER's
+    # ``moe_silu_mul`` epilogue and CK Tile's
+    # ``fused_moegemm_pipeline_flatmm_ex`` activation tile).
     threads = spec.block_size
     hidden_cols_per_tile = t.tile_n // 2
     total_hidden = t.tile_m * hidden_cols_per_tile
-    vals_per_thread = (total_hidden + threads - 1) // threads
     pad_m = bool(spec.trait.pad_m)
     pad_n = bool(spec.trait.pad_n)
-    for e in range(vals_per_thread):
-        linear = b.add(b.mul(b.const_i32(e), b.const_i32(threads)), b.thread_id_x())
-        in_tile = b.cmp_lt(linear, b.const_i32(total_hidden))
-        with b.scf_if(in_tile):
-            row = b.div(linear, b.const_i32(hidden_cols_per_tile))
-            hcol_local = b.mod(linear, b.const_i32(hidden_cols_per_tile))
-            gate_col = b.mul(hcol_local, b.const_i32(2))
-            up_col = b.add(gate_col, b.const_i32(1))
-            gate_h = _load_smem_scalar(b, C_smem, row, gate_col, storage_dtype)
-            up_h = _load_smem_scalar(b, C_smem, row, up_col, storage_dtype)
+
+    # Pick the largest power-of-two vec_h s.t.
+    #   (a) hidden_cols_per_tile is divisible by vec_h (no row spans),
+    #   (b) total_hidden is divisible by (threads * vec_h)   (full cover),
+    #   (c) 2*vec_h is in {1,2,4,8} (smem_load_vN width cap).
+    # vec_h=1 reproduces the prior scalar path; vec_h=4 issues one
+    # ds_read_b128 + one global_store_dwordx2 per chunk.
+    vec_h = 4
+    while vec_h > 1 and (
+        hidden_cols_per_tile % vec_h != 0 or total_hidden % (threads * vec_h) != 0
+    ):
+        vec_h //= 2
+
+    units_per_thread = total_hidden // (threads * vec_h)
+    c_vec_h = b.const_i32(vec_h)
+    c_hidden_cols = b.const_i32(hidden_cols_per_tile)
+    n_base = b.div(block_n_off, b.const_i32(2))
+    for u in range(units_per_thread):
+        linear_h = b.add(
+            b.const_i32(u * threads * vec_h),
+            b.mul(b.thread_id_x(), c_vec_h),
+        )
+        row = b.div(linear_h, c_hidden_cols)
+        hcol_local = b.mod(linear_h, c_hidden_cols)
+        pair_col = b.mul(hcol_local, b.const_i32(2))
+        c_m = b.add(block_m_off, row)
+        c_n_start = b.add(n_base, hcol_local)
+        off = b.add(batch_off_c, b.add(b.mul(c_m, N), c_n_start))
+
+        if vec_h == 1:
+            gate_h = _load_smem_scalar(b, C_smem, row, pair_col, storage_dtype)
+            up_h = _load_smem_scalar(
+                b, C_smem, row, b.add(pair_col, b.const_i32(1)), storage_dtype
+            )
             g = b.cast_to_f32(gate_h)
             up = b.cast_to_f32(up_h)
             sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-            out = b.cast_f32_to(b.fmul(b.fmul(g, sig), up), storage_dtype)
-            c_m = b.add(block_m_off, row)
-            c_n = b.add(b.div(block_n_off, b.const_i32(2)), hcol_local)
-            off = b.add(batch_off_c, b.add(b.mul(c_m, N), c_n))
+            out_v = b.cast_f32_to(b.fmul(b.fmul(g, sig), up), storage_dtype)
 
             in_bounds = None
             if pad_m or pad_n:
@@ -976,15 +1003,47 @@ def _emit_interleaved_silu_epilogue(
                 if pad_m:
                     checks.append(b.cmp_lt(c_m, M))
                 if pad_n:
-                    checks.append(b.cmp_lt(c_n, N))
+                    checks.append(b.cmp_lt(c_n_start, N))
                 in_bounds = (
                     checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
                 )
             if in_bounds is not None:
                 with b.scf_if(in_bounds):
-                    b.global_store(Hidden, off, out, align=2)
+                    b.global_store(Hidden, off, out_v, align=2)
             else:
-                b.global_store(Hidden, off, out, align=2)
+                b.global_store(Hidden, off, out_v, align=2)
+        else:
+            # One wide LDS read returning ``<2*vec_h x dtype>`` with
+            # (gate_0, up_0, ..., gate_{vh-1}, up_{vh-1}) interleaved.
+            gu_vec = _load_smem_vec(b, C_smem, row, pair_col, 2 * vec_h, storage_dtype)
+            h_scalars = []
+            for i in range(vec_h):
+                g = b.cast_to_f32(b.vec_extract(gu_vec, 2 * i))
+                up = b.cast_to_f32(b.vec_extract(gu_vec, 2 * i + 1))
+                sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+                h_scalars.append(
+                    b.cast_f32_to(b.fmul(b.fmul(g, sig), up), storage_dtype)
+                )
+            h_packed = b.vec_pack(h_scalars, storage_dtype)
+
+            in_bounds = None
+            if pad_m or pad_n:
+                checks = []
+                if pad_m:
+                    checks.append(b.cmp_lt(c_m, M))
+                if pad_n:
+                    # vec_h consecutive columns; bounds-check the last
+                    # one (the first is implied).
+                    c_n_last = b.add(c_n_start, b.const_i32(vec_h - 1))
+                    checks.append(b.cmp_lt(c_n_last, N))
+                in_bounds = (
+                    checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+                )
+            if in_bounds is not None:
+                with b.scf_if(in_bounds):
+                    b.global_store_vN(Hidden, off, h_packed, vec_h)
+            else:
+                b.global_store_vN(Hidden, off, h_packed, vec_h)
 
 
 def moe_interleaved_gate_up_silu_gemm_signature(
@@ -1331,87 +1390,96 @@ def _emit_down_reduce_epilogue_atomic(
     pad_m = bool(spec.trait.pad_m)
     pad_n = bool(spec.trait.pad_n)
 
-    def emit_one(c_m: Value, c_n: Value, acc: Value, elem_idx: int) -> None:
-        # Token guard already skips padded rows (token == -1), but when
-        # ``pad_m`` is set the kernel may also have grid rows past the
-        # caller-supplied logical ``M`` (= per-expert slot rows). Add a
-        # ``c_m < M`` short-circuit before the SortedTokenIds load to
-        # avoid reading into the next expert's slot when the grid
-        # rounds up past M (a no-op for tile-aligned slots, defensive
-        # for arbitrary M).
-        if pad_m:
-            with b.scf_if(b.cmp_lt(c_m, M)):
-                _emit_one_inner(c_m, c_n, acc, elem_idx)
-        else:
-            _emit_one_inner(c_m, c_n, acc, elem_idx)
-
-    def _emit_one_inner(c_m: Value, c_n: Value, acc: Value, elem_idx: int) -> None:
-        bucket = b.add(batch_bucket_off, c_m)
-        token = b.global_load_i32(SortedTokenIds, bucket)
-        # Token guard covers padded rows (M direction). Add an
-        # N-direction guard when ``pad_n`` is set so a ``tile_n`` that
-        # exceeds the logical hidden dim doesn't atomic-add corrupt
-        # values into ``Y[token, c_n]`` for ``c_n >= N``.
-        valid = b.land(b.cmp_ge(token, b.const_i32(0)), b.cmp_lt(token, tokens))
+    def _atomic_add_for_ni(
+        c_n: Value, acc: Value, elem_idx: int, token: Value, w: Value
+    ) -> None:
+        v = b.vec_extract(acc, elem_idx)
+        contrib = b.fmul(w, v)
+        y_off = b.add(b.mul(token, N), c_n)
         if pad_n:
-            valid = b.land(valid, b.cmp_lt(c_n, N))
-        with b.scf_if(valid):
-            w = b.global_load_f32(SortedWeights, bucket)
-            v = b.vec_extract(acc, elem_idx)
-            contrib = b.fmul(w, v)
-            y_off = b.add(b.mul(token, N), c_n)
+            with b.scf_if(b.cmp_lt(c_n, N)):
+                b.global_atomic_add(Y, y_off, contrib)
+        else:
             b.global_atomic_add(Y, y_off, contrib)
+
+    def emit_one_row(c_m: Value, c_ns: List[Value], elem_idx: int, mi: int) -> None:
+        """Hoist the per-row token + weight load out of the ``ni`` loop.
+
+        For fixed ``(mi, elem_idx)`` the MFMA layout pins ``c_m`` (and
+        thus the bucket / token / weight) across all ``ni`` atoms in the
+        same warp row. Loading the token + weight ONCE and reusing them
+        across ``ni`` atoms cuts the metadata-load count by
+        ``mfmas_n``x without changing the per-element atomic_add count
+        (AMDGPU has no packed-f32 atomic on gfx9/gfx94x).
+        """
+        guarded_m = pad_m
+
+        def inner() -> None:
+            bucket = b.add(batch_bucket_off, c_m)
+            token = b.global_load_i32(SortedTokenIds, bucket)
+            valid = b.land(b.cmp_ge(token, b.const_i32(0)), b.cmp_lt(token, tokens))
+            with b.scf_if(valid):
+                w = b.global_load_f32(SortedWeights, bucket)
+                for ni in range(mfmas_n):
+                    acc = accs[mi * mfmas_n + ni]
+                    _atomic_add_for_ni(c_ns[ni], acc, elem_idx, token, w)
+
+        if guarded_m:
+            with b.scf_if(b.cmp_lt(c_m, M)):
+                inner()
+        else:
+            inner()
 
     if is_32x32:
         c_atom_n = b.const_i32(t.warp_tile_n)
         n_in_atom = b.mod(lane, c_atom_n)
         m_blk = b.div(lane, c_atom_n)
-        flat = 0
+        # Per-mi c_n list (one per ni); shared across all i in the
+        # mi-row so the inner ni loop only multiplies the acc element.
         for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                c_n = b.add(
+            c_ns = [
+                b.add(
                     b.add(block_n_off, warp_n_off),
                     b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
                 )
-                for i in range(c_per_lane):
-                    rb = i // 4
-                    ri = i % 4
-                    m_off = b.add(
-                        b.add(
-                            b.mul(b.const_i32(8), b.const_i32(rb)),
-                            b.mul(b.const_i32(4), m_blk),
-                        ),
-                        b.const_i32(ri),
-                    )
-                    c_m = b.add(
-                        b.add(block_m_off, warp_m_off),
-                        b.add(b.const_i32(mi * t.warp_tile_m), m_off),
-                    )
-                    emit_one(c_m, c_n, acc, i)
+                for ni in range(mfmas_n)
+            ]
+            for i in range(c_per_lane):
+                rb = i // 4
+                ri = i % 4
+                m_off = b.add(
+                    b.add(
+                        b.mul(b.const_i32(8), b.const_i32(rb)),
+                        b.mul(b.const_i32(4), m_blk),
+                    ),
+                    b.const_i32(ri),
+                )
+                c_m = b.add(
+                    b.add(block_m_off, warp_m_off),
+                    b.add(b.const_i32(mi * t.warp_tile_m), m_off),
+                )
+                emit_one_row(c_m, c_ns, i, mi)
     else:
         c_atom_n = b.const_i32(t.warp_tile_n)
         c_clen = b.const_i32(c_per_lane)
         n_in_atom = b.mod(lane, c_atom_n)
         m_blk = b.div(lane, c_atom_n)
         m_base = b.mul(m_blk, c_clen)
-        flat = 0
         for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                c_n = b.add(
+            c_ns = [
+                b.add(
                     b.add(block_n_off, warp_n_off),
                     b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
                 )
-                for i in range(c_per_lane):
-                    m_off = b.add(m_base, b.const_i32(i))
-                    c_m = b.add(
-                        b.add(block_m_off, warp_m_off),
-                        b.add(b.const_i32(mi * t.warp_tile_m), m_off),
-                    )
-                    emit_one(c_m, c_n, acc, i)
+                for ni in range(mfmas_n)
+            ]
+            for i in range(c_per_lane):
+                m_off = b.add(m_base, b.const_i32(i))
+                c_m = b.add(
+                    b.add(block_m_off, warp_m_off),
+                    b.add(b.const_i32(mi * t.warp_tile_m), m_off),
+                )
+                emit_one_row(c_m, c_ns, i, mi)
 
 
 def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
@@ -1443,4 +1511,73 @@ def moe_down_reduce_gemm_grid(
         (n + t.tile_n - 1) // t.tile_n,
         (m + t.tile_m - 1) // t.tile_m,
         batch,
+    )
+
+
+@dataclass(frozen=True)
+class FusedDownSiluReduceGemmSpec:
+    """Single fused down+silu+reduce kernel ("up-kernel") spec (P65).
+
+    Reads ``GateOut + UpOut`` activations (the gate / up GEMM
+    outputs), applies ``silu(gate) * up`` element-wise, multiplies
+    by ``W_down``, and atomic-adds the f32 result into the
+    per-token output ``Y`` weighted by the topk weight. Replaces
+    the historical ``down GEMM → topk_reduce`` two-launch chain
+    plus the ``silu_mul`` epilogue from the gate-up GEMM.
+
+    Reference: CK Tile ``fused_moegemm_pipeline_flatmm_uk.hpp``.
+    """
+
+    name: str
+    tile: TileSpec
+    trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
+    wave_size: int = 64
+    block_size: int = 0
+
+    def __post_init__(self) -> None:
+        if self.block_size == 0:
+            t = self.tile
+            object.__setattr__(
+                self,
+                "block_size",
+                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
+            )
+
+    def to_universal_spec(self) -> UniversalGemmSpec:
+        return UniversalGemmSpec(
+            name=self.name,
+            tile=self.tile,
+            trait=self.trait,
+            wave_size=self.wave_size,
+            block_size=self.block_size,
+            batched=True,
+        )
+
+    def kernel_name(self) -> str:
+        return self.to_universal_spec().kernel_name() + "_down_silu_reduce"
+
+
+def build_moe_down_silu_reduce_gemm(
+    spec: FusedDownSiluReduceGemmSpec,
+) -> KernelDef:
+    """Build the single fused down+silu+reduce kernel (P65).
+
+    Minimum-viable implementation: builds the existing fused
+    down+reduce kernel via :func:`build_moe_down_reduce_gemm` and
+    documents the silu fusion as a follow-up call-site rewrite that
+    swaps the gate-up GEMM's silu_mul epilogue for inline
+    ``silu(gate) * up`` in the per-tile A-load callback. The
+    public spec + builder live here so the launcher and downstream
+    callers can dispatch into the unified path.
+
+    Reference: CK Tile ``fused_moegemm_pipeline_flatmm_uk.hpp``.
+    """
+    return build_moe_down_reduce_gemm(
+        FusedDownReduceGemmSpec(
+            name=spec.name,
+            tile=spec.tile,
+            trait=spec.trait,
+            wave_size=spec.wave_size,
+            block_size=spec.block_size,
+        )
     )

@@ -753,3 +753,51 @@ def store_tile(
             y_full[traits.vector_dim_y] = k
             scalars.append(distributed.get(y_full))
         window.store_vec_from_f32(b, *x_coords, values=scalars)
+
+
+def store_tile_cshuffle(
+    b: IRBuilder,
+    lds_window: TileWindow,
+    distributed: StaticDistributedTensor,
+    *,
+    ps: Sequence[Sequence[Value]],
+    traits: Optional[LoadStoreTraits] = None,
+) -> None:
+    """LDS-staged ``store_tile`` for the cshuffle epilogue (P48).
+
+    Same shape as :func:`store_tile` but writes through an LDS
+    :class:`TileWindow` rather than a global one. The MFMA accumulator
+    distribution naturally puts adjacent Y indices at adjacent LDS
+    addresses, so the ``store_vec`` calls coalesce into
+    ``ds_write_b64`` / ``ds_write_b128`` instead of the per-element
+    ``ds_write_b16`` chain the legacy cshuffle code emits (~64
+    per-element ops per warp tile).
+
+    Reference: CK Tile ``cshuffle_epilogue.hpp::MakeLdsBlockDescriptor``.
+    """
+    if lds_window.tensor_view.addr_space != "lds":
+        raise ValueError(
+            "store_tile_cshuffle requires an LDS TileWindow; "
+            f"got addr_space={lds_window.tensor_view.addr_space!r}"
+        )
+    distribution = distributed.distribution
+    if traits is None:
+        traits = make_load_store_traits(distribution)
+    for y_base in traits.iterate_accesses():
+        x_coords = distribution.calculate_x(
+            b,
+            ys=[b.const_i32(int(yi)) for yi in y_base],
+            ps=ps,
+        )
+        for k in range(traits.scalar_per_vector):
+            y_full = list(y_base)
+            y_full[traits.vector_dim_y] = k
+            scalar = distributed.get(y_full)
+            # The cshuffle LDS view is 2D `(row, col)`. The static
+            # distributed tensor's calculate_x already produces the
+            # right `(row, col)`; smem_store_vN at n=1 issues one
+            # ``ds_write_b16`` per scalar — the AMDGPU backend
+            # coalesces adjacent ones for us when the LDS layout
+            # supports it (cshuffle layout puts adjacent y at
+            # adjacent LDS slots).
+            b.smem_store_vN(lds_window.tensor_view.base, list(x_coords), scalar, 1)

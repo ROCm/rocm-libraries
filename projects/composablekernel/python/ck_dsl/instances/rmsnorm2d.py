@@ -25,9 +25,9 @@ visible delta vs the C++ reference is essentially three lines of code.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Callable, List, Literal, Tuple
 
-from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ..helpers.io import io_ir_type, store_scalar_from_f32
 from ..helpers.reduction import block_lds_reduce
 from ..helpers.spec import (
@@ -47,6 +47,38 @@ from ..helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
+
+
+def _balanced_combine(
+    values: List[Value], combine: Callable[[Value, Value], Value]
+) -> Value:
+    """Balanced-tree fold of ``values`` under ``combine``.
+
+    The per-chunk accumulator for the sum-of-squares is the latency
+    hot-spot of the pass-1 inner loop: a serial ``fadd(fadd(fadd(s, x0),
+    x1), ...)`` chain has critical-path depth ``len(values)`` because
+    IEEE-754 ``fadd`` is non-associative (the LLVM ``reassoc`` fastmath
+    flag is *not* set on the DSL's ``arith.fadd``; see
+    ``core/lower_llvm.py::_op_arith_fadd``). Emitting an explicit
+    balanced tree drops the depth to ``ceil(log2(len(values)))``,
+    matching the latency profile a programmer expects from a
+    ``sum(...)`` reduction without sacrificing strict IEEE rounding
+    (the *tree* rounding is still deterministic and lies well inside
+    the CK Tile parity tolerance of 2.5e-3 for f16 outputs).
+    """
+    if not values:
+        raise ValueError("_balanced_combine requires at least one value")
+    cur = list(values)
+    while len(cur) > 1:
+        nxt: List[Value] = []
+        i = 0
+        while i + 1 < len(cur):
+            nxt.append(combine(cur[i], cur[i + 1]))
+            i += 2
+        if i < len(cur):
+            nxt.append(cur[i])
+        cur = nxt
+    return cur[0]
 
 
 @dataclass(frozen=True)
@@ -132,12 +164,21 @@ def build_rmsnorm2d(spec: RMSNorm2DSpec) -> KernelDef:
 
     # Pass 1: ``sweep_row_chunks`` streams X once, the lambda accumulates
     # the sum-of-squares, and the f32 scalars are cached for pass 2.
+    #
+    # Per-chunk reduction is a balanced tree (depth log2(VEC)) folded
+    # once into the running ``s2`` partial; vs the prior straight-line
+    # ``s2 = fadd(s2, x_i*x_i)`` chain (depth VEC per chunk), this
+    # halves the critical-path latency the AMDGPU pipeline sees for
+    # the per-thread accumulator. CK Tile's ``BlockNormReduce`` does
+    # the same fold via ``sweep_tile_span`` but for the canonical
+    # 2D distribution; here the per-thread cardinality maps to the
+    # VEC-wide chunk so the tree pays off uniformly.
     s2 = b.const_f32(0.0)
 
     def pass1_body(_n_off, x_scalars):
         nonlocal s2
-        for xi in x_scalars:
-            s2 = b.fadd(s2, b.fmul(xi, xi))
+        chunk_sq = [b.fmul(xi, xi) for xi in x_scalars]
+        s2 = b.fadd(s2, _balanced_combine(chunk_sq, b.fadd))
 
     sweep_res = sweep_row_chunks(
         b,
@@ -160,10 +201,18 @@ def build_rmsnorm2d(spec: RMSNorm2DSpec) -> KernelDef:
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
             store_scalar_from_f32(b, InvRms, row, inv_rms, dtype=spec.dtype)
 
-    # Pass 2: scale by gamma, write output via the same sweep helper.
+    # Pass 2: scale by ``inv_rms * gamma``, write output via the same
+    # sweep helper. Reordering the multiplies as ``x * (inv_rms * gv)``
+    # exposes the ``inv_rms * gv`` term as a parallel-issuable op vs the
+    # prior ``(x * inv_rms) * gv`` chain (both have depth 2, but the
+    # reordered form has the two operands of the inner ``fmul`` rotate
+    # together so the AMDGPU scheduler can interleave more freely vs
+    # the prior form where ``inv_rms`` was a "hot" shared operand for
+    # every inner ``fmul``). Matches the form used by CK Tile's
+    # ``Rmsnorm2dFwdPipelineOnePass`` sweep_tile body.
     def pass2_body(n_off, _k, x_scalars):
         gv = g_view.load_vec_as_f32(b, [n_off], n=VEC)
-        return [b.fmul(b.fmul(x_scalars[i], inv_rms), gv[i]) for i in range(VEC)]
+        return [b.fmul(x_scalars[i], b.fmul(inv_rms, gv[i])) for i in range(VEC)]
 
     pass2_row_chunks(
         b,

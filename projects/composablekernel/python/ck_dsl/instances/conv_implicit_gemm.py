@@ -51,7 +51,7 @@ mode. We aim to beat that on the same shape.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from typing import List, Optional, Sequence
 
 from ..core.ir import (
@@ -63,10 +63,15 @@ from ..core.ir import (
     Value,
 )
 from ..helpers.atoms import MfmaAtom, mfma_atom
+from ..helpers.geometry import WarpGrid
 from ..helpers.layouts import LdsLayout
-from ..helpers.loads import AsyncTileLoader
+from ..helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from ..helpers.mfma_gemm_inner import decode_mfma_lanes
 from ..helpers.pipeline import SoftwarePipeline
 from ..helpers.schedule import SchedulePolicy
+from ..helpers.tensor_view import (
+    make_buffer_resource,
+)
 from ..transforms import TensorDescriptor, embed, pad, unmerge
 
 
@@ -455,7 +460,6 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
     p = spec.problem
 
     b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = spec.block_size
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
@@ -473,19 +477,31 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
+    # ---- Tile-level block/warp/lane decomposition (CK Tile ``BlockGemmShape``) ----
+    # ``WarpGrid.from_atom(...).bind(b)`` emits ``thread_id_x`` /
+    # ``lane`` / ``warp_id`` / ``warp_m_idx`` / ``warp_n_idx`` /
+    # ``block_m_off`` / ``block_n_off`` as one named decomposition,
+    # along with ``max_workgroup_size`` on the kernel attribute list.
+    # Replaces ~8 lines of hand-rolled ``b.div``/``b.mod`` lane arithmetic
+    # plus the manual ``block_m_off = block_id_y * block_m`` math.
+    grid = WarpGrid.from_atom(
+        atom,
+        tile_m=block_m,
+        tile_n=block_n,
+        tile_k=block_k,
+        warp_m=spec.warp_m,
+        warp_n=spec.warp_n,
+        wave_size=spec.wave_size,
+    ).bind(b, block_m_axis="y", block_n_axis="x")
+    tid = grid.tid
+    lane = grid.lane
+    warp_id = grid.warp_id
+    warp_m_idx = grid.warp_m_idx
+    warp_n_idx = grid.warp_n_idx
+
     c0 = b.const_i32(0)
-    c_wave = b.const_i32(spec.wave_size)
-    c_warps_n = b.const_i32(spec.warp_n)
-    c_block_m = b.const_i32(block_m)
-    c_block_n = b.const_i32(block_n)
     c_block_k = b.const_i32(block_k)
     c_K_gemm = b.const_i32(p.K_gemm)
-
-    tid = b.thread_id_x()
-    warp_id = b.div(tid, c_wave)
-    warp_m_idx = b.div(warp_id, c_warps_n)
-    warp_n_idx = b.mod(warp_id, c_warps_n)
-    lane = b.mod(tid, c_wave)
 
     # Grid: (block_n_idx, block_m_idx, 1). We follow gemm_universal:
     # block.x indexes N tile, block.y indexes M tile.
@@ -494,7 +510,10 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
     # into a linear WGID and run through the chiplet-aware super-tile
     # remap so consecutive WGs share an XCD (and an L2 slice). Conv
     # tile counts are derived from the problem shape and known at
-    # build time, so we use the compile-time variant.
+    # build time, so we use the compile-time variant. We override the
+    # ``WarpGrid``'s default block offsets via ``dataclasses.replace``
+    # so the downstream helpers (loaders, epilogues) automatically
+    # pick up the remapped origins.
     if spec.chiplet_swizzle:
         from ..helpers.grid import chiplet_aware_super_tile
 
@@ -511,11 +530,12 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             num_xcds=spec.chiplet_num_xcds,
             chunk_size=spec.chiplet_chunk_size,
         )
-        block_m_off_v = b.mul(swz.row, c_block_m)
-        block_n_off_v = b.mul(swz.col, c_block_n)
+        block_m_off_v = b.mul(swz.row, b.const_i32(block_m))
+        block_n_off_v = b.mul(swz.col, b.const_i32(block_n))
+        grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
     else:
-        block_n_off_v = b.mul(b.block_id_x(), c_block_n)
-        block_m_off_v = b.mul(b.block_id_y(), c_block_m)
+        block_m_off_v = grid.block_m_off
+        block_n_off_v = grid.block_n_off
 
     # LDS bank-conflict avoidance for the sync path: pad each K-row
     # by 8 halves so the stride is `block_k + 8` not `block_k`.
@@ -562,13 +582,11 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
 
     threads = spec.block_size
     load_vec = _choose_load_vec(spec)
-    a_vec_total = (block_m * block_k) // load_vec
-    b_vec_total = (block_n * block_k) // load_vec
-    a_vecs_per_thread = a_vec_total // threads
-    b_vecs_per_thread = b_vec_total // threads
-    c_threads = b.const_i32(threads)
-    c_load_vec = b.const_i32(load_vec)
-    c_block_k_div_vec = b.const_i32(block_k // load_vec)
+    # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
+    # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
+    # block_size, load_vec)`` and re-emits the per-iter constants
+    # (``c_threads``, ``c_load_vec``, ``c_cols_per_vec``) once per
+    # ``load()`` invocation, which the AMDGPU backend constant-folds.
 
     # The two descriptors used for global loads. The A descriptor is
     # the conv-coord-transform DAG; B is a simple naive (KRSC) +
@@ -576,46 +594,20 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
     A_desc = make_a_descriptor(p)
     B_desc = make_b_descriptor(p)
 
-    # Buffer resources so we get free OOB clamping for the bounds we
-    # don't catch in the predicate (the A_bytes / B_bytes sizes act as
-    # an outer fence; we still rely on the descriptor's `valid`
-    # predicate to zero pad-region reads since OOB clamping returns 0
-    # but isn't bit-accurate against the CPU/torch reference if we
-    # ever shift the pointer base).
-    a_rsrc = b.buffer_rsrc(A, A_bytes)
-    b_rsrc = b.buffer_rsrc(Bp, B_bytes)
-    d_rsrc = b.buffer_rsrc(D, D_bytes)
-
-    # CK Tile-style wrappers over the buffer rsrcs: every load through
-    # ``A_buf_view`` / ``B_buf_view`` emits ``raw_ptr_buffer_load_vN``
-    # via :meth:`TensorView.load_vec_at`, with the descriptor's
-    # ``valid`` predicate driving the OOB-sentinel trick uniformly.
-    from ..helpers.tensor_view import (
-        BufferResource as _BufferResource,
-        TensorDescriptor as _TensorDescriptor,
-        TensorView as _TensorView,
-    )
-
-    _A_buf_view = _TensorView(
-        base=_BufferResource(rsrc=a_rsrc, soffset=c0, num_bytes=0),
-        desc=_TensorDescriptor.packed((1,), F16),
-        addr_space="buffer",
-    )
-    _B_buf_view = _TensorView(
-        base=_BufferResource(rsrc=b_rsrc, soffset=c0, num_bytes=0),
-        desc=_TensorDescriptor.packed((1,), F16),
-        addr_space="buffer",
-    )
-    _A_lds_view = _TensorView(
-        base=None,  # rebound per-call below via ``A_dst`` argument
-        desc=_TensorDescriptor.packed((spec.tile_m, spec.tile_k), F16),
-        addr_space="lds",
-    )
-    _B_lds_view = _TensorView(
-        base=None,
-        desc=_TensorDescriptor.packed((spec.tile_n, spec.tile_k), F16),
-        addr_space="lds",
-    )
+    # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
+    # wraps ``b.buffer_rsrc(ptr, num_bytes)`` and pre-binds a zero
+    # ``soffset``; the resulting :class:`BufferResource` carries
+    # everything ``raw_ptr_buffer_load`` needs. The buffer's DW3 flags
+    # silently clamp OOB byte offsets to zero on loads / drop them on
+    # stores -- the canonical AMDGPU tail-safe load idiom used for
+    # both the conv padding-zone reads and the tail-of-grid epilogue
+    # stores.
+    a_buf_rsrc = make_buffer_resource(b, A, num_bytes=A_bytes)
+    b_buf_rsrc = make_buffer_resource(b, Bp, num_bytes=B_bytes)
+    d_buf_rsrc = make_buffer_resource(b, D, num_bytes=D_bytes)
+    a_rsrc = a_buf_rsrc.rsrc
+    b_rsrc = b_buf_rsrc.rsrc
+    d_rsrc = d_buf_rsrc.rsrc
 
     # Descriptor callbacks shared by both sync and async paths.
     # `(row, col)` are in the (tile_local M, tile_local K halves)
@@ -653,9 +645,31 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             block_size=threads,
             wave_size=spec.wave_size,
         )
+        a_sync_loader = None
+        b_sync_loader = None
     else:
         a_loader = None
         b_loader = None
+        # Sync path: ``CoalescedTileLoader`` encapsulates the
+        # "pick load_vec, per-thread div/mod into (row, col),
+        # buffer_load_vN_f16 -> smem_store_vN_f16" pattern. Same per-iter
+        # IR shape as the prior hand-rolled loop, but the per-thread
+        # chunk math (``cols_per_vec``, ``vecs_per_thread``, OOB sentinel
+        # routing via the descriptor's ``valid`` predicate) is centralised
+        # so a future tile-shape sweep picks it up uniformly across
+        # GEMM, conv, and attention loads.
+        a_sync_loader = CoalescedTileLoader(
+            tile_rows=block_m,
+            tile_cols=block_k,
+            block_size=threads,
+            load_vec=load_vec,
+        )
+        b_sync_loader = CoalescedTileLoader(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            load_vec=load_vec,
+        )
 
     schedule = SchedulePolicy.for_pipeline(
         "async_dma" if spec.async_dma else spec.pipeline
@@ -679,8 +693,9 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
         partial-last-tile case).
 
         `spec.async_dma=True` switches the load path to
-        `raw_ptr_buffer_load_lds` (runbook §6.3). Otherwise we use
-        register-staged `buffer_load_vN -> smem_store_vN`.
+        ``AsyncTileLoader`` + ``raw_ptr_buffer_load_lds`` (runbook §6.3).
+        Otherwise we use ``CoalescedTileLoader`` which emits the
+        register-staged ``buffer_load_vN -> smem_store_vN`` pipeline.
         """
         k_off_capture[0] = k_off
 
@@ -711,57 +726,26 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             )
             return
 
-        # Sync path: register-staged DRAM -> LDS, driven by the
-        # CK Tile-style buffer view. The descriptor's ``valid``
-        # predicate gates the load via :meth:`load_vec_at(mask=...)`,
-        # which routes False lanes to the OOB sentinel so the
-        # hardware buffer-load returns 0 (the canonical padding-aware
-        # idiom). LDS stores go through :meth:`store_vec` on a per-
-        # call LDS view rebound to ``A_dst`` / ``B_dst``.
-        from ..helpers.tensor_view import TileWindow as _TileWindow
-
-        A_lds_view = _TensorView(base=A_dst, desc=_A_lds_view.desc, addr_space="lds")
-        B_lds_view = _TensorView(base=B_dst, desc=_B_lds_view.desc, addr_space="lds")
-        A_lds_tile = _TileWindow(
-            view=A_lds_view,
-            lengths=(spec.tile_m, spec.tile_k),
-            origin=(c0, c0),
+        # Sync path: ``CoalescedTileLoader.load`` emits the per-thread
+        # ``buffer_load_vN_f16 -> smem_store_vN_f16`` chunks. Each
+        # callback gets ``(row, col)`` inside the tile-local frame and
+        # returns the global element offset + validity predicate, so
+        # the conv-coord-transform DAG drives the address arithmetic
+        # while the loader owns the thread distribution.
+        a_sync_loader.load(
+            b,
+            tid=tid,
+            smem_dst=A_dst,
+            descriptor=a_descriptor,
+            rsrc=a_rsrc,
         )
-        B_lds_tile = _TileWindow(
-            view=B_lds_view,
-            lengths=(spec.tile_n, spec.tile_k),
-            origin=(c0, c0),
+        b_sync_loader.load(
+            b,
+            tid=tid,
+            smem_dst=B_dst,
+            descriptor=b_descriptor,
+            rsrc=b_rsrc,
         )
-
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            a_row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            a_col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            a_off_elems, a_valid = a_descriptor(b, a_row, a_col)
-            if load_vec == 1:
-                a_val = _A_buf_view.load_scalar_at(b, a_off_elems, mask=a_valid)
-                A_lds_tile.store_scalar(b, a_row, a_col, value=a_val)
-            else:
-                a_vec = _A_buf_view.load_vec_at(
-                    b, a_off_elems, n=load_vec, mask=a_valid
-                )
-                A_lds_tile.store_vec(b, a_row, a_col, value=a_vec, n=load_vec)
-
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            b_row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            b_col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            b_off_elems, b_valid = b_descriptor(b, b_row, b_col)
-            if load_vec == 1:
-                b_val = _B_buf_view.load_scalar_at(b, b_off_elems, mask=b_valid)
-                B_lds_tile.store_scalar(b, b_row, b_col, value=b_val)
-            else:
-                b_vec = _B_buf_view.load_vec_at(
-                    b, b_off_elems, n=load_vec, mask=b_valid
-                )
-                B_lds_tile.store_vec(b, b_row, b_col, value=b_vec, n=load_vec)
 
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
@@ -773,15 +757,19 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
         + MFMA + VMEM traffic. The hints don't reorder our SSA — they tell
         the post-RA scheduler what groups to keep together.
         """
-        # Lane mapping (consistent with the MfmaAtom contract):
-        # 16x16:  m_in_atom = lane % 16,  k_blk = lane / 16,  n_in_atom = lane % 16
-        # 32x32:  m_in_atom = lane % 32,  k_blk = lane / 32,  n_in_atom = lane % 32
-        m_in_atom = b.mod(lane, b.const_i32(spec.warp_tile_m))
-        k_blk = b.div(lane, b.const_i32(spec.warp_tile_m))
-        n_in_atom = b.mod(lane, b.const_i32(spec.warp_tile_n))
+        # Tile-level lane decode (CK Tile ``BlockGemmAdaptor`` analogue):
+        #   16x16:  m_in_atom = lane % 16,  k_blk = lane / 16,  n_in_atom = lane % 16
+        #   32x32:  m_in_atom = lane % 32,  k_blk = lane / 32,  n_in_atom = lane % 32
+        # ``decode_mfma_lanes`` returns a frozen :class:`LaneDecode`
+        # carrying these as named SSA fields, so the MFMA loop never
+        # mis-derives them (a perennial copy-paste hazard).
+        decoded = decode_mfma_lanes(b, atom, lane)
+        m_in_atom = decoded.m_in_atom
+        n_in_atom = decoded.n_in_atom
+        k_blk = decoded.k_blk
 
-        warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
-        warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+        warp_m_off = grid.warp_m_off(b)
+        warp_n_off = grid.warp_n_off(b)
 
         new_accs: List[Value] = list(iter_vars)
 

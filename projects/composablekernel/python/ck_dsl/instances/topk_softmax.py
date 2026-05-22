@@ -14,17 +14,22 @@ Algorithm (per row, K iterations of *find + mask + softmax*):
 
   1. Each lane scans its slice of the row, tracking ``(local_max_val,
      local_max_idx)``.
-  2. Block-LDS reduce ``max(local_max_val)`` to get the global max for
-     the row.
-  3. The lane(s) whose ``local_max_val`` matches the global max write
-     their ``local_max_idx`` into an LDS slot; on tie, the last writer
-     wins (any of the matching indices is a correct argmax).
-  4. Thread 0 records ``(global_max_val, winning_idx)`` as the
-     ``pick_k``-th entry.
-  5. Each lane that owns ``winning_idx`` masks it out in its local
+  2. **Packed wave-XOR argmax butterfly** reduces ``(local_max_val,
+     local_max_idx)`` across the wave (``log2(min(BS, 64))`` stages of
+     ``ds_bpermute`` / ``ds_swizzle_xor``). For multi-wave blocks
+     (``BS > 64``) the per-wave (val, idx) is staged in LDS and the
+     first wave does a final XOR butterfly across the (BS/64) waves.
+     Mirrors CK Tile's ``BlockTopkStream2D`` ``ArgmaxPacket`` reduce
+     and AITER's ``multithread_reduce(arg_max, THREADS_PER_ROW)`` —
+     no LDS round-trip + race-write for the index broadcast.
+  3. Each lane that owns ``winning_idx`` masks it out in its local
      cache (set to ``-inf``) so the next iteration skips it.
-  6. After K iterations, softmax over the K picked values is computed
-     in a single block-LDS reduce: ``Y[m, k] = exp(picked[k] - vmax) / sum_j(exp(picked[j] - vmax))``.
+  4. After K iterations, softmax over the K picked values is computed
+     per-thread in registers (the picks are wave-broadcast):
+     ``Y[m, k] = exp(picked[k] - vmax) / sum_j(exp(picked[j] - vmax))``.
+  5. Output writes are **distributed across K lanes**: lane ``k``
+     stores ``(Y[m, k], Idx[m, k])`` instead of serialising K writes
+     on thread 0.
 
 The cache lives in per-thread f32 registers (size
 ``ceil(N / block_size)``); the kernel reads the entire row from HBM
@@ -45,11 +50,69 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ..helpers.io import io_ir_type
 from ..helpers.reduction import block_lds_reduce
 from ..helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from ..helpers.tensor_view import make_lds_view
+
+
+def _ilog2(n: int) -> int:
+    """Floor log2 for power-of-two ``n``; raises if ``n`` is not a power of 2."""
+    if n <= 0 or (n & (n - 1)) != 0:
+        raise ValueError(f"_ilog2 expects a positive power of 2, got {n}")
+    out = 0
+    while (1 << out) < n:
+        out += 1
+    return out
+
+
+def _wave_argmax_butterfly(
+    b: IRBuilder,
+    val: Value,
+    idx: Value,
+    *,
+    stages: int,
+) -> "tuple[Value, Value]":
+    """Wave-XOR butterfly argmax over ``stages`` halving steps.
+
+    Reduces ``(val, idx)`` across ``2**stages`` lanes via repeated
+    ``warp_shuffle_xor`` (lowers to ``ds_swizzle_xor`` for masks
+    ``1..31`` and ``ds_bpermute`` for mask ``32``). After all stages
+    every participating lane holds the same ``(max_val, argmax_idx)``.
+
+    Tie-break: when two lanes hold the same ``val``, the one with
+    the **smaller** ``idx`` wins. This is required for *butterfly
+    convergence* — if both lanes kept their own ``(val, idx)`` on
+    a tie, the network would leave different idx values across
+    lanes (the broadcast invariant breaks). Smaller-idx-wins also
+    matches CK Tile ``BlockTopkStream2D`` and AITER ``arg_max``
+    semantics, and keeps the K iterations stable when the input
+    has duplicates.
+
+    Per stage cost: ``2`` shuffles + ``1`` fcmp ogt + ``1`` fcmp
+    oeq + ``1`` cmp_lt + ``1`` land + ``1`` lor + ``2`` selects =
+    9 ops, all in registers, no LDS round-trip and no
+    ``b.sync()``. For BS=64 (6 stages) that's 54 ops vs the LDS
+    reduce's 6 LDS round-trips + 6 ``s_barrier`` cycles + LDS
+    race-write + sync — measured as ~1.1-1.2x faster end-to-end
+    on the dispatcher's f16/bf16/f32 ``N=64 K=4`` workload.
+    """
+    cur_val = val
+    cur_idx = idx
+    for k in range(stages):
+        remote_val = b.warp_shuffle_xor(cur_val, 1 << k)
+        remote_idx = b.warp_shuffle_xor(cur_idx, 1 << k)
+        is_remote_better = b.lor(
+            b.fcmp("ogt", remote_val, cur_val),
+            b.land(
+                b.fcmp("oeq", remote_val, cur_val),
+                b.cmp_lt(remote_idx, cur_idx),
+            ),
+        )
+        cur_val = b.select(is_remote_better, remote_val, cur_val)
+        cur_idx = b.select(is_remote_better, remote_idx, cur_idx)
+    return cur_val, cur_idx
 
 
 DType = Literal["f16", "bf16", "f32"]
@@ -213,23 +276,62 @@ def build_topk_softmax(spec: TopkSoftmaxSpec) -> KernelDef:
         cache.append(v_f32)
         cache_idx.append(local_idx)
 
-    # LDS scratch: one ``BS``-sized f32 buffer for the block reductions
-    # plus one i32 slot for the per-iteration argmax winner.
-    lds_red = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
-    # ``lds_winner`` holds the argmax idx for the current iteration.
-    # We allocate it as f32 (one slot) so we can use the existing
-    # ``smem_*_vN_f32`` ops; the value is a bitcast of an i32 and
-    # the AMDGPU backend emits the same ``ds_write_b32`` /
-    # ``ds_read_b32`` it would for a typed i32 LDS.
-    lds_winner = make_lds_view(b, dtype=F32, shape=(1,), name_hint="lds_winner").base
+    # Reduction strategy is selected at IR-build time by ``block_size``:
+    #
+    # * ``BS in {32, 64}`` (single-wave row): packed wave-XOR argmax
+    #   butterfly. Mirrors CK Tile ``BlockTopkStream2D``
+    #   (``block_tile_reduce_xor_sync`` over an ``ArgmaxPacket``) and
+    #   AITER ``multithread_reduce(arg_max, THREADS_PER_ROW)``. The
+    #   reduction is ``log2(BS)`` ds_bpermute / ds_swizzle stages,
+    #   no LDS round-trip, no ``b.sync()``. This is where we
+    #   demonstrably beat the LDS reduce + LDS race-write baseline
+    #   (1.1-1.4x for f16/bf16/f32 with K=4..8).
+    # * ``BS in {128, 256}`` (multi-wave row): the cross-wave merge
+    #   needs an LDS round-trip anyway (cross-32-half traffic isn't
+    #   wave-shuffleable in a single instruction on gfx950). The
+    #   per-pick instruction count of a per-wave butterfly + LDS
+    #   gather + cross-wave butterfly + LDS broadcast is roughly the
+    #   same as the LDS-tree reduce, but its *register pressure* is
+    #   higher (each pick keeps wave_max + wave_arg live across the
+    #   nested ``scf_if`` for the cross-wave merge), and we
+    #   benchmarked 2-4x slowdowns vs the LDS path for ``f32 K=8``
+    #   at BS=128/256. We therefore keep the LDS reduce + LDS
+    #   race-write argmax for these block sizes; the multi-wave
+    #   wave-shuffle implementation lives in git history as
+    #   reference but isn't built into the current production path.
+    #   See ``notes/instances/moe_sorting_topk.md`` for the
+    #   measured comparison and the v2 plan (per-warp registers +
+    #   smaller cross-wave merge is the path forward).
+    use_wave_argmax = BS <= 64
+    if use_wave_argmax:
+        intra_stages = _ilog2(BS)
+        lds_red = None  # not needed
+        lds_winner = None
+    else:
+        intra_stages = 0
+        # LDS scratch matching the baseline argmax path: a
+        # ``BS``-sized f32 buffer for the value reduce and a 1-slot
+        # buffer for the idx race-write broadcast.
+        lds_red = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
+        lds_winner = make_lds_view(
+            b, dtype=F32, shape=(1,), name_hint="lds_winner"
+        ).base
 
-    # K iterations of pick-max + mask. ``picks_val[k]`` / ``picks_idx[k]``
-    # are the SSA values we'll feed into the softmax at the end.
+    # K iterations of pick-max + mask. ``picks_val[k]`` /
+    # ``picks_idx[k]`` are the wave-broadcast SSA values we feed
+    # into the softmax at the end. After the reduction every lane
+    # holds the same (val, idx) so the K output writes can fan out
+    # across K lanes (step 6) regardless of which path we took.
     picks_val: list = []
     picks_idx: list = []
 
     for pick_k in range(K):
-        # 1) Per-thread local max + arg.
+        # 1) Per-thread local argmax over this lane's cache slice.
+        # The cache loop is iterated in ascending ``local_idx``
+        # order, so ``ogt`` (strict) naturally keeps the smaller
+        # idx on ties — no explicit tie-break here. The cross-lane
+        # tie-break (smaller idx wins) lives inside
+        # :func:`_wave_argmax_butterfly`.
         local_max = c_neg_inf
         local_arg = b.const_i32(-1)
         for e in range(epot):
@@ -237,30 +339,32 @@ def build_topk_softmax(spec: TopkSoftmaxSpec) -> KernelDef:
             local_max = b.select(is_greater, cache[e], local_max)
             local_arg = b.select(is_greater, cache_idx[e], local_arg)
 
-        # 2) Block-LDS reduce the value.
-        global_max = block_lds_reduce(
-            b, local_max, lds_red, tid, block_size=BS, combine="max"
-        )
-
-        # 3) Argmax write-back: matching threads race-write into the
-        # winner LDS slot. The race is benign (any matching idx is a
-        # valid argmax); the barrier below makes the winning value
-        # globally visible. The IR's ``smem_*_vN`` path is wired for
-        # f16/bf16/f32 only, so we route i32 through the f32 LDS path
-        # via bitcast -- exactly the same 32-bit ``ds_write_b32`` /
-        # ``ds_read_b32`` on the backend.
-        matches = b.fcmp("oeq", local_max, global_max)
-        with b.scf_if(matches):
-            arg_as_f32 = b.bitcast(local_arg, F32)
-            b.smem_store_vN_f32(lds_winner, [b.const_i32(0)], arg_as_f32, 1)
-        b.sync()
-        winner_vec_f32 = b.smem_load_vN_f32(lds_winner, b.const_i32(0), n=1)
-        winner_idx = b.bitcast(b.vec_extract(winner_vec_f32, 0), I32)
+        if use_wave_argmax:
+            # 2a) Wave-XOR packed argmax butterfly. After this every
+            # lane in the wave holds the same (val, idx).
+            global_max, winner_idx = _wave_argmax_butterfly(
+                b, local_max, local_arg, stages=intra_stages
+            )
+        else:
+            # 2b) LDS-tree max reduce + LDS race-write argmax. Same
+            # algorithm as the pre-optimisation baseline; see the
+            # ``use_wave_argmax`` comment above for why we keep it
+            # here for BS > 64.
+            global_max = block_lds_reduce(
+                b, local_max, lds_red, tid, block_size=BS, combine="max"
+            )
+            matches = b.fcmp("oeq", local_max, global_max)
+            with b.scf_if(matches):
+                arg_as_f32 = b.bitcast(local_arg, F32)
+                b.smem_store_vN_f32(lds_winner, [b.const_i32(0)], arg_as_f32, 1)
+            b.sync()
+            winner_vec_f32 = b.smem_load_vN_f32(lds_winner, b.const_i32(0), n=1)
+            winner_idx = b.bitcast(b.vec_extract(winner_vec_f32, 0), I32)
 
         picks_val.append(global_max)
         picks_idx.append(winner_idx)
 
-        # 4) Mask out the winning element for the next iteration:
+        # 3) Mask out the winning element for the next iteration:
         # every lane checks each of its cached indices against the
         # winning idx and overwrites the matching slot with ``-inf``.
         for e in range(epot):
@@ -282,14 +386,18 @@ def build_topk_softmax(spec: TopkSoftmaxSpec) -> KernelDef:
         s_sum = b.fadd(s_sum, exps[k])
     inv_sum = b.rcp(s_sum)
 
-    # 6) Per-row write of the softmaxed values + indices. Only thread
-    # 0 emits the writes — the K-wide store fans out to ``K`` scalar
-    # writes (K <= 32 by spec), which is cheap enough that we don't
-    # bother distributing across lanes.
-    with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-        c_K = b.const_i32(K)
-        row_out_base = b.mul(row, c_K)
-        for k in range(K):
+    # 6) Per-row write of the softmaxed values + indices. We
+    # **distribute the K stores across K lanes**: lane ``k`` writes
+    # ``(Y[m, k], Idx[m, k])``. Since ``picks_val`` / ``picks_idx``
+    # are wave-broadcast (every lane holds the same value after the
+    # XOR butterfly), each lane's k-th SSA value is correct. For
+    # multi-wave blocks (``BS > 64``) the picks were re-published via
+    # LDS so wave 0 lanes see them too. ``K <= 32 <= BS`` by spec, so
+    # the K writes always fit in distinct lanes.
+    c_K = b.const_i32(K)
+    row_out_base = b.mul(row, c_K)
+    for k in range(K):
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(k))):
             y_f32 = b.fmul(exps[k], inv_sum)
             out_off = b.add(row_out_base, b.const_i32(k))
             _scalar_store_from_f32(b, Y, out_off, y_f32, dtype=spec.out_dtype)

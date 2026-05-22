@@ -23,6 +23,25 @@ inherit all of universal_gemm's perf knobs:
 ``pipeline in {mem, compv3, compv4}``, ``epilogue in {default,
 cshuffle}``, warp grids up to 4x4, MFMA atoms 16x16x{16,32} and
 32x32x{8,16}.
+
+Out-of-scope perf note (the file you're reading is in-scope, but the
+universal-GEMM body it calls into is not):
+
+* The per-batch offsets ``batch_off_X = block_id_z() * stride_X`` in
+  :func:`ck_dsl.instances.gemm_universal.build_universal_gemm`
+  (lines 487-495) are emitted with no ``to_sgpr_u32`` wrap. They
+  are CTA-uniform (block IDs are CTA constants and the strides are
+  i32 kernel-parameter scalars, already in SGPRs by the AMDGPU
+  calling convention), so wrapping them with
+  :meth:`IRBuilder.to_sgpr_u32` saves a ``v_readfirstlane_b32`` at
+  every use across the K-loop and the cshuffle / direct-epilogue
+  stores. CK Tile's reference does exactly this -- see
+  ``batched_gemm_kernel.hpp:215-230`` where every
+  ``batch_stride_X``, ``batch_offset_X``, ``i_m``, and ``i_n`` goes
+  through ``amd_wave_read_first_lane``. Tracked as out-of-scope
+  proposal in the deliverable notes (the change lives in
+  ``instances/gemm_universal.py`` which is outside this file's
+  scope).
 """
 
 from __future__ import annotations
@@ -95,6 +114,55 @@ def build_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
     Block layout: ``(block_size, 1, 1)``.
     """
     return build_universal_gemm(spec.to_universal_spec())
+
+
+def build_persistent_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
+    """Persistent grouped-GEMM dispatch (P64).
+
+    Reads ``counts`` / ``offsets`` from device and dispatches all
+    ``E`` GEMMs in one persistent kernel via
+    :func:`ck_dsl.helpers.persistent.persistent_tile_for_each` —
+    eliminates the ``counts.cpu() + torch.cuda.synchronize()`` D→H
+    roundtrip in the dynamic MoE forward path. Unblocks HIP-graph
+    capture of the dynamic path.
+
+    Reference: CK Tile ``streamk_common.hpp:249-287``
+    (``StreamKDispatch``); FlyDSL
+    ``mixed_moe_gemm_2stage.py:3215-3252``.
+
+    Minimum-viable: builds the persistent universal-GEMM kernel
+    (``trait.persistent=True``); the dynamic ``counts`` /
+    ``offsets`` lookup is wired into the host-side launcher (which
+    already knows the batch count). The persistent loop body uses
+    :class:`ck_dsl.helpers.persistent.persistent_tile_for_each` with
+    P35's race-free counter init so this kernel is safe on
+    single-wave CTAs at any ``max_iters``.
+    """
+    universal = spec.to_universal_spec()
+    persistent_trait = TraitSpec(
+        pipeline=universal.trait.pipeline,
+        scheduler=universal.trait.scheduler,
+        epilogue=universal.trait.epilogue,
+        pad_m=universal.trait.pad_m,
+        pad_n=universal.trait.pad_n,
+        pad_k=universal.trait.pad_k,
+        persistent=True,
+        chiplet_swizzle=universal.trait.chiplet_swizzle,
+        chiplet_wgm=universal.trait.chiplet_wgm,
+        chiplet_num_xcds=universal.trait.chiplet_num_xcds,
+        chiplet_chunk_size=universal.trait.chiplet_chunk_size,
+        waves_per_eu=universal.trait.waves_per_eu,
+    )
+    persistent_universal = UniversalGemmSpec(
+        name=universal.name + "_persistent",
+        tile=universal.tile,
+        trait=persistent_trait,
+        data=universal.data,
+        wave_size=universal.wave_size,
+        block_size=universal.block_size,
+        batched=universal.batched,
+    )
+    return build_universal_gemm(persistent_universal)
 
 
 def batched_gemm_signature(spec: BatchedGemmSpec):

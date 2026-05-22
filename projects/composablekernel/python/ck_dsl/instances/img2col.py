@@ -68,11 +68,25 @@ class Img2ColSpec:
     dtype: DType = "f16"
     block_tile_m: int = 8
     block_tile_k: int = 128
+    vec_k: int = 8
     name: str = "ck_dsl_img2col"
 
     @property
     def block_size(self) -> int:
-        return self.block_tile_m * self.block_tile_k
+        return (self.block_tile_m * self.block_tile_k) // self.vec_k
+
+    @property
+    def can_vector_load(self) -> bool:
+        """Whether a single ``buffer_load_vN_f16`` covers each chunk.
+
+        True iff ``vec_k > 1`` and ``vec_k`` divides the input channel
+        count ``C`` — then every chunk's K-slots live in one
+        ``(r, s, c0..c0+vec_k-1)`` block and the leading NHWC offset is
+        enough for the whole vector. Otherwise the kernel falls back to
+        ``vec_k`` per-element scalar loads + a ``vec_pack``, still
+        followed by one wide store.
+        """
+        return self.vec_k > 1 and (self.problem.C % self.vec_k) == 0
 
     def kernel_name(self) -> str:
         return kernel_name_join(
@@ -80,19 +94,28 @@ class Img2ColSpec:
             self.problem.short(),
             self.dtype,
             f"t{self.block_tile_m}x{self.block_tile_k}",
+            f"v{self.vec_k}",
         )
 
 
 def is_valid_spec(spec: Img2ColSpec) -> Tuple[bool, str]:
     if spec.dtype != "f16":
         return False, f"unsupported dtype {spec.dtype!r} (only f16 in v1)"
+    if spec.vec_k not in (1, 2, 4, 8):
+        return False, f"vec_k must be one of {{1, 2, 4, 8}} (got {spec.vec_k})"
+    if spec.block_tile_k % spec.vec_k != 0:
+        return (
+            False,
+            f"block_tile_k {spec.block_tile_k} not divisible by vec_k {spec.vec_k}",
+        )
     if spec.block_size <= 0:
         return False, "block_size must be positive"
     if spec.block_size > 1024:
         return (
             False,
             f"block_size {spec.block_size} > 1024 hardware cap "
-            f"(block_tile_m {spec.block_tile_m} * block_tile_k {spec.block_tile_k})",
+            f"(block_tile_m {spec.block_tile_m} * block_tile_k "
+            f"{spec.block_tile_k} / vec_k {spec.vec_k})",
         )
     if spec.block_size % 64 != 0:
         return False, f"block_size {spec.block_size} not a multiple of wave_size (64)"
@@ -110,12 +133,20 @@ def build_img2col(spec: Img2ColSpec) -> KernelDef:
          Y_bytes: i32)          # buffer-resource byte length for Y
 
     Grid: ``(ceil(K/block_tile_k), ceil(M/block_tile_m), 1)``.
+
+    Per-thread work: one ``vec_k``-wide K chunk at ``(m, k_base)``.
+    The output store is always a single ``buffer_store_vN_f16`` per
+    thread (one wide-store transaction). The input load is a single
+    ``buffer_load_vN_f16`` when ``vec_k`` divides ``C`` (so all
+    ``vec_k`` K-slots share one ``(r, s, c0..c0+vec_k-1)`` NHWC block),
+    or a ``vec_k``-element scalar gather + ``vec_pack`` otherwise.
     """
     ok, why = is_valid_spec(spec)
     if not ok:
         raise ValueError(f"invalid img2col spec: {why}")
 
     p = spec.problem
+    V = spec.vec_k
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
@@ -138,33 +169,86 @@ def build_img2col(spec: Img2ColSpec) -> KernelDef:
     # (the same lever §6.1 of the runbook uses for tail-safe loads).
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
+    # Per-thread decomposition: tid -> (m_local, k_chunk_local). Each
+    # thread owns one (m, k_base..k_base+V-1) chunk along K. With
+    # cols_per_row = block_tile_k // V, the chunks tile the block in
+    # row-major (m, k_chunk) order.
+    cols_per_row = spec.block_tile_k // V
+    c_cols_per_row = b.const_i32(cols_per_row)
+    c_V = b.const_i32(V)
+
     tid = b.thread_id_x()
-    m_local = b.div(tid, c_block_k)
-    k_local = b.mod(tid, c_block_k)
+    m_local = b.div(tid, c_cols_per_row)
+    k_chunk_local = b.mod(tid, c_cols_per_row)
+    k_local_base = b.mul(k_chunk_local, c_V) if V > 1 else k_chunk_local
     m_val = b.add(b.mul(b.block_id_y(), c_block_m), m_local)
-    k_val = b.add(b.mul(b.block_id_x(), c_block_k), k_local)
+    k_val_base = b.add(b.mul(b.block_id_x(), c_block_k), k_local_base)
 
     x_rsrc = b.buffer_rsrc(X, X_bytes)
     y_rsrc = b.buffer_rsrc(Y, Y_bytes)
 
-    # Input address via the same descriptor implicit-GEMM uses.
-    # ``valid`` is the pad-mask (``hi`` / ``wi`` in the image bounds,
-    # ``r`` / ``s`` in the filter bounds for the partial-K-tile case).
-    offset, valid = A_desc.offset(b, m=m_val, k=k_val)
-    off_bytes = b.mul(offset, c_half_bytes)
-    safe_in_off = (
-        b.select(valid, off_bytes, oob_sentinel) if valid is not None else off_bytes
-    )
-    loaded = b.buffer_load_f16(x_rsrc, safe_in_off, c0)
+    # Input load. Two paths:
+    #
+    # (a) ``can_vector_load`` (C % V == 0, V > 1): the V K-slots of this
+    #     chunk live in one NHWC ``(r, s, c0..c0+V-1)`` block, so the
+    #     leading offset from ``A_desc.offset(m, k_base)`` is the start
+    #     of V contiguous halves and one ``buffer_load_vN_f16`` covers
+    #     the chunk. Validity is uniform across the chunk (same h, w
+    #     pad mask + same r/s indices), so the single ``valid`` from
+    #     the descriptor is the right OOB-routing predicate.
+    #
+    # (b) Scalar fallback: V independent ``A_desc.offset(m, k_base+i)``
+    #     queries, V scalar buffer loads (each with its own OOB
+    #     routing), packed into a ``<V x f16>`` vector for the wide
+    #     store. This handles ``C`` not divisible by V and the
+    #     ``V == 1`` recovery case.
+    if V == 1:
+        offset, valid = A_desc.offset(b, m=m_val, k=k_val_base)
+        off_bytes = b.mul(offset, c_half_bytes)
+        safe_in_off = (
+            b.select(valid, off_bytes, oob_sentinel) if valid is not None else off_bytes
+        )
+        loaded = b.buffer_load_f16(x_rsrc, safe_in_off, c0)
+    elif spec.can_vector_load:
+        offset, valid = A_desc.offset(b, m=m_val, k=k_val_base)
+        off_bytes = b.mul(offset, c_half_bytes)
+        safe_in_off = (
+            b.select(valid, off_bytes, oob_sentinel) if valid is not None else off_bytes
+        )
+        loaded = b.buffer_load_vN_f16(x_rsrc, safe_in_off, c0, dwords=V // 2)
+    else:
+        # V > 1 but C % V != 0: fall back to per-element scalar gather.
+        # We still get a wide store, just not a wide load.
+        halves: list = []
+        for i in range(V):
+            k_i = k_val_base if i == 0 else b.add(k_val_base, b.const_i32(i))
+            off_i, valid_i = A_desc.offset(b, m=m_val, k=k_i)
+            off_i_bytes = b.mul(off_i, c_half_bytes)
+            safe_i = (
+                b.select(valid_i, off_i_bytes, oob_sentinel)
+                if valid_i is not None
+                else off_i_bytes
+            )
+            halves.append(b.buffer_load_f16(x_rsrc, safe_i, c0))
+        loaded = b.vec_pack(halves, F16)
 
-    # Output address: out[m, k] is laid out row-major as ``m*K + k``.
-    out_off_elems = b.add(b.mul(m_val, c_K), k_val)
+    # Output store: row-major ``[M, K_gemm]`` so consecutive K halves
+    # are consecutive in memory and one ``buffer_store_vN_f16`` writes
+    # the whole chunk. ``in_bounds`` only needs to be True for *some*
+    # element of the chunk because the rsrc silently drops the trailing
+    # OOB halves at the K tail; we keep the leading-element bounds
+    # check (``m_val < M`` AND ``k_val_base < K_gemm``) so threads with
+    # ``m_val >= M`` get the whole chunk dropped via the OOB sentinel.
+    out_off_elems = b.add(b.mul(m_val, c_K), k_val_base)
     out_off_bytes = b.mul(out_off_elems, c_half_bytes)
     m_ok = b.cmp_lt(m_val, c_M)
-    k_ok = b.cmp_lt(k_val, c_K)
+    k_ok = b.cmp_lt(k_val_base, c_K)
     in_bounds = b.land(m_ok, k_ok)
     safe_out_off = b.select(in_bounds, out_off_bytes, oob_sentinel)
-    b.buffer_store_f16(y_rsrc, safe_out_off, c0, loaded)
+    if V == 1:
+        b.buffer_store_f16(y_rsrc, safe_out_off, c0, loaded)
+    else:
+        b.buffer_store_vN_f16(y_rsrc, safe_out_off, c0, loaded, dwords=V // 2)
 
     return b.kernel
 

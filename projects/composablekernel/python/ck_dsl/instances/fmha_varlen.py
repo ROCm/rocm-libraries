@@ -135,38 +135,46 @@ def build_fmha_fwd_varlen(spec: FmhaFwdVarlenSpec):
     cu_seqlens_k = kb.ptr("cu_seqlens_k")
     # ``q_token`` reuses block_id_x; semantically a tile index here.
     q_tile_idx = kb.q_token
-    head_idx = kb.head_idx
-    kv_head_idx = kb.kv_head_idx
+    # ``head_idx`` and ``kv_head_idx`` come from ``block_id_y`` and a
+    # const-divisor div; both are wave-uniform. Pinning them as SGPR
+    # also turns the address math inside
+    # ``mfma_attention_fwd_inner_body`` into scalar-ALU ops
+    # (s_mul_i32 / s_add_i32) instead of v_ ops, matching the CK
+    # Tile ``amd_wave_read_first_lane(...)`` pattern in
+    # ``include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp``.
+    head_idx = b.to_sgpr_u32(kb.head_idx)
+    kv_head_idx = b.to_sgpr_u32(kb.kv_head_idx)
     scale_log2 = kb.scalar("scale_log2")
 
-    # The first global Q row this CTA owns.
-    q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
+    # The first global Q row this CTA owns; wave-uniform (depends only
+    # on block_id_x), so it lifts to SGPR cleanly.
+    q_tile_base = b.to_sgpr_u32(b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M)))
 
-    # Find which sequence this tile belongs to via linear scan of
-    # cu_seqlens_q. Since the tile is BLOCK_M-aligned and per-sequence
-    # seqlen_q is BLOCK_M-aligned (validated), all 16 rows fall in the
-    # same sequence.
-    seq_idx_loop = b.scf_for_iter(
-        b.const_i32(0),
-        b.const_i32(spec.batch),
-        b.const_i32(1),
-        [("seq", b.const_i32(0))],
-        iv_name="bs_i",
-    )
-    with seq_idx_loop as (iv, (seq,)):
-        cuq_next = b.global_load_i32(cu_seqlens_q, b.add(iv, b.const_i32(1)))
+    # Find which sequence this tile belongs to via Python-unrolled
+    # scan of cu_seqlens_q. ``spec.batch`` is a compile-time constant
+    # so the unrolled chain becomes ``B`` compares + ``B`` cmovs --
+    # no scf.for backedge, no induction-variable update. Since the
+    # tile is BLOCK_M-aligned and per-sequence seqlen_q is
+    # BLOCK_M-aligned (validated), all 16 rows fall in the same
+    # sequence and the result is wave-uniform (input is block_id_x).
+    # ``to_sgpr_u32`` parks ``seq_idx`` and the derived addresses in
+    # scalar registers so the downstream global loads pick them up as
+    # ``s_buffer_load_dword``.
+    seq = b.const_i32(0)
+    for i in range(spec.batch):
+        cuq_next = b.global_load_i32(cu_seqlens_q, b.const_i32(i + 1))
         is_in_seq = b.cmp_lt(q_tile_base, cuq_next)
-        b.scf_yield(b.select(is_in_seq, seq, b.add(seq, b.const_i32(1))))
-    seq_idx = seq_idx_loop.results[0]
+        seq = b.select(is_in_seq, seq, b.add(seq, b.const_i32(1)))
+    seq_idx = b.to_sgpr_u32(seq)
 
-    cuq_base = b.global_load_i32(cu_seqlens_q, seq_idx)
-    local_q_tile = b.sub(q_tile_base, cuq_base)
-    cuk_base = b.global_load_i32(cu_seqlens_k, seq_idx)
+    cuq_base = b.to_sgpr_u32(b.global_load_i32(cu_seqlens_q, seq_idx))
+    local_q_tile = b.to_sgpr_u32(b.sub(q_tile_base, cuq_base))
+    cuk_base = b.to_sgpr_u32(b.global_load_i32(cu_seqlens_k, seq_idx))
     cuk_next = b.global_load_i32(cu_seqlens_k, b.add(seq_idx, b.const_i32(1)))
-    seqlen_k = b.sub(cuk_next, cuk_base)
+    seqlen_k = b.to_sgpr_u32(b.sub(cuk_next, cuk_base))
 
-    k_token_offset = b.mul(cuk_base, kb.stride_token("k"))
-    v_token_offset = b.mul(cuk_base, kb.stride_token("v"))
+    k_token_offset = b.to_sgpr_u32(b.mul(cuk_base, kb.stride_token("k")))
+    v_token_offset = b.to_sgpr_u32(b.mul(cuk_base, kb.stride_token("v")))
 
     causal_ctx = b.const_i32(0) if s.mask_mode in ("causal", "sliding_window") else None
 

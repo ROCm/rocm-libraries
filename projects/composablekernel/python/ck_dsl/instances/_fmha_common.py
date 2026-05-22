@@ -361,6 +361,36 @@ class FmhaKernelBuilder:
 
     # ----- grid decode -----
 
+    def appendkv_grid(
+        self,
+        *,
+        block_q: int = 64,
+        has_batch_axis: bool = False,
+    ) -> Tuple[Value, Value]:
+        """Tile-per-CTA grid for fmha_appendkv (P75).
+
+        Historical grid: ``(ceil(total_new_q/256), num_kv_heads, 1)``
+        — one thread per ``(token, kv_head)`` with the entire head_dim
+        running sequentially in one thread. Tile-per-CTA grid:
+        ``(ceil(total_new_q/block_q), num_kv_heads[, batch])`` — one
+        wave64 CTA per ``(BLOCK_Q, kv_head)`` tile, each lane covers
+        an 8-element chunk of head_dim. 64× thread parallelism on the
+        head_dim direction; matches CK Tile's
+        ``BlockFmhaFwdAppendKVPipeline``.
+
+        Returns ``(q_tile_base, kv_head_idx)``: the per-CTA Q-tile
+        base token index (= ``block_id_x * block_q``) and the
+        kv_head index (= ``block_id_y``). The caller threads
+        ``q_tile_base`` through the row-base callbacks so each lane
+        in the CTA hits a different ``(token, head_dim_chunk)`` slot.
+        """
+        b = self.b
+        self.q_tile_base = b.to_sgpr_u32(b.mul(b.block_id_x(), b.const_i32(block_q)))
+        self.kv_head_idx = b.to_sgpr_u32(b.block_id_y())
+        if has_batch_axis:
+            self.batch_idx = b.to_sgpr_u32(b.block_id_z())
+        return self.q_tile_base, self.kv_head_idx
+
     def decode_grid(
         self,
         *,
@@ -377,10 +407,17 @@ class FmhaKernelBuilder:
         as attributes on this builder.
         """
         b = self.b
-        self.q_token = b.block_id_x()
-        self.head_idx = b.block_id_y()
+        # P76: every grid axis is wave-uniform — pin into SGPR via
+        # ``to_sgpr_u32`` so downstream consumers (stride math,
+        # mask predicates, K/V row-base callbacks) see scalar
+        # registers rather than re-materialising
+        # ``readfirstlane(block_id_*)`` per use. Mirrors CK Tile's
+        # ``amd_wave_read_first_lane`` pattern across every FMHA
+        # forward / backward / append-KV / paged-prefill builder.
+        self.q_token = b.to_sgpr_u32(b.block_id_x())
+        self.head_idx = b.to_sgpr_u32(b.block_id_y())
         if has_batch_axis:
-            self.batch_idx = b.block_id_z()
+            self.batch_idx = b.to_sgpr_u32(b.block_id_z())
         nqkv = (
             num_queries_per_kv
             if num_queries_per_kv is not None
@@ -389,7 +426,7 @@ class FmhaKernelBuilder:
         if nqkv == 1:
             self.kv_head_idx = self.head_idx
         else:
-            self.kv_head_idx = b.div(self.head_idx, b.const_i32(nqkv))
+            self.kv_head_idx = b.to_sgpr_u32(b.div(self.head_idx, b.const_i32(nqkv)))
         return self.q_token, self.head_idx, self.kv_head_idx
 
     # ----- tensor descriptor factory -----

@@ -136,16 +136,30 @@ def build_fmha_fwd_head_grouping(spec: FmhaFwdHeadGroupingSpec):
     # The grid's block_id_x is the Q-tile index (semantically a tile,
     # not a token); ``kb.q_token`` reuses the same axis.
     q_tile_idx = kb.q_token
-    head_idx = kb.head_idx
-    kv_head_idx = kb.kv_head_idx
-    batch_idx = kb.batch_idx
+    # All four grid coords (block_id_{x,y,z}, head, kv_head, batch) are
+    # wave-uniform. Pin them as SGPR so the per-CTA address math below
+    # lowers to scalar-ALU instructions (s_mul_i32 / s_add_i32) instead
+    # of the equivalent v_ ops. Matches CK Tile's GQA-aware kernel
+    # which calls ``amd_wave_read_first_lane`` on every grid coord
+    # before the address math (see
+    # ``include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp``).
+    head_idx = b.to_sgpr_u32(kb.head_idx)
+    kv_head_idx = b.to_sgpr_u32(kb.kv_head_idx)
+    batch_idx = b.to_sgpr_u32(kb.batch_idx)
 
     # Batch offsets fold into k_token_offset / v_token_offset (added
-    # inside the helper's row-base math) and into q_tile_base.
-    k_token_offset = b.mul(b.mul(batch_idx, seqlen_k), kb.stride_token("k"))
-    v_token_offset = b.mul(b.mul(batch_idx, seqlen_k), kb.stride_token("v"))
-    q_tile_local = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
-    q_tile_base = b.add(q_tile_local, b.mul(batch_idx, seqlen_q))
+    # inside the helper's row-base math) and into q_tile_base. All
+    # three are wave-uniform (depend only on block_id_{y,z} and the
+    # scalar seqlen params), so they live in SGPR all the way through
+    # to the global_load address sums inside the MFMA inner body.
+    k_token_offset = b.to_sgpr_u32(
+        b.mul(b.mul(batch_idx, seqlen_k), kb.stride_token("k"))
+    )
+    v_token_offset = b.to_sgpr_u32(
+        b.mul(b.mul(batch_idx, seqlen_k), kb.stride_token("v"))
+    )
+    q_tile_local = b.to_sgpr_u32(b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M)))
+    q_tile_base = b.to_sgpr_u32(b.add(q_tile_local, b.mul(batch_idx, seqlen_q)))
 
     causal_ctx = b.const_i32(0) if s.mask_mode in ("causal", "sliding_window") else None
 

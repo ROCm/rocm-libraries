@@ -580,11 +580,29 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
 def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
     """Enable register-resident P for the existing 16x16x32 2D path.
 
-    Hard-disabled by default while the lane transform is being validated.
-    Tests/experiments can monkey-patch this selector; once parity and trace
-    benches are clean it can be enabled for bf16 no-window long-prefill.
+    P73: enable for ``dtype == "bf16"`` when the gate conditions hold
+    (no sinks, no sliding window, no softcap, no alibi, no qq_bias,
+    no kv_storage_dtype). The lane-XOR + bit-transpose register
+    permutation in ``attention_tiled_2d.py:1020-1078`` is now stable
+    enough to flip on for bf16; the f16 path stays disabled until the
+    same parity sweep validates it. Other configurations stay on the
+    P_LDS publish path.
     """
-    return False
+    if problem.dtype != "bf16":
+        return False
+    if problem.use_sinks:
+        return False
+    if problem.sliding_window > 0:
+        return False
+    if problem.softcap > 0:
+        return False
+    if problem.use_alibi:
+        return False
+    if problem.use_qq_bias:
+        return False
+    if _kv_storage_dtype(problem) is not None:
+        return False
+    return True
 
 
 def _tiled_spec_from_problem(
@@ -1531,8 +1549,44 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
             ),
         )
 
+        # Vectorised QK dot product. Both Q[q_tok, q_head, :] and
+        # K[physical, token_in_block, kv_head, :] are stride-1 along the
+        # head_size axis, so we read them in ``vec8`` chunks (one
+        # ds_read_b128 / buffer_load_b128 each). The inner accumulation
+        # order ``score += q[d] * k[d]`` is preserved by walking the
+        # vec lanes in order, so the result is bit-identical to the
+        # prior per-element unroll. ``head_size`` is restricted to
+        # {64, 128, 256} by :func:`supports_native_unified_attention`,
+        # so it always divides cleanly by 8.
         score = zero_f
-        for d in b.unroll(p.head_size):
+        q_off_base, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=b.const_i32(0))
+        k_off_base = kv_desc_elem.offset(
+            b,
+            physical_block=physical,
+            token_in_block=token_in_block,
+            kv_head=kv_head,
+            dim=b.const_i32(0),
+        )
+        VEC = 8
+        for d8 in b.unroll(p.head_size // VEC):
+            d_base = b.const_i32(d8 * VEC)
+            qv_vec = b.global_load_vN(
+                query, b.add(q_off_base, d_base), dtype, VEC, align=16
+            )
+            kv_vec = b.global_load_vN(
+                key, b.add(k_off_base, d_base), dtype, VEC, align=16
+            )
+            for i in range(VEC):
+                score = b.fadd(
+                    score,
+                    b.fmul(
+                        b.cast_to_f32(b.vec_extract(qv_vec, i)),
+                        b.cast_to_f32(b.vec_extract(kv_vec, i)),
+                    ),
+                )
+        # Defensive tail scalar fold for head_size % 8 != 0; in
+        # production this loop is empty.
+        for d in b.unroll((p.head_size // VEC) * VEC, p.head_size):
             d_v = b.const_i32(d)
             q_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=d_v)
             k_off = kv_desc_elem.offset(
@@ -1542,9 +1596,9 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
                 kv_head=kv_head,
                 dim=d_v,
             )
-            qv = b.cast_to_f32(b.global_load(query, q_off, dtype, align=2))
-            kv = b.cast_to_f32(b.global_load(key, k_off, dtype, align=2))
-            score = b.fadd(score, b.fmul(qv, kv))
+            qv_s = b.cast_to_f32(b.global_load(query, q_off, dtype, align=2))
+            kv_s = b.cast_to_f32(b.global_load(key, k_off, dtype, align=2))
+            score = b.fadd(score, b.fmul(qv_s, kv_s))
 
         score = b.fmul(b.fmul(score, scale), rcp_ln2)
         if p.softcap > 0:
@@ -1864,18 +1918,26 @@ def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDe
 def _emit_find_seq_idx_scan(
     b: IRBuilder, cu_q: Value, q_tok: Value, num_seqs: Value
 ) -> Value:
-    scan = b.scf_for_iter(
-        b.const_i32(0),
+    """Find ``seq_idx`` for the given Q token via a binary search.
+
+    P74: replaces the historical linear scan (``O(num_seqs)``) with
+    the shared ``binary_search_seq_idx`` helper in per-token mode
+    (``cu_q[s] <= q_tok < cu_q[s+1]``). Cosmetic on the scalar
+    oracle but matches the tiled kernels' shape and saves
+    ``O(num_seqs - log2(num_seqs))`` linear-scan iterations on
+    high-batch decode workloads.
+    """
+    from ..helpers.attention import binary_search_seq_idx
+
+    return binary_search_seq_idx(
+        b,
+        cu_q,
+        q_tok,
         num_seqs,
-        b.const_i32(1),
-        [("seq_idx", b.const_i32(0))],
-        iv_name="si",
+        block_q=1,  # unused in per_token mode
+        iterations=32,  # bounded scf.for trip count; 32 covers num_seqs <= 2^32
+        per_token=True,
     )
-    with scan as (si, (seq_idx,)):
-        start_i = b.global_load_i32(cu_q, si)
-        le = b.cmp_le(start_i, q_tok)
-        b.scf_yield(b.select(le, si, seq_idx))
-    return scan.results[0]
 
 
 def _q_descriptor(p: UnifiedAttentionProblem) -> TensorDescriptor:
@@ -1947,13 +2009,56 @@ def _emit_qk_score(
     scale: Value,
     rcp_ln2: Value,
 ) -> Value:
+    """Per-(query_token, query_head) QK dot product for the scalar kernels.
+
+    The dot product sums ``head_size`` half-precision element pairs into
+    one f32 score. Both Q[q_tok, q_head, :] and
+    K[physical_block, token_in_block, kv_head, :] are contiguous along
+    the head_size dimension (the innermost stride-1 axis of their
+    respective descriptors), so the kernel reads them in
+    ``vec8`` chunks via :meth:`IRBuilder.global_load_vN` instead of
+    one 16-bit ``b.global_load`` per element. The inner accumulation
+    order is preserved (``score += q[d] * k[d]`` for ``d`` increasing
+    monotonically), so the result is bit-identical to the prior
+    per-element form.
+
+    Head sizes that aren't a multiple of 8 fall back to a tail loop;
+    in production the scalar kernels are only built for
+    ``head_size in {64, 128, 256}`` (see
+    :func:`supports_native_unified_attention`), all multiples of 8.
+    """
     score = b.const_f32(0.0)
     physical, token_in_block = _physical_block_and_token(
         b, p, block_tables, seq_idx, kpos
     )
     q_desc = _q_descriptor(p)
     kv_desc = _paged_kv_descriptor(p)
-    for d in b.unroll(p.head_size):
+    q_off_base, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=b.const_i32(0))
+    k_off_base = kv_desc.offset(
+        b,
+        physical_block=physical,
+        token_in_block=token_in_block,
+        kv_head=kv_head,
+        dim=b.const_i32(0),
+    )
+    VEC = 8
+    n_vec = p.head_size // VEC
+    for d8 in b.unroll(n_vec):
+        d_base = b.const_i32(d8 * VEC)
+        qv = b.global_load_vN(query, b.add(q_off_base, d_base), dtype, VEC, align=16)
+        kv = b.global_load_vN(key, b.add(k_off_base, d_base), dtype, VEC, align=16)
+        for i in range(VEC):
+            score = b.fadd(
+                score,
+                b.fmul(
+                    b.cast_to_f32(b.vec_extract(qv, i)),
+                    b.cast_to_f32(b.vec_extract(kv, i)),
+                ),
+            )
+    # Tail scalar fold for head_size values not a multiple of VEC (defensive;
+    # the supported set in supports_native_unified_attention is {64,128,256}
+    # — all multiples of 8 — so this loop is empty for any compiled kernel).
+    for d in b.unroll(n_vec * VEC, p.head_size):
         d_v = b.const_i32(d)
         q_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=d_v)
         k_off = kv_desc.offset(
@@ -1963,9 +2068,9 @@ def _emit_qk_score(
             kv_head=kv_head,
             dim=d_v,
         )
-        qv = b.cast_to_f32(b.global_load(query, q_off, dtype, align=2))
-        kv = b.cast_to_f32(b.global_load(key, k_off, dtype, align=2))
-        score = b.fadd(score, b.fmul(qv, kv))
+        qv_s = b.cast_to_f32(b.global_load(query, q_off, dtype, align=2))
+        kv_s = b.cast_to_f32(b.global_load(key, k_off, dtype, align=2))
+        score = b.fadd(score, b.fmul(qv_s, kv_s))
     return b.fmul(b.fmul(score, scale), rcp_ln2)
 
 

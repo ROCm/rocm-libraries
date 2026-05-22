@@ -84,6 +84,15 @@ class CoalescedTileLoader:
         True  # use buffer_load_vN (bounds-checked); False uses raw ptr
     )
     oob_sentinel: int = (1 << 31) - 1  # voffset used when valid=False (clamped to 0)
+    # P33: when the descriptor's K axis is internally a (K0, K1) split
+    # (e.g. implicit-GEMM ``K0=R*S × K1=C`` for NHWC convs), set
+    # ``inner_dim`` to the K1 extent. The loader keeps emitting one
+    # contiguous load per thread per chunk but the consumer-side
+    # MFMA loop iterates ``kk`` over K1 only — letting redundant
+    # ``embed(h, w)`` valid-checks (loop-invariant over the C inner
+    # dim) hoist out of the loop. ``None`` (default) is the legacy
+    # flat-K behaviour.
+    inner_dim: Optional[int] = None
 
     @classmethod
     def choose_vec(
@@ -491,3 +500,78 @@ def lane_contiguous_descriptor(
     `(row, col_halves)`.
     """
     return base_off_fn
+
+
+@dataclass(frozen=True)
+class AsyncPingPongLoader:
+    """Two-buffer ping-pong wrapper over :class:`AsyncTileLoader`.
+
+    P32 hoist: provides the ``async_K_loop`` wrapper that CK Tile's
+    compv4 pipelines ship in ``block_fmha_pipeline_qr_ks_vs_async.hpp``.
+
+    The kernel allocates two LDS buffers (the loader's
+    ``required_lds_bytes()`` × 2). On iter ``k``, while consumers
+    read buffer ``k & 1``, this wrapper issues the next async load
+    into buffer ``(k + 1) & 1``. After the loop, one final consume
+    of the last-issued buffer completes the pipeline.
+
+    Reference: ``include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp``.
+    """
+
+    loader: AsyncTileLoader
+
+    def emit_pipeline(
+        self,
+        b: IRBuilder,
+        *,
+        smem_a: Value,
+        smem_b: Value,
+        n_iters: int,
+        wave_id: Value,
+        tid: Value,
+        rsrc_fn: Callable[[IRBuilder, int], Value],
+        descriptor_fn: Callable[[IRBuilder, int], DescriptorFn],
+        consume_fn: Callable[[IRBuilder, int, Value], None],
+        coherency: int = 0,
+    ) -> None:
+        """Run the full ping-pong K-loop.
+
+        ``rsrc_fn(b, kt) -> rsrc`` and ``descriptor_fn(b, kt) ->
+        descriptor`` produce the per-iteration source and address
+        translator. ``consume_fn(b, kt, smem_buf)`` is invoked on the
+        already-loaded buffer (after the wave has waited for vmcnt=0).
+        """
+        if n_iters <= 0:
+            return
+        slots = (
+            self.loader.bind(b, smem_dst=smem_a, wave_id=wave_id),
+            self.loader.bind(b, smem_dst=smem_b, wave_id=wave_id),
+        )
+        smems = (smem_a, smem_b)
+
+        # Prologue: issue iter 0 into buffer 0.
+        slots[0].issue(
+            b,
+            tid=tid,
+            rsrc=rsrc_fn(b, 0),
+            descriptor=descriptor_fn(b, 0),
+            coherency=coherency,
+        )
+        for k in range(1, n_iters):
+            # Issue next iter into the OTHER buffer while consumer is
+            # still scheduled on the current one (the consumer's
+            # ``s_waitcnt vmcnt(0)`` happens inside ``consume_fn``).
+            cur_buf = (k - 1) & 1
+            nxt_buf = k & 1
+            slots[nxt_buf].issue(
+                b,
+                tid=tid,
+                rsrc=rsrc_fn(b, k),
+                descriptor=descriptor_fn(b, k),
+                coherency=coherency,
+            )
+            consume_fn(b, k - 1, smems[cur_buf])
+
+        # Epilogue: drain the last-issued buffer.
+        last_buf = (n_iters - 1) & 1
+        consume_fn(b, n_iters - 1, smems[last_buf])

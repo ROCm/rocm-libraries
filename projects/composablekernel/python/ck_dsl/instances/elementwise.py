@@ -18,10 +18,31 @@ The kernel processes the buffer as a single contiguous run of ``numel``
 elements; multi-dimensional torch tensors must be ``contiguous()``. This
 mirrors CK Tile's ``elementwise_example`` strategy.
 
-The kernel uses :class:`ck_dsl.helpers.TensorView` for global I/O and
-:func:`ck_dsl.helpers.io.io_ir_type` for the dtype dispatch; the per-
-element math is the canonical exp2-based pattern (no ``llvm.tanh``,
-which the AMDGPU backend can't lower).
+CK Tile parity shape:
+
+* Each CTA owns one ``block_size * vec``-element slab of the contiguous
+  run (``S::Block_M`` in CK Tile terms; here a 1D row instead of a 2D
+  M tile because there is no reduction).
+* Each thread reads ``vec`` consecutive elements via
+  :meth:`TileWindow.load_vec_as_f32` -- the per-lane CK Tile
+  ``cast_tile<ComputeDataType>(load_tile(...))`` analogue -- promotes to
+  ``f32``, applies the per-element op (``ElementWiseOperation{}`` in
+  CK Tile), and writes back via :meth:`TileWindow.store_vec_from_f32`.
+* The ``ElementWiseOperation`` math is f32 because that is the CK Tile
+  ``ComputeDataType`` convention; the per-lane math IS per-element
+  scalar f32 because each lane already owns one f32 register per slot
+  (there is no SIMD-over-N-lane f32 instruction on AMDGPU; the packed
+  ``v_pk_*`` family is f16 / bf16 only, and going through those would
+  require us to drop the f32 compute precision).
+* When the trailing chunk is partial (``thread_base + vec > N``), the
+  kernel falls through to a per-element scalar loop guarded by
+  ``cmp_lt(idx, N)``.
+
+The per-element math uses the canonical ``exp2``-based sigmoid /
+``tanh`` pattern (no ``llvm.tanh``, which the AMDGPU backend can't
+lower); negation goes through :meth:`IRBuilder.fneg` rather than
+``fsub(0.0, x)`` so the LLVM lowering emits a single ``v_neg``-form
+sign-flip instead of a one-op ``v_sub``.
 """
 
 from __future__ import annotations
@@ -131,13 +152,42 @@ def _sigmoid_via_exp2(b: IRBuilder, x: Value) -> Value:
     return b.rcp(b.fadd(one, b.exp2(b.fmul(c_neg_log2e, x))))
 
 
+def _gelu_tanh(b: IRBuilder, x: Value) -> Value:
+    """Tanh-approximation GELU in f32.
+
+    ``gelu_tanh(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))``
+
+    Factored out so SwiGLU's GELU sibling (``geglu``) shares the exact
+    same constant pool and op chain rather than duplicating the
+    arithmetic at the binary call site.
+    """
+    c_half = b.const_f32(0.5)
+    c_one = b.const_f32(1.0)
+    c_sq2_over_pi = b.const_f32(0.7978845608028654)
+    c_a = b.const_f32(0.044715)
+    # Cube x via (x*x)*x: depth-2 dependency chain, same op count as
+    # the natural ``x*x*x`` triple-mul; we write it this way so the
+    # IR builder folds the constant-1 stride on the third multiply
+    # rather than two consecutive ``v_mul`` issues.
+    x2 = b.fmul(x, x)
+    x3 = b.fmul(x2, x)
+    inner = b.fmul(c_sq2_over_pi, b.fadd(x, b.fmul(c_a, x3)))
+    return b.fmul(b.fmul(c_half, x), b.fadd(c_one, _tanh_via_exp2(b, inner)))
+
+
 def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
     if op == "copy":
         return x
     if op == "neg":
-        return b.fsub(b.const_f32(0.0), x)
+        # ``arith.fneg`` lowers to a single sign-bit flip; the
+        # ``fsub(0.0, x)`` form used to emit a constant-load +
+        # ``v_sub`` pair pre-canonicalisation.
+        return b.fneg(x)
     if op == "abs":
-        return b.fmax(x, b.fsub(b.const_f32(0.0), x))
+        # ``|x| = max(x, -x)`` is the AMDGPU-friendly form; the
+        # ``v_max3_f32`` family selects the max directly without the
+        # ``fsub(0.0, x)`` constant load.
+        return b.fmax(x, b.fneg(x))
     if op == "relu":
         return b.fmax(x, b.const_f32(0.0))
     if op == "exp2":
@@ -159,14 +209,7 @@ def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
         c_1702 = b.const_f32(1.702)
         return b.fmul(x, _sigmoid_via_exp2(b, b.fmul(c_1702, x)))
     if op == "gelu_tanh":
-        # GELU (tanh approx): 0.5 * x * (1 + tanh(sqrt(2/pi)*(x + 0.044715*x^3)))
-        c_half = b.const_f32(0.5)
-        c_one = b.const_f32(1.0)
-        c_sq2_over_pi = b.const_f32(0.7978845608028654)
-        c_a = b.const_f32(0.044715)
-        x3 = b.fmul(b.fmul(x, x), x)
-        inner = b.fmul(c_sq2_over_pi, b.fadd(x, b.fmul(c_a, x3)))
-        return b.fmul(b.fmul(c_half, x), b.fadd(c_one, _tanh_via_exp2(b, inner)))
+        return _gelu_tanh(b, x)
     raise ValueError(f"unsupported unary op {op!r}")
 
 
@@ -191,15 +234,9 @@ def _apply_binary(b: IRBuilder, a: Value, c: Value, op: str) -> Value:
     if op == "geglu":
         # GeGLU: gelu(a) * c -- same gating shape as SwiGLU but with
         # tanh-approx GELU on the activation side. Used in PaLM and
-        # GLU-variant T5 papers.
-        c_half = b.const_f32(0.5)
-        c_one = b.const_f32(1.0)
-        c_sq2_over_pi = b.const_f32(0.7978845608028654)
-        c_a = b.const_f32(0.044715)
-        a3 = b.fmul(b.fmul(a, a), a)
-        inner = b.fmul(c_sq2_over_pi, b.fadd(a, b.fmul(c_a, a3)))
-        gelu_a = b.fmul(b.fmul(c_half, a), b.fadd(c_one, _tanh_via_exp2(b, inner)))
-        return b.fmul(gelu_a, c)
+        # GLU-variant T5 papers. The activation reuses
+        # :func:`_gelu_tanh` so the constant pool stays unique.
+        return b.fmul(_gelu_tanh(b, a), c)
     raise ValueError(f"unsupported binary op {op!r}")
 
 
@@ -251,6 +288,11 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
     in_fast = b.cmp_le(fast_lim, N)
 
     def emit_vec_path() -> None:
+        # Tile-shaped fast path: one vec load + per-lane f32 promote
+        # via the TileWindow, the per-element op in f32, and one
+        # vec_pack + vec store on the way out. Mirrors CK Tile's
+        # ``store_tile(y_window, cast_tile<YDataType>(y_tile))`` where
+        # ``y_tile`` is the per-thread register span.
         a_scalars = a_view.load_vec_as_f32(b, [thread_base], n=spec.vec)
         if spec.is_binary():
             b_scalars = b_view.load_vec_as_f32(b, [thread_base], n=spec.vec)
@@ -263,6 +305,13 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
         c_view.store_vec_from_f32(b, [thread_base], values=results)
 
     def emit_scalar_path() -> None:
+        # Trailing-tail scalar fallback. The fast path's
+        # ``thread_base + vec <= N`` predicate is false here, so each
+        # of the up-to-``vec`` lanes individually probes ``idx < N``
+        # before issuing its scalar load / op / store. The list
+        # comprehension over ``range(spec.vec)`` is unrolled at IR
+        # construction time so the inner branches all fold to direct
+        # predicated ops.
         for i in range(spec.vec):
             idx = b.add(thread_base, b.const_i32(i))
             in_bounds = b.cmp_lt(idx, N)

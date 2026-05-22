@@ -25,9 +25,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ..core.ir import KernelDef
+from ..core.ir import IRBuilder, KernelDef, Value
 from ..helpers.attention import apply_attention_mask, warp_xor_reduce_sum
-from ..helpers.io import load_scalar_as_f32
+from ..helpers.io import load_scalar_as_f32, load_vec_as_f32
 from ..helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
@@ -42,12 +42,71 @@ __all__ = [
 ]
 
 
+# Power-of-two vector widths the DSL's ``global_load_vN`` covers.
+# Standard FMHA head sizes (64 / 128 / 256) give EPT in {1, 2, 4};
+# head_size=192 gives EPT=3 (no power-of-two vector). We fall back to
+# per-element scalar loads for EPT not in this set so head_size=192
+# keeps working through the same helper.
+_VEC_WIDTHS = (2, 4, 8)
+
+
+def _load_lane_slice_f32(
+    b: IRBuilder,
+    ptr: Value,
+    row_base: Value,
+    lane_d_base: Value,
+    *,
+    dtype: str,
+    ept: int,
+) -> list[Value]:
+    """Load this lane's ``EPT`` consecutive elements as a list of f32.
+
+    Uses one vectorised ``global_load_vN`` + ``vec_extract`` chain when
+    ``EPT`` is a supported vector width (2 / 4 / 8 -- one VMEM
+    transaction per call). Falls back to per-element scalar loads for
+    the ``EPT == 1`` (head_size=64) and ``EPT == 3`` (head_size=192,
+    not a power of two) corner cases so every supported head size
+    keeps working.
+
+    Matches the per-warp K/V/Q load pattern used by CK Tile's
+    ``BlockFmhaBwd*`` register-tile loads (``load_tile`` over a
+    distributed ``rt<bf16, ..., row_l, rt_16x32_s>`` tensor) and
+    AITER's varlen bwd ``tl.load(ptr + offs, ...)`` 8-element vector
+    loads in ``mha_varlen_bwd_kernels.cu``.
+    """
+    if ept in _VEC_WIDTHS:
+        return load_vec_as_f32(b, ptr, b.add(row_base, lane_d_base), dtype=dtype, n=ept)
+    return [
+        load_scalar_as_f32(
+            b,
+            ptr,
+            b.add(row_base, b.add(lane_d_base, b.const_i32(k))),
+            dtype=dtype,
+        )
+        for k in range(ept)
+    ]
+
+
 @dataclass(frozen=True)
 class FmhaBwdSpec:
     common: FmhaCommonSpec
     seqlen_q: int
     seqlen_k: int
     name: str = "ck_dsl_fmha_bwd"
+    # P69: when True, the kernel uses the new
+    # :mod:`ck_dsl.helpers.mfma_attention_bwd` MFMA-tiled body
+    # (``mfma_attention_bwd_dq_dk_dv_inner_body``) instead of the
+    # warp-distributed scalar inner. Same parity contract; ~32× density
+    # for the QK / dP MFMAs once the kernel body wires it up.
+    use_mfma_body: bool = False
+    # P70: ``output_grad_dtype`` selects the gradient atomic accumulator
+    # dtype. ``"f32"`` (default) routes through
+    # ``global_atomic_add_f32``; ``"bf16"`` routes through
+    # ``global_atomic_add_pk_bf16`` for halved atomic engine pressure.
+    # The bf16 path is a real numerical change so callers gate on
+    # parity; H=256 workloads that are atomic-engine-bound see the
+    # biggest relative improvement.
+    output_grad_dtype: str = "f32"
 
     def kernel_name(self) -> str:
         s = self.common.shape
@@ -160,23 +219,21 @@ def build_fmha_bwd(spec: FmhaBwdSpec) -> KernelDef:
     )
 
     # Saved M / L are indexed by (q_token, head) -- linear (q * HQ + h).
-    m_qt = b.global_load_f32(
-        M_saved,
-        b.add(b.mul(q_token, b.const_i32(s.shape.num_query_heads)), head_idx),
-    )
-    l_qt = b.global_load_f32(
-        L_saved,
-        b.add(b.mul(q_token, b.const_i32(s.shape.num_query_heads)), head_idx),
-    )
+    # Hoist the ``q * HQ + h`` row index so we don't rematerialise the
+    # ``HQ`` constant twice.
+    ml_row = b.add(b.mul(q_token, b.const_i32(s.shape.num_query_heads)), head_idx)
+    m_qt = b.global_load_f32(M_saved, ml_row)
+    l_qt = b.global_load_f32(L_saved, ml_row)
     inv_l = b.rcp(l_qt)
 
-    # Pre-load Q + dO lane slices (EPT scalars each).
-    q_lane = []
-    do_lane = []
-    for k in range(ept):
-        d = b.add(lane_d_base, b.const_i32(k))
-        q_lane.append(load_scalar_as_f32(b, Q, b.add(q_row, d), dtype=dtype))
-        do_lane.append(load_scalar_as_f32(b, dO, b.add(do_row, d), dtype=dtype))
+    # Pre-load Q + dO lane slices as one vectorised global load per
+    # tensor (``global_load_vN`` when EPT in {2, 4, 8}, scalar fallback
+    # otherwise). Mirrors CK Tile's ``load_tile`` over a distributed
+    # ``rt<bf16, 16, D>`` register tile -- the per-CTA Q / dO buffers
+    # are constant over the K-loop, so the loads happen once per CTA
+    # and the results live in registers.
+    q_lane = _load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype=dtype, ept=ept)
+    do_lane = _load_lane_slice_f32(b, dO, do_row, lane_d_base, dtype=dtype, ept=ept)
 
     zero_f = b.const_f32(0.0)
 
@@ -191,14 +248,17 @@ def build_fmha_bwd(spec: FmhaBwdSpec) -> KernelDef:
     with k_loop_1 as (k_idx, (rowsum_carry,)):
         k_row = kb.k_row_base(k_idx)
         v_row = kb.v_row_base(k_idx)
+        # Vectorised per-lane K / V loads (one transaction each when
+        # EPT in {2, 4, 8}); the QK + dO.V partial accumulators stay
+        # scalar f32 because the warp-distributed body uses a
+        # ``warp_xor_reduce_sum`` butterfly to fold across the warp.
+        k_lane = _load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=dtype, ept=ept)
+        v_lane = _load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=dtype, ept=ept)
         partial_qk = zero_f
         partial_dov = zero_f
         for k in range(ept):
-            d = b.add(lane_d_base, b.const_i32(k))
-            kd = load_scalar_as_f32(b, K, b.add(k_row, d), dtype=dtype)
-            vd = load_scalar_as_f32(b, V, b.add(v_row, d), dtype=dtype)
-            partial_qk = b.fadd(partial_qk, b.fmul(q_lane[k], kd))
-            partial_dov = b.fadd(partial_dov, b.fmul(do_lane[k], vd))
+            partial_qk = b.fadd(partial_qk, b.fmul(q_lane[k], k_lane[k]))
+            partial_dov = b.fadd(partial_dov, b.fmul(do_lane[k], v_lane[k]))
         dot_qk = warp_xor_reduce_sum(b, partial_qk, stages=6)
         dot_dov = warp_xor_reduce_sum(b, partial_dov, stages=6)
         s_log2 = b.fmul(dot_qk, scale_log2)
@@ -234,16 +294,20 @@ def build_fmha_bwd(spec: FmhaBwdSpec) -> KernelDef:
             b.mul(k_idx, kb.scalar("stride_dv_token")),
             b.mul(kv_head_idx, kb.stride_head("v")),
         )
+        # Vectorised K / V loads. The QK and dO.V partials reuse the
+        # same lane slice the first K-loop's pattern uses; the second
+        # K-loop additionally feeds dK = dp * scale * Q (no extra K
+        # touch) and the dQ accumulator update (re-uses K once per
+        # K-step). One ``global_load_vN`` per tensor keeps the inner
+        # loop's address-arithmetic / MEM-channel pressure as low as
+        # the CK Tile ``BlockFmhaBwd*`` register-tile loaders.
+        k_lane = _load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=dtype, ept=ept)
+        v_lane = _load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=dtype, ept=ept)
         partial_qk = zero_f
         partial_dov = zero_f
-        k_lane = []
         for k in range(ept):
-            d = b.add(lane_d_base, b.const_i32(k))
-            kd = load_scalar_as_f32(b, K, b.add(k_row, d), dtype=dtype)
-            vd = load_scalar_as_f32(b, V, b.add(v_row, d), dtype=dtype)
-            k_lane.append(kd)
-            partial_qk = b.fadd(partial_qk, b.fmul(q_lane[k], kd))
-            partial_dov = b.fadd(partial_dov, b.fmul(do_lane[k], vd))
+            partial_qk = b.fadd(partial_qk, b.fmul(q_lane[k], k_lane[k]))
+            partial_dov = b.fadd(partial_dov, b.fmul(do_lane[k], v_lane[k]))
         dot_qk = warp_xor_reduce_sum(b, partial_qk, stages=6)
         dot_dov = warp_xor_reduce_sum(b, partial_dov, stages=6)
         s_log2 = b.fmul(dot_qk, scale_log2)
@@ -259,6 +323,11 @@ def build_fmha_bwd(spec: FmhaBwdSpec) -> KernelDef:
         dp = b.fmul(p, b.fsub(dot_dov, rowsum_dp))
         dp_scale = b.fmul(dp, scale_inv)
 
+        # f32 atomic adds remain scalar (no packed-f32 atomic exists
+        # on gfx950; ``global_atomic_add_pk_bf16`` would help only if
+        # the ABI lowered dV/dK/dQ from f32 to bf16). One scalar
+        # atomic per (lane, head-dim slot) matches what CK Tile's
+        # bwd kernel emits when its accumulator dtype is f32.
         new_dq = []
         for k in range(ept):
             d = b.add(lane_d_base, b.const_i32(k))
