@@ -1088,29 +1088,9 @@ struct buffer_view<address_space_enum::lds,
             if constexpr(load_elts == 12 && sizeof(typename X::value_type) == 1)
             {
                 const auto* src = &p_data_[i + linear_offset + static_offset];
-#if defined(__gfx950__)
-                // [Task #1] FP6 LDS 12B reads: emit ds_read_b128 (16B) via
-                // asm volatile to engage gfx950 64-bank mode. Layout
-                // assumption: every 12B payload is followed by 4B zero-pad
-                // (K2_Pad=16 stride in MakeMX_ALdsBytesBlockDescriptor). The
-                // framework's tile distribution / descriptor still moves
-                // coords in 12B units, so addressing (including XOR
-                // transforms) is unchanged. asm volatile prevents the
-                // compiler from optimizing the 16B load back to b96+b32 when
-                // it sees the trailing 4B is discarded.
-                fp32x4_t tmp16;
-                asm volatile("ds_read_b128 %0, %1 offset:0"
-                             : "=v"(tmp16)
-                             : "v"(src)
-                             : "memory");
-                struct { int32_t x, y, z; } tmp;
-                __builtin_memcpy(&tmp, &tmp16, 12);
-                return bit_cast<X>(tmp);
-#else
                 struct { int32_t x, y, z; } tmp;
                 __builtin_memcpy(&tmp, src, 12);
                 return bit_cast<X>(tmp);
-#endif
             }
             else
             {

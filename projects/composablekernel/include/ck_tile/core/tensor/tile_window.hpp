@@ -322,27 +322,6 @@ struct tile_window_with_static_distribution
         return amd_wave_read_first_lane(bottom_tensor_coord_off.get_offset());
     }
 
-    // [Task #1: inline-asm LDS path]
-    // Returns the per-thread byte offset (NOT wave-uniform) for the bottom
-    // tensor coord at iCoord-0, plus a uniform window-level shift from
-    // offset_t. Used by hand-rolled inline-asm LDS reads in pipelines that
-    // need to bypass the load_tile machinery (e.g. coercing ds_read_b128 on
-    // FP6 packed layouts).
-    template <typename offset_t>
-    CK_TILE_DEVICE index_t get_thread_buffer_offset(offset_t = {}) const
-    {
-        const index_t per_thread = pre_computed_coords_[I0][I1].get_offset();
-        const index_t uniform_win_off = [&]() -> index_t {
-            if constexpr(std::is_integral_v<offset_t>)
-                return 0;
-            else if constexpr(is_constant_v<offset_t>)
-                return offset_t::value;
-            else
-                return get_load_offset(offset_t{});
-        }();
-        return per_thread + uniform_win_off;
-    }
-
     template <typename DataType,
               typename StaticTileDistribution,
               index_t i_access_unsupport_ = -1,
@@ -567,92 +546,6 @@ struct tile_window_with_static_distribution
     CK_TILE_WORKAROUND_ROCM_6_2_SCRATCH_MEMORY_ISSUE
                 asm volatile(
                     ""); // this is starting from rocm-6.2, but same sympton, reuse this flag
-#endif
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
-            });
-        });
-    }
-
-    // [Task #1: inline-asm LDS path]
-    // Same as load_raw but accepts a per-call window-level offset (mirrors
-    // load_with_offset). Routes through get_vectorized_elements_raw so the
-    // LDS read uses asm volatile (smem_load<>), guaranteeing the compiler
-    // emits a single ds_read_b{8*sizeof(vector_t)} per access instead of
-    // splitting the load.
-    template <typename DstTile,
-              index_t i_access_unsupport_ = -1,
-              bool oob_conditional_check  = true,
-              bool pre_nop                = false,
-              typename offset_t>
-    CK_TILE_DEVICE void load_with_offset_raw(offset_t offset,
-                                             DstTile& dst_tensor,
-                                             number<i_access_unsupport_>          = {},
-                                             bool_constant<oob_conditional_check> = {},
-                                             bool_constant<pre_nop>               = {}) const
-    {
-        using Traits   = typename Base::Traits;
-        using vector_t = typename Traits::vector_t;
-        using SFC_Ys   = typename Traits::SFC_Ys;
-        static constexpr index_t YElementSize =
-            typename Base::TileDstr{}.get_ys_to_d_descriptor().get_element_space_size();
-        static_assert(YElementSize % (Traits::PackedSize * Traits::ScalarPerVector) == 0);
-        using vectorized_tbuf =
-            array<vector_t, YElementSize / (Traits::PackedSize * Traits::ScalarPerVector)>;
-
-        constexpr auto tile_dstr = typename Base::TileDstr{};
-
-        auto& dst_vec_tbuf = reinterpret_cast<vectorized_tbuf&>(dst_tensor.get_thread_buffer());
-
-        const index_t linear_off = [&]() {
-            if constexpr(std::is_integral_v<offset_t>)
-                return offset;
-            else if constexpr(is_constant_v<offset_t>)
-                return offset_t::value;
-            else
-                return get_load_offset(offset_t{});
-        }();
-
-        // loop over thread tensor space [y0, y1, ...]
-        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
-
-            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-                constexpr auto pre_nop_ = [&]() {
-                    if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
-                        return bool_constant<true>{};
-                    else
-                        return bool_constant<false>{};
-                }();
-
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-                constexpr index_t d =
-                    tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys_start) /
-                    Traits::PackedSize;
-                static_assert(d % Traits::ScalarPerVector == 0);
-
-                this->get_bottom_tensor_view().template get_vectorized_elements_raw<vector_t>(
-                    dst_vec_tbuf.template at<d / Traits::ScalarPerVector>(),
-                    bottom_tensor_thread_coord,
-                    linear_off,
-                    bool_constant<oob_conditional_check>{},
-                    pre_nop_);
-#if CK_TILE_WORKAROUND_ROCM_6_1_SCRATCH_MEMORY_ISSUE || \
-    CK_TILE_WORKAROUND_ROCM_6_2_SCRATCH_MEMORY_ISSUE
-                asm volatile("");
 #endif
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))

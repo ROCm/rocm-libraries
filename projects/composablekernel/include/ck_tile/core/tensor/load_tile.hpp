@@ -123,37 +123,6 @@ CK_TILE_DEVICE auto load_tile_raw(T& tile,
         tile, number<i_access>{}, bool_constant<oob_conditional_check>{}, bool_constant<pre_nop>{});
 }
 
-// [Task #1: inline-asm LDS path] Offset variant of load_tile_raw — required
-// because we need both (a) per-call (mIter,kIter) windowing AND (b) the asm
-// volatile smem_load path that guarantees the compiler emits one ds_read per
-// access (no compiler-side splitting).
-template <typename T,
-          typename BottomTensorView_,
-          typename WindowLengths_,
-          typename TileDistribution_,
-          index_t NumCoord,
-          index_t i_access           = -1,
-          bool oob_conditional_check = true,
-          bool pre_nop               = false,
-          typename offset_t>
-CK_TILE_DEVICE void
-load_tile_raw_with_offset(T& tile,
-                          const tile_window_with_static_distribution<BottomTensorView_,
-                                                                     WindowLengths_,
-                                                                     TileDistribution_,
-                                                                     NumCoord>& tile_window,
-                          offset_t offset,
-                          number<i_access>                     = {},
-                          bool_constant<oob_conditional_check> = {},
-                          bool_constant<pre_nop>               = {})
-{
-    tile_window.load_with_offset_raw(offset,
-                                     tile,
-                                     number<i_access>{},
-                                     bool_constant<oob_conditional_check>{},
-                                     bool_constant<pre_nop>{});
-}
-
 template <typename T,
           typename BottomTensorView_,
           typename WindowLengths_,
