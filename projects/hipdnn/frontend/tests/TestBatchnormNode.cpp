@@ -764,6 +764,46 @@ TEST(TestBatchnormNode, PreValidateRejectsEpsilonWithNoDimensions)
     EXPECT_TRUE(error.get_message().find("dimensions are not set") != std::string::npos);
 }
 
+// Backend packing does not currently support relaxed scale/bias shapes.
+// This verifies that such configurations are rejected during lowerin
+TEST(TestBatchnormNode, CreateOperationRejectsUnsupportedScaleBiasShapes)
+{
+    BatchnormAttributes attrs;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(x);
+
+    auto y = std::make_shared<TensorAttributes>();
+    y->set_uid(2);
+    attrs.set_y(y);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(3).set_dim({64}); // relaxed shape
+    attrs.set_scale(scale);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(4).set_dim({32}); // mismatched shape
+    attrs.set_bias(bias);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(5).set_dim({1}).set_value(1e-5);
+    attrs.set_epsilon(epsilon);
+
+    GraphAttributes graphAttrs;
+    BatchnormNode node(std::move(attrs), graphAttrs);
+
+    ASSERT_EQ(node.pre_validate_node().code, ErrorCode::OK);
+
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+    auto err = node.create_operation(tensorDescs, operations);
+
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(operations.empty());
+}
+
 TEST(TestBatchnormNode, GetNodeTypeReturnsBatchnorm)
 {
     const GraphAttributes graphAttrs;
