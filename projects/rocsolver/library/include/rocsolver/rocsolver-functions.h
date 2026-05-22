@@ -29661,7 +29661,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
 
 /*! @{
     \brief CHOLQR computes an orthogonal factorization of a number of columns (rows) of a general m-by-n matrix 
-    \f$A\f$ using the Cholesky factorization of \f$A'A\f$ (\f$AA'\f$).
+    \f$A\f$ using the Cholesky factorization of \f$A'A\f$ if \f$m \geq n\f$ or \f$AA'\f$ if \f$m < n\f$.
 
     \details
     The factorization has the form
@@ -29697,16 +29697,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     \f]
     if \f$m < n\f$.
 
-    R is an nr-by-nr upper triangular matrix (L is an nr-by-nr lowerr triangular matrix), Q is an m-by-nr
-    (nr-by-n) matrix with orthonormal columns (rows), and the m-by-(n - nr) ((m - nr)-by-n) 
-    matrix A* represents the last n - nr columns (m - nr rows) of A. 
+    R is an nr-by-nr upper triangular matrix. L is an nr-by-nr lower triangular matrix. Q is an m-by-nr (or nr-by-n) matrix with orthonormal columns (rows), and matrix A* represents the last n - nr columns (or m - nr rows) of A. 
     nr is an output argument that indicates the number of columns (rows) of A that were properly factorized
     by the funtion (\f$\text{nr} \leq \text{min}(m,n)\f$). 
     The factorization is computed using the Cholesky QR algorithm as described below.
 
-    The algorithm starts by computing \f$B = A'A\f$ (\f$B = AA'\f$), and produces \f$T\f$ via the Cholesky
-    factorization \f$B=T'T\f$ (\f$B=TT'\f$). Finally, it computes the factor \f$H\f$ as the solution of the
-    triangular system \f$A=HT\f$ (\f$A=TH\f$). 
+    The algorithm starts by computing \f$B = A'A\f$ (or \f$B = AA'\f$), and produces \f$W\f$ via the Cholesky
+    factorization \f$B=W'W\f$ (or \f$B=WW'\f$). Finally, it computes the factor \f$H\f$ as the solution of the
+    triangular system \f$A=HW\f$ (\f$A=WH\f$). 
 
     The initial Cholesky factorization could fail if B is not positive definite, which could happen
     when A is ill-conditioned or singular. In this case, only nr columns (rows) of B will be reduced properly, 
@@ -29714,17 +29712,17 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     nr is thus related with the value of info as returned by \ref rocsolver_spotrf "POTRF". 
 
     Alternatively, the algorithm could use a preconditioned matrix \f$B = A'A + \text{sigma}\cdot I\f$
-    (\f$B = AA' + \text{sigma}\cdot I\f$)
+    (or \f$B = AA' + \text{sigma}\cdot I\f$)
     to increase the chances of the Cholesky factorization of B to succeed, and thus increasing the
-    value of nr. Depending on the value of cholshift, the shift, sigma, could be provided by the user
+    value of nr. The shift, sigma, could be provided by the user
     (if cholshift = rocsolver_cholqr_shift_provided), or an "ideal" number could be computed internally
     (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none, 
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in Q.
-    If \f$A=Q_1R_1\f$ (\f$A=L_1Q_1\f$) is the intial factorization of A, one can always re-apply the Cholesky factorization
-    process to \f$Q_1\f$ to produce \f$Q_1=Q_2R_2\f$ (\f$Q_1=L_2Q_2\f$). This would yield a new factorization \f$A=QR\f$ (\f$A=LQ\f$), with 
-    \f$R=R_2R_1\f$ (\f$L=L_1L_2)\f$, and \f$Q=Q_2\f$. The columns (rows) of Q are expected to be closer to be orthonormal than
+    If \f$A=Q_1R_1\f$ (or \f$A=L_1Q_1\f$) is an intial factorization of A, one can always re-apply the CholeskyQR
+    process to \f$Q_1\f$ to produce \f$Q_1=Q_2R_2\f$ (or \f$Q_1=L_2Q_2\f$). This would yield a new factorization \f$A=QR\f$ (or \f$A=LQ\f$), with 
+    \f$R=R_2R_1\f$ (\f$L=L_1L_2)\f$, and \f$Q=Q_2\f$. The columns (rows) of Q are now expected to be closer to be orthonormal than
     the columns (rows) of the initial \f$Q_1\f$. CHOLQR will execute cholnum - 1 extra Cholesky factorizations 
     to refine the factor Q.   
 
@@ -29735,7 +29733,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     numerical rank of matrix A.      
 
     \note
-    Common configurations of the Cholesky QR algorithm studied in the literature include: 
+    Common configurations of the CholeskyQR algorithm studied in the literature include: 
     CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1, 
     CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2, and 
     ShiftedCholeskyQR3, which can be executed with cholshift = rocsolver_cholqr_shift_computed, and cholnum = 3.
@@ -29743,9 +29741,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     numbers up to \f$O(\text{eps}^{-1})\f$ (i.e. \f$\approx 4\times10^{15}\f$ in double precision).
 
     \note
-    Even if the factorization is complete, i.e. nr = min(m,n), the returned factors H and T do not
-    form a full QR (LQ) factorization of A. H will always be missing the last columns (rows) which correspond to
-    the m - n (n - m) orthonormal vectors generating the row (column) null-space of A. cholqr cannot be used as a
+    Even if the factorization is complete, i.e. nr = min(m,n), the returned factors H and W do not
+    form a full QR (or LQ) factorization of A. H will always be missing the last columns (rows) which correspond to
+    the m - n (or n - m) orthonormal vectors generating the row (column) null-space of A. In other words, cholqr cannot be used as a
     row (colum) compresion method if the back transformation is required.   
    
 
