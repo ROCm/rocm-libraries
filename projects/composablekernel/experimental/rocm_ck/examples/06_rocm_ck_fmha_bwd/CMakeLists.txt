@@ -61,10 +61,18 @@ set(DQDKDV_VARIANTS
 )
 
 set(CONVERT_DQ_VARIANTS
+    fmha_bwd_convert_dq_fp16_d64_batch_det
+    fmha_bwd_convert_dq_fp16_d64_group_det
+    fmha_bwd_convert_dq_bf16_d64_batch_det
+    fmha_bwd_convert_dq_bf16_d64_group_det
     fmha_bwd_convert_dq_fp16_d128_batch_det
     fmha_bwd_convert_dq_fp16_d128_group_det
     fmha_bwd_convert_dq_bf16_d128_batch_det
     fmha_bwd_convert_dq_bf16_d128_group_det
+    fmha_bwd_convert_dq_fp16_d256_batch_det
+    fmha_bwd_convert_dq_fp16_d256_group_det
+    fmha_bwd_convert_dq_bf16_d256_batch_det
+    fmha_bwd_convert_dq_bf16_d256_group_det
 )
 
 set(KERNEL_VARIANTS

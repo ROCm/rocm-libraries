@@ -237,6 +237,22 @@ struct FmhaBwdConvertDQVariant
 
 // clang-format off
 static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
+    {"fmha_bwd_convert_dq_fp16_d64_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64,
+                   .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_fp16_d64_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64,
+                   .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d64_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64,
+                   .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d64_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64,
+                   .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
     {"fmha_bwd_convert_dq_fp16_d128_batch_det", makeSpec(FmhaBwdConvertDQConfig{
          .signature = {.dtype = DataType::FP16, .hdim_q = 128,
                        .mode = FmhaMode::BATCH},
@@ -253,6 +269,22 @@ static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
          .signature = {.dtype = DataType::BF16, .hdim_q = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {}})},
+    {"fmha_bwd_convert_dq_fp16_d256_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256,
+                    .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_fp16_d256_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d256_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256,
+                    .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d256_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
 };
 // clang-format on
 
