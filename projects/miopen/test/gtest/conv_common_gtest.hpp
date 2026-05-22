@@ -1888,6 +1888,22 @@ std::vector<T> generate_data_limited(const std::vector<T>& dims,
     INSTANTIATE_MIOPEN_SMOKE_TEST(id, name, data_type, __VA_ARGS__); \
     INSTANTIATE_MIOPEN_FULL_TEST(id, name, data_type, __VA_ARGS__)
 
+#define MIOPEN_CONCATENATE_INNER(prefix, suffix) prefix##suffix
+
+#define MIOPEN_CONCATENATE(prefix, suffix) MIOPEN_CONCATENATE_INNER(prefix, suffix)
+
+#define MIOPEN_TESTSUITE_NAME(prefix) MIOPEN_CONCATENATE(prefix, MIOPEN_GTEST_SUFFIX)
+
+#define MIOPEN_TEST_INFO(prefix) MIOPEN_CONCATENATE(prefix, MIOPEN_GTEST_INFO_SUFFIX)
+
+#define MIOPEN_TESTSUITE_PREFIX(id) MIOPEN_CONCATENATE(MIOPEN_TEST_TYPE, id)
+
+#define INSTANTIATE_MIOPEN_TEST_SUITE(id, name, ...)                                           \
+    INSTANTIATE_TEST_SUITE_P(id,                                                               \
+                             name,                                                             \
+                             GenCases<MIOPEN_GTEST_DATA_TYPE>(MIOPEN_SMOKE_TEST, __VA_ARGS__), \
+                             DefaultTestNameGenerator<TestCase>{})
+
 template <typename... TParams>
 using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>, // conv_mode
                                         NamedParameter<std::string>, // pad_mode
@@ -2430,14 +2446,14 @@ struct conv_test : public testing::TestWithParam<TestCase>
             {
                 auto output = get_output_tensor<T, Tout>(filter, input, weights, out_layout);
 
-                auto gen_positive_value = [=](auto...) {
+                auto gen_positive_value = [=, this](auto...) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return gen_float ? prng::gen_canonical<double>()
                                      : static_cast<double>(prng::gen_A_to_B(1, v_max));
                 };
 
-                auto gen_sign_value = [=](auto... is) {
+                auto gen_sign_value = [=, this](auto... is) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return gen_float ? prng::gen_A_to_B(-1.0, 1.0)
