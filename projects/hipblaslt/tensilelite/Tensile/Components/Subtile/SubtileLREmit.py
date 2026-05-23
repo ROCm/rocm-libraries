@@ -400,9 +400,9 @@ def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
   wavesize = kernel["WavefrontSize"]
   subIterKBytes = tileInfo.subIterKBytes
   loadWidth = tileInfo.loadWidthLR
-  numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
   blockSize = subIterKBytes // loadWidth
- 
+
+  # subtile divided evenly among its reads, in columns
   colOffsetStride = blockSize // tileInfo.numLRPerSubtile
 
   module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
