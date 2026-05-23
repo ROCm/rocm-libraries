@@ -41,16 +41,16 @@ class TestDetectArchRocminfoPath:
         ), patch("subprocess.run", return_value=proc):
             assert detect_arch() == "gfx942"
 
-    def test_rocminfo_missing_returns_fallback(self):
+    def test_rocminfo_missing_returns_unknown(self):
         with patch.object(_arch, "_detect_via_torch", return_value=None), patch.object(
             _arch, "resolve_rocm_tool", return_value=None
         ):
-            assert detect_arch() == "fallback"
+            assert detect_arch() == "unknown"
 
 
-class TestDetectArchFallback:
-    def test_no_torch_no_rocminfo_returns_fallback(self):
+class TestDetectArchUnknown:
+    def test_no_torch_no_rocminfo_returns_unknown(self):
         with patch.object(_arch, "_detect_via_torch", return_value=None), patch.object(
             _arch, "_detect_via_rocminfo", return_value=None
         ):
-            assert detect_arch() == "fallback"
+            assert detect_arch() == "unknown"

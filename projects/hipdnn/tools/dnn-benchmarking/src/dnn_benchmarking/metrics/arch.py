@@ -4,11 +4,13 @@
 """GPU architecture detection for arch-specific PMC counter sets.
 
 Used by :mod:`rocprof_pmc` to pick the right counter list for the live
-device. The fallback chain is torch -> rocminfo -> ``"fallback"``: torch
+device. The detection chain is torch -> rocminfo -> ``"unknown"``: torch
 is preferred because the dnn-benchmarking process already imports it for
 GPU timing, so the lookup is cheap; rocminfo is the universal probe for
-hosts where torch is unavailable; ``"fallback"`` returns a sparse safe
-counter set rather than raising so the orchestrator can still produce
+hosts where torch is unavailable; ``"unknown"`` is the sentinel returned
+when no GPU can be identified. Callers that key off arch (e.g. PMC set
+selection) translate ``"unknown"`` into their own conservative-defaults
+path rather than raising, so the orchestrator can still produce
 *something* for the user.
 """
 
@@ -47,7 +49,7 @@ def _detect_via_rocminfo() -> Optional[str]:
     # Use resolve_rocm_tool so hosts where /opt/rocm/bin isn't on PATH
     # (Alola login nodes, sandboxed containers) still find rocminfo. A
     # bare shutil.which silently misses it and downgrades the user to
-    # the fallback counter set.
+    # the "unknown" sentinel + the conservative PMC counter set.
     binary = resolve_rocm_tool("rocminfo")
     if binary is None:
         return None
@@ -70,11 +72,12 @@ def _detect_via_rocminfo() -> Optional[str]:
 
 
 def detect_arch() -> str:
-    """Return the gfx target of the live GPU.
+    """Return the gfx target of the live GPU, or ``"unknown"``.
 
-    Returns ``"fallback"`` when no GPU is detectable. Callers should
-    look up the returned key in their per-arch table; the fallback key
-    must always exist in those tables.
+    Returns ``"unknown"`` when no GPU is detectable (no torch, no
+    rocminfo, or both failed to identify an architecture). Callers
+    should treat ``"unknown"`` as a signal to use their conservative
+    defaults rather than as a table key.
     """
     arch = _detect_via_torch()
     if arch is not None:
@@ -82,4 +85,4 @@ def detect_arch() -> str:
     arch = _detect_via_rocminfo()
     if arch is not None:
         return arch
-    return "fallback"
+    return "unknown"

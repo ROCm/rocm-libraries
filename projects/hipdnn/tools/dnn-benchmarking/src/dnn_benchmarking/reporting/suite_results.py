@@ -344,7 +344,7 @@ class SuiteMetadata:
         gpu_model: GPU model name.
         gpu_arch: GPU gfx target (e.g. "gfx90a", "gfx942"). Useful for
             keying arch-specific PMC counter sets when analysing the
-            JSON downstream. "fallback" when detection failed.
+            JSON downstream. "unknown" when detection failed.
         python_version: Python version string.
         hipdnn_version: hipDNN version string.
         cpu_model: CPU model string from /proc/cpuinfo.
@@ -573,10 +573,10 @@ def collect_environment_info() -> Dict[str, Any]:
     except ImportError:
         pass
 
-    # gfx target via the same torch -> rocminfo -> fallback chain used
+    # gfx target via the same torch -> rocminfo -> "unknown" chain used
     # by metrics.rocprof_pmc, so the JSON output and the PMC keying
     # agree on what arch this run targeted. detect_arch() never raises —
-    # it returns "fallback" when no GPU is detectable.
+    # it returns "unknown" when no GPU is detectable.
     gpu_arch = detect_arch()
 
     info: Dict[str, Any] = {
