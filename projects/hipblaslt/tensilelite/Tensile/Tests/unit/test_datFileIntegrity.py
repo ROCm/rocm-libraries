@@ -36,13 +36,14 @@ the suite discriminates the regression class rather than just rubber-stamping
 whatever the build produced.
 """
 
-import glob
 import os
 import re
 from collections import defaultdict
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 try:
     import msgpack
@@ -54,6 +55,9 @@ _LIB_DIR_ENV = "HIPBLASLT_TEST_LIBRARY_DIR"
 
 # Master library filename:    "TensileLibrary_lazy_<arch>.dat"
 # Per-arch Mapping filename:  "TensileLiteLibrary_lazy_<arch>_Mapping.dat"
+# Both live in a per-base-arch subdirectory under the library root:
+#   <libDir>/<base-arch>/TensileLibrary_lazy_<arch>.dat
+#   <libDir>/<base-arch>/TensileLiteLibrary_lazy_<arch>_Mapping.dat
 _MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat$")
 _MAPPING_RE = re.compile(r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat$")
 
@@ -73,23 +77,31 @@ def _libDirOrSkip() -> Path:
     return p
 
 
+def _archDir(libDir: Path, arch: str) -> Path:
+    """Return the per-base subdirectory for an arch (strip target features)."""
+    return libDir / arch.split(":")[0]
+
+
 def _archsPresent(libDir: Path):
     """Return the set of arches that have BOTH a master library file and a
-    per-arch Mapping file in the installed directory."""
-    masters = {m.group("arch") for f in libDir.iterdir()
-               if (m := _MASTER_RE.match(f.name))}
-    mappings = {m.group("arch") for f in libDir.iterdir()
-                if (m := _MAPPING_RE.match(f.name))}
+    per-arch Mapping file in their per-base subdirectory under libDir."""
+    masters = set()
+    mappings = set()
+    for sub in libDir.iterdir():
+        if not sub.is_dir() or not sub.name.startswith("gfx"):
+            continue
+        for f in sub.iterdir():
+            if (m := _MASTER_RE.match(f.name)):
+                masters.add(m.group("arch"))
+            elif (m := _MAPPING_RE.match(f.name)):
+                mappings.add(m.group("arch"))
     return masters & mappings
 
 
 def _loadMapping(libDir: Path, arch: str):
-    path = libDir / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
+    path = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     with open(path, "rb") as f:
         return msgpack.unpack(f, raw=False)
-
-# TODO: Tests always skipped — need markers to run in CI.
-# Issue: https://github.com/ROCm/rocm-libraries/issues/7486
 
 # ---------------------------------------------------------------------------
 # 1. Discovery: a built directory must have at least one (master, Mapping) pair.
@@ -97,10 +109,18 @@ def _loadMapping(libDir: Path, arch: str):
 def test_libraryDirHasMatchingMasterAndMappingFiles():
     libDir = _libDirOrSkip()
     archs = _archsPresent(libDir)
-    masters_only = {_MASTER_RE.match(f.name).group("arch")
-                    for f in libDir.iterdir() if _MASTER_RE.match(f.name)} - archs
-    mappings_only = {_MAPPING_RE.match(f.name).group("arch")
-                     for f in libDir.iterdir() if _MAPPING_RE.match(f.name)} - archs
+    all_masters = set()
+    all_mappings = set()
+    for sub in libDir.iterdir():
+        if not sub.is_dir() or not sub.name.startswith("gfx"):
+            continue
+        for f in sub.iterdir():
+            if (m := _MASTER_RE.match(f.name)):
+                all_masters.add(m.group("arch"))
+            elif (m := _MAPPING_RE.match(f.name)):
+                all_mappings.add(m.group("arch"))
+    masters_only = all_masters - archs
+    mappings_only = all_mappings - archs
 
     assert archs, (
         f"{libDir} contains no matched (master, Mapping) pair. "
@@ -136,9 +156,11 @@ def test_everyMappingValueResolvesToAFileOnDisk(_dummy):
     missing = defaultdict(list)
     for arch in sorted(archs):
         mapping = _loadMapping(libDir, arch)
-        # mapping is {int -> str} where str is a kernel filename stem
+        archDir = _archDir(libDir, arch)
+        # mapping is {int -> str} where str is a kernel filename stem; the
+        # .dat file lives in the same per-arch subdir as the Mapping itself.
         for idx, kernelName in mapping.items():
-            datPath = libDir / f"{kernelName}.dat"
+            datPath = archDir / f"{kernelName}.dat"
             if not datPath.is_file():
                 missing[arch].append((idx, kernelName))
 
@@ -168,7 +190,9 @@ def test_perArchMappingIncludesFallbackEntries():
 
     # First scan to decide whether fallback files exist for this build;
     # if not, there's nothing for the per-arch Mapping to point at.
-    fallback_dat_files = list(libDir.glob("*_fallback_*.dat"))
+    # Fallback .dat files live inside each per-arch subdir alongside the
+    # Mapping that references them.
+    fallback_dat_files = list(libDir.glob("*/*_fallback_*.dat"))
     if not fallback_dat_files:
         pytest.skip(
             "no *_fallback_<arch>.dat files in build output; either the "
