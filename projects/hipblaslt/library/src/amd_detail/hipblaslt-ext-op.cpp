@@ -143,8 +143,9 @@ namespace
            && hipGetDeviceProperties(&props, deviceId) == hipSuccess)
         {
             const std::string archName = trimArchName(props.gcnArchName);
+            // Per-base layout: library/<arch>/hipblasltExtOpLibrary_<arch>.dat
             auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path("hipblasltExtOpLibrary_" + archName + ".dat"));
+                std::filesystem::path(archName) / ("hipblasltExtOpLibrary_" + archName + ".dat"));
             if(perArchPath)
                 return perArchPath->string();
         }

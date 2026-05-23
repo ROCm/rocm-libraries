@@ -75,7 +75,7 @@ def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Pa
 def buildSourceCodeObjectFiles(
         compiler: Compiler,
         bundler: Bundler,
-        destDir: Union[Path, str],
+        destRoot: Union[Path, str],
         tmpObjDir: Union[Path, str],
         includeDir: Union[Path, str],
         kernelPath: Union[Path, str],
@@ -85,7 +85,9 @@ def buildSourceCodeObjectFiles(
 
     Args:
         toolchain: The source toolchain.
-        destDir: The destination directory where HSA code object files are placed.
+        destRoot: The library/ root directory. Per-arch outputs are written to
+            destRoot/<base-arch>/; target features (xnack+/xnack-) are stripped
+            from the directory path and survive only in the filename suffix.
         tmpObjDir: The directory where HIP source object files are created.
         includeDir: The include directory path.
         kernelPath: The path to the kernel source file.
@@ -98,7 +100,7 @@ def buildSourceCodeObjectFiles(
 
     with timing_context("python_kernel_build_src_co.setup"):
         tmpObjDir = Path(ensurePath(tmpObjDir))
-        destDir = Path(ensurePath(destDir))
+        destRoot = Path(ensurePath(destRoot))
         kernelPath = Path(kernelPath)
 
         objFilename = kernelPath.stem + '.o'
@@ -107,8 +109,9 @@ def buildSourceCodeObjectFiles(
 
     # Try to restore pre-built code objects from the helper-kernel cache.
     # On a hit we skip compilation/unbundling entirely and return early.
+    # The cache restore routes each file to its per-base subdir under destRoot.
     with timing_context("python_kernel_build_src_co.cache_check"):
-        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destDir)
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot)
     if hit:
         stop = timer()
         print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
@@ -127,6 +130,8 @@ def buildSourceCodeObjectFiles(
             if not coPathRaw: continue
             bundler(target, objPath, str(coPathRaw))
 
+            # Route to the per-base subdir; xnack survives in the filename only.
+            destDir = Path(ensurePath(destRoot / arch.split("-xnack")[0]))
             coPath = str(destDir / coPathRaw.stem)
             coPathsRaw.append(coPathRaw)
             coPaths.append(coPath)

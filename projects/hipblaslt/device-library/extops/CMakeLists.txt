@@ -87,8 +87,12 @@ foreach(arch IN LISTS archs)
             ${HIPBLASLT_PYTHON_DEPS}
             ${previous_target}
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library/hipblasltExtOpLibrary_${arch}.dat"
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${HIPBLASLT_TENSILE_LIBPATH}/library"
+        # Co-locate ExtOp artifacts in the per-base library/<arch>/ subdir alongside
+        # Tensile kernels. The _<arch> filename suffix is preserved so per-arch
+        # variants don't collide if the layout ever flattens.
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
         COMMENT "Creating hipblasltExtOpLibrary_${arch}.dat"
     )
     # Update previous target for next iteration

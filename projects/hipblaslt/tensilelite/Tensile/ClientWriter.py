@@ -45,7 +45,7 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .TensileCreateLibrary import copyStaticFiles, libraryDir, _singleArchDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -120,9 +120,13 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  libraryGlobBase = libraryDir(clientLibraryPath, archs)
-  coList = glob(os.path.join(libraryGlobBase, "*.co"))
-  yamlList = glob(os.path.join(libraryGlobBase, "*.yaml"))
+  # Kernels fan out into one per-base subdir per arch; union the globs across them.
+  coList = []
+  yamlList = []
+  for arch in archs:
+    archDir = libraryDir(clientLibraryPath, arch)
+    coList.extend(glob(os.path.join(archDir, "*.co")))
+    yamlList.extend(glob(os.path.join(archDir, "*.yaml")))
 
   clientParametersPaths = []
   splitGSU = False
@@ -762,7 +766,12 @@ def writeClientConfig(
 
 def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    libraryPath = libraryDir(libraryRootPath, archs or [])
+    # Benchmarking always operates on a single arch at a time. If the caller
+    # didn't tell us which, scan library/ for the lone gfx subdir.
+    if archs:
+        libraryPath = libraryDir(libraryRootPath, archs[0])
+    else:
+        libraryPath = _singleArchDir(libraryRootPath)
     libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 

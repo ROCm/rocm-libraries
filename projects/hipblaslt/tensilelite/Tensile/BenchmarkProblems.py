@@ -377,7 +377,8 @@ def writeBenchmarkFiles(
                 s["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
                 s["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
 
-            newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs))
+            # Benchmark builds always target a single base arch; pick its subdir.
+            newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs[0]))
             newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
             libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
             newLibraryFileFull = newLibraryFile + libraryExt

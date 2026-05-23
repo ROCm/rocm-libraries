@@ -3,11 +3,13 @@
 
 # Custom kernels - build from assembly source files into a single combined .co
 
-# Determine the destination directory for custom kernels
+# Determine the destination directory for custom kernels.
+# Co-locate the .co with other gfx950 artifacts under library/gfx950/ so the
+# runtime probe (which keys off the per-arch subdir) finds it consistently.
 if(NOT "${HIPBLASLT_TENSILE_LIBPATH}")
-    set(CUSTOM_KERNEL_DST_DIR "${hipblaslt_BINARY_DIR}/Tensile/library")
+    set(CUSTOM_KERNEL_DST_DIR "${hipblaslt_BINARY_DIR}/Tensile/library/gfx950")
 else()
-    set(CUSTOM_KERNEL_DST_DIR "${HIPBLASLT_TENSILE_LIBPATH}/library")
+    set(CUSTOM_KERNEL_DST_DIR "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx950")
 endif()
 
 file(MAKE_DIRECTORY "${CUSTOM_KERNEL_DST_DIR}")
@@ -169,8 +171,8 @@ if(ROCM_LLD)
     endforeach()
     
     # Link all .o files into a single combined .co file
-    set(COMBINED_CO_FILE "${BUILT_OBJ_DIR}/rr_custom_kernels.co")
-    set(COMBINED_CO_DST "${CUSTOM_KERNEL_DST_DIR}/rr_custom_kernels.co")
+    set(COMBINED_CO_FILE "${BUILT_OBJ_DIR}/rr_custom_kernels_gfx950.co")
+    set(COMBINED_CO_DST "${CUSTOM_KERNEL_DST_DIR}/rr_custom_kernels_gfx950.co")
     
     add_custom_command(
         OUTPUT "${COMBINED_CO_FILE}"
@@ -179,7 +181,7 @@ if(ROCM_LLD)
             -o "${COMBINED_CO_FILE}"
             ${BUILT_OBJ_FILES}
         DEPENDS ${BUILT_OBJ_FILES}
-        COMMENT "Linking all kernel objects into rr_custom_kernels.co"
+        COMMENT "Linking all kernel objects into rr_custom_kernels_gfx950.co"
         VERBATIM
     )
     
@@ -187,7 +189,7 @@ if(ROCM_LLD)
         OUTPUT "${COMBINED_CO_DST}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${COMBINED_CO_FILE}" "${COMBINED_CO_DST}"
         DEPENDS "${COMBINED_CO_FILE}"
-        COMMENT "Copying rr_custom_kernels.co to ${CUSTOM_KERNEL_DST_DIR}"
+        COMMENT "Copying rr_custom_kernels_gfx950.co to ${CUSTOM_KERNEL_DST_DIR}"
         VERBATIM
     )
     

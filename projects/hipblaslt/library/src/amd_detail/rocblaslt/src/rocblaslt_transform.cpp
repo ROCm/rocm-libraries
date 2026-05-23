@@ -63,8 +63,9 @@ namespace
             if(colonPos != std::string::npos)
                 archName = archName.substr(0, colonPos);
 
+            // Per-base layout: library/<arch>/hipblasltTransform_<arch>.hsaco
             auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path("hipblasltTransform_" + archName + ".hsaco"));
+                std::filesystem::path(archName) / ("hipblasltTransform_" + archName + ".hsaco"));
             if(perArchPath)
                 return *perArchPath;
         }
