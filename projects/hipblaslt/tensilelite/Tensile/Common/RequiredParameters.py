@@ -119,5 +119,6 @@ def getRequiredParametersMin() -> set:
         'DtlPlusLdsBuf',
         'MinGRIncPerMfma',
         'UsePLRPack',
-        'UseSubtileImpl'
+        'UseSubtileImpl',
+        'ClusterDim',
     })

@@ -93,6 +93,17 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
+# ROCM-1545: hipblasLtMatmul with INF inputs and computeType HIPBLAS_COMPUTE_32F_FAST_TF32
+# returns NaN on gfx950 (MI355). This test expects correct behavior (no NaN in output).
+- {name: matmul_tf32_inf_ROCM1545, category: pre_checkin, precision: *xf32_precision,
+   function: matmul, transA: N, transB: N, M: 64, N: 64, K: 64, alpha: 1.0, beta: 0.0,
+   initialization: inf }
+
+# Smoke: norm_dist_one_special (Gaussian fill + one FP special); batch_count 2 exercises packed strided buffers.
+- {name: matmul_norm_dist_one_special_smoke, category: quick, precision: *real_precisions,
+   function: matmul, transA: N, transB: N, M: 32, N: 32, K: 32, alpha: 1.0, beta: 0.0,
+   batch_count: 2, initialization: norm_dist_one_special }
+
 - name: matmul_one
   category: quick
   function:
