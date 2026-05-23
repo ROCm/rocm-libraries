@@ -3089,7 +3089,7 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
                                             static_cast<index_t>(coherence));
     }
 #else
-        ignore = descriptor;
+    ignore = descriptor;
 #endif
 }
 
@@ -3121,7 +3121,7 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
                                                static_cast<index_t>(coherence));
     }
 #else
-        ignore = descriptor;
+    ignore = descriptor;
 #endif
 }
 
