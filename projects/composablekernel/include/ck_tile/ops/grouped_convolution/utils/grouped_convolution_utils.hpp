@@ -6,6 +6,8 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/convolution_parameter.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "ck_tile/ops/grouped_convolution/utils/convolution_specialization.hpp"
+#include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 
 namespace ck_tile {
 
@@ -71,7 +73,8 @@ template <index_t NDimSpatial_,
           index_t VectorSizeC_      = 1,
           index_t NumGroupsToMerge_ = 1,
           bool EnableSplitImage_    = false,
-          bool ExplicitGemm_        = false>
+          bool ExplicitGemm_        = false,
+          bool EnableWcnn_          = false>
 struct GroupedConvTraits
 {
     private:
@@ -100,6 +103,7 @@ struct GroupedConvTraits
     static constexpr index_t NumGroupsToMerge                     = NumGroupsToMerge_;
     static constexpr bool EnableSplitImage                        = EnableSplitImage_;
     static constexpr bool ExplicitGemm                            = ExplicitGemm_;
+    static constexpr bool EnableWcnn                              = EnableWcnn_;
     static constexpr index_t NDimSpatial                          = NDimSpatial_;
     static constexpr ConvolutionSpecialization ConvSpecialization = ConvSpecialization_;
     using InLayout                                                = InLayout_;

@@ -2,16 +2,23 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "ck_tile/ops/grouped_convolution/block/block_wcnn_asmem_bsmem_creg.hpp"
 #include "ck_tile/ops/grouped_convolution/kernel/grouped_convolution_backward_data_kernel.hpp"
 #include "ck_tile/ops/grouped_convolution/kernel/grouped_convolution_backward_weight_kernel.hpp"
 #include "ck_tile/ops/grouped_convolution/kernel/grouped_convolution_forward_kernel.hpp"
 #include "ck_tile/ops/grouped_convolution/pipeline/grouped_conv_universal_pipeline_ag_bg_cr_policy.hpp"
+#include "ck_tile/ops/grouped_convolution/pipeline/wcnn_forward_ag_bg_cr_default_policy.hpp"
+#include "ck_tile/ops/grouped_convolution/pipeline/wcnn_pipeline_ag_bg_cr_comp_default.hpp"
+#include "ck_tile/ops/grouped_convolution/pipeline/wcnn_pipeline_problem.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/convolution_specialization.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/split_k_utils.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/transform_conv_bwd_data_to_gemm.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/transform_conv_bwd_weight_to_gemm.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/transform_conv_fwd_to_gemm.hpp"
+#include "ck_tile/ops/grouped_convolution/warp/warp_conv_dispatcher.hpp"
+#include "ck_tile/ops/grouped_convolution/warp/warp_conv_impl.hpp"
+#include "ck_tile/ops/grouped_convolution/warp/warp_conv_intrinsic.hpp"
 #include "ck_tile/ops/common/generic_2d_block_shape.hpp"
 #include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/ops/common/streamk_common.hpp"

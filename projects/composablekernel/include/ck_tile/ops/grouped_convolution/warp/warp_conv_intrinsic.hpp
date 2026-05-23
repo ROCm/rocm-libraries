@@ -93,7 +93,7 @@ template <typename DataType>
 constexpr bool GetAcoFlag()
 {
     // ACO uses different channel order for accumulators, which requires different MOD settings
-    if constexpr(std::same_as<DataType, fp16_t> || std::same_as<DataType, bf16_t>)
+    if constexpr(is_any_of<DataType, fp16_t, bf16_t>::value)
         return true;
     else
         return false;
@@ -110,7 +110,7 @@ template <bool AcoFlag,
 struct WarpConvIntrinsicBase
 {
     template <bool TensorSigned = false, bool WeightSigned = false, bool HighLane = false>
-    static constexpr CK_TILE_DEVICE CK_TILE_HOST index_t GetMods()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetMods()
     {
         return wcnn_mods::GetFilterSizeMod<FilterSizeY, FilterSizeX>() |
                wcnn_mods::GetAccumIsBiasMod<false>() |
@@ -124,8 +124,7 @@ struct WarpConvIntrinsicBase
 
 // Primary template — static_assert on unsupported combinations
 template <typename ImgDataType,
-          typename InAccDataType,
-          typename OutAccDataType,
+          typename AccDataType,
           bool AcoFlag,
           index_t HPerWcnn,
           index_t WPerWcnn,
@@ -146,10 +145,11 @@ struct WarpConvIntrinsic
 // ============================================================
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 1>
+struct WarpConvIntrinsic<half_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 1>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0)
     {
         return __builtin_amdgcn_convolve_f32_f16_4x2(acc, wei, a0, GetMods(), false);
@@ -157,10 +157,11 @@ struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 };
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 2>
+struct WarpConvIntrinsic<half_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 2>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1)
     {
         return __builtin_amdgcn_convolve_f32_f16_4x2(acc, wei, a0, a1, GetMods(), false);
@@ -168,10 +169,11 @@ struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 };
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 3>
+struct WarpConvIntrinsic<half_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 3>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2)
     {
         return __builtin_amdgcn_convolve_f32_f16_4x2(acc, wei, a0, a1, a2, GetMods(), false);
@@ -179,10 +181,11 @@ struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 };
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 4>
+struct WarpConvIntrinsic<half_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 4>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto
     call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2, ImgVec a3)
     {
@@ -195,10 +198,11 @@ struct WarpConvIntrinsic<half_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 // ============================================================
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 1>
+struct WarpConvIntrinsic<bf16_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 1>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0)
     {
         return __builtin_amdgcn_convolve_f32_bf16_4x2(acc, wei, a0, GetMods(), false);
@@ -206,10 +210,11 @@ struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 };
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 2>
+struct WarpConvIntrinsic<bf16_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 2>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1)
     {
         return __builtin_amdgcn_convolve_f32_bf16_4x2(acc, wei, a0, a1, GetMods(), false);
@@ -217,10 +222,11 @@ struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 };
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 3>
+struct WarpConvIntrinsic<bf16_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 3>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2)
     {
         return __builtin_amdgcn_convolve_f32_bf16_4x2(acc, wei, a0, a1, a2, GetMods(), false);
@@ -228,14 +234,129 @@ struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, D
 };
 
 template <bool AcoFlag, index_t DilationY, index_t DilationX>
-struct WarpConvIntrinsic<bf16_t, float, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 4>
+struct WarpConvIntrinsic<bf16_t, float, AcoFlag, 4, 2, 1, 1, DilationY, DilationX, 4>
     : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>
 {
-    template <typename AccVec, typename WeiVec, typename ImgVec>
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
     CK_TILE_DEVICE static auto
     call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2, ImgVec a3)
     {
         return __builtin_amdgcn_convolve_f32_bf16_4x2(acc, wei, a0, a1, a2, a3, GetMods(), false);
+    }
+};
+
+// ============================================================
+// fp16, 4x4 tile, 1x1 filter
+// ============================================================
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 4, 4, 1, 1, DilationY, DilationX, 1>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>
+{
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_4x4(acc, wei, a0, GetMods(), false);
+    }
+};
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 4, 4, 1, 1, DilationY, DilationX, 2>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>
+{
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_4x4(acc, wei, a0, a1, GetMods(), false);
+    }
+};
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 4, 4, 1, 1, DilationY, DilationX, 3>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>
+{
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_4x4(acc, wei, a0, a1, a2, GetMods(), false);
+    }
+};
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 4, 4, 1, 1, DilationY, DilationX, 4>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>
+{
+    using WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto
+    call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2, ImgVec a3)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_4x4(acc, wei, a0, a1, a2, a3, GetMods(), false);
+    }
+};
+
+// ============================================================
+// fp16, 8x4 tile, 1x1 filter
+// ============================================================
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 8, 4, 1, 1, DilationY, DilationX, 1>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>
+{
+    using Base1 = WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 1>;
+    using Base1::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_8x4(
+            acc, wei, a0, Base1::template GetMods<false, false, HighLane>(), false);
+    }
+};
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 8, 4, 1, 1, DilationY, DilationX, 2>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>
+{
+    using Base2 = WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 2>;
+    using Base2::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_8x4(
+            acc, wei, a0, a1, Base2::template GetMods<false, false, HighLane>(), false);
+    }
+};
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 8, 4, 1, 1, DilationY, DilationX, 3>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>
+{
+    using Base3 = WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 3>;
+    using Base3::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_8x4(
+            acc, wei, a0, a1, a2, Base3::template GetMods<false, false, HighLane>(), false);
+    }
+};
+
+template <bool AcoFlag, index_t DilationY, index_t DilationX>
+struct WarpConvIntrinsic<half_t, half_t, AcoFlag, 8, 4, 1, 1, DilationY, DilationX, 4>
+    : WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>
+{
+    using Base4 = WarpConvIntrinsicBase<AcoFlag, 1, 1, DilationY, DilationX, 4>;
+    using Base4::GetMods;
+    template <bool HighLane = false, typename AccVec, typename WeiVec, typename ImgVec>
+    CK_TILE_DEVICE static auto
+    call(AccVec acc, WeiVec wei, ImgVec a0, ImgVec a1, ImgVec a2, ImgVec a3)
+    {
+        return __builtin_amdgcn_convolve_f16_f16_8x4(
+            acc, wei, a0, a1, a2, a3, Base4::template GetMods<false, false, HighLane>(), false);
     }
 };
 
