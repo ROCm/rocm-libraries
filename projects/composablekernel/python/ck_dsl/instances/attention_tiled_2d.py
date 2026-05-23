@@ -260,6 +260,11 @@ class UnifiedAttention2DTiledSpec:
     # two direct block-table loads per tile and simple shift/add byte arithmetic
     # instead of the generic TensorDescriptor transform DAG.
     use_fast_paged_kv_desc: bool = False
+    # Experimental schedule: issue the current V async copy immediately after
+    # the iter-start K drain/barrier, before QK. This gives V the whole QK plus
+    # softmax window to arrive; the next-K prefetch is still issued after QK so
+    # the partial wait before PV can leave only next K pending.
+    use_early_v_schedule: bool = False
     # Backend residency experiment for accumulator-touching 32x32 attention:
     # request zero AGPR allocation so LLVM selects VGPR-form MFMA and avoids
     # AGPR<->VGPR copies around the online-softmax/PV accumulator scaling.
@@ -353,6 +358,11 @@ class UnifiedAttention2DTiledSpec:
                 )
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
+        if self.use_early_v_schedule:
+            if self.use_grouped_kv2_softmax:
+                raise ValueError("use_early_v_schedule does not support grouped_kv2")
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_early_v_schedule v1 does not support FP8 KV")
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"
@@ -497,6 +507,7 @@ class UnifiedAttention2DTiledSpec:
             "mlim" if self.use_transposed_mask_limit else "",
             "gkv2" if self.use_grouped_kv2_softmax else "",
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
+            "earlyv" if self.use_early_v_schedule else "",
             "agpr0" if self.use_agpr_alloc_zero else "",
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
@@ -658,6 +669,7 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     TRANSPOSED_MASK_LIMIT = spec.use_transposed_mask_limit
     GROUPED_KV2 = spec.use_grouped_kv2_softmax
     FAST_PAGED_KV_DESC = spec.use_fast_paged_kv_desc
+    EARLY_V_SCHEDULE = spec.use_early_v_schedule
     # FP8 K/V cache: when set, K/V cache pointers are ``ptr<fp8e4m3, global>``
     # (one byte per element), the async DMA path is disabled, and a sync
     # per-thread load + ``cvt_fp8_to_f32 * k_scale -> cast<bf16>`` chain
@@ -2297,6 +2309,11 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         # the previous iteration waited all async loads before PV.
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
+        if EARLY_V_SCHEDULE:
+            # V_lds is single-buffered. The iter-start full drain guarantees
+            # the previous PV's V reads retired, so current V can be issued
+            # before QK and overlap with QK + softmax.
+            _issue_v(kv_tile_iv, cur_buf)
         if GROUPED_KV2:
             # Prototype schedule: while QK0 reads cur_buf, prefetch QK1 into
             # nxt_buf. This keeps the two K tiles resident simultaneously but
@@ -2688,6 +2705,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             # Both K buffers have been consumed by QK0/QK1. Refill cur_buf
             # with the next group's first K tile and carry cur_buf forward.
             _issue_k(safe_next_tile, cur_buf)
+        elif EARLY_V_SCHEDULE:
+            _issue_k(safe_next_tile, nxt_buf)
         else:
             _issue_v(kv_tile_iv, cur_buf)
             _issue_k(safe_next_tile, nxt_buf)
