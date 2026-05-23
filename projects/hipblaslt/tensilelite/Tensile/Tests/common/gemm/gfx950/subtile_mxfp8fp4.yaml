@@ -33,9 +33,9 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
-      MacDataTypeA: F4
-      MacDataTypeB: F8
+      DataType: F8
+      MacDataTypeA: F8
+      MacDataTypeB: F4
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -73,9 +73,9 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
-      MacDataTypeA: F4
-      MacDataTypeB: F8
+      DataType: F8
+      MacDataTypeA: F8
+      MacDataTypeB: F4
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True

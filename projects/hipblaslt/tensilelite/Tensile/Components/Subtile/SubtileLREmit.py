@@ -402,10 +402,12 @@ def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
   loadWidth = tileInfo.loadWidthLR
   numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
   blockSize = subIterKBytes // loadWidth
+ 
+  colOffsetStride = blockSize // tileInfo.numLRPerSubtile
 
   module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
   for vgprId in range(1, len(tileInfo.sharedVgprLROffset)):
-    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId-1]), src1=hex(numMFMACols), comment="%s: colOffset for MFMA %u of subtile"%(tc, vgprId)))
+    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId-1]), src1=hex(colOffsetStride), comment="%s: colOffset for ds_read %u of subtile (stride=%d)"%(tc, vgprId, colOffsetStride)))
     module.add(VAndB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=hex(blockSize-1), comment="%s: colOffset = colOffset %% block_size"%tc))
 
   for vgprId in range(0, len(tileInfo.sharedVgprLROffset)):
