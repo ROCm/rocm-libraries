@@ -35,7 +35,7 @@ from copy import deepcopy
 from typing import Tuple
 PRECISION = 100
 class SIA3(SIA):
-    kernel = {"ScheduleIterAlg": 3}
+    kernel = {"_ScheduleIterAlg": 3}
     def __call__(self):
         assert(0)
 
@@ -93,7 +93,7 @@ class SIA3(SIA):
               firstIter, lastLc, isNGLL, startIterItem)
 
 class SIA2(SIA):
-    kernel = {"ScheduleIterAlg": 2}
+    kernel = {"_ScheduleIterAlg": 2}
     def __call__(self):
         assert(0)
 
@@ -121,7 +121,7 @@ class SIA2(SIA):
               firstIter, lastLc, isNGLL)
 
 class SIA1(SIA):
-    kernel = {"ScheduleIterAlg": 1}
+    kernel = {"_ScheduleIterAlg": 1}
     def __call__(self):
         assert(0)
 
@@ -149,7 +149,7 @@ class SIA1(SIA):
               firstIter, lastLc, isNGLL)
 
 class SIA0(SIA):
-    kernel = {"ScheduleIterAlg": 0}
+    kernel = {"_ScheduleIterAlg": 0}
     def __call__(self):
         assert False
 
