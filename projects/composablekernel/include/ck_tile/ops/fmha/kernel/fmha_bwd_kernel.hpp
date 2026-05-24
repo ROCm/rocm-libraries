@@ -120,9 +120,7 @@ struct FmhaBwdWorkspaceManager
     {
         if constexpr(kUseQrQtrDorPipeline)
             return 0;
-        const size_t raw = GetDqAccSplitsSize<kUseQrQtrDorPipeline>(batch) +
-                           GetDqAccOffsetsSize(batch) + GetCuStateSize(get_num_cus()) +
-                           GetBatchStateSize(batch);
+        const size_t raw = GetBatchStateOffset(batch) + GetBatchStateSize(batch);
         // Pad to 4K so dq_acc buffer always starts on a page-aligned boundary.
         return integer_least_multiple(raw, static_cast<size_t>(4096));
     }
@@ -147,6 +145,12 @@ struct FmhaBwdWorkspaceManager
         return GetWorkspaceHostSize<kUseQrQtrDorPipeline>(batch);
     }
 
+    template <typename T>
+    CK_TILE_HOST static T* workspace_ptr(void* base, size_t offset)
+    {
+        return reinterpret_cast<T*>(static_cast<char*>(base) + offset);
+    }
+
     // Fill CPU prepared workspace and return size of non CPU prepared workspace size
     template <bool kUseQrQtrDorPipeline, index_t kN0, index_t kM0>
     CK_TILE_HOST static size_t
@@ -169,8 +173,8 @@ struct FmhaBwdWorkspaceManager
         if(reinterpret_cast<uintptr_t>(cpu_ws) % 16 != 0)
             throw std::runtime_error("PrepareWorkspaceHost: cpu_ws must be 16-byte aligned");
         const auto nsplits = reinterpret_cast<index_t*>(cpu_ws);
-        const auto offsets = reinterpret_cast<long_index_t*>(reinterpret_cast<char*>(cpu_ws) +
-                                                             GetDqAccSplitsSize<false>(batch_size));
+        const auto offsets =
+            workspace_ptr<long_index_t>(cpu_ws, GetDqAccSplitsSize<false>(batch_size));
         if constexpr(kIsGroupMode)
             if(!seqstart_qs || !seqstart_ks)
                 throw std::runtime_error("seqstart_qs and seqstart_ks are required for group mode");
@@ -190,15 +194,15 @@ struct FmhaBwdWorkspaceManager
             // Step 1: compute prefix_batch and target_w using per-batch seqlens.
             // prefix_batch[b] = sum_{i<b}(nhead * nc[i] * sq_work[i]); drives CU partition.
             const index_t num_cus = get_num_cus();
-            std::vector<index_t> prefix_batch(batch_size + 1);
-            auto* cu_states_out = reinterpret_cast<FmhaBwdGroupPersistentCuState*>(
-                reinterpret_cast<char*>(cpu_ws) + GetCuStateOffset(batch_size));
-            auto* batch_states = reinterpret_cast<FmhaBwdBatchState*>(
-                reinterpret_cast<char*>(cpu_ws) + GetBatchStateOffset(batch_size));
+            auto prefix_batch     = std::make_unique<index_t[]>(batch_size + 1);
+            auto* cu_states_out =
+                workspace_ptr<FmhaBwdGroupPersistentCuState>(cpu_ws, GetCuStateOffset(batch_size));
+            auto* batch_states =
+                workspace_ptr<FmhaBwdBatchState>(cpu_ws, GetBatchStateOffset(batch_size));
 
             // Build CU states in logical-CU order; copied to cu_states_out
             // with an XCD-contiguous remap at the end.
-            std::vector<FmhaBwdGroupPersistentCuState> cu_states(num_cus);
+            auto cu_states = std::make_unique<FmhaBwdGroupPersistentCuState[]>(num_cus);
 
             // sq_work: sq aligned to kM0 for work-distribution purposes.
             // If sq==0, use kM0 so CUs are still dispatched and write dK/dV=0.
