@@ -24,6 +24,8 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu {
@@ -60,7 +62,16 @@ void Backend::configurePassManager(PassManager& pm) {
     pm.setGemmTileConfig(gemmTileConfig);
 
     AsmCapsConfig asmCapsConfig;
-    asmCapsConfig.hasVgprMsb16 = opts.HasVgprMSB16;
+    asmCapsConfig.vgprMsbMode = static_cast<VgprMsbMode>(opts.VgprMsbMode);
+
+    // When VgprMsbMode was not set explicitly (standalone path without rocisa),
+    // auto-probe using comgr if available.
+    if (asmCapsConfig.vgprMsbMode == VgprMsbMode::None) {
+        auto arch = module.getArch();
+        GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+        asmCapsConfig = ToolchainCaps::probe(archId);
+    }
+
     pm.setAsmCapsConfig(asmCapsConfig);
 }
 

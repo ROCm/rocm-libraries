@@ -84,6 +84,17 @@ endforeach(arch)
 
 message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 
+# AMD comgr for runtime assembler capability probing (must be before configure_file)
+if(DEFINED ENV{ROCM_PATH})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}")
+endif()
+find_package(amd_comgr CONFIG)
+if(NOT amd_comgr_FOUND)
+    message(FATAL_ERROR
+        "amd_comgr not found. Set ROCM_PATH or CMAKE_PREFIX_PATH to your ROCm installation.")
+endif()
+set(STINKYTOFU_HAS_COMGR 1)
+
 configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
 
@@ -173,6 +184,8 @@ add_dependencies(stinkytofu tablegen_generated)
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
 find_package(Threads REQUIRED)
 target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+
+target_link_libraries(stinkytofu PRIVATE amd_comgr)
 
 # Add source files from src/ subdirectory
 add_subdirectory(src)
