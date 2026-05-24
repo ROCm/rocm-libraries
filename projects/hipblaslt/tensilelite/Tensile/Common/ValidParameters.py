@@ -282,6 +282,8 @@ validParameters = { # we need to make sure this matches develop
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
+    # Enable GL2 prefetch using global_prefetch_b8 instruction
+    "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop

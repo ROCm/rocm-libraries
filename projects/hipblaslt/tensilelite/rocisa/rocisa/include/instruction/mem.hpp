@@ -3337,4 +3337,80 @@ namespace rocisa
         RegContainerPtr group2;
         RegContainerPtr group3;
     };
+
+    struct GlobalPrefetchB8 : public Instruction
+    {
+        GlobalPrefetchB8(const std::shared_ptr<Container>&    v_addr,
+                         const std::shared_ptr<Container>&    s_addr,
+                         const std::optional<GLOBALModifiers> gm = std::nullopt,
+                         const std::string&             comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , v_addr(v_addr)
+            , s_addr(s_addr)
+            , gm(gm)
+        {
+            if(getAsmCaps()["HasGlobalPrefetch"])
+            {
+                setInst("global_prefetch_b8");
+            }
+            else
+            {
+                throw std::runtime_error("global_prefetch_b8 is not supported.");
+            }
+        }
+
+        GlobalPrefetchB8(const GlobalPrefetchB8& other)
+            : GlobalPrefetchB8(other.v_addr,
+                       other.s_addr,
+                       other.gm)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalPrefetchB8>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {v_addr, s_addr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {v_addr, s_addr};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(v_addr && !v_addr->toString().empty())
+            {
+                kStr += " " + v_addr->toString();
+            }
+            if(s_addr && !s_addr->toString().empty())
+            {
+                kStr += ", " + s_addr->toString();
+            }
+            else{
+                kStr += ", off";
+            }
+            if(gm)
+                kStr += gm->toString();
+
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {v_addr, s_addr}, nullptr);
+            return formatWithComment(kStr);
+        }
+
+    private:
+        std::shared_ptr<Container> v_addr;
+        std::shared_ptr<Container> s_addr;
+        std::optional<GLOBALModifiers> gm;
+    };
 } // namespace rocisa

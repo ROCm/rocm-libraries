@@ -536,4 +536,23 @@ namespace rocisa
             return "";
         }
     }
+
+    enum class TemporalHint : int
+    {
+        TH_DEFAULT  = 0,
+        TH_LOAD_NT = 1
+    };
+
+    inline std::string toString(TemporalHint th)
+    {
+        switch(th)
+        {
+        case TemporalHint::TH_DEFAULT:
+            return "TH_DEFAULT";
+        case TemporalHint::TH_LOAD_NT:
+            return "TH_LOAD_NT";
+        default:
+            return "";
+        }
+    }
 }

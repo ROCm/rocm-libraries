@@ -425,6 +425,7 @@ defaultBenchmarkCommonParameters = [
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
+    {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},

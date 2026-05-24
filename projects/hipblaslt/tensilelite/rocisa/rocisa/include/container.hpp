@@ -196,17 +196,27 @@ namespace rocisa
         NonVolatile  nv;
     };
 
+    // Modifiers for global_* memory ops: the immediate offset (offset:N) plus the
+    // temporal hint / cache scope used by global_prefetch_b8 (gfx1250 gl2-prefetch).
+    // Offset-only ops leave th/ms at their defaults (TH_DEFAULT / SCOPE_CU), which
+    // are not printed.
     struct GLOBALModifiers : public Container
     {
-        GLOBALModifiers(int offset = 0)
+        GLOBALModifiers(int          offset = 0,
+                        TemporalHint th     = TemporalHint::TH_DEFAULT,
+                        CacheScope   ms     = CacheScope::SCOPE_CU)
             : Container()
             , offset(offset)
+            , th(th)
+            , ms(ms)
         {
         }
 
         GLOBALModifiers(const GLOBALModifiers& other)
             : Container()
             , offset(other.offset)
+            , th(other.th)
+            , ms(other.ms)
         {
         }
 
@@ -222,10 +232,20 @@ namespace rocisa
             {
                 kStr += " offset:" + std::to_string(offset);
             }
+            if(th != TemporalHint::TH_DEFAULT)
+            {
+                kStr += " th:" + rocisa::toString(th);
+            }
+            if(ms != CacheScope::SCOPE_CU)
+            {
+                kStr += " scope:" + rocisa::toString(ms);
+            }
             return kStr;
         }
 
-        int offset;
+        int          offset;
+        TemporalHint th;
+        CacheScope   ms;
     };
 
     struct MUBUFModifiers : public Container
