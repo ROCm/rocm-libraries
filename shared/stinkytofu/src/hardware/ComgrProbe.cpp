@@ -8,7 +8,45 @@
 #include <amd_comgr/amd_comgr.h>
 
 #include <vector>
-#endif
+
+#ifdef _WIN32
+#include <Windows.h>
+#include <delayimp.h>
+
+#include <cstdlib>
+#include <string>
+
+namespace {
+
+std::string getRocmBinDir() {
+    char* rocmPath = nullptr;
+    size_t len = 0;
+    _dupenv_s(&rocmPath, &len, "ROCM_PATH");
+    if (!rocmPath) return {};
+    std::string binDir = std::string(rocmPath) + "\\bin";
+    free(rocmPath);
+    return binDir;
+}
+
+FARPROC WINAPI delayLoadHook(unsigned dliNotify, PDelayLoadInfo pdli) {
+    if (dliNotify != dliNotePreLoadLibrary) return nullptr;
+
+    std::string binDir = getRocmBinDir();
+    if (binDir.empty()) return nullptr;
+
+    std::string fullPath = binDir + "\\" + pdli->szDll;
+    HMODULE mod =
+        LoadLibraryExA(fullPath.c_str(), nullptr,
+                       LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    return reinterpret_cast<FARPROC>(mod);
+}
+
+}  // namespace
+
+extern "C" const PfnDliHook __pfnDliNotifyHook2 = delayLoadHook;
+#endif  // _WIN32
+
+#endif  // STINKYTOFU_HAS_COMGR
 
 namespace stinkytofu {
 

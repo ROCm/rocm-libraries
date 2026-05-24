@@ -187,6 +187,20 @@ target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
 target_link_libraries(stinkytofu PRIVATE amd_comgr)
 
+# On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
+# than at process startup.  A delay-load hook in ComgrProbe.cpp calls
+# AddDllDirectory(ROCM_PATH) so the loader can find the DLL without requiring
+# the user to add ROCM_PATH\bin to PATH.
+if(WIN32)
+    if(BUILD_SHARED_LIBS)
+        target_link_options(stinkytofu PRIVATE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
+        target_link_libraries(stinkytofu PRIVATE delayimp)
+    else()
+        target_link_options(stinkytofu INTERFACE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
+        target_link_libraries(stinkytofu INTERFACE delayimp)
+    endif()
+endif()
+
 # Add source files from src/ subdirectory
 add_subdirectory(src)
 
