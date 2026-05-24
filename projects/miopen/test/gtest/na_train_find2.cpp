@@ -12,7 +12,7 @@
 #include "network_data.hpp"
 #include "compare_helper.hpp"
 
-#include <miopen//fusionHost.hpp>
+#include <miopen/fusionHost.hpp>
 #include <miopen/batch_norm.hpp>
 
 #include <gtest/gtest.h>
