@@ -13,7 +13,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
+#include <memory>
 
 // S[seqlen_q, seqlen_k] = Q[seqlen_q, hdim_q] @ K[seqlen_k, hdim_q]
 // S'[seqlen_q, seqlen_k] = S[seqlen_q, seqlen_k] * Scale[1]
