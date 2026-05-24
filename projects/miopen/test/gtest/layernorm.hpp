@@ -24,15 +24,13 @@
  *
  *******************************************************************************/
 
-#include <../test/get_handle.hpp>
-#include <../test/random.hpp>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-#include "cpu_layernorm.hpp"
-#include <gtest/gtest.h>
+#include "get_handle.hpp"
+
+#include <miopen/cpu_layernorm.hpp>
 #include <miopen/layernorm.hpp>
-#include <miopen/miopen.h>
-#include <string>
+#include <miopen/verify.hpp>
+
+#include <gtest/gtest.h>
 
 struct LayerNormTestCase
 {

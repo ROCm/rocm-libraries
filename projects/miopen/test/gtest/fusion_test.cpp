@@ -23,18 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest.h>
-#include <gtest/gtest_common.hpp>
-#include <miopen/miopen.h>
-#include <miopen/fusion.hpp>
 #include <miopen/fusion/solvers.hpp>
-#include <miopen/find_solution.hpp>
 
-#include "tensor_holder.hpp"
-#include "get_handle.hpp"
 #include "cba.hpp"
 #include "gtest_desc_guard.hpp"
-#include "../lib_env_var.hpp"
 
 #if MIOPEN_BACKEND_HIP
 namespace {

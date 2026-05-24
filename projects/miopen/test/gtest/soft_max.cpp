@@ -1,11 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "get_handle.hpp"
-#include "miopen/miopen.h"
-#include "verify.hpp"
 #include <gtest/gtest.h>
+
 #include <miopen/softmax.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
+
+#include "get_handle.hpp"
+#include "network_data.hpp"
 
 #define NEGATIVE_CUTOFF_VAL_FP32 (-1e20)
 #define NEGATIVE_CUTOFF_VAL_FP16 (-1e4)

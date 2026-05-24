@@ -1,22 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <iostream>
-#include <limits>
-
-#include "../driver.hpp"
-#include "miopen/check_numerics.hpp"
-#include "miopen/handle.hpp"
-#include "../tensor_holder.hpp"
-
+#include <miopen/handle.hpp>
 #include <miopen/convolution.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/check_numerics.hpp>
+
+#include <fstream>
 #include <gtest/gtest.h>
 
 namespace fs = miopen::fs;
 
 const std::string test_file_name_prefix = "dumptensortest_";
-const size_t tensor_size                = 20;
-const size_t nan_index                  = 5;
+const size_t tensor_size{20};
+const size_t nan_index{5};
 
 template <class T>
 void prettyPrintTensor(const tensor<T>& host_tensor)

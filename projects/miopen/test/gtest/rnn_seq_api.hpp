@@ -25,27 +25,17 @@
  *******************************************************************************/
 #pragma once
 
-#include "gtest_common.hpp"
+#include <gtest/gtest.h>
+
 #include "compare_helper.hpp"
-#include "gtest_desc_guard.hpp"
-#include "../dropout_util.hpp"
+#include "dropout_util.hpp"
 #include "get_handle.hpp"
-
-#include "random.hpp"
-#include <cstdlib>
-#include <iostream>
-#include <algorithm>
-
-#include <miopen/rnn.hpp>
-#include <miopen/miopen.h>
-#include <miopen/float_equal.hpp>
 
 //
 // Native rnn tensor format
 //
-#include "../seq_tensor_holder.hpp"
-#include "../rnn_util.hpp"
-#include "../cpu_rnn.hpp"
+#include "seq_tensor_holder.hpp"
+#include "cpu_rnn.hpp"
 ///
 
 namespace {

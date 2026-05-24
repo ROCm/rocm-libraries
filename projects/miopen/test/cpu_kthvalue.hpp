@@ -26,12 +26,9 @@
 
 #pragma once
 
-#include "tensor_holder.hpp"
-#include "tensor_view.hpp"
+#include <miopen/tensor_holder.hpp>
 
 #include <miopen/tensor_view_utils.hpp>
-
-#include <vector>
 
 template <typename TIO>
 void cpu_kthvalue(tensor<TIO> input,

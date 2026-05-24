@@ -6,9 +6,9 @@
 #include <miopen/find_solution.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/temp_file.hpp>
+#include <miopen/random.hpp>
 
-#include "random.hpp"
-#include "../get_handle.hpp"
+#include "get_handle.hpp"
 
 namespace {
 class TrivialTestSolver final : public miopen::solver::conv::ConvSolver

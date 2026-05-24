@@ -23,12 +23,13 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/datatype.hpp>
 #include <gtest/gtest.h>
 
 #include "get_handle.hpp"
-#include "tensor_util.hpp"
-#include "verify.hpp"
+
+#include <miopen/datatype.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 #define PERF_ENABLE 0
 #if PERF_ENABLE

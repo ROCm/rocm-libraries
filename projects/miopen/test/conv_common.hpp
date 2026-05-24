@@ -25,9 +25,6 @@
  *******************************************************************************/
 #pragma once
 
-#include "test.hpp"
-#include "workspace.hpp"
-
 #include <miopen/convolution.hpp>
 #include <miopen/tensor_holder.hpp>
 #include <miopen/tensor_layout.hpp>
@@ -35,9 +32,9 @@
 #include <miopen/find_db.hpp>
 #include <miopen/cpu_conv.hpp>
 
-#include "driver.hpp"
-#include "get_handle.hpp"
+#include "workspace.hpp"
 #include "gpu_conv.hpp"
+#include "driver.hpp"
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
 

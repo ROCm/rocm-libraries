@@ -26,17 +26,12 @@
 #pragma once
 
 #include <gtest/gtest.h>
-#include "cpu_conv.hpp"
-#include "get_handle.hpp"
-#include "tensor_util.hpp"
-#include <fusionHost.hpp>
-#include <miopen/conv/data_invoke_params.hpp>
-#include "conv_common.hpp"
-#include "hip_float8.hpp"
-#include "verify.hpp"
-#include "../random.hpp"
 
-#include "conv_test_base.hpp"
+#include <miopen/convolution.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
+
+#include "get_handle.hpp"
 #include "f8_cast_util.hpp"
 
 struct ConvTestCaseF8

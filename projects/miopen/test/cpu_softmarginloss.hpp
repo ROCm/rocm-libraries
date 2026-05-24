@@ -25,8 +25,7 @@
  *******************************************************************************/
 #pragma once
 
-#include "miopen/miopen.h"
-#include "tensor_holder.hpp"
+#include <miopen/tensor_holder.hpp>
 #include <miopen/tensor_view_utils.hpp>
 
 template <class T>

@@ -26,10 +26,9 @@
 
 #pragma once
 
-#include "tensor_holder.hpp"
-#include "rnn_util.hpp"
-
 #include <miopen/seq_tensor.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/rnn.hpp>
 
 template <class DataT, class IndexT>
 std::vector<DataT> GetReorderedVector(const std::vector<DataT>& src,

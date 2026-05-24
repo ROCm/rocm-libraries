@@ -24,13 +24,10 @@
  *
  *******************************************************************************/
 
-#include <gtest/ai_heuristics.hpp>
-#include "../tensor_holder.hpp"
-#include "get_handle.hpp"
 #include <miopen/conv/solvers.hpp>
-#include <miopen/conv/heuristics/ai_heuristics.hpp>
-#include <miopen/datatype.hpp>
-#include "../../driver/driver.hpp"
+
+#include "ai_heuristics.hpp"
+#include "../driver/driver.hpp"
 
 struct KernelTuningNetTestCase : AIModelTestCase
 {
@@ -289,9 +286,9 @@ protected:
         ASSERT_TRUE(
             miopen::conv::IsEnoughWorkspace("GetSolutionsFallback AI", solver_id, ws, &invoke_ctx));
 
-        miopen::PerformanceDb db = {miopen::DbKinds::PerfDb, fs::path{"/tmp"}, fs::path {
-                                        "/tmp"
-                                    }}; // empty db, force heuristic
+        miopen::PerformanceDb db = {miopen::DbKinds::PerfDb,
+                                    fs::path{"/tmp"},
+                                    fs::path{"/tmp"}}; // empty db, force heuristic
         miopen::solver::ConvSolution sol =
             solv.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
 

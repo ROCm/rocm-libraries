@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "solver_f8.hpp"
+#include "conv_test_base.hpp"
 
 template <>
 std::vector<ConvTestCaseF8> ConvTestConfigs()

@@ -37,7 +37,7 @@
 #include <algorithm>
 #include <iostream>
 
-#include "../../test/dropout_util.hpp"
+#include "../kernels/miopen_rocrand.hpp"
 
 #define DROPOUT_DEBUG 0
 

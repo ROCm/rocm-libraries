@@ -23,11 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "../conv2d.hpp"
-#include <miopen/miopen.h>
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
-#include "get_handle.hpp"
+#include "conv2d.hpp"
 #include "gtest_common.hpp"
 
 namespace regression_issue_2012 {

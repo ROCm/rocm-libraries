@@ -41,6 +41,7 @@ struct GPU_PReLU_bwd_BFP16 : PReLUTest<bfloat16>
 };
 
 } // namespace prelu
+
 using namespace prelu;
 
 TEST_P(GPU_PReLU_bwd_FP32, Test)

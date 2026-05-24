@@ -24,15 +24,15 @@
  *
  *******************************************************************************/
 
-#include "../driver/tensor_driver.hpp"
-#include "../src/kernels/MIOpenReduceCalculation.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
-#include <gtest/gtest.h>
-#include <miopen/miopen.h>
+
 #include <miopen/reducecalculation.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
+
+#include "../src/kernels/MIOpenReduceCalculation.hpp"
+
+#include <gtest/gtest.h>
 
 template <typename T, ReduceCalculationOp_t op>
 void cpu_calculation_forward(tensor<T> input,

@@ -24,12 +24,9 @@
  *
  *******************************************************************************/
 
-#include <miopen/invoker.hpp>
 #include <miopen/tensor_reorder_util.hpp>
 #include <miopen/tensor_layout.hpp>
 
-#include "gtest_common.hpp"
-#include "random.hpp"
 #include "test_parameter_name_generator.hpp"
 #include "workspace.hpp"
 

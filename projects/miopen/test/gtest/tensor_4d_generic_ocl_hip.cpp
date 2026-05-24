@@ -24,16 +24,20 @@
  *
  *******************************************************************************/
 #include "get_handle.hpp"
-#include "perf_helper.hpp"
 
 #include <miopen/datatype.hpp>
-#include <verify.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 #include <gtest/gtest.h>
 
 #define MAX_TENSOR_ELEM 17
-#define PERF_ENABLE 0
 #define POW_2 1
+
+#define PERF_ENABLE 0
+#if PERF_ENABLE
+#include "perf_helper.hpp"
+#endif
 
 struct TensorsConfig
 {
@@ -360,40 +364,39 @@ protected:
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
-        if constexpr(PERF_ENABLE)
-        {
-            ph.perfTest(handle,
-                        kernel_name,
-                        network_config_ocl,
-                        false,
-                        tensA_dev.get(),
-                        static_cast<int>(tensorsConfig.acstrides[0]),
-                        static_cast<int>(tensorsConfig.acstrides[1]),
-                        static_cast<int>(tensorsConfig.acstrides[2]),
-                        tensB_dev.get(),
-                        static_cast<int>(tensorsConfig.blens[1]),
-                        static_cast<int>(tensorsConfig.blens[2]),
-                        static_cast<int>(tensorsConfig.blens[3]),
-                        static_cast<int>(tensorsConfig.bstrides[0]),
-                        static_cast<int>(tensorsConfig.bstrides[1]),
-                        static_cast<int>(tensorsConfig.bstrides[2]),
-                        tensC_dev.get(),
-                        static_cast<int>(tensorsConfig.aclens[1]),
-                        static_cast<int>(tensorsConfig.aclens[2]),
-                        static_cast<int>(tensorsConfig.aclens[3]),
-                        static_cast<int>(tensorsConfig.acstrides[0]),
-                        static_cast<int>(tensorsConfig.acstrides[1]),
-                        static_cast<int>(tensorsConfig.acstrides[2]),
-                        alpha0,
-                        alpha1,
-                        beta,
-                        bitmap,
-                        work_per_wg,
-                        static_cast<long>(0),
-                        static_cast<long>(0),
-                        static_cast<long>(0),
-                        num_wg_orig);
-        }
+#if PERF_ENABLE
+        ph.perfTest(handle,
+                    kernel_name,
+                    network_config_ocl,
+                    false,
+                    tensA_dev.get(),
+                    static_cast<int>(tensorsConfig.acstrides[0]),
+                    static_cast<int>(tensorsConfig.acstrides[1]),
+                    static_cast<int>(tensorsConfig.acstrides[2]),
+                    tensB_dev.get(),
+                    static_cast<int>(tensorsConfig.blens[1]),
+                    static_cast<int>(tensorsConfig.blens[2]),
+                    static_cast<int>(tensorsConfig.blens[3]),
+                    static_cast<int>(tensorsConfig.bstrides[0]),
+                    static_cast<int>(tensorsConfig.bstrides[1]),
+                    static_cast<int>(tensorsConfig.bstrides[2]),
+                    tensC_dev.get(),
+                    static_cast<int>(tensorsConfig.aclens[1]),
+                    static_cast<int>(tensorsConfig.aclens[2]),
+                    static_cast<int>(tensorsConfig.aclens[3]),
+                    static_cast<int>(tensorsConfig.acstrides[0]),
+                    static_cast<int>(tensorsConfig.acstrides[1]),
+                    static_cast<int>(tensorsConfig.acstrides[2]),
+                    alpha0,
+                    alpha1,
+                    beta,
+                    bitmap,
+                    work_per_wg,
+                    static_cast<long>(0),
+                    static_cast<long>(0),
+                    static_cast<long>(0),
+                    num_wg_orig);
+#endif
     }
 
     void runHIP()
@@ -443,40 +446,39 @@ protected:
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
-        if constexpr(PERF_ENABLE)
-        {
-            ph.perfTest(handle,
-                        kernel_name,
-                        network_config_hip,
-                        false,
-                        tensA_dev.get(),
-                        static_cast<int>(tensorsConfig.acstrides[0]),
-                        static_cast<int>(tensorsConfig.acstrides[1]),
-                        static_cast<int>(tensorsConfig.acstrides[2]),
-                        tensB_dev.get(),
-                        static_cast<int>(tensorsConfig.blens[1]),
-                        static_cast<int>(tensorsConfig.blens[2]),
-                        static_cast<int>(tensorsConfig.blens[3]),
-                        static_cast<int>(tensorsConfig.bstrides[0]),
-                        static_cast<int>(tensorsConfig.bstrides[1]),
-                        static_cast<int>(tensorsConfig.bstrides[2]),
-                        tensC_dev.get(),
-                        static_cast<int>(tensorsConfig.aclens[1]),
-                        static_cast<int>(tensorsConfig.aclens[2]),
-                        static_cast<int>(tensorsConfig.aclens[3]),
-                        static_cast<int>(tensorsConfig.acstrides[0]),
-                        static_cast<int>(tensorsConfig.acstrides[1]),
-                        static_cast<int>(tensorsConfig.acstrides[2]),
-                        alpha0,
-                        alpha1,
-                        beta,
-                        bitmap,
-                        work_per_wg,
-                        static_cast<long>(0),
-                        static_cast<long>(0),
-                        static_cast<long>(0),
-                        num_wg_orig);
-        }
+#if PERF_ENABLE
+        ph.perfTest(handle,
+                    kernel_name,
+                    network_config_hip,
+                    false,
+                    tensA_dev.get(),
+                    static_cast<int>(tensorsConfig.acstrides[0]),
+                    static_cast<int>(tensorsConfig.acstrides[1]),
+                    static_cast<int>(tensorsConfig.acstrides[2]),
+                    tensB_dev.get(),
+                    static_cast<int>(tensorsConfig.blens[1]),
+                    static_cast<int>(tensorsConfig.blens[2]),
+                    static_cast<int>(tensorsConfig.blens[3]),
+                    static_cast<int>(tensorsConfig.bstrides[0]),
+                    static_cast<int>(tensorsConfig.bstrides[1]),
+                    static_cast<int>(tensorsConfig.bstrides[2]),
+                    tensC_dev.get(),
+                    static_cast<int>(tensorsConfig.aclens[1]),
+                    static_cast<int>(tensorsConfig.aclens[2]),
+                    static_cast<int>(tensorsConfig.aclens[3]),
+                    static_cast<int>(tensorsConfig.acstrides[0]),
+                    static_cast<int>(tensorsConfig.acstrides[1]),
+                    static_cast<int>(tensorsConfig.acstrides[2]),
+                    alpha0,
+                    alpha1,
+                    beta,
+                    bitmap,
+                    work_per_wg,
+                    static_cast<long>(0),
+                    static_cast<long>(0),
+                    static_cast<long>(0),
+                    num_wg_orig);
+#endif
     }
 
     void verify()
@@ -495,30 +497,29 @@ protected:
 
     void TearDown() override
     {
-        if constexpr(PERF_ENABLE)
-        {
-            std::string stats{};
-            stats += "_aclens_" + std::to_string(tensorsConfig.aclens[0]) + "_" +
-                     std::to_string(tensorsConfig.aclens[1]) + "_" +
-                     std::to_string(tensorsConfig.aclens[2]) + "_" +
-                     std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
-                     std::to_string(tensorsConfig.acstrides[0]) + "_" +
-                     std::to_string(tensorsConfig.acstrides[1]) + "_" +
-                     std::to_string(tensorsConfig.acstrides[2]) + "_" +
-                     std::to_string(tensorsConfig.acstrides[3]);
-            stats += "_blens_" + std::to_string(tensorsConfig.blens[0]) + "_" +
-                     std::to_string(tensorsConfig.blens[1]) + "_" +
-                     std::to_string(tensorsConfig.blens[2]) + "_" +
-                     std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
-                     std::to_string(tensorsConfig.bstrides[0]) + "_" +
-                     std::to_string(tensorsConfig.bstrides[1]) + "_" +
-                     std::to_string(tensorsConfig.bstrides[2]) + "_" +
-                     std::to_string(tensorsConfig.bstrides[3]);
-            stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
-                     "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
+#if PERF_ENABLE
+        std::string stats{};
+        stats += "_aclens_" + std::to_string(tensorsConfig.aclens[0]) + "_" +
+                 std::to_string(tensorsConfig.aclens[1]) + "_" +
+                 std::to_string(tensorsConfig.aclens[2]) + "_" +
+                 std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
+                 std::to_string(tensorsConfig.acstrides[0]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[1]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[2]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[3]);
+        stats += "_blens_" + std::to_string(tensorsConfig.blens[0]) + "_" +
+                 std::to_string(tensorsConfig.blens[1]) + "_" +
+                 std::to_string(tensorsConfig.blens[2]) + "_" +
+                 std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
+                 std::to_string(tensorsConfig.bstrides[0]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[1]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[2]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[3]);
+        stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
+                 "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
-            ph.writeStatsToCSV("tensor_4d.csv", stats);
-        }
+        ph.writeStatsToCSV("tensor_4d.csv", stats);
+#endif
     }
 
     const std::string kernel_name{"Op4dTensorGeneric"};
@@ -546,7 +547,9 @@ protected:
     TensorsConfig tensorsConfig;
     float alpha0, alpha1, beta;
 
+#if PERF_ENABLE
     PerfHelper ph;
+#endif
 };
 
 struct GPU_Op4dTensorGenericTest_FP32 : Op4DTensorGenericTest<float>

@@ -33,6 +33,8 @@
 #include <miopen/batchnorm/problem_description.hpp>
 #include <miopen/verify.hpp>
 
+#include "get_handle.hpp"
+
 struct BNTestCase
 {
     size_t N;

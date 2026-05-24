@@ -24,24 +24,18 @@
  *
  *******************************************************************************/
 
-#include "random.hpp"
 #include "test.hpp"
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
 #include "../driver/mloSoftmaxHost.hpp"
-#include "verify.hpp"
 
 #include <miopen/softmax.hpp>
-
-#include <miopen/miopen.h>
-
-#include <miopen/solution.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 #include <gtest/gtest.h>
 
-#include <vector>
-
 using namespace miopen;
+
 template <typename T = float, typename Tref = double>
 class SoftmaxFind20Test
 {

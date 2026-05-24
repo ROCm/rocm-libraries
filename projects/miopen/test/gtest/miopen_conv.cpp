@@ -23,10 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/miopen.h>
-#include <gtest/gtest.h>
-#include "../conv2d.hpp"
-#include "get_handle.hpp"
+#include "conv2d.hpp"
 #include "gtest_common.hpp"
 
 namespace miopen_conv {

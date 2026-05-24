@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/tensor_ops.hpp>
+#include <miopen/stringutils.hpp>
 #include <tensor_util.hpp>
 #include "gtest_common.hpp"
 

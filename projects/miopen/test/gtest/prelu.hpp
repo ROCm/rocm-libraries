@@ -26,13 +26,11 @@
 
 #include "cpu_prelu.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+
+#include <miopen/prelu.hpp>
+#include <miopen/verify.hpp>
 
 #include <gtest/gtest.h>
-#include <miopen/miopen.h>
-#include <miopen/prelu.hpp>
 
 inline std::ostream& operator<<(std::ostream& os, const std::vector<size_t>& v)
 {

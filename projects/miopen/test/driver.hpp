@@ -10,7 +10,6 @@
 #include "serialize.hpp"
 #include "test.hpp"
 
-#include <miopen/tensor_holder.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/expanduser.hpp>
 #include <miopen/md5.hpp>
@@ -732,7 +731,8 @@ struct test_driver
             miss = false;
             return miopen::detach_async([=] {
                 result_type result;
-                load(f.string(), result);
+                std::ifstream is{f.string()};
+                serialize(is, result); // load result
                 return std::move(result);
             });
         }
@@ -740,7 +740,8 @@ struct test_driver
         {
             miss = true;
             return miopen::then(cpu_async(v, xs...), [=](auto data) {
-                save(f.string(), data);
+                std::ofstream os{f.string()};
+                serialize(os, data); // save data
                 return data;
             });
         }
@@ -755,8 +756,8 @@ struct test_driver
     /// Winograd-specific precision loss is roughly 2+2 bits.
     /// Let's adjust tolerance (only for FP32 WrW for now).
     template <class V>
-    auto adjust_parameters_impl(miopen::rank<1>,
-                                V&& v) -> decltype(v.stats, v.is_conv_wrw_f32, void())
+    auto adjust_parameters_impl(miopen::rank<1>, V&& v)
+        -> decltype(v.stats, v.is_conv_wrw_f32, void())
     {
         if(v.is_conv_wrw_f32 && v.stats->algorithm == miopenConvolutionAlgoWinograd)
             tolerance *= 16.0;
@@ -769,8 +770,8 @@ struct test_driver
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
-                                                                          v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs)
+        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
@@ -1061,6 +1062,7 @@ void check_unparsed_args(Driver& d,
         }
     }
 }
+
 #if(MIOPEN_TEST_DRIVER_MODE == 2)
 template <class Driver>
 std::vector<typename Driver::argument*>
@@ -1219,6 +1221,7 @@ void test_drive_impl_2(std::string program_name, std::vector<std::string> as)
     }
 }
 #endif
+
 template <class Driver>
 void test_drive_impl_1(std::string program_name, std::vector<std::string> as)
 {

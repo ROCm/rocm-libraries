@@ -4,24 +4,12 @@
 #ifndef GUARD_MIOPEN_TEST_GTEST_POOLING2D_COMMON_HPP
 #define GUARD_MIOPEN_TEST_GTEST_POOLING2D_COMMON_HPP
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <gtest/gtest.h>
-#include <half/half.hpp>
-#include <limits>
-#include <numeric>
+#include "pooling_common.hpp"
+
 #include <miopen/logger.hpp>
-#include <numeric>
-#include <miopen/tensor_layout.hpp>
-#include <sstream>
-#include <vector>
-// network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1
-// (currently TEST_GET_INPUT_TENSOR = 0, but include is needed to support both cases)
-#include "../network_data.hpp"
-#include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "pooling_gtest_common.hpp"
+#include <miopen/verify.hpp>
+
+#include <gtest/gtest.h>
 
 // Configuration defines matching the original ctest behavior
 #define WORKAROUND_ISSUE_1670 1

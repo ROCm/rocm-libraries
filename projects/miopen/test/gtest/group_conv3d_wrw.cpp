@@ -23,8 +23,6 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest.h>
-
 #include "group_conv.hpp"
 
 using namespace group_conv;

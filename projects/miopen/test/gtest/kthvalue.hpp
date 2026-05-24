@@ -23,19 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "../driver/tensor_driver.hpp"
 #include "cpu_kthvalue.hpp"
 #include "get_handle.hpp"
 
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen/kthvalue.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 #include <gtest/gtest.h>
-#include <miopen/miopen.h>
-#include <miopen/kthvalue.hpp>
 
-#include <random>
 struct KthvalueTestCase
 {
     std::vector<size_t> dims;

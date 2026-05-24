@@ -2,16 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <miopen/rnn.hpp>
-#include <miopen/miopen.h>
-#include "tensor_holder.hpp"
+
+#include <miopen/rnn_util.hpp>
 
 #include "compare_helper.hpp"
 #include "gtest_desc_guard.hpp"
 #include "gtest_handle_guard.hpp"
-#include "../dropout_util.hpp"
-#include "../rnn_util.hpp"
-#include "../workspace.hpp"
+#include "dropout_util.hpp"
+#include "workspace.hpp"
+#include "rnn_util.hpp"
 
 namespace {
 /// Specific version for compating CPU and GPU results, because this test is order-dependent

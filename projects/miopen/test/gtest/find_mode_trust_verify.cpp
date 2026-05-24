@@ -24,9 +24,9 @@
  *
  *******************************************************************************/
 
-#include <gtest/group_conv.hpp>
-#include <miopen/datatype.hpp>
-#include "../../driver/driver.hpp"
+#include <miopen/generic_search_controls.hpp>
+#include "group_conv.hpp"
+#include "../driver/driver.hpp"
 
 namespace miopen {
 std::vector<solver::ConvSolution>

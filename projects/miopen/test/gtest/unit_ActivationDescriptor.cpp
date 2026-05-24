@@ -24,21 +24,12 @@
  *
  *******************************************************************************/
 
-#include <algorithm>
-#include <future>
-
-#include <miopen/activ.hpp>
-#include <miopen/miopen.h>
-#include <miopen/handle.hpp>
-
 #include "activ_common.hpp"
 #include "gtest_common.hpp"
+#include "network_data.hpp"
 
-#include "../network_data.hpp"
-#include "../random.hpp"
-#include "../tensor_holder.hpp"
-#include "../tensor_util.hpp"
-#include "../verify.hpp"
+#include <miopen/activ.hpp>
+#include <miopen/verify.hpp>
 
 #define UNIT_ACTIVATION_DESCRIPTOR_DEBUG 0
 

@@ -23,21 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "test.hpp"
-#include <array>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
 #include <miopen/activ.hpp>
-#include <miopen/miopen.h>
-#include <miopen/stringutils.hpp>
-#include <miopen/tensor.hpp>
-#include <utility>
-#include <fusionHost.hpp>
-#include "verify.hpp"
-#include "gtest/gtest.h"
-#include <half/half.hpp>
+#include <miopen/fusionHost.hpp>
+#include <miopen/verify.hpp>
+#include "get_handle.hpp"
+
+#include <gtest/gtest.h>
 
 struct ActivationConfig
 {

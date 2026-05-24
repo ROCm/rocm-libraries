@@ -1,14 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gtest/gtest.h>
-#include "miopen/miopen.h"
-#include "../fusionHost.hpp"
-#include "../random.hpp"
+#include "get_handle.hpp"
+#include "network_data.hpp"
 #include "compare_helper.hpp"
-#include <miopen/stringutils.hpp>
 
-#include <array>
+#include <miopen//fusionHost.hpp>
+#include <miopen/batch_norm.hpp>
+
+#include <gtest/gtest.h>
 
 #define MIO_BN_USE_MIX_PREC 1
 #if MIO_BN_USE_MIX_PREC == 1

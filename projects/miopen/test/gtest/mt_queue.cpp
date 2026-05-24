@@ -25,15 +25,12 @@
  *******************************************************************************/
 #include <gtest/gtest.h>
 #include <miopen/mt_queue.hpp>
-#include <thread>
-#include <chrono>
-
-#include "random.hpp"
+#include <miopen/random.hpp>
 
 static std::atomic<int> num_prod{};
 
 static const auto total_producers = std::thread::hardware_concurrency();
-const auto data_len               = 100;
+const auto data_len{100};
 
 template <typename T>
 using data_t = std::vector<T>;

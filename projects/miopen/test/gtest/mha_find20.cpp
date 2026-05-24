@@ -25,22 +25,16 @@
  *******************************************************************************/
 
 #include "test.hpp"
-#include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
-#include "../workspace.hpp"
+#include "workspace.hpp"
 
 #include <miopen/mha/mha_descriptor.hpp>
 #include <miopen/mha/solvers.hpp>
 #include <miopen/mha/invoke_params.hpp>
-
-#include <miopen/miopen.h>
-
-#include <miopen/solution.hpp>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 #include <gtest/gtest.h>
 
-#include <vector>
 #include <variant>
 
 using namespace miopen;

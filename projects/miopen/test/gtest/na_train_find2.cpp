@@ -8,10 +8,14 @@
 #define PREC_TYPE T
 #endif
 
-#include <gtest/gtest.h>
-#include "../fusionHost.hpp"
+#include "get_handle.hpp"
+#include "network_data.hpp"
 #include "compare_helper.hpp"
-#include <miopen/stringutils.hpp>
+
+#include <miopen//fusionHost.hpp>
+#include <miopen/batch_norm.hpp>
+
+#include <gtest/gtest.h>
 
 namespace {
 constexpr double MIO_BN_TEST_EXPAVGFACTOR = 0.99;

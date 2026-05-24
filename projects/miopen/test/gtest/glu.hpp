@@ -26,21 +26,13 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include "cpu_glu.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
 
-#include <algorithm>
-#include <cstdint>
-#include <gtest/gtest.h>
-#include <limits>
-#include <vector>
-
-#include <miopen/allocator.hpp>
-#include <miopen/miopen.h>
 #include <miopen/glu.hpp>
+#include <miopen/verify.hpp>
 
 struct GLUTestCase
 {

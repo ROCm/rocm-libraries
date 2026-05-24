@@ -27,26 +27,17 @@
 #ifndef GUARD_MIOPEN_TEST_DROPOUT_CPU_HPP
 #define GUARD_MIOPEN_TEST_DROPOUT_CPU_HPP
 
-#include <array>
-#include <cmath>
-#include <algorithm>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-
 #include <miopen/dropout.hpp>
 #include <miopen/ford.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
+#include <miopen/float_equal.hpp>
 
 // disable __device__ qualifiers
 #ifdef FQUALIFIERS
 #error rocrand FQUALIFIERS defined externally, probably one of rocrand device header included prior to this
 #endif
 #define FQUALIFIERS inline
-#include "../src/kernels/miopen_rocrand.hpp"
+#include <miopen_rocrand.hpp>
+
 inline void InitKernelStateEmulator(std::vector<rocrand_state_xorwow>& states,
                                     const miopen::DropoutDescriptor& dropoutDesc)
 {

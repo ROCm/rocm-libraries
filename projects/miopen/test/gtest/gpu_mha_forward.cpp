@@ -23,26 +23,16 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/config.h>
 
 #include "get_handle.hpp"
 #include "mha_helper.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "workspace.hpp"
 #include "gtest_common.hpp"
-#include "../workspace.hpp"
 
-#include <miopen/miopen.h>
-#include <miopen/solution.hpp>
-
-#include <gtest/gtest.h>
-
-#include <map>
-#include <memory>
-#include <variant>
-#include <vector>
+#include <miopen/mha/mha_descriptor.hpp>
 
 using namespace miopen;
+
 namespace {
 
 struct TensorStruct

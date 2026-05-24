@@ -25,8 +25,6 @@
  *******************************************************************************/
 
 #include "glu.hpp"
-#include "gtest/gtest.h"
-using float16 = half_float::half;
 
 using GPU_GLU_fwd_FP32  = GLUFwdTest<float>;
 using GPU_GLU_fwd_FP16  = GLUFwdTest<float16>;

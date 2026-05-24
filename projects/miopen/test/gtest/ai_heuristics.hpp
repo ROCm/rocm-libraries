@@ -25,10 +25,8 @@
  *******************************************************************************/
 
 #pragma once
-#include <miopen/miopen.h>
-#include <gtest/cba.hpp>
-#include <miopen/conv_algo_name.hpp>
-#include <gtest/group_conv.hpp>
+
+#include "group_conv.hpp"
 
 struct AIModelTestCase
 {

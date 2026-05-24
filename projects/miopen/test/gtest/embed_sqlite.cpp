@@ -2,11 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <miopen/config.h>
 
-#include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen/random.hpp>
 
 #if MIOPEN_EMBED_DB
 #include <miopen_data.hpp>

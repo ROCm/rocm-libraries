@@ -23,9 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/miopen.h>
-#include <gtest/gtest.h>
-#include "get_handle.hpp"
+
 #include "gtest_common.hpp"
 
 namespace deepbench_rnn {

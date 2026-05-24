@@ -26,13 +26,12 @@
 
 #include <gtest/gtest.h>
 
-#include <miopen/tensor.hpp>
-#include <miopen/tensor_ops.hpp>
-
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
+#include "network_data.hpp"
 #include "tensor_util.hpp"
-#include "verify.hpp"
+
+#include <miopen/tensor_ops.hpp>
+#include <miopen/verify.hpp>
 
 namespace {
 using UnaryTensorOpsCase = std::tuple<std::vector<size_t>, int>;

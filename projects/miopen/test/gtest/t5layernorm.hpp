@@ -23,15 +23,13 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-
-#include "../driver/tensor_driver.hpp"
-#include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
 #include <gtest/gtest.h>
+
+#include "get_handle.hpp"
+
 #include <miopen/t5layernorm.hpp>
-#include <miopen/miopen.h>
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 template <class T>
 void cpu_t5layernorm_forward(tensor<T> x,

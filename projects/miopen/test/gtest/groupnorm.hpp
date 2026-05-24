@@ -23,17 +23,13 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/miopen.h>
 #include <gtest/gtest.h>
-#include <miopen/groupnorm.hpp>
 
-#include "tensor_holder.hpp"
-#include "cpu_groupnorm.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "../driver/tensor_driver.hpp"
-#include "verify.hpp"
-#include <random>
+#include "cpu_groupnorm.hpp"
+
+#include <miopen/groupnorm.hpp>
+#include <miopen/verify.hpp>
 
 struct GroupNormTestCase
 {

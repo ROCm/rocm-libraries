@@ -5,11 +5,8 @@
 
 #include <miopen/convolution.hpp>
 #include <miopen/tensor_layout.hpp>
-
-#include "../cpu_conv.hpp"
-#include "../random.hpp"
-#include "../tensor_holder.hpp"
-#include "../verify.hpp"
+#include <miopen/cpu_conv.hpp>
+#include <miopen/verify.hpp>
 
 namespace {
 struct TestCase2D

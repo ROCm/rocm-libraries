@@ -27,8 +27,14 @@
 #ifndef MIOPEN_GUARD_TEST_SERIALIZE_HPP
 #define MIOPEN_GUARD_TEST_SERIALIZE_HPP
 
+#include <miopen/each_args.hpp>
 #include <miopen/tensor_holder.hpp>
+
+#include <type_traits>
 #include <fstream>
+#include <string>
+#include <vector>
+#include <tuple>
 
 template <class T>
 struct is_trivial_serializable : std::is_trivially_copy_constructible<T>
@@ -47,13 +53,34 @@ std::enable_if_t<is_trivial_serializable<T>{}> serialize(std::ostream& os, const
 }
 
 template <class T>
-auto serialize(std::ostream& os,
-               const T& x) -> decltype(x.begin(), x.end(), T(x.begin(), x.end()), void())
+auto serialize(std::ostream& os, const T& x)
+    -> decltype(x.begin(), x.end(), T(x.begin(), x.end()), void())
 {
     std::size_t n = std::distance(x.begin(), x.end());
     serialize(os, n);
     for(auto&& y : x)
         serialize(os, y);
+}
+
+template <class T>
+void serialize(std::istream& s, tensor<T>& x)
+{
+    std::vector<std::size_t> lens;
+    serialize(s, lens);
+    std::vector<std::size_t> strides;
+    serialize(s, strides);
+    x.desc = miopen::TensorDescriptor{miopen_type<T>{}, lens, strides};
+    serialize(s, x.data);
+}
+
+template <class T>
+void serialize(std::ostream& os, const tensor<T>& x)
+{
+    const auto& lens = x.desc.GetLengths();
+    serialize(os, lens);
+    const auto& strides = x.desc.GetStrides();
+    serialize(os, strides);
+    serialize(os, x.data);
 }
 
 template <class... Ts>
@@ -80,8 +107,8 @@ std::enable_if_t<is_trivial_serializable<T>{}> serialize(std::istream& is, std::
 }
 
 template <class T>
-auto serialize(std::istream& is,
-               T& x) -> decltype(x.begin(), x.end(), x.assign(x.begin(), x.end()), void())
+auto serialize(std::istream& is, T& x)
+    -> decltype(x.begin(), x.end(), x.assign(x.begin(), x.end()), void())
 {
     using value_type = std::decay_t<decltype(*x.begin())>;
     std::size_t n;
@@ -105,20 +132,6 @@ serialize(std::istream& is,
 {
     miopen::unpack(
         [&](auto&&... xs) { miopen::each_args([&](auto&& x) { serialize(is, x); }, xs...); }, t);
-}
-
-template <class T>
-void load(std::string name, T& x)
-{
-    std::ifstream is{name.c_str()};
-    serialize(is, x);
-}
-
-template <class T>
-void save(std::string name, const T& x)
-{
-    std::ofstream os{name.c_str()};
-    serialize(os, x);
 }
 
 #endif

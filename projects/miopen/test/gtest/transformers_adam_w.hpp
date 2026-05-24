@@ -24,15 +24,11 @@
  *
  *******************************************************************************/
 #define MIOPEN_BETA_API 1
-#include "../driver/tensor_driver.hpp"
+
 #include "cpu_transformers_adam_w.hpp"
-#include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
-#include <gtest/gtest.h>
 #include <miopen/adam.hpp>
-#include <miopen/miopen.h>
+
+#include <gtest/gtest.h>
 
 struct TransformersAdamWTestCase
 {

@@ -1,10 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gtest/gtest.h>
-#include <half/half.hpp>
-#include <vector>
-#include "../network_data.hpp"
 #include "pooling2d_common.hpp"
 
 // Configuration define matching the original ctest behavior
