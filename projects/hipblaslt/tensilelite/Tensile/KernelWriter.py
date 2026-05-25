@@ -4420,9 +4420,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Printout tile info
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo, dtileInfo]:
       if tileInfo != None:
-        # Use per-line comments to avoid multi-line /* */ blocks (gfx12 assembler rejects them)
-        for line in str(tileInfo).split('\n'):
-          module.addComment1(line)
+        module.addComment0(str(tileInfo))
 
     # Allocate registers for GR/LR
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
