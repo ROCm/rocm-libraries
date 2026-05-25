@@ -158,6 +158,14 @@ class Reporter:
         """
         self._print(f"ERROR: {message}")
 
+    def print_warning(self, message: str) -> None:
+        """Print non-fatal warning message.
+
+        Args:
+            message: Warning message.
+        """
+        self._print(f"WARNING: {message}")
+
     def _print(self, text: str) -> None:
         """Print a line of text.
 
@@ -618,6 +626,11 @@ class Reporter:
             if pe.status == "success":
                 self._print_pe_stats(pe)
                 self._print_pe_metrics(pe)
+                # Profiling artefacts render independently of the always-on
+                # metrics block — opt-in profiling is valid under
+                # --metrics-tier off, and the user should still see where
+                # their artefacts landed plus any tool-failure detail.
+                self._print_profiling_block(pe)
                 if pe.correctness is not None:
                     self._print_pe_correctness(pe.correctness, suite_config)
             elif pe.status == "skipped":
@@ -727,36 +740,99 @@ class Reporter:
         if pe.vram_used_mb is not None:
             self._print(f"  VRAM used:            {self._fmt_mib(pe.vram_used_mb)}")
         self._print("")
-        self._print_profiling_block(pe)
 
     def _print_profiling_block(self, pe: ProviderEngineResult) -> None:
         """Render the opt-in profiling artefacts when extra_metrics is set.
 
-        Each line is conditional: a user who runs only --emit-trace
-        sees one line, only --perf sees a different one. Full nested
-        data is always in the JSON.
+        Each line is conditional: a user who runs only --pmc sees one
+        line, only --emit-trace sees a different one, and so on. Long
+        counter lists fold to ``[N more, see JSON]`` so the console
+        block stays compact — full nested data is always in the JSON.
         """
         extra = pe.extra_metrics
         if not extra:
             return
-        any_present = any(isinstance(extra.get(k), dict) for k in ("trace", "perf"))
+        any_present = any(
+            isinstance(extra.get(k), dict) for k in ("trace", "pmc", "perf", "roofline")
+        )
         if not any_present:
             return
         self._print("Profiling:")
 
         trace = extra.get("trace")
         if isinstance(trace, dict):
-            path = trace.get("path") or trace.get("db_path")
+            # Trace and rocpd db are distinct artefacts — kineto in
+            # particular emits both: `path` is the chrome JSON the user
+            # opens in Perfetto/Chrome, `db_path` is the rocpd source.
+            # Folding them onto one line with a `fmt` suffix would
+            # mislabel a database as a trace whenever convert failed and
+            # only `db_path` was present.
             fmt = trace.get("format", "?")
-            if path:
-                self._print(f"  Trace ({fmt}):         {path}")
-            elif "skipped" in trace:
+            trace_path = trace.get("path")
+            db_path = trace.get("db_path")
+            if trace_path:
+                self._print(f"  Trace ({fmt}):         {trace_path}")
+                # Both .pftrace and chrome JSON open in Perfetto.
+                self._print("    → drag onto https://ui.perfetto.dev/")
+            if db_path:
+                self._print(f"  Trace DB:              {db_path}")
+                # When the kineto convert failed, the db is all we have;
+                # surface the convert command so the user can rerun.
+                if not trace_path:
+                    self._print(
+                        "    → python -m rocpd convert -i <db> "
+                        "--output-format chrome -o trace.json"
+                    )
+            if not trace_path and not db_path and "skipped" in trace:
                 self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
+            if "error_tail" in trace:
+                self._print(
+                    f"  Trace ({fmt}):         rocprofv3 errored "
+                    f"(rc={trace.get('returncode', '?')})"
+                )
+
+        pmc = extra.get("pmc")
+        if isinstance(pmc, dict):
+            arch = pmc.get("arch", "?")
+            pmc_set = pmc.get("set", "?")
+            counters = pmc.get("counters") or {}
+            db_path = pmc.get("db_path")
+            if counters:
+                head = list(counters.items())[:3]
+                rendered = "  ".join(
+                    f"{name}={int(v.get('sum', 0)):,}" for name, v in head
+                )
+                more = len(counters) - len(head)
+                suffix = f"  [{more} more, see JSON]" if more > 0 else ""
+                self._print(f"  PMC ({pmc_set}, {arch}):  {rendered}{suffix}")
+            elif "skipped" in pmc:
+                self._print(f"  PMC ({pmc_set}, {arch}):  skipped — {pmc['skipped']}")
+            elif "error_tail" in pmc:
+                self._print(
+                    f"  PMC ({pmc_set}, {arch}):  rocprofv3 errored "
+                    f"(rc={pmc.get('returncode', '?')})"
+                )
+            # Surface the rocpd db path + analyze hint whenever we
+            # captured one, regardless of whether parsing succeeded.
+            # The db itself is the full source of truth; aggregates are
+            # the convenience layer.
+            if db_path:
+                self._print(f"  PMC db:               {db_path}")
+                self._print(
+                    "    → rocprof-compute analyze --path "
+                    f"{Path(db_path).parent} "
+                    "(see docs/troubleshooting.md for venv setup)"
+                )
 
         perf = extra.get("perf")
         if isinstance(perf, dict):
             if "skipped" in perf:
                 self._print(f"  CPU (perf):           skipped — {perf['skipped']}")
+            elif "error_tail" in perf:
+                self._print(
+                    f"  CPU (perf):           errored "
+                    f"(rc={perf.get('returncode', '?')})"
+                )
             else:
                 bits = []
                 ipc = perf.get("ipc_user")
@@ -773,6 +849,36 @@ class Reporter:
                     bits.append(f"task_clock={tc:.1f}ms")
                 if bits:
                     self._print(f"  CPU (perf):           {'  '.join(bits)}")
+
+        roofline = extra.get("roofline")
+        if isinstance(roofline, dict):
+            # rocprof-compute profile mode emits CSVs (no PDF); the
+            # rendered roofline (ASCII / GUI / TUI) comes from a
+            # separate `rocprof-compute analyze` pass against
+            # `workload_path`. analyze has its own Python deps that
+            # would downgrade torch's numpy if installed into the
+            # dnn-benchmarking venv — see docs/troubleshooting.md for
+            # the separate-venv recipe.
+            workload = roofline.get("workload_path")
+            csv = roofline.get("roofline_csv")
+            if csv:
+                self._print(f"  Roofline CSV:         {csv}")
+            if workload:
+                self._print(
+                    f"    → rocprof-compute analyze --path {workload} "
+                    "--block 4  (ASCII roofline)"
+                )
+                self._print(
+                    "    → add --gui for interactive web UI "
+                    "(see docs/troubleshooting.md for analyze venv setup)"
+                )
+            if "skipped" in roofline:
+                self._print(f"  Roofline:             skipped — {roofline['skipped']}")
+            if "error_tail" in roofline:
+                self._print(
+                    f"  Roofline:             rocprof-compute errored "
+                    f"(rc={roofline.get('returncode', '?')})"
+                )
         self._print("")
 
     def _print_pe_correctness(
