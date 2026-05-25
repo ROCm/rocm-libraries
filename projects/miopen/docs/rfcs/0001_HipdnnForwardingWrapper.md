@@ -134,7 +134,32 @@ Today's `libMIOpen.so` is **left completely unchanged**. The wrapper ships as a 
 
 Why this is the fallback: the user-facing opt-in is more invasive (`LD_PRELOAD` is fragile, awkward in container/CI environments, and easy to forget), and the call path adds a function-pointer indirection plus all the usual `dlopen` lifecycle concerns. It does, however, leave the existing MIOpen build entirely alone and decouples the wrapper from the hipDNN ABI at link time, so it is the safer option if Option A turns out to require build-system changes we cannot stomach.
 
-> **Open question (owner: Mitch Ousdahl) — Option B edge cases.** Several POSIX dynamic-loader corner cases need investigation before Option B can be relied on as a fallback: `RTLD_DEEPBIND` interactions with namespaced symbol resolution, behavior under static-linked downstream consumers (where `LD_PRELOAD` does not interpose), and `setuid` binaries where the loader strips `LD_PRELOAD` for security. To be resolved before Option A/B decision is locked.
+#### 4.3.3 Findings from the `dlopen`/`dlsym` investigation
+
+An investigation was conducted into the dynamic-loader-based mechanism that Option B depends on. The findings below catalog the problems that surfaced; together they are the reason Option B is treated as a fallback only, to be used solely if Option A is found infeasible. Several of these findings would also need to be addressed *in addition to* the Option A work if we ever fell back to B, materially expanding its scope beyond what the §4.3.2 table suggests.
+
+**Correctness and lifecycle**
+
+- **Symbol resolution ordering.** `dlsym(RTLD_NEXT, ...)` and `dlopen` of an explicit path behave differently in subtle ways. Getting the choice wrong means the wrapper either fails to find the implementation symbol or recurses into itself; both failure modes are silent until the first forwarded call.
+- **Initialization order.** Wrapper init touches logging, env-var parsing, and hipDNN handle creation. In some load orders this happens before MIOpen's own static initializers run. The failure mode is a deadlock or crash at process init, which is hostile to diagnose because it happens before any user code executes.
+- **Fork/exec safety.** `dlopen`'d handles and cached function pointers must survive `fork()` without re-initialization. HIP runtime state interacts badly with `fork()` in general, and the wrapper would inherit those interactions on top of its own dynamic-loader state.
+- **Thread-safety of first-call resolution.** The standard "cache the function pointer on first call" pattern requires either a one-shot init (e.g. `pthread_once`) or an explicit memory barrier. Without one, concurrent first calls can observe a torn read of the pointer. This is the kind of bug that passes CI on a quiet machine and surfaces only under production concurrency.
+
+**Operational**
+
+- **No link-time validation of the hipDNN ABI.** The §4.3.2 table frames this as "degrades gracefully," but in practice an ABI break shows up as `dlsym` returning `NULL` deep inside a workload rather than as a build failure. The failure mode moves from CI to production, which is the wrong direction.
+- **Debuggability.** Stack traces go through function pointers, so breakpoints set on `miopenConvolutionForward` do not fire where users expect. Static analysis tools (`nm`, `ldd`, `readelf -d`) do not reveal the real dependency graph because hipDNN is loaded at runtime. This raises the on-call and support burden for every issue that touches the wrapper.
+- **Library discovery is environment-dependent.** `dlopen("libhipdnn.so")` resolves via `LD_LIBRARY_PATH`, `ld.so.cache`, and RPATH at runtime. Picking up the wrong hipDNN — an older system copy, a sibling install, a leftover from a different ROCm version — is silent and hard to diagnose. Option A eliminates this entirely by binding both libraries at link time.
+
+**Portability**
+
+- **POSIX-only API.** `dlopen`/`dlsym` is POSIX. Windows requires `LoadLibrary`/`GetProcAddress`, which means the resolver code is forked by platform and the wrapper needs a portability shim for any work that needs to run on ROCm-on-Windows. Option A's direct linkage works identically on both platforms (modulo SONAME / DLL naming).
+
+**Performance**
+
+- **Per-call indirection.** Every forwarded call goes through a function pointer, which defeats inlining at the call site and is harder to argue is "in the noise" than a plain function call. This is the same overhead concern flagged in §6 row 1 as "non-negligible … especially under Option B's `dlopen`/`dlsym` indirection," but the investigation confirms the indirection is structural to Option B — it cannot be optimized away while keeping the dynamic-loader mechanism.
+
+Collectively, these findings convert the §4.3.2 "Option B is the fallback if A turns out to be impractical" framing into a stronger statement: Option B carries real correctness, operational, and portability costs that Option A does not, so Option A should be made to work unless a hard blocker is found. The previously open Option B edge cases (`RTLD_DEEPBIND` interactions, static-linked consumers where `LD_PRELOAD` does not interpose, `setuid` binaries where the loader strips `LD_PRELOAD`) are folded into the operational findings above and would each need explicit handling if Option B were ever adopted.
 
 ### 4.4 Per-entry-point routing policy
 
@@ -203,9 +228,9 @@ A runtime flag ("wrapper present but always dispatches to Private") would not sa
 | | Pros | Cons |
 |---|---|---|
 | **Option A — direct linkage (preferred)** | No user-side opt-in (no `LD_PRELOAD`). Plain function-call dispatch — easiest to argue is overhead-free. Provider short-circuit in Phase 4 is a one-line link-line change. SONAME is preserved, so consumers see no change. | Requires build-system changes to produce `libMIOpen.so` as a wrapper while renaming the implementation. Investigation required before commitment. |
-| **Option B — `dlopen`/`dlsym` + `LD_PRELOAD`** | Existing MIOpen build is untouched. Wrapper is decoupled from hipDNN ABI at link time; degrades gracefully if hipDNN is missing. | `LD_PRELOAD` opt-in is fragile in container/CI environments and easy to forget. Function-pointer indirection plus `dlopen` lifecycle concerns. Provider short-circuit in Phase 4 is awkward — the provider would need its own opt-out from the preload. |
+| **Option B — `dlopen`/`dlsym` + `LD_PRELOAD`** | Existing MIOpen build is untouched. Wrapper is decoupled from hipDNN ABI at link time; degrades gracefully if hipDNN is missing. | `LD_PRELOAD` opt-in is fragile in container/CI environments and easy to forget. Function-pointer indirection plus `dlopen` lifecycle concerns (init ordering, fork/exec, first-call thread-safety). ABI breaks surface in production rather than at link time. Library discovery depends on `LD_LIBRARY_PATH`/RPATH/`ld.so.cache` — wrong-hipDNN pickup is silent. Resolver is POSIX-only; Windows needs a separate `LoadLibrary` shim. Provider short-circuit in Phase 4 is awkward — the provider would need its own opt-out from the preload. See §4.3.3 for the full investigation findings. |
 
-The preference is Option A precisely because the negligible-overhead and provider-bypass goals are easier to reason about with a plain function call than with a preload-based shim. Option B remains the fallback if the Option A investigation finds blocking build-system or packaging issues.
+The preference is Option A precisely because the negligible-overhead and provider-bypass goals are easier to reason about with a plain function call than with a preload-based shim. The §4.3.3 investigation strengthens this preference: Option B carries correctness, operational, and portability costs that Option A does not. Option B remains the fallback only if the Option A investigation finds blocking build-system or packaging issues.
 
 ### 5.4 Phase env vars and logging separately
 
