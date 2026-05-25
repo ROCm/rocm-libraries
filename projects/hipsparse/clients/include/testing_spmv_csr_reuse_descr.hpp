@@ -46,23 +46,22 @@ void testing_spmv_csr_reuse_descr_bad_arg(const Arguments& argus)
 
 // Exercises the SpMV-only path: never call hipsparseSpMV_bufferSize and
 // never call hipsparseSpMV_preprocess -- only hipsparseSpMV itself, and
-// pass a null externalBuffer. 
+// pass a null externalBuffer.
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
-static void
-    call_spmv_only(hipsparseHandle_t&                        handle,
-                   hipsparseSpMatDescr_t&                    matA,
-                   J                                         m,
-                   J                                         n,
-                   I                                         nnz,
-                   std::vector<I>&                           hcsr_row_ptr,
-                   std::vector<J>&                           hcsr_col_ind,
-                   std::vector<A>&                           hcsr_val,
-                   T                                         alpha,
-                   T                                         beta,
-                   hipsparseIndexBase_t                      idx_base,
-                   const std::vector<hipsparseOperation_t>&  ops,
-                   const std::vector<hipsparseSpMVAlg_t>&    algs,
-                   int                                       number_of_passes)
+static void call_spmv_only(hipsparseHandle_t&                       handle,
+                           hipsparseSpMatDescr_t&                   matA,
+                           J                                        m,
+                           J                                        n,
+                           I                                        nnz,
+                           std::vector<I>&                          hcsr_row_ptr,
+                           std::vector<J>&                          hcsr_col_ind,
+                           std::vector<A>&                          hcsr_val,
+                           T                                        alpha,
+                           T                                        beta,
+                           hipsparseIndexBase_t                     idx_base,
+                           const std::vector<hipsparseOperation_t>& ops,
+                           const std::vector<hipsparseSpMVAlg_t>&   algs,
+                           int                                      number_of_passes)
 {
     hipDataType xType       = getDataType<X>();
     hipDataType yType       = getDataType<Y>();
@@ -137,7 +136,7 @@ static void
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern
 // for a single (operation, algorithm) configuration: query
 // hipsparseSpMV_bufferSize, hipMalloc a fresh externalBuffer of that size,
-// optionally run hipsparseSpMV_preprocess, then run hipsparseSpMV. When 
+// optionally run hipsparseSpMV_preprocess, then run hipsparseSpMV. When
 // called repeatedly with the same (op, alg) on the same matA, the wrapper must
 // continue to return correct results despite the bufferSize / buffer
 // being re-queried and re-allocated on every call.
@@ -264,22 +263,21 @@ static void call_spmv(hipsparseHandle_t&     handle,
 // sized to the max, then repeatedly call hipsparseSpMV alternating among
 // the configurations without ever calling hipsparseSpMV_bufferSize again.
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
-static void
-    call_spmv_shared_buffer(hipsparseHandle_t&                        handle,
-                            hipsparseSpMatDescr_t&                    matA,
-                            J                                         m,
-                            J                                         n,
-                            I                                         nnz,
-                            std::vector<I>&                           hcsr_row_ptr,
-                            std::vector<J>&                           hcsr_col_ind,
-                            std::vector<A>&                           hcsr_val,
-                            T                                         alpha,
-                            T                                         beta,
-                            hipsparseIndexBase_t                      idx_base,
-                            const std::vector<hipsparseOperation_t>&  ops,
-                            const std::vector<hipsparseSpMVAlg_t>&    algs,
-                            int                                       number_of_passes,
-                            bool                                      use_preprocess)
+static void call_spmv_shared_buffer(hipsparseHandle_t&                       handle,
+                                    hipsparseSpMatDescr_t&                   matA,
+                                    J                                        m,
+                                    J                                        n,
+                                    I                                        nnz,
+                                    std::vector<I>&                          hcsr_row_ptr,
+                                    std::vector<J>&                          hcsr_col_ind,
+                                    std::vector<A>&                          hcsr_val,
+                                    T                                        alpha,
+                                    T                                        beta,
+                                    hipsparseIndexBase_t                     idx_base,
+                                    const std::vector<hipsparseOperation_t>& ops,
+                                    const std::vector<hipsparseSpMVAlg_t>&   algs,
+                                    int                                      number_of_passes,
+                                    bool                                     use_preprocess)
 {
     hipDataType xType       = getDataType<X>();
     hipDataType yType       = getDataType<Y>();
@@ -363,8 +361,8 @@ static void
                         handle, op, &alpha, matA, x, &beta, y, computeType, alg, buffer));
                 }
 
-                CHECK_HIPSPARSE_ERROR(hipsparseSpMV(
-                    handle, op, &alpha, matA, x, &beta, y, computeType, alg, buffer));
+                CHECK_HIPSPARSE_ERROR(
+                    hipsparseSpMV(handle, op, &alpha, matA, x, &beta, y, computeType, alg, buffer));
 
                 std::vector<Y> hy_out(y_size);
                 CHECK_HIP_ERROR(
@@ -398,8 +396,8 @@ static void
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_spmv_csr_reuse_descr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     J                    m        = argus.M;
     J                    n        = argus.N;
     T                    h_alpha  = argus.get_alpha<T>();
@@ -515,7 +513,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     // Scenario 3: bufferSize is queried once per configuration up front, a
     // single externalBuffer is allocated to the max of those sizes, and
     // hipsparseSpMV is then called repeatedly across configurations with
-    // that one shared buffer (no further bufferSize calls). 
+    // that one shared buffer (no further bufferSize calls).
     for(bool use_preprocess : {false, true})
     {
         call_spmv_shared_buffer<I, J, A, X, Y, T>(handle,

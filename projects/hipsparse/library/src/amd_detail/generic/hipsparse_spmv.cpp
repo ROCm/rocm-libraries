@@ -35,21 +35,20 @@
 // hipsparseSpMV_bufferSize and hipsparseSpMV_preprocess share this lookup; the
 // SpMV-only override for csr_adaptive + non_transpose (when no entry yet
 // exists) is handled separately in hipsparseSpMV.
-static hipsparseStatus_t
-    hipsparseSpMV_get_or_add_entry(hipsparseHandle_t              handle,
-                                   hipsparseSpMVDescr_st*         hip_spmv_descr,
-                                   rocsparse_operation            operation,
-                                   rocsparse_spmv_alg             spmv_alg,
-                                   rocsparse_datatype             datatype,
-                                   hipsparseSpMVDescr_st::Entry** out_entry)
+static hipsparseStatus_t hipsparseSpMV_get_or_add_entry(hipsparseHandle_t      handle,
+                                                        hipsparseSpMVDescr_st* hip_spmv_descr,
+                                                        rocsparse_operation    operation,
+                                                        rocsparse_spmv_alg     spmv_alg,
+                                                        rocsparse_datatype     datatype,
+                                                        hipsparseSpMVDescr_st::Entry** out_entry)
 {
     hipsparseSpMVDescr_st::Entry* entry
         = hip_spmv_descr->find_entry(operation, spmv_alg, datatype, datatype);
 
     if(entry == nullptr)
     {
-        RETURN_IF_HIPSPARSE_ERROR(hip_spmv_descr->add_entry(
-            handle, operation, spmv_alg, datatype, datatype, &entry));
+        RETURN_IF_HIPSPARSE_ERROR(
+            hip_spmv_descr->add_entry(handle, operation, spmv_alg, datatype, datatype, &entry));
     }
 
     *out_entry = entry;
@@ -288,8 +287,7 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
         // for this configuration, fall back to csr_rowsplit (csr_adaptive
         // requires the caller to have run analysis first via the explicit
         // bufferSize / preprocess flow).
-        if((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
-           && (operation == rocsparse_operation_none))
+        if((spmv_alg == rocsparse_spmv_alg_csr_adaptive) && (operation == rocsparse_operation_none))
         {
             spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
         }
@@ -325,8 +323,7 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                 void* temp_buffer = nullptr;
                 if(buffer_size_in_bytes > 0)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMallocAsync(&temp_buffer, buffer_size_in_bytes, stream));
+                    RETURN_IF_HIP_ERROR(hipMallocAsync(&temp_buffer, buffer_size_in_bytes, stream));
                 }
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_v2_spmv((rocsparse_handle)handle,
@@ -351,18 +348,17 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                 // We can use the externalBuffer since the user is allocating
                 // a buffer for the analysis phase only, but the user does not
                 // know it.
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse_v2_spmv((rocsparse_handle)handle,
-                                      entry->spmv_descr,
-                                      alpha,
-                                      to_rocsparse_const_spmat_descr(matA),
-                                      (rocsparse_const_dnvec_descr)vecX,
-                                      beta,
-                                      (const rocsparse_dnvec_descr)vecY,
-                                      rocsparse_v2_spmv_stage_analysis,
-                                      entry->buffer_size_stage_analysis,
-                                      externalBuffer,
-                                      nullptr));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_v2_spmv((rocsparse_handle)handle,
+                                                            entry->spmv_descr,
+                                                            alpha,
+                                                            to_rocsparse_const_spmat_descr(matA),
+                                                            (rocsparse_const_dnvec_descr)vecX,
+                                                            beta,
+                                                            (const rocsparse_dnvec_descr)vecY,
+                                                            rocsparse_v2_spmv_stage_analysis,
+                                                            entry->buffer_size_stage_analysis,
+                                                            externalBuffer,
+                                                            nullptr));
             }
 
             entry->is_implicit_stage_analysis_called = true;

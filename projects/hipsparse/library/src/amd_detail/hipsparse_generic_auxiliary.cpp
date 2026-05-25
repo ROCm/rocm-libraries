@@ -71,11 +71,10 @@ hipsparseSpMVDescr_st::Entry::~Entry()
     }
 }
 
-hipsparseSpMVDescr_st::Entry*
-    hipsparseSpMVDescr_st::find_entry(rocsparse_operation operation,
-                                      rocsparse_spmv_alg  alg,
-                                      rocsparse_datatype  scalar_datatype,
-                                      rocsparse_datatype  compute_datatype)
+hipsparseSpMVDescr_st::Entry* hipsparseSpMVDescr_st::find_entry(rocsparse_operation operation,
+                                                                rocsparse_spmv_alg  alg,
+                                                                rocsparse_datatype  scalar_datatype,
+                                                                rocsparse_datatype compute_datatype)
 {
     for(auto& entry : this->m_entries)
     {
