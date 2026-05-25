@@ -4109,9 +4109,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # DTVA/B, DTLA/B, or TDM case: global read wait is handled above, skip force waitcnt0
             skipForceWaitcnt0 = True
           syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync LDS%u"%(self.states.ldsBarrierTokenIdx), skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=[self.states.ldsBarrierTokenIdx]))
-
           # swap barrier token
           self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+          if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["PrefetchGlobalRead"] == 1:
+            syncCode.add(self._syncThreads(kernel, "PGR1 and TDM, another wait to sync LDS%u"%(self.states.ldsBarrierTokenIdx), skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=[self.states.ldsBarrierTokenIdx]))
 
         if isSwapAndResetLwoIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
