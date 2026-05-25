@@ -2,34 +2,29 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 #######################################################################
-# Subtile BF16 K-tail: large MT — extended coverage per sebvince's
-# PR #7661 review. Builds on `subtile_bf16_anyk_largemt.yaml` (which
-# pins the MT 320x288 VGPR-pressure regression at PGR=0 only) with:
+# Subtile BF16 K-tail: extended large-MT coverage. Builds on
+# `subtile_bf16_anyk_largemt.yaml` (which pins MT 320x288 VGPR-pressure
+# regression at PGR=0 only) with:
 #
-#  1. MT 320x320 (10x10 wavetile, 2x2 WG) — sebvince:
-#     "We might want to add more large MTs like 320x320 to make sure
-#      none of them are rejected (320x320 is using almost all vpgrs
-#      available)." Comment id 3289001186.
+#  1. MT 320x320 (10x10 wavetile, 2x2 WG): symmetric large MT that
+#     stresses VGPR allocation (uses almost all available vgprs); pin
+#     that no shape in this configuration is silently rejected by the
+#     Solution-level gate.
 #
-#  2. PrefetchGlobalRead ∈ {0, 1, 2} — sebvince:
-#     "I would test all 3 PGRs as it might affect GR_inc logic in
-#      tail loop (and test larger K to avoid NGLL skip)." Comment id
-#      3289012025.
+#  2. PrefetchGlobalRead in {0, 1, 2}: tail-loop GR_inc differs across
+#     prefetch depths, so the same shape must build at all three.
 #
-#  3. Larger K (multiple full main-loop iterations before the tail)
-#     so the NGLL fast-path isn't bypassed and the tail-loop GR_inc
-#     interaction with the prefetch pipeline is genuinely exercised.
+#  3. Larger K (multiple full main-loop iterations before the tail) so
+#     the NGLL fast-path isn't bypassed and the GR_inc interaction with
+#     the prefetch pipeline is genuinely exercised.
 #
-# Sebvince comment #3289008557 ("Try multiple DU too (to check it
-# works with multi-partitions)") is intentionally NOT covered: per
-# nakajee's preference this PR does not support multi-partition
-# tail-loop layouts. DepthU is fixed at 64 (the existing largemt
-# config) so the K-tail path matches what the unit pins emit.
+# DepthU is fixed at 64 (matches the existing largemt config) so the
+# K-tail emit path is the same one the unit pins cover. Multi-partition
+# DepthU layouts are explicitly out of scope for this PR.
 #
-# PrintSolutionRejectionReason is on so any VGPR-overflow rejection
-# surfaces in the test log instead of silently zero-ing the build set
-# (sebvince's secondary concern: "if we reject a solution because of
-# VGPR usage overflow this test will silently fails (errorCode 0)").
+# PrintSolutionRejectionReason is on so a VGPR-overflow rejection
+# surfaces in the test log instead of silently dropping the kernel
+# from the build set (errorCode 0).
 #######################################################################
 GlobalParameters:
   PrintSolutionRejectionReason: True
@@ -188,9 +183,9 @@ BenchmarkProblems:
 
   ########################################
   # Section 4 — MT 320x288, ASEM=2, PGR ∈ {0, 1, 2}.
-  # Extends the existing nakajee-repro shape (subtile_bf16_anyk_
-  # largemt.yaml only covers PGR=0) across all three prefetch depths
-  # at larger K to exercise GR_inc under the full prefetch pipeline.
+  # Extends the original largemt shape (subtile_bf16_anyk_largemt.yaml
+  # only covers PGR=0) across all three prefetch depths at larger K to
+  # exercise GR_inc under the full prefetch pipeline.
   ########################################
   -
     - # ProblemType

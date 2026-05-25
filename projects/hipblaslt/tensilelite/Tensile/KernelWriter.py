@@ -4360,36 +4360,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def _emitTailSrdTightenSubtile(self, kernel):
     """Tighten `Srd<tc>+2` (buffer NumRecords) at tail entry so the
     K-direction reads of the re-issued tail GR cannot wander past
-    A/B's actual end-of-array on the last m-row of the tile. Addresses
-    nakajee's OOR review (PR #7661 carried forward from PR #7636
-    "Comment 5" TODO at the tail GR site).
+    A/B's actual end-of-array on the last m-row of the tile (OOR
+    clip).
 
-    Formula (nakajee #PR-7661 follow-up: align to bpr=4, not loadBytes):
+    Formula (align to bpr=4):
       alignedBytes = roundUp(LoopCounterL * bpe, 4)    # bpr=4
       delta_bytes  = DepthU * bpe - alignedBytes
       Srd<tc>+2   -= delta_bytes
 
-    `roundUp(..., bpr=4)` is the tightest clip nakajee's spec admits
-    that still keeps the wide DTL load valid for the trailing odd-K
-    element on the last m-row: per-thread `buffer_load_<...>` is a
-    BufferLoad-aligned hardware multiple of bpr, so the smallest
-    granularity past K_remain that the load *needs* to cover is one
-    bpr-worth of bytes (=2 bf16 / 4 int8 elements). Earlier m-rows
-    are over-protected (their k_lane >= K_remain reads still pass the
+    `roundUp(..., bpr=4)` is the tightest clip that still keeps the
+    wide DTL load valid for the trailing odd-K element on the last
+    m-row: per-thread `buffer_load_<...>` is a BufferLoad-aligned
+    hardware multiple of bpr, so the smallest granularity past
+    K_remain that the load *needs* to cover is one bpr-worth of
+    bytes (=2 bf16 / 4 int8 elements). Earlier m-rows are
+    over-protected (their k_lane >= K_remain reads still pass the
     tightened limit but get zeroed in VGPR by the per-MFMA lane
     mask + sub-lane refine, so correctness is unchanged).
 
-    Align-UP (vs nakajee's literal align-DOWN `remainK & 0xfffffffe`)
+    Align-UP (rather than literal align-DOWN `remainK & 0xfffffffe`)
     is required because the gfx950 assembler rejects the narrow
     trailing-element load (`buffer_load_d16_b16 ... lds`) the
     align-DOWN strategy depended on; that helper was previously
     deleted in `7df7d24`. Without it, align-DOWN would drop the
-    trailing odd-K element from the wide load. Our wide DTL + per-lane
-    refine path handles the trailing element when it is INCLUDED in
-    the wide load (which requires align-UP). bpr=4 is the finest
-    align-UP granularity, trading nakajee's tightest possible clip
-    for at most one DWORD (4 B = 2 bf16) of slack. Tensilelite always
-    K-pads to MIK boundary, so DWORD-level past-K reads stay
+    trailing odd-K element from the wide load. Our wide DTL +
+    per-lane refine path handles the trailing element when it is
+    INCLUDED in the wide load (which requires align-UP). bpr=4 is
+    the finest align-UP granularity, costing at most one DWORD
+    (4 B = 2 bf16) of slack relative to a per-byte clip. Tensilelite
+    always K-pads to MIK boundary, so DWORD-level past-K reads stay
     within-page.
 
     `delta_bytes >= 0` is provably non-negative under align-UP to
@@ -4450,7 +4449,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.addComment2(
       "Tighten Srd<tc>+2 to K_remain*bpe rounded up to bpr=4 "
-      "(nakajee #PR-7661 OOR review follow-up)")
+      "(OOR clip on last m-row)")
     with self.allocTmpSgpr(2) as tmpInfo:
       scaledKRem = tmpInfo.idx
       delta = tmpInfo.idx + 1
@@ -4486,7 +4485,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def _emitTailSrdTightenSubtileMX(self, kernel):
     """Tighten `SrdMXS{A,B}+2` (buffer NumRecords) at tail entry for MX
-    scale buffers when `DepthU > MX_PAD_K`. Per nakajee #PR-7661 spec:
+    scale buffers when `DepthU > MX_PAD_K` (OOR clip on the MX-scale
+    side; companion to the bf16 tightener above):
 
       remainK_MX = roundUp(K_remain, 256)                # K elements
       delta_K    = DepthU - remainK_MX                   # K elements, >= 0
@@ -4540,7 +4540,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     hasMxB = kernel["ProblemType"].get("MXBlockB", 0) > 0
     if not (hasMxA or hasMxB):
       return module
-    MX_PAD_K = 256  # nakajee spec: MX padding unit is K=256 (8 * mxBlock=32)
+    MX_PAD_K = 256  # MX padding unit is K=256 (8 * mxBlock=32); host re-scatter pads to this granularity
     depthU = int(kernel["DepthU"])
     if depthU <= MX_PAD_K:
       # Static no-op: host padding already covers any K_remain < DU.
@@ -4567,7 +4567,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # would be safer if a future layout violates the assumption.
         return module
       bytesPerKList.append(bytesPerDU // depthU)
-    # Per nakajee #PR-7661 spec the MX delta is in K-elements; we
+    # MX delta is in K-elements (matches host pad granularity); we
     # scale by per-operand bytesPerKElement_MX. For uniformity we
     # require all MX operands agree on bytesPerKElement (always true
     # for our MXSA_B4/MXSB_B4 / MXSA_B8/MXSB_B8 layouts).
@@ -4577,7 +4577,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.addComment2(
       "Tighten SrdMXS<tc>+2 for K_remain (MX K-pad=%u, DepthU=%u; "
-      "nakajee #PR-7661 OOR review MX follow-up)" % (MX_PAD_K, depthU))
+      "OOR clip MX scale follow-up)" % (MX_PAD_K, depthU))
     with self.allocTmpSgpr(2) as tmpInfo:
       remKMx = tmpInfo.idx
       delta = tmpInfo.idx + 1
@@ -4614,14 +4614,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def _emitTailSrdTightenSubtileMXData(self, kernel):
     """Tighten `Srd{A,B}+2` (buffer NumRecords) at tail entry for the
     MX **data** tensors when `DepthU > MX_PAD_K` (=256). Companion to
-    `_emitTailSrdTightenSubtileMX` which clips `SrdMXS{A,B}+2`;
-    nakajee #PR-7661 review pointed out that the data-side SRD needs
-    the same K=256-padded clip so the natural DepthU-shaped data
-    over-read on the last m-row cannot fault past the data tensor's
-    allocated bytes (the per-lane-mask + 0-scale absorb keeps results
-    correct even with garbage data, but garbage reads can still page
-    fault if they spill past the data buffer's last byte).
-    Per-nakajee spec:
+    `_emitTailSrdTightenSubtileMX` which clips `SrdMXS{A,B}+2`. The
+    data-side SRD needs the same K=256-padded clip as the scale side
+    so the natural DepthU-shaped data over-read on the last m-row
+    cannot fault past the data tensor's allocated bytes (the per-lane
+    mask + 0-scale absorb keeps results correct even with garbage
+    data, but garbage reads can still page fault if they spill past
+    the data buffer's last byte).
+
+    Formula:
       remainK_MX = roundUp(K_remain, 256)                # K elements
       delta_K    = DepthU - remainK_MX                   # K elements, >= 0
       Srd{A,B}+2 -= delta_K * bpe_data                   # bytes
@@ -4652,8 +4653,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       - at least one MX side present (`MXBlockA > 0` OR `MXBlockB > 0`),
       - non-swizzled A/B on the MX sides we tighten (SwizzleTensor{A,B}
         on the MX operand bails -- swizzle adds a per-block stride
-        that the simple `delta_K * bpe` formula does not model;
-        nakajee comment 3286926937 notes swizzle support is deferred),
+        that the simple `delta_K * bpe` formula does not model; the
+        swizzled-MX clip is deferred to a later patch),
       - `DepthU > 256` (otherwise static no-op),
       - per-MX-operand bpe in {0.5, 1} (fp4 / fp8; the only data dtypes
         used with MXBlock today).
@@ -4704,7 +4705,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.addComment2(
       "Tighten Srd<tc>+2 for MX data K_remain (MX K-pad=%u, DepthU=%u; "
-      "nakajee #PR-7661 OOR review MX data follow-up)" % (MX_PAD_K, depthU))
+      "OOR clip MX data follow-up)" % (MX_PAD_K, depthU))
     with self.allocTmpSgpr(2) as tmpInfo:
       remKMx = tmpInfo.idx
       delta = tmpInfo.idx + 1
@@ -4773,13 +4774,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     multiple of a register), only the mod=0 step is reachable and
     the mod>0 chain collapses. Otherwise the full mod chain is
     emitted unconditionally -- the mod>0 chain is short (4 instr
-    per step for bf16, 12 total for fp8) and per nakajee #PR-review
-    the 3-instr scalar runtime gate to skip it is not worth the
-    branch overhead in the precompute path (this chain runs ONCE
-    per (operand, mmak, ir) before the per-mmak MFMA loop, not in
-    the hot path). The mod=0 step is always emitted (it's the
-    "this VGPR is entirely past LoopCounterL" case the coarse
-    cndmask used to handle and that #5 lets the byte refine own).
+    per step for bf16, 12 total for fp8) and a 3-instr scalar
+    runtime gate to skip it is not worth the branch overhead in
+    the precompute path (this chain runs ONCE per (operand, mmak,
+    ir) before the per-mmak MFMA loop, not in the hot path). The
+    mod=0 step is always emitted (it's the "this VGPR is entirely
+    past LoopCounterL" case the coarse cndmask used to handle and
+    that #5 lets the byte refine own).
 
     A and B operand chains are emitted independently per #3 so a
     mixed-bpe problem (e.g. asymmetric fp8/bf16 in a future PR) gets
@@ -4913,12 +4914,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return module
 
 
-  def _emitTailSubLaneMaskInitSebvince(self, kPosBaseVgpr, numMIInUnroll,
+  def _emitTailSubLaneMaskInitFused(self, kPosBaseVgpr, numMIInUnroll,
                                        bpe, vgprPerInUnroll):
-    """Emit sebvince-form per-lane invariants for the K-tail mask
+    """Emit fused-form per-lane invariants for the K-tail mask
     chain (BF16 byte-refine path: bpe=2, elementsPerVgpr=2). Returns
     the persistent VGPRs the per-(operand, mmak, ir) chain consults
-    via `_emitTailSubLaneMaskChainIntoVgprSebvince`:
+    via `_emitTailSubLaneMaskChainIntoVgprFused`:
 
       * `diffVgpr` (1 VGPR): `LoopCounterL - kPosBase` (signed
         v_sub_i32). Persists across every per-(mmak, ir) chain so
@@ -4934,16 +4935,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         uses sFull / sZero cmps to override to full (-1) / zero (0)
         when the entire lane is in / out of range.
 
-    Idea ported from sebvince's #7683 commit a0fee2619c
-    (`Precompute mask for all subIterK`) and e9f5f55b refinement
-    (`Simplify emit_mask_k`). Adopted on our branch with the
-    long-lived per-(mmak, ir) precompute storage we already hold
-    (`_emitTailSubLaneMaskPrecomputeSubtile`) so the per-mmak apply
-    step stays a pure `v_and_b32` (per nakajee #PR-7661 review,
-    "Mask calculation scheduling between GR and wait" -- the chain
-    init + per-(mmak, ir) precompute both run before the swait /
-    sbarrier drain, then per-mmak just v_ands the precomputed
-    mask).
+    Stays paired with the long-lived per-(mmak, ir) precompute
+    storage in `_emitTailSubLaneMaskPrecomputeSubtile` so the
+    per-mmak apply step stays a pure `v_and_b32`. The chain init +
+    per-(mmak, ir) precompute both run before the GR swait /
+    sbarrier drain so the cmp/cndmask traffic co-issues with the
+    buffer-load latency; the per-mmak hot path just v_ands the
+    precomputed mask onto each tile VGPR.
 
     Asserted scope: bpe == 2 only (BF16). Other byte-refine bpe
     values (bpe in {1, 4}) keep the legacy
@@ -4951,23 +4949,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
     dispatcher.
     """
     laneSGPRCount = self.states.laneSGPRCount
-    module = Module("tailSubLaneMaskInitSebvince")
+    module = Module("tailSubLaneMaskInitFused")
     assert bpe == 2 and vgprPerInUnroll >= 1, \
-      ("sebvince mask init currently supports BF16 (bpe=2) only; "
+      ("fused mask init currently supports BF16 (bpe=2) only; "
        "got bpe=%r vgprPerInUnroll=%r" % (bpe, vgprPerInUnroll))
     elementsPerVgpr = 2
 
-    diffVgpr = self.vgprPool.checkOut(1, "subLaneMaskDiffSebvince")
+    diffVgpr = self.vgprPool.checkOut(1, "subLaneMaskDiffFused")
     module.add(VSubI32(
       dst=vgpr(diffVgpr), src0=sgpr("LoopCounterL"), src1=vgpr(kPosBaseVgpr),
-      comment="subLaneMask sebvince: diff = LoopCounterL - kPosBase "
+      comment="subLaneMask fused: diff = LoopCounterL - kPosBase "
               "(signed; per-(mmak,ir) chain uses fullLit/zeroLit folded)"))
 
     # halfKeep = 0x0000FFFF (keep low BF16 K-element, zero high)
     halfMaskVgpr = self.vgprPool.checkOut(1, "subLaneMaskHalfKeep")
     module.add(VMovB32(
       dst=vgpr(halfMaskVgpr), src="0x0000FFFF",
-      comment="subLaneMask sebvince: halfKeep mask = 0x0000FFFF"))
+      comment="subLaneMask fused: halfKeep mask = 0x0000FFFF"))
 
     # d = LoopCounterL % numMIInUnroll. numMIInUnroll is a power of 2
     # for every gfx950 BF16 MFMA we emit (MI_M * MI_K / WaveSize = 8
@@ -4976,7 +4974,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(VAndB32(
       dst=vgpr(vDLaneRem),
       src0=numMIInUnroll - 1, src1=sgpr("LoopCounterL"),
-      comment="subLaneMask sebvince: d = LoopCounterL %% %u" % numMIInUnroll))
+      comment="subLaneMask fused: d = LoopCounterL %% %u" % numMIInUnroll))
 
     boundaryMaskVgprs = []
     with self.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
@@ -5011,14 +5009,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return module, diffVgpr, boundaryMaskVgprs
 
 
-  def _emitTailSubLaneMaskChainIntoVgprSebvince(self, diffVgpr, boundaryMaskVgpr,
+  def _emitTailSubLaneMaskChainIntoVgprFused(self, diffVgpr, boundaryMaskVgpr,
                                                 operand, mmak, ir, miK,
                                                 numMIInUnroll, targetMaskVgpr):
-    """Sebvince-form per-(operand, mmak, ir) K-tail mask chain. Two
+    """Fused-form per-(operand, mmak, ir) K-tail mask chain. Two
     VOPC cmps + two cndmasks compute a 3-state mask
     (full / boundary[ir] / zero) keyed off the single `diffVgpr` and
     `boundaryMaskVgpr` precomputed once by
-    `_emitTailSubLaneMaskInitSebvince`.
+    `_emitTailSubLaneMaskInitFused`.
 
     Per call:
       fullLit = mmak*miK + numMIInUnroll - 1
@@ -5039,7 +5037,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     fullLit = mmak * miK + numMIInUnroll - 1
     zeroLit = mmak * miK
 
-    module = Module("tailSubLaneMaskChainSebvince %s mmak=%u ir=%u"
+    module = Module("tailSubLaneMaskChainFused %s mmak=%u ir=%u"
                     % (operand, mmak, ir))
 
     with self.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
@@ -5101,10 +5099,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     computation and the bpe-parametric mod chain. Retained for the
     bpe != 2 byte-refine path (fp8 / int8 anyK, not exercised in
     the current gauntlet) and for the
-    `SubtileTailMaskSebvinceForm=False` fallback. The default BF16
+    `SubtileTailMaskFusedForm=False` fallback. The default BF16
     (bpe=2) path now uses
-    `_emitTailSubLaneMaskChainIntoVgprSebvince` instead (per
-    nakajee #PR-7661 MT320x320 side-by-side).
+    `_emitTailSubLaneMaskChainIntoVgprFused` instead (lower
+    instruction count on the MT320x320 side-by-side).
     """
     laneSGPRCount = self.states.laneSGPRCount
     bpr = 4
@@ -5184,7 +5182,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         VGPR cost for the common bf16/bf16 case).
       - Persistent VGPR count for the common case:
         `numMmaks * (numMIInUnroll // elementsPerVgpr)` per-(mmak, ir)
-        precomputed masks PLUS, on the sebvince path, the init
+        precomputed masks PLUS, on the fused path, the init
         invariants: `1 + (numMIInUnroll // elementsPerVgpr)` shared
         across all (mmak, ir). For BF16 ASEM<8 with numMIInUnroll=8,
         elementsPerVgpr=2 (4 vgprs per mmak): 2 mmaks (DU=64) -> 8
@@ -5193,18 +5191,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         persistent.
 
     Chain dispatch:
-      - `kernel.get("SubtileTailMaskSebvinceForm", True)` && bpeA ==
-        bpeB == 2 (BF16): use the sebvince init+chain form (single
+      - `kernel.get("SubtileTailMaskFusedForm", True)` && bpeA ==
+        bpeB == 2 (BF16): use the fused init+chain form (single
         `diff` + per-i `boundary[ir]` precomputed once, then 2 cmps +
-        2 cndmasks per (mmak, ir)). Idea ported from #7683 commits
-        a0fee2619c / e9f5f55b / 4a4d6a596 / d999a288. Per nakajee
-        #PR-7661 MT320x320 side-by-side review.
+        2 cndmasks per (mmak, ir)).
       - Otherwise: legacy per-(operand, mmak, ir) chain via
         `_emitTailSubLaneMaskChainIntoVgpr` (bpe-parametric mod
         chain with static skip + runtime gate). Covers fp8/int8
         byte-refine paths and asymmetric bpe configs (not exercised
         in the current gauntlet) plus the explicit fallback when
-        the sebvince form is disabled.
+        the fused form is disabled.
 
     Returns:
       `(module, maskVgprMap, allocatedMaskVgprs)`:
@@ -5239,27 +5235,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
     vgprPerInUnrollB = max(1, numMIInUnroll // elementsPerVgprB)
     shareAB = (bpeA == bpeB and elementsPerVgprA == elementsPerVgprB)
 
-    # Sebvince form gating: opt-in for the BF16/BF16 symmetric path
+    # Fused form gating: opt-in for the BF16/BF16 symmetric path
     # only (the chain shares one boundary[ir] vgpr across operands,
-    # so asymmetric bpe doesn't fit). `SubtileTailMaskSebvinceForm`
+    # so asymmetric bpe doesn't fit). `SubtileTailMaskFusedForm`
     # defaults to True; setting it False reverts to the legacy
     # per-(operand, mmak, ir) bpe-parametric chain (kept for fp8 /
     # int8 byte-refine paths and the reversible escape hatch).
-    useSebvinceForm = (kernel.get("SubtileTailMaskSebvinceForm", True)
+    useFusedForm = (kernel.get("SubtileTailMaskFusedForm", True)
                        and shareAB and bpeA == 2)
 
     module = Module("tailSubLaneMaskPrecomputeSubtile")
     maskVgprMap = {}
     allocatedMaskVgprs = []
 
-    if useSebvinceForm:
+    if useFusedForm:
       # Init invariants once (diff + boundaryMask[ir]). The init
       # VGPRs persist across every per-(mmak, ir) chain emit AND the
       # per-mmak apply loop (the chain re-reads boundaryMask[ir];
       # the apply itself ignores them, but freeing here would race
       # the next mmak's chain emit).
       initModule, diffVgpr, boundaryMaskVgprs = \
-        self._emitTailSubLaneMaskInitSebvince(
+        self._emitTailSubLaneMaskInitFused(
           kPosBaseVgpr, numMIInUnroll, bpeA, vgprPerInUnrollA)
       module.add(initModule)
       allocatedMaskVgprs.append(diffVgpr)
@@ -5271,10 +5267,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             1, "subLaneMask_A_mmak%d_ir%d" % (mmak, ir))
           allocatedMaskVgprs.append(vMaskA)
           maskVgprMap[("A", mmak, ir)] = vMaskA
-          module.add(self._emitTailSubLaneMaskChainIntoVgprSebvince(
+          module.add(self._emitTailSubLaneMaskChainIntoVgprFused(
             diffVgpr, boundaryMaskVgprs[ir],
             "A", mmak, ir, miK, numMIInUnroll, vMaskA))
-        # bpeA == bpeB == 2 guaranteed by useSebvinceForm; B operand
+        # bpeA == bpeB == 2 guaranteed by useFusedForm; B operand
         # shares the per-(mmak, ir) precomputed mask.
         for ir in range(vgprPerInUnrollA):
           maskVgprMap[("B", mmak, ir)] = maskVgprMap[("A", mmak, ir)]
@@ -5282,7 +5278,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Legacy bpe-parametric chain. Kept for fp8 / int8 byte-refine
     # configs (not in current gauntlet) and the
-    # SubtileTailMaskSebvinceForm=False reversibility path.
+    # SubtileTailMaskFusedForm=False reversibility path.
     kPosCur = self.vgprPool.checkOut(1, "kPosCurPrecompute")
     seedVgpr = self.vgprPool.checkOut(1, "subLaneByteSeedPrecompute")
 
@@ -5442,17 +5438,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #     NLL/NGLL drained K=[0, origCounter*DU) cleanly; last GR_INC
       #     left SRD one DU short of K_aligned. Advance SRD by 1 DU.
       #
-      # Hoisted ABOVE `calculateLoopNumIter` (per sebvince #PR-7683
-      # design): the SRD advance / LWA realign is the mainloop-exit
-      # "GR_INC + LW swap" undo; sebvince emits it as part of his main-
-      # and-exit-loops block which runs BEFORE the tail-entry K%DU==0
+      # Hoisted ABOVE `calculateLoopNumIter`: the SRD advance / LWA
+      # realign is the mainloop-exit "GR_INC + LW swap" undo, and the
+      # main-and-exit-loops block runs BEFORE the tail-entry K%DU==0
       # cmp/branch. Running it here unconditionally is harmless on the
       # early-exit path (the post-tail write-out uses SrdC/SrdD, not
       # SrdA/B/MXSA/MXSB or LocalWriteBaseAddr), and it lets the SAddU32
       # / SXorB32 chain co-issue with calculateLoopNumIter's
       # divide-and-remainder rather than serialize behind its cmp+branch.
       # Bonus: reading OrigLoopCounter directly drops the snapshot
-      # SGPR our previous version held across the calculateLoopNumIter
+      # SGPR a prior version held across the calculateLoopNumIter
       # call.
       if kernel["PrefetchGlobalRead"] > 0:
         pgr = kernel["PrefetchGlobalRead"]
@@ -5543,12 +5538,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # (statically no-op for DepthU <= 256, the host MX-pad unit).
       module.add(self._emitTailSrdTightenSubtileMX(kernel))
       # MX data SRD tightening (SrdA / SrdB on MX kernels) when
-      # DepthU > 256; nakajee #PR-7661 review pointed out that the
-      # data-side SRD needs the same K=256-padded clip as the scale
-      # side (the per-lane mask + 0-scale absorb keeps results
-      # correct under garbage data, but garbage reads can still page
-      # fault past the data buffer). See `_emitTailSrdTightenSubtileMXData`
-      # for formula and gating (statically no-op for DepthU <= 256).
+      # DepthU > 256: data-side SRD needs the same K=256-padded clip
+      # as the scale side (the per-lane mask + 0-scale absorb keeps
+      # results correct under garbage data, but garbage reads can
+      # still page fault past the data buffer). See
+      # `_emitTailSrdTightenSubtileMXData` for formula and gating
+      # (statically no-op for DepthU <= 256).
       module.add(self._emitTailSrdTightenSubtileMXData(kernel))
 
       # No SRD rewind here. For PGR=0 the mainloop's per-iter GR_INC
@@ -5663,7 +5658,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # consume any DTL/LDS data -- so hoisting it above the
       # `tail GR: wait for DTL writes to LDS` drain lets the
       # cmp/cndmask chain co-issue with the buffer-load latency
-      # rather than serializing behind it (per nakajee #PR-review).
+      # rather than serializing behind it.
       #
       # The per-mmak loop below collapses to a pure
       # `v_and_b32 vIdx, vMask[..], vIdx` apply step. Persistent
@@ -5771,9 +5766,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         #   mfmaId = getSubtileShapeLinearId(du, 0)
         # Loops sId0 over the operand's M-axis local subtile grid and
         # emits one DS load per (sId0, sId1, du). Inlined here (vs a
-        # separate `emitSubtileDsReadForMmak` helper) per sebvince
-        # #PR-7661 review -- the iteration shape is tail-scaffold-
-        # specific and the only consumer is this site.
+        # separate `emitSubtileDsReadForMmak` helper) because the
+        # iteration shape is tail-scaffold-specific and this is the
+        # only call site.
         for tc, ti in (('A', tiA), ('B', tiB)):
           subKShape = ti.subtileShape[1]
           sId1     = mmak // subKShape

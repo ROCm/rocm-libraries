@@ -61,20 +61,20 @@ from Tensile.Tests.unit.test_subtile_tailloop_emit import (
 # ── Driver ──────────────────────────────────────────────────────────────────
 
 def _emit_anyk_tail_asm(*, asem: int, pgr: int = 0, MT0: int = 128, MT1: int = 128,
-                        sebvinceForm: bool = True, depthU: int = 64) -> str:
+                        fusedForm: bool = True, depthU: int = 64) -> str:
     """Emit a BF16 subtile tail scaffold at the requested ASEM.
 
-    `sebvinceForm` (default True) drives `SubtileTailMaskSebvinceForm`
-    -- the post-#7683-port BF16 mask chain (single shared diff +
-    per-i boundary[ir], then sFull/sZero cmps per (mmak, ir)).
+    `fusedForm` (default True) drives `SubtileTailMaskFusedForm` --
+    the BF16 mask chain that fuses a single shared diff +
+    per-i boundary[ir] init with sFull/sZero cmps per (mmak, ir).
     Set False to pin the legacy per-(operand, mmak, ir) bpe-parametric
     chain (still used for fp8 / int8 byte-refine paths and the
-    `SubtileTailMaskSebvinceForm=False` reversibility escape hatch).
+    `SubtileTailMaskFusedForm=False` reversibility escape hatch).
     """
     kernel = _create_kernel(MT0=MT0, MT1=MT1, fp4=False,
                             depthU=depthU, no_tail_loop=False)
     setdefault_tail_scaffold_kernel_keys(kernel, pgr, asem=asem)
-    kernel["SubtileTailMaskSebvinceForm"] = sebvinceForm
+    kernel["SubtileTailMaskFusedForm"] = fusedForm
 
     kwa = build_minimal_subtile_kwa(kernel)
     tPA = {"is_sparse": False, "tpsMetadata": None}
@@ -135,8 +135,8 @@ class TestAnyKEmit_K4:
     gate, no mod>0 mask byte, and the coarse cmp+cndmask is gone (#5).
     """
 
-    def test_k4_sebvince_form_emits_init_and_per_mmak_chain(self):
-        """ASEM=4 (byte refine path, BF16). With the sebvince form
+    def test_k4_fused_form_emits_init_and_per_mmak_chain(self):
+        """ASEM=4 (byte refine path, BF16). With the fused form
         adopted as default, the chain emits:
           * init: single `v_sub_i32 vDiff, sgprLoopCounterL, vKPosBase`
             (signed) + per-i boundaryMask cndmask sequence.
@@ -149,9 +149,9 @@ class TestAnyKEmit_K4:
         tail = _extract_tail_section(_emit_anyk_tail_asm(asem=4, pgr=0))
         assert tail, "K%4 emit produced no tail block"
 
-        # Sebvince form fires (default for BF16/BF16).
-        assert "subLaneMask sebvince" in tail, (
-            "K%4 (ASEM=4) emit must engage the sebvince mask init "
+        # Fused form fires (default for BF16/BF16).
+        assert "subLaneMask fused" in tail, (
+            "K%4 (ASEM=4) emit must engage the fused mask init "
             "(default for bf16/bf16 byte refine)."
         )
         # Legacy chain primitives must be absent. The `byteRefine`
@@ -159,20 +159,20 @@ class TestAnyKEmit_K4:
         # both forms; pinned by the apply tests above), but the
         # legacy seed `mask seed = full keep` mov and the
         # per-(operand, mmak, ir) byteRefine CHAIN start tag must
-        # not appear under the sebvince default form.
+        # not appear under the fused default form.
         assert re.search(
             r"v_mov_b32\s+v\d+,\s*0xffffffff[^\n]*mask seed = full keep",
             tail, re.IGNORECASE,
         ) is None, (
             "K%4 emit must NOT contain the legacy `mask seed = full "
-            "keep` (sebvince form skips the per-(mmak, ir) seed mov)."
+            "keep` (fused form skips the per-(mmak, ir) seed mov)."
         )
         assert re.search(
             r"byteRefine\[[AB] ir=\d+ mmak=\d+\]: mask seed",
             tail,
         ) is None, (
             "K%4 emit must NOT contain the legacy `byteRefine "
-            "[<op> ir=N mmak=M]: mask seed` chain start (sebvince "
+            "[<op> ir=N mmak=M]: mask seed` chain start (fused "
             "form replaces the per-(operand, mmak, ir) chain with "
             "the shared diff + boundary precompute)."
         )
@@ -182,36 +182,36 @@ class TestAnyKEmit_K4:
         ) is None, (
             "K%4 emit must NOT contain the legacy coarse "
             "`v_cndmask_b32 ... if K_idx >= sizeL` per-VGPR cndmask "
-            "(sebvince form's sFull/sZero subsume it)."
+            "(fused form's sFull/sZero subsume it)."
         )
-        # Sebvince per-(mmak, ir) chain: 2 cndmasks per chain at
+        # Fused per-(mmak, ir) chain: 2 cndmasks per chain at
         # numMmaks=2 (DU=64 / MIK=32), vgprPerInUnroll=4 -> 16
         # cndmasks shared across A/B (bpeA==bpeB). Plus 8 cndmasks in
         # the init (per-i boundary, 2 cndmasks per i, 4 vgprs).
         # Pin the per-(mmak, ir) chain markers as a substring count.
-        sebvince_chain_markers = re.findall(
+        fused_chain_markers = re.findall(
             r"subLaneMask\[A mmak=\d+ ir=\d+\] = sFull",
             tail,
         )
-        assert len(sebvince_chain_markers) >= 4, (
-            "K%4 emit (sebvince form) must have >=4 per-(A, mmak, ir) "
+        assert len(fused_chain_markers) >= 4, (
+            "K%4 emit (fused form) must have >=4 per-(A, mmak, ir) "
             "sFull cndmasks (2 mmaks * 4 ir). Got %d.\nTail excerpt:\n"
-            % len(sebvince_chain_markers) + tail[:1500]
+            % len(fused_chain_markers) + tail[:1500]
         )
 
     def test_k4_legacy_form_emits_mod0_only(self):
-        """`SubtileTailMaskSebvinceForm=False` reverts to the legacy
+        """`SubtileTailMaskFusedForm=False` reverts to the legacy
         bpe-parametric chain. ASEM=4 still statically skips the mod>0
         chain (ASEM*bpe=8 is a multiple of bpr=4); only the mod=0
         step + seed remain. Regression pin for the reversibility
         escape hatch.
         """
         tail = _extract_tail_section(
-            _emit_anyk_tail_asm(asem=4, pgr=0, sebvinceForm=False))
+            _emit_anyk_tail_asm(asem=4, pgr=0, fusedForm=False))
         assert tail, "K%4 legacy emit produced no tail block"
         assert "byteRefine" in tail, (
             "K%4 legacy emit must contain legacy `byteRefine` "
-            "comments (sebvince form disabled)."
+            "comments (fused form disabled)."
         )
         # No mod>0 chain.
         assert re.search(
@@ -241,12 +241,12 @@ class TestAnyKEmit_K2:
     against each boundary VGPR is the sole K-tail mask.
     """
 
-    def test_k2_emits_sebvince_form_chain(self):
-        """ASEM=2 fires the byte refine. Under the sebvince default
-        form: chain is single `vDiff` init + per-i boundaryMask init +
+    def test_k2_emits_fused_form_chain(self):
+        """ASEM=2 fires the byte refine. Under the fused default form:
+        chain is single `vDiff` init + per-i boundaryMask init +
         sFull/sZero cmps per (mmak, ir). The per-mmak apply step
-        remains a pure v_and_b32 (precompute pattern preserved per
-        nakajee #PR-7661 review on scheduling).
+        remains a pure v_and_b32 (precompute pattern preserved so the
+        chain runs entirely in the GR-wait shadow).
 
         Strictly more cmps than the K%32 baseline (which only has the
         per-mmak coarse cmp): init adds vgprPerInUnroll-many boundary
@@ -259,21 +259,21 @@ class TestAnyKEmit_K2:
         assert tail_k2, "K%2 emit produced no tail block"
         assert tail_k32, "K%32 baseline emit produced no tail block"
 
-        # Cmp count: sebvince form emits VCmpLtI32 (boundary init) +
+        # Cmp count: fused form emits VCmpLtI32 (boundary init) +
         # VCmpGTI32 (sFull) + VCmpLeI32 (sZero). The K%32 baseline
         # uses VCmpGEI32 (coarse). Pin "strictly more cmps total".
         cmp_k2 = re.findall(r"v_cmp_(?:gt|le|lt|ge)_i32", tail_k2)
         cmp_k32 = re.findall(r"v_cmp_(?:gt|le|lt|ge)_i32", tail_k32)
         assert len(cmp_k2) > len(cmp_k32), (
-            f"K%2 sebvince-form emit must add per-(mmak, ir) sFull/"
+            f"K%2 fused-form emit must add per-(mmak, ir) sFull/"
             f"sZero cmps + boundary init cmps beyond the K%32 "
             f"baseline; got cmp_k2={len(cmp_k2)} vs "
             f"cmp_k32={len(cmp_k32)}."
         )
 
         # Init shows up exactly once.
-        assert "subLaneMask sebvince: diff = LoopCounterL - kPosBase" in tail_k2, (
-            "K%2 emit must contain the sebvince init `diff = "
+        assert "subLaneMask fused: diff = LoopCounterL - kPosBase" in tail_k2, (
+            "K%2 emit must contain the fused init `diff = "
             "LoopCounterL - kPosBase`."
         )
         # Per-(mmak, ir) sFull cmp tagged with mmak/ir indices.
@@ -320,7 +320,7 @@ class TestAnyKEmit_K2:
             "Tail excerpt:\n" + tail_k2[:2000]
         )
 
-        # Precompute hoist: the sebvince init + per-(mmak, ir) chain
+        # Precompute hoist: the fused init + per-(mmak, ir) chain
         # must appear BEFORE the first per-mmak ds_read wait. The
         # per-mmak apply step (`v_and_b32 ... apply precomputed mask`)
         # lives AFTER that marker.
@@ -330,9 +330,9 @@ class TestAnyKEmit_K2:
             "ds_reads ...` marker."
         )
         diff_init_idx = tail_k2.find(
-            "subLaneMask sebvince: diff = LoopCounterL - kPosBase")
+            "subLaneMask fused: diff = LoopCounterL - kPosBase")
         assert 0 < diff_init_idx < ds_wait_idx, (
-            "K%%2 emit must hoist the sebvince `diff` init BEFORE the "
+            "K%%2 emit must hoist the fused `diff` init BEFORE the "
             "first per-mmak ds_read wait (precompute block).\n"
             "diff@%d, ds_wait@%d" % (diff_init_idx, ds_wait_idx)
         )
@@ -350,7 +350,7 @@ class TestAnyKEmit_K2:
             r"[^\n]*d = LoopCounterL % 8",
             tail_k2,
         ), (
-            "K%2 sebvince emit missing `v_and_b32 vDLaneRem, 7, "
+            "K%2 fused emit missing `v_and_b32 vDLaneRem, 7, "
             "sgprLoopCounterL` (d = LoopCounterL % 8). Tail "
             "excerpt:\n" + tail_k2[:2000]
         )
@@ -391,9 +391,9 @@ class TestAnyKEmit_K2:
 class TestAnyKEmit_K1:
     """ASEM=1 (odd K). `ASEM*bpe = 2` is not a multiple of `bpr = 4`,
     so the mod>0 partial chain is emitted unconditionally (no runtime
-    s_and/s_cbranch gate -- per nakajee #PR-review the 3-instr scalar
-    gate to skip a 4-instr chain in the one-shot precompute setup is
-    not worth the branch overhead). The chain shape is:
+    s_and/s_cbranch gate -- the 3-instr scalar gate to skip a 4-instr
+    chain in the one-shot precompute setup is not worth the branch
+    overhead). The chain shape is:
 
       v_mov_b32 vMask, 0xFFFFFFFF                         // mask seed
       v_mov_b32 vSeed, 0xFFFF                             // mod=1 keep
@@ -406,15 +406,14 @@ class TestAnyKEmit_K1:
       v_and_b32 vIdx, vMask, vIdx                         // each idx
     """
 
-    def test_k1_no_narrow_load_and_emits_sebvince_chain(self):
-        """ASEM=1 (full odd-K path). Default sebvince form chain.
+    def test_k1_no_narrow_load_and_emits_fused_chain(self):
+        """ASEM=1 (full odd-K path). Default fused form chain.
         Asserts:
           * no narrow d16 load (still illegal on gfx950);
           * no legacy runtime-gate skip label or partial-mod residue
-            (those were already dropped pre-sebvince per nakajee
-            review and stay dropped);
-          * sebvince init emitted (vDiff, halfKeep, boundary[i]);
-          * sebvince per-(mmak, ir) sFull/sZero chain emitted;
+            (already dropped pre-fused-form and stay dropped);
+          * fused init emitted (vDiff, halfKeep, boundary[i]);
+          * fused per-(mmak, ir) sFull/sZero chain emitted;
           * boundary cndmask `(d<hi) ? halfKeep : full` present in
             init (the 3-state mask construction).
         """
@@ -432,11 +431,11 @@ class TestAnyKEmit_K1:
         )
 
         # Runtime gate must NOT be emitted: legacy dropped this gate
-        # pre-sebvince, and sebvince form doesn't have a mod>0 chain
-        # to gate either way.
+        # pre-fused-form, and the fused form doesn't have a mod>0
+        # chain to gate either way.
         assert "SubtileTailByteShiftPartialSkip" not in tail, (
             "ASEM=1 emit must NOT contain the legacy partial-mod skip "
-            "label (already dropped pre-sebvince; sebvince form has "
+            "label (already dropped pre-fused; fused form has "
             "no mod>0 chain)."
         )
         assert re.search(
@@ -448,14 +447,14 @@ class TestAnyKEmit_K1:
             "residue (legacy chain artifact)."
         )
 
-        # Sebvince init: `v_sub_i32 vDiff, sgprLoopCounterL, vKPosBase`
+        # Fused init: `v_sub_i32 vDiff, sgprLoopCounterL, vKPosBase`
         # and `v_mov_b32 vHalfKeep, 0x0000FFFF`.
         assert re.search(
             r"v_sub_i32\s+v\d+,\s+s\[sgprLoopCounterL\],\s+v\d+"
             r"[^\n]*diff = LoopCounterL - kPosBase",
             tail,
         ), (
-            "ASEM=1 emit missing sebvince init `v_sub_i32 vDiff, "
+            "ASEM=1 emit missing fused init `v_sub_i32 vDiff, "
             "sgprLoopCounterL, vKPosBase`. Tail excerpt:\n"
             + tail[:2000]
         )
@@ -463,7 +462,7 @@ class TestAnyKEmit_K1:
             r"v_mov_b32\s+v\d+,\s*0x0000FFFF[^\n]*halfKeep",
             tail, re.IGNORECASE,
         ), (
-            "ASEM=1 emit missing sebvince init `v_mov_b32 vHalfKeep, "
+            "ASEM=1 emit missing fused init `v_mov_b32 vHalfKeep, "
             "0x0000FFFF`. Tail excerpt:\n" + tail[:2000]
         )
 
@@ -485,7 +484,7 @@ class TestAnyKEmit_K1:
             tail,
         )
         assert sfull_cnd is not None, (
-            "ASEM=1 emit missing sebvince sFull cndmask "
+            "ASEM=1 emit missing fused sFull cndmask "
             "`mask = sFull ? full : boundary[ir]`. Tail excerpt:\n"
             + tail[:2500]
         )
@@ -525,7 +524,7 @@ class TestAnyKEmit_K1:
             "application. Tail excerpt:\n" + tail[:2000]
         )
 
-        # ASEM=1 sebvince chain runs INSIDE the precompute block
+        # ASEM=1 fused chain runs INSIDE the precompute block
         # (before any per-mmak ds_read wait): both the init `diff`
         # subtract AND the per-(mmak, ir) sFull/sZero cmps must
         # precede the first per-mmak ds_read wait.
@@ -535,9 +534,9 @@ class TestAnyKEmit_K1:
             "ds_reads` marker."
         )
         diff_init_pos = tail.find(
-            "subLaneMask sebvince: diff = LoopCounterL - kPosBase")
+            "subLaneMask fused: diff = LoopCounterL - kPosBase")
         assert 0 < diff_init_pos < ds_wait_idx, (
-            "ASEM=1 emit must place the sebvince `diff = "
+            "ASEM=1 emit must place the fused `diff = "
             "LoopCounterL - kPosBase` init INSIDE the precompute "
             "block (before the first per-mmak ds_read wait)."
         )
@@ -545,7 +544,7 @@ class TestAnyKEmit_K1:
             r"subLaneMask\[A mmak=\d+ ir=\d+\]: sFull",
             tail,
         ))
-        assert last_sfull, "ASEM=1 emit missing sebvince sFull markers"
+        assert last_sfull, "ASEM=1 emit missing fused sFull markers"
         assert last_sfull[-1].start() < ds_wait_idx, (
             "ASEM=1 emit must place the LAST per-(mmak, ir) sFull cmp "
             "INSIDE the precompute block (before the first per-mmak "
@@ -607,7 +606,7 @@ class TestAnyKEmit_Precompute:
     """
 
     def test_precompute_block_before_per_mmak_loop(self):
-        """ASEM=2 (byte refine path, sebvince default form). Every
+        """ASEM=2 (byte refine path, fused default form). Every
         init step + per-(mmak, ir) sFull/sZero chain step must
         appear BEFORE the first `tail LR mmak=0 ... wait for ds_reads`
         marker -- that marker opens the per-mmak loop body, and the
@@ -626,12 +625,12 @@ class TestAnyKEmit_Precompute:
         apply_section = tail[marker_idx:]
 
         # Init runs in the precompute section.
-        assert ("subLaneMask sebvince: diff = LoopCounterL - kPosBase"
+        assert ("subLaneMask fused: diff = LoopCounterL - kPosBase"
                 in precompute_section), (
-            "Precompute section must contain the sebvince `diff` init"
+            "Precompute section must contain the fused `diff` init"
         )
         # mmak=0 AND mmak=1 sFull cmps in the precompute section
-        # (sebvince form emits all subIterK chains up front).
+        # (fused form emits all subIterK chains up front).
         assert re.search(
             r"subLaneMask\[A mmak=0 ir=\d+\]: sFull",
             precompute_section,
@@ -654,7 +653,7 @@ class TestAnyKEmit_Precompute:
         assert re.search(
             r"subLaneMask\[A mmak=\d+ ir=\d+\]", apply_section
         ) is None, (
-            "Per-mmak apply section must NOT emit any sebvince "
+            "Per-mmak apply section must NOT emit any fused "
             "chain markers (hoisted out into the precompute block)."
         )
 
@@ -666,7 +665,7 @@ class TestAnyKEmit_Precompute:
         `tail GR: wait for DTL writes to LDS` swait + the
         `tail GR: LDS sync before LR` barrier (rather than
         serializing behind them). Tests both ASEM=1 and ASEM=2 under
-        the sebvince default form.
+        the fused default form.
         """
         for asem in (1, 2):
             tail = _extract_tail_section(_emit_anyk_tail_asm(asem=asem, pgr=0))
@@ -683,15 +682,15 @@ class TestAnyKEmit_Precompute:
                 "ASEM=%d emit missing `%s` barrier after swait"
                 % (asem, barrier_marker))
 
-            # Sebvince form: pin the `diff` init marker (sole entry
+            # Fused form: pin the `diff` init marker (sole entry
             # point of the chain) above the DTL wait.
             diff_pos = tail.find(
-                "subLaneMask sebvince: diff = LoopCounterL - kPosBase")
+                "subLaneMask fused: diff = LoopCounterL - kPosBase")
             assert diff_pos > 0, (
-                "ASEM=%d emit missing sebvince `diff` init comment"
+                "ASEM=%d emit missing fused `diff` init comment"
                 % asem)
             assert diff_pos < dtl_wait_idx, (
-                "ASEM=%d emit must hoist the sebvince `diff` init "
+                "ASEM=%d emit must hoist the fused `diff` init "
                 "ABOVE the `%s` swait so cmp/cndmask can co-issue "
                 "with the buffer-load latency.\n"
                 "diff@%d, dtl_wait@%d"
@@ -703,7 +702,7 @@ class TestAnyKEmit_Precompute:
                 tail,
             ):
                 assert m.start() < dtl_wait_idx, (
-                    "ASEM=%d emit has sebvince chain marker at "
+                    "ASEM=%d emit has fused chain marker at "
                     "offset %d AFTER the DTL wait at offset %d -- "
                     "the precompute chain must be fully hoisted "
                     "above the wait."

@@ -42,8 +42,8 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # BF16 TN — MT 320x288, DU = 2*MI_K = 64, ASEM=2 (the failure
-  # report mode: nakajee's K=66 / MT 320x288 repro).
+  # BF16 TN — MT 320x288, DU = 2*MI_K = 64, ASEM=2 (originally surfaced
+  # as a K=66 / MT 320x288 VGPR-pressure regression).
   ########################################
   -
     - # ProblemType
@@ -76,7 +76,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # K = 1*DU + 2 — the nakajee repro
+          # K = 1*DU + 2 — the originally reported repro
           - Exact: [320, 288, 1,  66]
           # K = 1*DU + 14 — different K_remain on the same MT
           - Exact: [320, 288, 1,  78]

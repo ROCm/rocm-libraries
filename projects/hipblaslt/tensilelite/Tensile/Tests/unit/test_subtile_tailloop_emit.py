@@ -763,11 +763,11 @@ class TestTailEmitContent_PGR2:
 
     def test_omits_origCounter_snapshot_after_hoist(self, fp4_pgr2_asm):
         r"""PGR>0 tail-entry gating is now hoisted ABOVE
-        `calculateLoopNumIter` (per sebvince #PR-7683 design), so the
-        `s_mov_b32 sX, sgprOrigLoopCounter ... snapshot K//DU` SGPR
-        snapshot is no longer needed -- the gate cmps read
-        `sgprOrigLoopCounter` directly while it still holds the
-        original K//DU value (calculateLoopNumIter zeroes it).
+        `calculateLoopNumIter`, so the `s_mov_b32 sX,
+        sgprOrigLoopCounter ... snapshot K//DU` SGPR snapshot is no
+        longer needed -- the gate cmps read `sgprOrigLoopCounter`
+        directly while it still holds the original K//DU value
+        (calculateLoopNumIter zeroes it).
         """
         assert not re.search(
             r"s_mov_b32\s+s\[?\d+\]?,\s*s\[sgprOrigLoopCounter\][^\n]*snapshot K//DU",
@@ -795,11 +795,11 @@ class TestTailEmitContent_PGR2:
         )
 
     def test_gating_block_precedes_TailLoopBeginL(self, fp4_pgr2_asm):
-        r"""Per sebvince #PR-7683 design, the PGR>0 SRD-advance / LWA-
-        XOR gating block must sit BEFORE `TailLoopBeginL` (the openLoop
-        label) AND BEFORE the calculateLoopNumIter K%DU==0 early-exit
-        cmp/branch. Pin by checking the c=0 origCounter cmp appears
-        before the SkipTailLoopL early-exit cmp/branch.
+        r"""The PGR>0 SRD-advance / LWA-XOR gating block must sit BEFORE
+        `TailLoopBeginL` (the openLoop label) AND BEFORE the
+        calculateLoopNumIter K%DU==0 early-exit cmp/branch. Pin by
+        checking the c=0 origCounter cmp appears before the
+        SkipTailLoopL early-exit cmp/branch.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
@@ -1036,8 +1036,7 @@ class TestTailEmitContent_PGR1:
     def test_omits_origCounter_snapshot_after_hoist(self, bf16_pgr1_asm):
         """PGR=1 must NOT emit the legacy OrigLoopCounter snapshot;
         the gating block reads sgprOrigLoopCounter directly now that
-        it sits before calculateLoopNumIter (per sebvince #PR-7683
-        design).
+        it sits before calculateLoopNumIter.
         """
         assert not re.search(
             r"s_mov_b32\s+s\[?\d+\]?,\s*s\[sgprOrigLoopCounter\][^\n]*snapshot K//DU",
@@ -1097,7 +1096,7 @@ class TestTailEmitContent_PGR1:
         already branched away via the c=0 reset path above). Emitted
         for structural symmetry with PGR=2.
 
-        After the sebvince #PR-7683 hoist, the source is
+        After the gating-block hoist, the source is
         `sgprOrigLoopCounter` directly (the snapshot scratch sgpr is
         gone), so the cmp src0 must spell out `sgprOrigLoopCounter`.
         """
@@ -1112,8 +1111,8 @@ class TestTailEmitContent_PGR1:
 # ── Tests: Srd<tc>+2 tightening at tail entry ────────────────────────────────
 
 class TestTailSrdTightenSubtile:
-    """`_emitTailSrdTightenSubtile` emit shape (nakajee #PR-7661 OOR review
-    + follow-up tightening to bpr=4 alignment).
+    """`_emitTailSrdTightenSubtile` emit shape (OOR clip on the wide
+    tail GR + bpr=4 alignment).
 
     The tightening fires once at tail entry (after the PGR>0 entry
     gating, before openLoop), shrinks `SrdA+2` and `SrdB+2` by
@@ -1125,8 +1124,7 @@ class TestTailSrdTightenSubtile:
 
     Under align-UP to bpr=4, `delta = DepthU*bpe - alignedBytes` is
     provably >= 0, so there is NO runtime cbranch/skip-label -- when
-    delta=0 the SSubs are harmless no-ops (see nakajee #PR-7661
-    review cleanup (2)).
+    delta=0 the SSubs are harmless no-ops.
     """
 
     @pytest.fixture
@@ -1147,9 +1145,9 @@ class TestTailSrdTightenSubtile:
         """
         tail = _extract_tail_section(bf16_pgr0_asm)
         assert tail
-        assert "OOR review" in tail or "nakajee #PR-7661" in tail, (
+        assert "OOR clip" in tail, (
             "Tail must emit the `_emitTailSrdTightenSubtile` banner "
-            "referencing the nakajee #PR-7661 OOR review.\n"
+            "describing the OOR clip on the last m-row.\n"
             "Tail head:\n" + tail[:2000]
         )
 
@@ -1157,9 +1155,9 @@ class TestTailSrdTightenSubtile:
         """The aligned-K-bytes chain is the runtime fingerprint of the
         helper: `s_lshl_b32 <s>, sgprLoopCounterL, 0x1` (bf16 bpe=2)
         then `s_add_u32 <s>, <s>, 3` and `s_and_b32 <s>, <s>, 0xfffffffc`
-        for bpr=4 alignment (nakajee #PR-7661 follow-up cleanup #1:
-        align to bpr=4, not loadBytes=16, since BufferLoad's natural
-        granularity is bpr).
+        for bpr=4 alignment. (bpr is BufferLoad's natural granularity;
+        a per-byte clip would over-tighten and drop the trailing
+        odd-K element from the wide load.)
         """
         tail = _extract_tail_section(bf16_pgr0_asm)
         assert tail
@@ -1179,7 +1177,7 @@ class TestTailSrdTightenSubtile:
             tail
         ), (
             "Tail must mask to align up to bpr=4 boundary "
-            "(alignMaskInv = 0xfffffffc), per nakajee follow-up #1"
+            "(alignMaskInv = 0xfffffffc)"
         )
 
     def test_no_runtime_skip_branch(self, bf16_pgr0_asm):
@@ -1187,9 +1185,8 @@ class TestTailSrdTightenSubtile:
         (`alignedBytes <= roundUp((DepthU-1)*bpe, 4) <= DepthU*bpe`
         for bpe in {1, 2}). The runtime `s_cmp_lt_u32 alignedBytes,
         DepthU*bpe` + `s_cbranch_scc0 TailSrdTightenSkip<L>` short-
-        circuit from the original commit is dead and must be removed
-        (nakajee #PR-7661 follow-up cleanup #2). When delta=0 the
-        two `s_sub_u32` lines become harmless no-ops.
+        circuit from an earlier draft is dead and must be removed.
+        When delta=0 the two `s_sub_u32` lines become harmless no-ops.
         """
         tail = _extract_tail_section(bf16_pgr0_asm)
         assert tail
@@ -1197,10 +1194,7 @@ class TestTailSrdTightenSubtile:
         # between the banner and the first `s_sub_u32 SrdA+2` line)
         # so we don't mis-flag an unrelated `s_cmp_lt_u32` elsewhere
         # in the tail.
-        banner_pos = max(
-            tail.find("OOR review"),
-            tail.find("nakajee #PR-7661"),
-        )
+        banner_pos = tail.find("OOR clip")
         srdA_match = re.search(
             r"s_sub_u32\s+s\[sgprSrdA\+2\][^\n]*Srd A\+2 -= delta",
             tail)
@@ -1214,7 +1208,7 @@ class TestTailSrdTightenSubtile:
         ), (
             "Tail must NOT emit `s_cmp_lt_u32 alignedBytes < DepthU*bpe` "
             "in the tighten region -- delta is provably >= 0 under "
-            "align-UP to bpr=4 (nakajee #PR-7661 cleanup #2). Region:\n"
+            "align-UP to bpr=4. Region:\n"
             + region
         )
         assert "TailSrdTightenSkip" not in tail, (
@@ -1289,7 +1283,7 @@ class TestTailSrdTightenSubtile:
         """
         tail = _extract_tail_section(fp4_pgr0_asm)
         assert tail
-        assert "OOR review" not in tail, (
+        assert "OOR clip on last m-row" not in tail, (
             "MX FP4 tail must NOT emit the bf16/fp16 SRD tighten."
         )
         assert "TailSrdTightenSkip" not in tail, (
@@ -1301,7 +1295,7 @@ class TestTailSrdTightenSubtile:
         so the SRD tighten helper must short-circuit early.
         """
         asm = _emit_tail_loop_asm(fp4=False, no_tail_loop=True, pgr=0)
-        assert "OOR review" not in asm
+        assert "OOR clip on last m-row" not in asm
         assert "TailSrdTightenSkip" not in asm
 
     def test_srd_tighten_fires_for_pgr2(self, bf16_pgr2_asm):
@@ -1349,12 +1343,11 @@ class TestTailSrdTightenSubtile:
 class TestTailSrdTightenSubtileMX:
     """`_emitTailSrdTightenSubtileMX` emit shape.
 
-    Per nakajee #PR-7661 spec the MX scale SRD+2 needs an extra
-    tightening step at tail entry when `DepthU > 256` (= MX K-padding
-    unit). For `DepthU <= 256` the host's
-    `rearrangePaddedMXScaleLayout` already pads K-blocks out to the
-    next 256-K boundary, so the natural NumRecords already covers any
-    K_remain on the last m-row -- the MX helper must be a static
+    The MX scale SRD+2 needs an extra tightening step at tail entry
+    when `DepthU > 256` (= MX K-padding unit). For `DepthU <= 256` the
+    host's `rearrangePaddedMXScaleLayout` already pads K-blocks out to
+    the next 256-K boundary, so the natural NumRecords already covers
+    any K_remain on the last m-row -- the MX helper must be a static
     no-op (no instructions, no comments).
 
     For `DepthU > 256` (only `DepthU=512` in our current MX yaml
@@ -1383,7 +1376,7 @@ class TestTailSrdTightenSubtileMX:
         asm = self._emit_fp4_asm(depthU=256)
         tail = _extract_tail_section(asm)
         assert tail, "fp4 fixture must produce a tail body"
-        assert "MX follow-up" not in tail, (
+        assert "MX scale follow-up" not in tail, (
             "DepthU=256 must NOT emit the MX SRD tighten banner "
             "(static no-op: K_remain < 256 == padK already covered "
             "by host padding)."
@@ -1407,7 +1400,7 @@ class TestTailSrdTightenSubtileMX:
         asm = self._emit_fp4_asm(depthU=512)
         tail = _extract_tail_section(asm)
         assert tail
-        assert "MX follow-up" in tail, (
+        assert "MX scale follow-up" in tail, (
             "DepthU=512 fp4 tail must emit the MX SRD tighten banner. "
             "Tail head:\n" + tail[:2500]
         )
@@ -1452,7 +1445,7 @@ class TestTailSrdTightenSubtileMX:
         asm = _emit_tail_loop_asm(fp4=False, no_tail_loop=False, pgr=0)
         tail = _extract_tail_section(asm)
         assert tail
-        assert "MX follow-up" not in tail, (
+        assert "MX scale follow-up" not in tail, (
             "Non-MX (bf16) tail must NOT emit the MX SRD tighten "
             "banner"
         )
@@ -1503,13 +1496,12 @@ class TestTailSrdTightenSubtileMXData:
 
     Companion to `_emitTailSrdTightenSubtileMX`: where the scale
     tightener clips `SrdMXS{A,B}+2`, the data tightener clips
-    `Srd{A,B}+2` on the MX **data** tensor side. nakajee #PR-7661
-    review pointed out that the data side needs the same K=256-padded
-    clip as the scale side -- otherwise the natural DepthU-shaped data
-    over-read on the last m-row can fault past the data buffer's
-    allocated bytes (the per-lane-mask + 0-scale absorb keeps the MFMA
-    result correct under garbage data, but garbage reads can still
-    page fault past the data buffer).
+    `Srd{A,B}+2` on the MX **data** tensor side. The data side needs
+    the same K=256-padded clip as the scale side -- otherwise the
+    natural DepthU-shaped data over-read on the last m-row can fault
+    past the data buffer's allocated bytes (the per-lane-mask +
+    0-scale absorb keeps the MFMA result correct under garbage data,
+    but garbage reads can still page fault past the data buffer).
 
     Static gate (must emit nothing): `DepthU <= 256`. The host MX
     K-padding already covers any K_remain < 256 in that regime, so
@@ -1521,8 +1513,8 @@ class TestTailSrdTightenSubtileMXData:
     emits a roundUp(K_remain, 256) chain, a single delta_K =
     DepthU - remainK_MX precompute, ONE `s_lshr_b32 delta, delta, 1`
     (delta_K * 0.5 = delta_K >> 1), and one `s_sub_u32 Srd{A,B}+2`
-    per MX operand. Swizzled MX operands bail (separate DTV emit
-    path; deferred per nakajee review reply).
+    per MX operand. Swizzled MX operands bail (DTV emit path needs
+    a per-block stride; deferred to a later patch).
     """
 
     def _emit_fp4_asm(self, *, depthU, pgr=0):
@@ -1618,7 +1610,7 @@ class TestTailSrdTightenSubtileMXData:
 
     def test_mxdata_tighten_after_scale_tighten(self):
         """Emit order at DepthU=512 fp4: the MX **scale** tighten
-        (`MX follow-up`) must precede the MX **data** tighten
+        (`MX scale follow-up`) must precede the MX **data** tighten
         (`MX data follow-up`); the scaffold call site adds them in
         scale-then-data order so a refactor that swaps them gets
         caught here.
@@ -1626,7 +1618,7 @@ class TestTailSrdTightenSubtileMXData:
         asm = self._emit_fp4_asm(depthU=512)
         tail = _extract_tail_section(asm)
         assert tail
-        scale_pos = tail.find("MX follow-up")
+        scale_pos = tail.find("MX scale follow-up")
         data_pos  = tail.find("MX data follow-up")
         assert scale_pos >= 0 and data_pos >= 0, (
             "DepthU=512 fp4 tail must emit BOTH scale and data "

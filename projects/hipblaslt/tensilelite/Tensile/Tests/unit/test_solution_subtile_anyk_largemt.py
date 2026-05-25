@@ -24,19 +24,16 @@
 ################################################################################
 """Solution-level pins for the subtile BF16 any-K tail on large MT shapes.
 
-Adds the coverage sebvince asked for in PR #7661 review comments
-3289001186 / 3289008557 / 3289012025: the large symmetric MT 320x320
-config (10x10 wavetile, 2x2 WG) and the existing MT 320x288 nakajee
-repro shape must not be rejected at the `assignProblemIndependent…`
-gate across all three `PrefetchGlobalRead` values and the three
-ASEM ∈ {1, 2, 8} modes.
+The large symmetric MT 320x320 (10x10 wavetile, 2x2 WG) config and the
+existing MT 320x288 repro shape must not be rejected at the
+`assignProblemIndependent…` gate across all three `PrefetchGlobalRead`
+values and the three ASEM ∈ {1, 2, 8} modes.
 
-The yaml smoke `subtile_bf16_anyk_largemt_sebvince.yaml` covers the
+The yaml smoke `subtile_bf16_anyk_largemt_extended.yaml` covers the
 runtime build path. These unit pins cover the Solution-level gate
 ordering: they catch a regression that would silently drop the large
-MT from the built solution set (sebvince's secondary concern that a
-VGPR-overflow rejection on this MT would silently report success
-with errorCode 0).
+MT from the built solution set (a VGPR-overflow rejection on this MT
+would otherwise silently report success with errorCode 0).
 
 The pins do NOT cover the late-stage VGPR-budget rejection that
 happens inside `KernelWriter.py` after register allocation -- that
@@ -126,7 +123,7 @@ def _run_assign_problem_independent(state):
         pass
 
 
-# ── Large MT shapes recommended by sebvince ─────────────────────────────────
+# ── Large MT shapes covered ─────────────────────────────────────────────────
 
 # (label, mi-9-tuple). MT = mi_m*wt_m*wg_m × mi_n*wt_n*wg_n.
 _LARGE_MT_SHAPES = [
@@ -138,14 +135,10 @@ _LARGE_MT_SHAPES = [
 # ── Tests ───────────────────────────────────────────────────────────────────
 
 class TestSubtileBf16LargeMTNotRejected:
-    """Sebvince comment 3289001186 (subtile_bf16_anyk_largemt.yaml
-    line 106): "We might want to add more large MTs like 320x320 to
-    make sure none of them are rejected (320x320 is using almost all
-    vpgrs available)."
-
-    Pin: the Solution-level gate accepts MT 320x320 and MT 320x288
+    """Pin: the Solution-level gate accepts MT 320x320 and MT 320x288
     at ASEM ∈ {1, 2, 8} so no silent drop happens before the
-    kernel-write stage.
+    kernel-write stage. MT 320x320 in particular sits near the VGPR
+    budget ceiling and is the shape most at risk of a silent reject.
     """
 
     @pytest.mark.parametrize("label,mi", _LARGE_MT_SHAPES)
@@ -156,18 +149,17 @@ class TestSubtileBf16LargeMTNotRejected:
         assert state.get("Valid") is not False, (
             f"Large MT {label} ASEM={asem}: Solution.py rejected the "
             f"kernel at the assignProblemIndependent gate (state['Valid'] "
-            f"is False). Sebvince flagged this as a silent failure mode."
+            f"is False). This is a silent failure mode -- a VGPR-overflow "
+            f"reject on this MT would still report errorCode 0."
         )
 
 
 class TestSubtileBf16LargeMTAcceptsAllPGR:
-    """Sebvince comment 3289012025 (subtile_bf16_anyk_largemt.yaml
-    line 107): "I would test all 3 PGRs as it might affect GR_inc
-    logic in tail loop (and test larger K to avoid NGLL skip)."
-
-    Pin: the Solution-level gate accepts MT 320x320 and MT 320x288
+    """Pin: the Solution-level gate accepts MT 320x320 and MT 320x288
     at PrefetchGlobalRead ∈ {0, 1, 2} so the per-prefetch-depth
-    GR_inc paths all get a chance to run during the yaml smoke.
+    GR_inc paths all get a chance to run during the yaml smoke. The
+    tail-loop GR_inc differs across prefetch depths, so this gate has
+    to hold for all three.
     """
 
     @pytest.mark.parametrize("label,mi", _LARGE_MT_SHAPES)
