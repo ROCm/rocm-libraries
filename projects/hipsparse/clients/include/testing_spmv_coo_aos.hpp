@@ -64,7 +64,7 @@ void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 #else
 #if(CUDART_VERSION >= 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
 #endif
 #endif
