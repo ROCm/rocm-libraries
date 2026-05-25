@@ -34,6 +34,7 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_weight_xdl_cshuffle_v3.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -1783,16 +1784,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
         else
         {
-            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-            auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-                for(const auto& s : strides)
-                    if(s > TwoGB)
-                        return true;
-                return false;
-            };
-            const bool stride_ovf = any_stride_exceeds_2gb(b_g_n_c_wis_strides) ||
-                                    any_stride_exceeds_2gb(e_g_k_c_xs_strides) ||
-                                    any_stride_exceeds_2gb(a_g_n_k_wos_strides);
+            const bool stride_ovf = tensor_exceeds_2gb(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
@@ -1971,16 +1965,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
         else
         {
-            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-            auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-                for(const auto& s : strides)
-                    if(s > TwoGB)
-                        return true;
-                return false;
-            };
-            const bool stride_ovf = any_stride_exceeds_2gb(b_g_n_c_wis_strides) ||
-                                    any_stride_exceeds_2gb(e_g_k_c_xs_strides) ||
-                                    any_stride_exceeds_2gb(a_g_n_k_wos_strides);
+            const bool stride_ovf = tensor_exceeds_2gb(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;

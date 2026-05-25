@@ -21,6 +21,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_fwd_multiple_abd.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
@@ -33,6 +34,7 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_abd_wmma_cshuffle_v3.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wno-unknown-warning-option"
@@ -90,17 +92,17 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                     std::is_same_v<e_data_type, ck::bhalf_t>)))
     {
 #endif
-        using EpilogueType =
-            typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
-                                          GridwiseGemm::UseDirectStore,
-                                      typename GridwiseGemm::EpilogueDirectStore,
-                                      typename GridwiseGemm::EpilogueCShuffle>::type;
+        constexpr auto epilogue_type =
+            GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
+                ? EpilogueType::DirectStore
+                : EpilogueType::CShuffle;
+        using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
 
         constexpr index_t LDS_size =
-            GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
         __shared__ char p_shared[LDS_size];
 
-        auto epilogue_args = EpilogueType{};
+        auto epilogue_args = SelectedEpilogue{};
 
         const auto a_grid_desc_ak0_m_ak1 =
             GridwiseGemm::MakeAGridDescriptor_AK0_M_AK1(a_grid_desc_m_k);
@@ -2156,19 +2158,12 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-            for(auto s : strides)
-                if(s > TwoGB)
-                    return true;
-            return false;
-        };
-        bool ds_stride_ovf = false;
+        bool ds_ovf = false;
         for(index_t d = 0; d < NumDTensor; d++)
-            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_k_wos_strides[d]);
-        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_c_wis_strides) ||
-                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
-                                any_stride_exceeds_2gb(e_g_n_k_wos_strides) || ds_stride_ovf;
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return Argument{p_as,
                         p_bs,
                         p_ds,
@@ -2287,19 +2282,12 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-            for(auto s : strides)
-                if(s > TwoGB)
-                    return true;
-            return false;
-        };
-        bool ds_stride_ovf = false;
+        bool ds_ovf = false;
         for(index_t d = 0; d < NumDTensor; d++)
-            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_k_wos_strides[d]);
-        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_c_wis_strides) ||
-                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
-                                any_stride_exceeds_2gb(e_g_n_k_wos_strides) || ds_stride_ovf;
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return std::make_unique<Argument>(p_as,
                                           p_bs,
                                           p_ds,
