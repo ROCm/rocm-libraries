@@ -10,7 +10,7 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
-namespace hip_kernel_provider::test_bn_common
+namespace hip_kernel_provider::batchnorm::test::common
 {
 
 struct BatchnormTestCase
@@ -117,4 +117,24 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingFull3dTestCases()
     };
 }
 
-} // namespace hip_kernel_provider::test_bn_common
+inline std::vector<BatchnormTestCase> getBnBwdSmoke2dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1, 1}, seed},
+        {{32, 3, 1, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdSmoke3dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed},
+        {{2, 3, 2, 4, 4}, seed},
+    };
+}
+
+} // namespace hip_kernel_provider::batchnorm::test::common

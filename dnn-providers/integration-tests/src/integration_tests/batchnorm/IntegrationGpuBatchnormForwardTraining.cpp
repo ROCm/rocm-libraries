@@ -266,9 +266,8 @@ protected:
                                     this->getTolerance(graphObj, outputs.nextRunningVariance));
         }
 
-        // Force execution on the specific engine that claimed capability
-        graphObj.set_preferred_engine_id_ext(TestConfig::get().getEngineId());
-
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

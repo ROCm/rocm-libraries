@@ -24,29 +24,37 @@
  #
  ###############################################################################
 
+include(CMakeDependentOption)
+
 # Find / configure LLVM
 add_subdirectory(llvm)
 
-include(FetchContent)
+cmake_dependent_option(HIPTENSOR_USE_SYSTEM_GOOGLETEST "Use system Google Test library instead of downloading and building it" OFF "HIPTENSOR_BUILD_TESTS" OFF)
 
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG release-1.12.1
-)
-FetchContent_GetProperties(googletest)
-if(NOT googletest_POPULATED)
-    # Fetch the content using default details
-    FetchContent_Populate(googletest)
-    # Save the shared libs setting, then force to static libs
-    set(BUILD_SHARED_LIBS_OLD ${BUILD_SHARED_LIBS})
-    set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "Build SHARED libraries" FORCE)
-    # Turn off gtest installation
-    set(INSTALL_GTEST OFF)
-    # Add gtest targets as static libs
-    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
-    # Restore shared libs setting
-    set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_OLD} CACHE INTERNAL "Build SHARED libraries" FORCE)
+if(HIPTENSOR_USE_SYSTEM_GOOGLETEST)
+    find_package(GTest REQUIRED)
+else()
+    include(FetchContent)
+
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.17.0
+    )
+    FetchContent_GetProperties(googletest)
+    if(NOT googletest_POPULATED)
+        # Fetch the content using default details
+        FetchContent_Populate(googletest)
+        # Save the shared libs setting, then force to static libs
+        set(BUILD_SHARED_LIBS_OLD ${BUILD_SHARED_LIBS})
+        set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "Build SHARED libraries" FORCE)
+        # Turn off gtest installation
+        set(INSTALL_GTEST OFF)
+        # Add gtest targets as static libs
+        add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
+        # Restore shared libs setting
+        set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_OLD} CACHE INTERNAL "Build SHARED libraries" FORCE)
+    endif()
 endif()
 
 get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
@@ -63,12 +71,49 @@ file(WRITE "${INSTALL_TEST_FILE}"
 # Target that will trigger build of all tests
 add_custom_target(hiptensor_tests)
 
+# On Windows, DLL search order is: application dir -> System32 -> PATH.
+# A system-installed ROCm places amdhip64_7.dll and amd_comgr_3.dll in
+# System32, which always wins over PATH. If the test binary is compiled with
+# a newer toolchain but an older runtime is loaded from System32, kernel launches
+# may crash (SEH 0xC0000005) if the code-object format is incompatible.
+if(WIN32 AND CREATE_TEST_APP_LOCAL_DEPLOY)
+    # hip_DIR is set by find_package(HIP) to <HIP_ROOT>/lib/cmake/hip.
+    # Walk up three directory levels to reach <HIP_ROOT>, then append /bin.
+    get_filename_component(_hip_cmake_dir  "${hip_DIR}"          DIRECTORY) # .../lib/cmake
+    get_filename_component(_hip_lib_dir    "${_hip_cmake_dir}"   DIRECTORY) # .../lib
+    get_filename_component(_hip_root       "${_hip_lib_dir}"     DIRECTORY) # <HIP_ROOT>
+    set(_hip_bin_dir "${_hip_root}/bin")
+
+    message(STATUS "HIP runtime DLL source: ${_hip_bin_dir}")
+    message(STATUS "HIP runtime DLL destination: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+
+    if(EXISTS "${_hip_bin_dir}")
+        file(MAKE_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+        file(GLOB _hip_dlls
+            "${_hip_bin_dir}/amd_comgr*.dll"   # code-object manager
+            "${_hip_bin_dir}/amdhip64*.dll"    # HIP runtime
+            "${_hip_bin_dir}/amdhiprtc*.dll"   # HIP RTC
+            "${_hip_bin_dir}/rocm_kpack*.dll"  # kernel packaging
+        )
+        if(_hip_dlls)
+            foreach(_dll ${_hip_dlls})
+                file(COPY "${_dll}" DESTINATION "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+            endforeach()
+            list(LENGTH _hip_dlls _hip_dll_count)
+            message(STATUS "Staged ${_hip_dll_count} HIP runtime DLL(s) into ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+        else()
+            message(WARNING "No DLLs found in ${_hip_bin_dir} - tests may load wrong HIP runtime from System32")
+        endif()
+    else()
+        message(WARNING "HIP DLL source directory not found: ${_hip_bin_dir} - "
+                        "tests may load wrong HIP runtime from System32")
+    endif()
+endif()
+
 set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/common.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_gtest_main.cpp)
 
-# Prevent CMake to add building path to RUNPATH
-set(CMAKE_SKIP_RPATH  TRUE)
 
 # Create test executables and deploy
 function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
@@ -105,9 +150,9 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
     if(WIN32)
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
     else()
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
                               "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
     endif()
 
@@ -140,6 +185,14 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH" "unsupported host device")
     # Set working directory to bin/ for proper DLL/resource loading on Windows
     set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+    # On Windows, ensure the ROCm/HIP DLLs (amdhip64_7.dll, etc.) are discoverable by ctest.
+    # ctest may not inherit the user's PATH that includes the ROCm bin directory, causing
+    # HIP runtime DLL load failures (SEH 0xC0000005) on the first HIP call in a test fixture.
+    if(WIN32)
+        set_property(TEST ${BINARY_NAME} PROPERTY ENVIRONMENT
+            "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+    endif()
 
     # Install with rocm pkg
     rocm_install_targets(
@@ -174,9 +227,9 @@ function(add_hiptensor_unit_test)
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
     if(WIN32)
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
     else()
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
                               "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     endif()
     target_include_directories(${BINARY_NAME} PRIVATE
@@ -202,6 +255,14 @@ function(add_hiptensor_unit_test)
     set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH" "unsupported host device")
     # Set working directory to bin/ for proper DLL/resource loading on Windows
     set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+    # On Windows, ensure the ROCm/HIP DLLs (amdhip64_7.dll, etc.) are discoverable by ctest.
+    # ctest may not inherit the user's PATH that includes the ROCm bin directory, causing
+    # HIP runtime DLL load failures (SEH 0xC0000005) on the first HIP call in a test fixture.
+    if(WIN32)
+        set_property(TEST ${BINARY_NAME} PROPERTY ENVIRONMENT
+            "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+    endif()
 
     # Install with rocm pkg
     rocm_install_targets(

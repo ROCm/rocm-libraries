@@ -19,6 +19,7 @@
 using namespace hipblaslt_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using ::testing::Return;
 
 TEST(TestHipblasltEngineManager, ReturnsApplicableEngineIds)

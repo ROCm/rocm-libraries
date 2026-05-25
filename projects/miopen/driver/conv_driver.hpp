@@ -1448,13 +1448,13 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             new GPUMem(ctx, GetTensorSize(weightTensor_vect4), sizeof(Tgpu), buffer_check));
     }
 
-    outhost   = tensor<Tref>(miopen::deref(outputTensor).GetLayout_t(),
+    outhost   = tensor<Tref>(miopen::deref(outputTensor).GetLayoutEnum().value(),
                            miopen::deref(outputTensor).GetLengths(),
                            miopen::deref(outputTensor).GetStrides());
-    din_host  = tensor<Tref>(miopen::deref(inputTensor).GetLayout_t(),
+    din_host  = tensor<Tref>(miopen::deref(inputTensor).GetLayoutEnum().value(),
                             miopen::deref(inputTensor).GetLengths(),
                             miopen::deref(inputTensor).GetStrides());
-    dwei_host = tensor<Tref>(miopen::deref(weightTensor).GetLayout_t(),
+    dwei_host = tensor<Tref>(miopen::deref(weightTensor).GetLayoutEnum().value(),
                              miopen::deref(weightTensor).GetLengths(),
                              miopen::deref(weightTensor).GetStrides());
 
@@ -2540,17 +2540,22 @@ int ConvDriver<Tgpu, Tref>::RunBackwardGPU()
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
         int bias_return_code = CaptureKernel([&]() -> int {
-            miopenConvolutionBackwardBias(GetHandle(),
-                                          &alpha,
-                                          outputTensor,
-                                          dout.GetDevicePtr(),
-                                          &beta,
-                                          biasTensor,
-                                          db.GetDevicePtr());
-            return miopenStatusSuccess;
+            return miopenConvolutionBackwardBias(GetHandle(),
+                                                 &alpha,
+                                                 outputTensor,
+                                                 dout.GetDevicePtr(),
+                                                 &beta,
+                                                 biasTensor,
+                                                 db.GetDevicePtr());
         });
 
-        if(bias_return_code != miopenStatusSuccess)
+        if(bias_return_code == miopenStatusNotImplemented)
+        {
+            std::cout << "Skipping backward bias: miopenConvolutionBackwardBias is deprecated and "
+                         "not implemented."
+                      << std::endl;
+        }
+        else if(bias_return_code != miopenStatusSuccess)
         {
             ret |= bias_return_code;
         }

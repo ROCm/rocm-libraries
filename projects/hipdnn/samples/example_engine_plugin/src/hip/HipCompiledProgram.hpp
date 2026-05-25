@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -29,7 +29,7 @@ public:
     HipCompiledProgram(const std::string& kernelFileName,
                        const std::vector<std::string>& compilerOptions);
 
-    ~HipCompiledProgram() override;
+    ~HipCompiledProgram() noexcept override;
 
     HipCompiledProgram(const HipCompiledProgram&) = delete;
     HipCompiledProgram& operator=(const HipCompiledProgram&) = delete;

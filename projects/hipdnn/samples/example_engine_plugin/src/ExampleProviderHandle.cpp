@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "ExampleProviderHandle.hpp"
@@ -7,7 +7,7 @@
 
 hipdnn_plugin_sdk::
     EngineManager<ExampleProviderHandle, ExampleProviderSettings, ExampleProviderContext>&
-    ExampleProviderHandle::getEngineManager()
+    ExampleProviderHandle::getEngineManager() const
 {
     return container->getEngineManager();
 }

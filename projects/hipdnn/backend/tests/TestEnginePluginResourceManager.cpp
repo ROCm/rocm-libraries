@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <memory>
@@ -685,6 +686,252 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphWithNullParameters)
     }
 }
 
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextFailsForUnsupportedPlugin)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce(::testing::Throw(
+            HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                            "Engine plugin does not support execution context serialization")));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_NOT_SUPPORTED);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsNullPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce([](hipdnnEnginePluginHandle_t,
+                     hipdnnEnginePluginExecutionContext_t,
+                     hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{nullptr, 4};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsEmptyPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 1> payloadBytes{9};
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce([&payloadBytes](hipdnnEnginePluginHandle_t,
+                                  hipdnnEnginePluginExecutionContext_t,
+                                  hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{payloadBytes.data(), 0};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextCopiesPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 4> payloadBytes{9, 8, 7, 6};
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce([&payloadBytes](hipdnnEnginePluginHandle_t,
+                                  hipdnnEnginePluginExecutionContext_t,
+                                  hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{payloadBytes.data(), payloadBytes.size()};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_NO_THROW(resourceManager.serializeExecutionContext(
+            100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext));
+    }
+
+    ASSERT_EQ(serializedContext, std::vector<uint8_t>(payloadBytes.begin(), payloadBytes.end()));
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsInvalidInputs)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(100, nullptr, serializedContext),
+            HIPDNN_STATUS_BAD_PARAM);
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                101, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_INTERNAL_ERROR);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedFailsForUnsupportedPlugin)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 3> serializedContextBytes{4, 5, 6};
+    const hipdnnPluginConstData_t serializedContext{serializedContextBytes.data(),
+                                                    serializedContextBytes.size()};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                createExecutionContextFromSerialized(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                                     &serializedContext))
+        .WillOnce(::testing::Throw(
+            HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                            "Engine plugin does not support execution context serialization")));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            EnginePluginResourceManager::createExecutionContextFromSerialized(
+                std::make_shared<EnginePluginResourceManager>(std::move(resourceManager)),
+                100,
+                &serializedContext),
+            HIPDNN_STATUS_NOT_SUPPORTED);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedPropagatesPluginFailure)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 3> serializedContextBytes{4, 5, 6};
+    const hipdnnPluginConstData_t serializedContext{serializedContextBytes.data(),
+                                                    serializedContextBytes.size()};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                createExecutionContextFromSerialized(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                                     &serializedContext))
+        .WillOnce(::testing::Throw(HipdnnException(
+            HIPDNN_STATUS_PLUGIN_ERROR, "Plugin rejected serialized execution context")));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            EnginePluginResourceManager::createExecutionContextFromSerialized(
+                std::make_shared<EnginePluginResourceManager>(std::move(resourceManager)),
+                100,
+                &serializedContext),
+            HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
 TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
@@ -769,15 +1016,9 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailTensorMismatch)
     const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
-    auto engineConfigWrapper = createDescriptor<MockEngineConfigDescriptor>();
-    auto engineWrapper = createDescriptor<MockEngineDescriptor>();
     auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
     auto variantWrapper = createDescriptor<MockVariantDescriptor>();
 
-    auto mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
-        engineConfigWrapper.get());
-    auto mockEngine
-        = MockDescriptorUtility::asDescriptorUnsafe<MockEngineDescriptor>(engineWrapper.get());
     auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         executionPlanWrapper.get());
     auto mockVariantPack
@@ -796,13 +1037,10 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailTensorMismatch)
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
-    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
 
-    EXPECT_CALL(*mockExecutionPlan, getEngineConfig())
-        .WillOnce(::testing::Return(mockEngineConfig));
-    EXPECT_CALL(*mockEngineConfig, getEngine()).WillOnce(::testing::Return(mockEngine));
-    EXPECT_CALL(*mockEngine, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
     EXPECT_CALL(*mockVariantPack, getWorkspace())
         .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
     EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
@@ -833,15 +1071,9 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
     const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
-    auto engineConfigWrapper = createDescriptor<MockEngineConfigDescriptor>();
-    auto engineWrapper = createDescriptor<MockEngineDescriptor>();
     auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
     auto variantWrapper = createDescriptor<MockVariantDescriptor>();
 
-    auto mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
-        engineConfigWrapper.get());
-    auto mockEngine
-        = MockDescriptorUtility::asDescriptorUnsafe<MockEngineDescriptor>(engineWrapper.get());
     auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         executionPlanWrapper.get());
     auto mockVariantPack
@@ -859,13 +1091,10 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
-    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
 
-    EXPECT_CALL(*mockExecutionPlan, getEngineConfig())
-        .WillOnce(::testing::Return(mockEngineConfig));
-    EXPECT_CALL(*mockEngineConfig, getEngine()).WillOnce(::testing::Return(mockEngine));
-    EXPECT_CALL(*mockEngine, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
     EXPECT_CALL(*mockVariantPack, getWorkspace())
         .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
     EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));

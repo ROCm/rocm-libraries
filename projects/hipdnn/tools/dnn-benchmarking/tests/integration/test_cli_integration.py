@@ -61,10 +61,11 @@ class TestCLIIntegration:
         )
 
         assert result.returncode != 0
-        assert "not found" in result.stdout.lower() or "error" in result.stdout.lower()
+        combined = (result.stdout + result.stderr).lower()
+        assert "no graph files found" in combined or "error" in combined
 
     @pytest.mark.gpu
-    def test_cli_full_run(self, sample_graph_path: Path) -> None:
+    def test_cli_full_run(self, sample_graph_path: Path, plugin_path_cli_args) -> None:
         """Test full CLI run with sample graph (requires GPU)."""
         if not sample_graph_path.exists():
             pytest.skip(f"Sample graph not found: {sample_graph_path}")
@@ -96,7 +97,9 @@ class TestCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-            ],
+                "-v",
+            ]
+            + plugin_path_cli_args,
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,
@@ -139,7 +142,9 @@ class TestCLIIntegration:
             ("sample_batchnorm.json", "sample_batchnorm_inference_32x64x28x28"),
         ],
     )
-    def test_cli_all_sample_graphs(self, graph_name: str, expected_name: str) -> None:
+    def test_cli_all_sample_graphs(
+        self, graph_name: str, expected_name: str, plugin_path_cli_args
+    ) -> None:
         """Test CLI execution with all sample graph types."""
         sample_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
 
@@ -173,7 +178,9 @@ class TestCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-            ],
+                "-v",
+            ]
+            + plugin_path_cli_args,
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,
@@ -194,20 +201,21 @@ class TestCLIParser:
 
     def test_parse_default_values(self) -> None:
         """Test parsing with default values."""
-        from dnn_benchmarking.cli.parser import parse_args
+        from dnn_benchmarking.cli.parser import create_parser
 
-        config = parse_args(["--graph", "/test/graph.json"])
+        args = create_parser().parse_args(["--graph", "/test/graph.json"])
 
-        assert config.graph_path == Path("/test/graph.json")
-        assert config.warmup_iters == 10
-        assert config.benchmark_iters == 100
-        assert config.engine_id == 1
+        assert args.graph == ["/test/graph.json"]
+        assert args.warmup == 10
+        assert args.iters == 100
+        # --engine defaults to None (= run all discovered engines)
+        assert args.engine is None
 
     def test_parse_custom_values(self) -> None:
         """Test parsing with custom values."""
-        from dnn_benchmarking.cli.parser import parse_args
+        from dnn_benchmarking.cli.parser import create_parser
 
-        config = parse_args(
+        args = create_parser().parse_args(
             [
                 "--graph",
                 "/test/graph.json",
@@ -215,25 +223,87 @@ class TestCLIParser:
                 "20",
                 "--iters",
                 "200",
-                "--engine-id",
+                "--engine",
                 "2",
             ]
         )
 
-        assert config.graph_path == Path("/test/graph.json")
-        assert config.warmup_iters == 20
-        assert config.benchmark_iters == 200
-        assert config.engine_id == 2
+        assert args.graph == ["/test/graph.json"]
+        assert args.warmup == 20
+        assert args.iters == 200
+        assert args.engine == [2]
 
     def test_parse_short_options(self) -> None:
         """Test parsing with short option names."""
-        from dnn_benchmarking.cli.parser import parse_args
+        from dnn_benchmarking.cli.parser import create_parser
 
-        config = parse_args(
+        args = create_parser().parse_args(
             ["-g", "/test/graph.json", "-w", "5", "-i", "50", "-e", "3"]
         )
 
-        assert config.graph_path == Path("/test/graph.json")
-        assert config.warmup_iters == 5
-        assert config.benchmark_iters == 50
-        assert config.engine_id == 3
+        assert args.graph == ["/test/graph.json"]
+        assert args.warmup == 5
+        assert args.iters == 50
+        assert args.engine == [3]
+
+    def test_engine_comma_list_parses_at_subprocess_level(self) -> None:
+        """A comma-separated --engine value is accepted by the CLI without error."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                "/nonexistent/path/graph.json",
+                "--engine",
+                "1,2,3",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent.parent,
+        )
+        # Should fail because graph doesn't exist (rc=1), not because of arg parse (rc=2)
+        assert result.returncode == 1, (
+            f"Expected rc=1 (graph not found), got {result.returncode}. "
+            f"stderr: {result.stderr}"
+        )
+
+    def test_engine_invalid_value_rejected(self) -> None:
+        """A non-integer --engine value is rejected by the parser (rc=2)."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                "/x.json",
+                "--engine",
+                "abc",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent.parent,
+        )
+        assert result.returncode == 2  # argparse error
+
+    def test_verbose_flag_accepted(self) -> None:
+        """The -v / --verbose flag is accepted by the parser."""
+        for flag in ("-v", "--verbose"):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "dnn_benchmarking",
+                    "--graph",
+                    "/nonexistent/path/graph.json",
+                    flag,
+                ],
+                capture_output=True,
+                text=True,
+                cwd=Path(__file__).parent.parent.parent,
+            )
+            # Same as above: rc=1 means parser accepted the flag and we got past arg parse
+            assert result.returncode == 1, (
+                f"{flag}: expected rc=1 (graph not found), got {result.returncode}. "
+                f"stderr: {result.stderr}"
+            )
