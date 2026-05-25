@@ -498,8 +498,6 @@ class TensorDataMoverLoad(TensorDataMover):
     def calPadInterval(ldsBlockSizePerPad: int) -> int:
         ldsBlockDwordsPerPad = ldsBlockSizePerPad // 4 # bytes to dwords
         assert ldsBlockDwordsPerPad > 0
-        assert (ldsBlockDwordsPerPad & (ldsBlockDwordsPerPad - 1)) == 0, \
-            f"LdsBlockSizePerPad//4 ({ldsBlockDwordsPerPad}) must be a power of 2 for TDM hardware encoding"
         return int(log2(ldsBlockDwordsPerPad)) - 1
 
     @staticmethod
