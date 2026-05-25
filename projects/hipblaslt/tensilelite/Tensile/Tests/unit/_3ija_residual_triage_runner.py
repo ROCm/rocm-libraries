@@ -88,6 +88,105 @@ def _classify_failure(f):
     return (ftype, prod_cat, cons_cat, prod_body, cons_body)
 
 
+# TEST-SITE PATCH for rocm-libraries-ldm5.
+#
+# The CMS per-tile schedule bodies (under Tensile/Components/CustomSchedule/
+# gfx950/) mutate kernel-level flags inside the body (e.g. UseMFMAF32XEmulation
+# = False) during Solution.__init__ via hasCustomSchedule. The non-CMS
+# reference build (build_non_cms_reference) forces UseCustomMainLoopSchedule
+# = 0, which makes hasCustomSchedule early-return at dispatch.py:401-402
+# WITHOUT running the per-tile body — so the reference retains the Solution-
+# default derivation (UseMFMAF32XEmulation = True for TF32 on gfx950). This
+# selects a different TF32 low-bits lowering on each side (4x4x4 helper MFMA
+# vs cvt+sub), which compare_graphs flags as missing MFMA identities (ldm5).
+#
+# This map mirrors the per-tile body's flag mutations onto the reference
+# config so both builds see the same flag state. PROPERLY FIXING THIS
+# requires moving per-tile flag declarations out of schedule bodies and into
+# the YAML side so the non-CMS path picks them up too — tracked separately.
+#
+# Key: (info.name, info.TransposeA, info.TransposeB, info.LDSTrInst,
+#       info.TransposeLDS) — matches the runner's dedup key.
+_PER_TILE_REF_FLAG_OVERRIDES = {
+    # _get_schedule_128x192x32_TF32: isTN + not useLDSTr + TLDS=1
+    # (CustomSchedule/gfx950/_128x192x32_TF32.py:50-53)
+    ("_get_schedule_128x192x32_TF32", True, False, False, 1): {
+        "UseMFMAF32XEmulation": False,
+    },
+    # _get_schedule_192x128x32_TF32: isTN + useLDSTr + TLDS=1
+    # (CustomSchedule/gfx950/_192x128x32_TF32.py:45-49)
+    ("_get_schedule_192x128x32_TF32", True, False, True, 1): {
+        "UseMFMAF32XEmulation": False,
+    },
+    # _get_schedule_256x192x32_TF32: isTN + not useLDSTr + TLDS=1
+    # (CustomSchedule/gfx950/_256x192x32_TF32.py:48-51)
+    ("_get_schedule_256x192x32_TF32", True, False, False, 1): {
+        "UseMFMAF32XEmulation": False,
+    },
+    # _get_schedule_256x128x32_TF32: isTN + useLDSTr + TLDS=1
+    # (CustomSchedule/gfx950/_256x128x32_TF32.py:48-51)
+    ("_get_schedule_256x128x32_TF32", True, False, True, 1): {
+        "UseMFMAF32XEmulation": False,
+    },
+}
+
+
+def _lookup_per_tile_overrides(info):
+    """Return the flag-override dict for this fixture, or None if no
+    override is required. See `_PER_TILE_REF_FLAG_OVERRIDES` above."""
+    return _PER_TILE_REF_FLAG_OVERRIDES.get(
+        (info.name, info.TransposeA, info.TransposeB,
+         info.LDSTrInst, info.TransposeLDS)
+    )
+
+
+def _build_non_cms_reference_with_state_overrides(
+    config, info, asm, isaInfoMap
+):
+    """Inline replica of `build_non_cms_reference` that, for fixtures
+    listed in `_PER_TILE_REF_FLAG_OVERRIDES`, mutates the Solution's
+    `_state` dict AFTER construction (so the override survives
+    `Solution.assignProblemIndependentDerivedParameters` re-derivation
+    at Solution.py:625-639) but BEFORE `_getKernelSource` runs (so the
+    writer sees the patched flag state).
+
+    Fixtures with no override fall through to the stock
+    `build_non_cms_reference`."""
+    from Tensile.Components.CustomSchedule.approach_a import (
+        build_non_cms_reference,
+    )
+    overrides = _lookup_per_tile_overrides(info)
+    if overrides is None:
+        return build_non_cms_reference(config, asm, isaInfoMap)
+
+    # Replicate `build_non_cms_reference`'s steps inline so we can
+    # interleave the state-override step. Mirrors approach_a.py:114-140.
+    from copy import deepcopy
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
+    from cms_test_utils import _make_solution
+
+    patched_config = deepcopy(config)
+    patched_config['UseCustomMainLoopSchedule'] = 0
+
+    solution = _make_solution(patched_config, asm, isaInfoMap)
+    # Apply post-construction state overrides to mirror what the CMS
+    # per-tile schedule body would have done to its own Solution.
+    for key, value in overrides.items():
+        solution._state[key] = value
+
+    writer = KernelWriterAssembly(asm, DebugConfig())
+    writer.enable_capture_non_cms_build()
+    writer._getKernelSource(solution)
+
+    capture = writer._last_default_capture
+    if capture is None:
+        raise RuntimeError(
+            "build_non_cms_reference_with_state_overrides: "
+            "writer._last_default_capture was not populated."
+        )
+    return capture
+
+
 def _exercise_one(info, asm, isaInfoMap):
     """Build #1 + Build #2 + compare_graphs + validate_edge_wait_coverage
     for one CMS fixture. Returns dict with keys:
@@ -126,7 +225,9 @@ def _exercise_one(info, asm, isaInfoMap):
                          "populate kernelBody post-loop assembly"}
 
     try:
-        ref_cap = build_non_cms_reference(config, asm, isaInfoMap)
+        ref_cap = _build_non_cms_reference_with_state_overrides(
+            config, info, asm, isaInfoMap
+        )
     except Exception as e:
         return {"error": f"build_non_cms_reference failed: "
                          f"{type(e).__name__}: {e}\n"
