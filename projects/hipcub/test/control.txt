@@ -8,8 +8,8 @@
 #
 # Where:
 # - test_name_regex   : is a regular expression to match against the fully qualified name of the currently running test (TestSuiteName.TestName).
-# - arch_regex        : is a regular expression that may contain keywords, which will be matched against the gfx id of the current device (eg. gfx942).
-#                       Please see the section below for a full description of keywords.
+# - arch_regex        : is a regular expression which will be matched against the gfx id of the current device (eg. gfx942).
+#                       This regex can contain "keywords". Please see the section below for a description of these.
 # - size_filter_expr  : is an expression that allows you to filter out ranges of sizes using operators (eg. <, >, ==, *).
 #                       You can also use basic arithmetic operators (+, -, *, /, <<, >>).
 #                       You can specify multiple size filter expressions and separate them with commas.
@@ -33,7 +33,7 @@
 # eg. /<mi300-family>|gfx1100/ expands to /(gfx942, gfx950)|gfx1100/
 #
 # This allows you to quickly disable whole families of architectures without having to individually specify each one.
-# Here are some example keywords and the architectures they match:
+# Here are some sample keywords and the architectures they map to:
 # - <all>           : all architectures from any vendor
 # - <amd>           : all AMD architectures
 # - <nvidia>        : Nvidia devices
@@ -61,7 +61,7 @@
 # The arithmetic expression must be an expression that simplifies down to a single size value (the size to filter on).
 # For example, here is a size filter expression that filters out all sizes greater than 2^32:
 # > (1 << 32)
-# Operators have normal C++ precedence. For a list of precedences, see the precedence map in test/hipcub/test_utils_controller.hpp.in. 
+# Operators have normal C++ precedence. For a list of precedences, see the precedence map in test/hipcub/test_utils_controller.hpp. 
 #
 # You can specify multiple size filter expressions by separating them with a comma. Filters are applied individually from left to right.
 # This is equivalent to combining them using a logical OR.
@@ -86,7 +86,7 @@
 # -----------
 # You can specify that the current line should only disable tests when running with one or more specific build types, or you can
 # allow the current line to disable tests when running with any build type.
-# Available build types options include "asan", "valgrind", and "*" (to specify all build types).
+# Available build types options include "asan", "valgrind", "windows", "linux", and "*" (to specify all build types).
 # You can list multiple build types delimited with a comma. This is equivalent to combining them using a logical OR.
 #
 # Examples:
@@ -94,7 +94,7 @@
 # /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan : "Skipping test under ASAN."
 #
 # - This will cause matching tests (on any architecture) to be disabled when running an asan or a valgrind build.
-# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan, valgrind : "Skipping test under ASAN and Valgrind."
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan, valgrind : "Skipping test under ASAN or Valgrind."
 #
 # - This will cause matching tests (on any architecture) to be disabled when running on any build type.
 # /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : * : "Skipping test under all build types."
@@ -103,6 +103,7 @@
 # Caveats
 # -------
 # - After modifying this file, please rebuild target copy_control_file_changes, which copies it into the correct location in the build directory.
+#   - If you have other code changes, it's sufficient to just rebuild that target, since test targets are all dependent on copy_control_file_changes.
 #
 # - Regexes are sensitive to spaces, so those should be omitted unless you want to match them.
 #   For example, /(gfx1100|gfx1101) | gfx1200/ will not match "gfx1100" or "gfx1200" but will match "gfx1100 " or " gfx1200".
@@ -110,10 +111,10 @@
 #
 # - Remember to escape literal '.' and '/' characters in test names - otherwise they'll have their regex meaning.
 #
-# - Tests that are compiled in parallel may have a "Id<integer>/" prefix. This prefix is stripped out before regex matching
+# - Tests that are compiled in parallel may have an "Id<integer>/" prefix. This prefix is stripped out before regex matching
 #   on the test name takes place, so you should ignore it when writing test name regexes.
 #
-# - If multiple regexes cover the same test, then the architecture regexes and size filters from all rules will examined,
+# - If multiple regexes cover the same test, then the architecture regexes and size filters from all rules will be examined
 #   in order from top to bottom.
 #
 # - The arithmetic expressions in size filter expressions use unsigned arithmetic.
