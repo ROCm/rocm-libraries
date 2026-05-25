@@ -20,10 +20,10 @@ namespace hipdnn_test_sdk::utilities
 // RMS check is only relative tolerance based. We recommend using cpu_fp_reference_validation
 // instead, but this class can be used to compare with MIOpen tolerance checks.
 template <class T>
-class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation
+class CpuReferenceMiopenRmsValidation : public IReferenceValidation
 {
 public:
-    CpuFpReferenceMiopenRmsValidation(T relativeTolerance = std::numeric_limits<T>::epsilon())
+    CpuReferenceMiopenRmsValidation(T relativeTolerance = std::numeric_limits<T>::epsilon())
         : _relativeTolerance(static_cast<double>(relativeTolerance))
     {
         using hipdnn_data_sdk::types::isinf;
@@ -34,7 +34,7 @@ public:
         }
     }
 
-    ~CpuFpReferenceMiopenRmsValidation() override = default;
+    ~CpuReferenceMiopenRmsValidation() override = default;
 
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
@@ -153,16 +153,16 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     switch(dataType)
     {
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
-        return std::make_unique<CpuFpReferenceMiopenRmsValidation<float>>(relativeTolerance);
+        return std::make_unique<CpuReferenceMiopenRmsValidation<float>>(relativeTolerance);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
-        return std::make_unique<CpuFpReferenceMiopenRmsValidation<hipdnn_data_sdk::types::half>>(
+        return std::make_unique<CpuReferenceMiopenRmsValidation<hipdnn_data_sdk::types::half>>(
             hipdnn_data_sdk::types::half(relativeTolerance));
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
         return std::make_unique<
-            CpuFpReferenceMiopenRmsValidation<hipdnn_data_sdk::types::bfloat16>>(
+            CpuReferenceMiopenRmsValidation<hipdnn_data_sdk::types::bfloat16>>(
             hipdnn_data_sdk::types::bfloat16(relativeTolerance));
     case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
-        return std::make_unique<CpuFpReferenceMiopenRmsValidation<double>>(
+        return std::make_unique<CpuReferenceMiopenRmsValidation<double>>(
             static_cast<double>(relativeTolerance));
     default:
         throw std::runtime_error("Unsupported data type for RMS validator");

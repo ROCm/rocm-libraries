@@ -18,7 +18,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceReduction
+class CpuReferenceReduction
 {
 public:
     static bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node)

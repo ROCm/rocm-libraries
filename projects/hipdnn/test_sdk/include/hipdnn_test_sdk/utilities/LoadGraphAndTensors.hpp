@@ -13,7 +13,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #endif
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
@@ -111,7 +111,7 @@ struct GraphAndTensorMap
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
 
-                    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<DataType>{
+                    auto validator = hipdnn_test_sdk::utilities::CpuReferenceValidation<DataType>{
                         absTolerance, relTolerance};
                     return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
                 },

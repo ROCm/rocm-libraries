@@ -10,7 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
@@ -91,7 +91,7 @@ public:
         const double epsilonVal = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
-        utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
+        utilities::CpuReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
                                                                      *shallowScaleTensor,
                                                                      *shallowBiasTensor,
                                                                      *shallowMeanTensor,

@@ -15,11 +15,11 @@ namespace hipdnn_test_sdk::utilities
 {
 
 template <class T>
-class CpuFpReferenceValidation : public IReferenceValidation
+class CpuReferenceValidation : public IReferenceValidation
 {
 public:
     // NOLINTNEXTLINE(readability-redundant-casting) - cast needed for non-float T types
-    CpuFpReferenceValidation(float absoluteTolerance = float(std::numeric_limits<T>::epsilon()),
+    CpuReferenceValidation(float absoluteTolerance = float(std::numeric_limits<T>::epsilon()),
                              // NOLINTNEXTLINE(readability-redundant-casting)
                              float relativeTolerance = float(std::numeric_limits<T>::epsilon()))
         : _absoluteTolerance(absoluteTolerance)
@@ -33,7 +33,7 @@ public:
         }
     }
 
-    ~CpuFpReferenceValidation() override = default;
+    ~CpuReferenceValidation() override = default;
 
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
@@ -168,16 +168,16 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     switch(dataType)
     {
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
-        return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
+        return std::make_unique<CpuReferenceValidation<float>>(absoluteTolerance,
                                                                  relativeTolerance);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
-        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::half>>(
+        return std::make_unique<CpuReferenceValidation<hipdnn_data_sdk::types::half>>(
             absoluteTolerance, relativeTolerance);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
-        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>>(
+        return std::make_unique<CpuReferenceValidation<hipdnn_data_sdk::types::bfloat16>>(
             absoluteTolerance, relativeTolerance);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
-        return std::make_unique<CpuFpReferenceValidation<double>>(absoluteTolerance,
+        return std::make_unique<CpuReferenceValidation<double>>(absoluteTolerance,
                                                                   relativeTolerance);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
         return std::make_unique<CpuIntReferenceValidation<int8_t>>();
@@ -201,7 +201,7 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     }
     else
     {
-        return std::make_unique<CpuFpReferenceValidation<T>>(absoluteTolerance, relativeTolerance);
+        return std::make_unique<CpuReferenceValidation<T>>(absoluteTolerance, relativeTolerance);
     }
 }
 

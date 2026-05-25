@@ -18,7 +18,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceSdpa
+class CpuReferenceSdpa
 {
 public:
     /// SDPA forward: O = softmax(Q @ K^T * scale) @ V
@@ -57,19 +57,19 @@ public:
     {
         if(q.dims().size() != 4)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: q must be rank-4 [B, H, Sq, D]");
+            throw std::invalid_argument("CpuReferenceSdpa: q must be rank-4 [B, H, Sq, D]");
         }
         if(k.dims().size() != 4)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: k must be rank-4 [B, Hkv, Skv, D]");
+            throw std::invalid_argument("CpuReferenceSdpa: k must be rank-4 [B, Hkv, Skv, D]");
         }
         if(v.dims().size() != 4)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: v must be rank-4 [B, Hkv, Skv, Dv]");
+            throw std::invalid_argument("CpuReferenceSdpa: v must be rank-4 [B, Hkv, Skv, Dv]");
         }
         if(o.dims().size() != 4)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: o must be rank-4 [B, H, Sq, Dv]");
+            throw std::invalid_argument("CpuReferenceSdpa: o must be rank-4 [B, H, Sq, Dv]");
         }
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
@@ -82,36 +82,36 @@ public:
         if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsK <= 0
            || numHeadsV <= 0 || seqKv <= 0 || headDimV <= 0)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: all dimensions must be positive");
+            throw std::invalid_argument("CpuReferenceSdpa: all dimensions must be positive");
         }
 
         // ===== CROSS-TENSOR CHECKS (insert HERE) =====
         if(k.dims()[0] != batch || v.dims()[0] != batch || o.dims()[0] != batch)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: batch dimension mismatch");
+            throw std::invalid_argument("CpuReferenceSdpa: batch dimension mismatch");
         }
         if(k.dims()[3] != headDim)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: Q head_dim (" + std::to_string(headDim)
+            throw std::invalid_argument("CpuReferenceSdpa: Q head_dim (" + std::to_string(headDim)
                                         + ") != K head_dim (" + std::to_string(k.dims()[3]) + ")");
         }
         if(numHeads % numHeadsV != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa: numHeads must be divisible by numHeadsV");
+                "CpuReferenceSdpa: numHeads must be divisible by numHeadsV");
         }
         if(v.dims()[2] != seqKv)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: K and V sequence lengths must match");
+            throw std::invalid_argument("CpuReferenceSdpa: K and V sequence lengths must match");
         }
         if(o.dims()[1] != numHeads || o.dims()[2] != seqQ || o.dims()[3] != headDimV)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa: output shape must be [B, H, Sq, Dv]");
+            throw std::invalid_argument("CpuReferenceSdpa: output shape must be [B, H, Sq, Dv]");
         }
         if(numHeads % numHeadsK != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa: numHeads must be divisible by numHeadsK");
+                "CpuReferenceSdpa: numHeads must be divisible by numHeadsK");
         }
 
         // Validate LSE tensor if provided
@@ -119,12 +119,12 @@ public:
         {
             if(lse->dims().size() != 3)
             {
-                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+                throw std::invalid_argument("CpuReferenceSdpa: lse must be rank-3 [B, H, Sq]");
             }
             if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
+                    "CpuReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
                     + std::to_string(numHeads) + ", " + std::to_string(seqQ) + "] but got ["
                     + std::to_string(lse->dims()[0]) + ", " + std::to_string(lse->dims()[1]) + ", "
                     + std::to_string(lse->dims()[2]) + "]");
@@ -286,42 +286,42 @@ public:
         if(q.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: q must be rank-4 [B, H_q, Sq, D]");
+                "CpuReferenceSdpa::backward: q must be rank-4 [B, H_q, Sq, D]");
         }
         if(k.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: k must be rank-4 [B, H_kv, Skv, D]");
+                "CpuReferenceSdpa::backward: k must be rank-4 [B, H_kv, Skv, D]");
         }
         if(v.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: v must be rank-4 [B, H_kv, Skv, Dv]");
+                "CpuReferenceSdpa::backward: v must be rank-4 [B, H_kv, Skv, Dv]");
         }
         if(o.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: o must be rank-4 [B, H_q, Sq, Dv]");
+                "CpuReferenceSdpa::backward: o must be rank-4 [B, H_q, Sq, Dv]");
         }
         if(dO.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dO must be rank-4 [B, H_q, Sq, Dv]");
+                "CpuReferenceSdpa::backward: dO must be rank-4 [B, H_q, Sq, Dv]");
         }
         if(dQ.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dQ must be rank-4 [B, H_q, Sq, D]");
+                "CpuReferenceSdpa::backward: dQ must be rank-4 [B, H_q, Sq, D]");
         }
         if(dK.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dK must be rank-4 [B, H_kv, Skv, D]");
+                "CpuReferenceSdpa::backward: dK must be rank-4 [B, H_kv, Skv, D]");
         }
         if(dV.dims().size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dV must be rank-4 [B, H_kv, Skv, Dv]");
+                "CpuReferenceSdpa::backward: dV must be rank-4 [B, H_kv, Skv, Dv]");
         }
 
         // Extract dimensions
@@ -338,7 +338,7 @@ public:
            || numHeadsV <= 0 || seqKv <= 0 || headDimV <= 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: all dimensions must be positive");
+                "CpuReferenceSdpa::backward: all dimensions must be positive");
         }
 
         // Cross-tensor dimension validation
@@ -346,51 +346,51 @@ public:
            || dO.dims()[0] != batch || dQ.dims()[0] != batch || dK.dims()[0] != batch
            || dV.dims()[0] != batch)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa::backward: batch dimension mismatch");
+            throw std::invalid_argument("CpuReferenceSdpa::backward: batch dimension mismatch");
         }
         if(k.dims()[3] != headDim)
         {
-            throw std::invalid_argument("CpuFpReferenceSdpa::backward: Q head_dim != K head_dim");
+            throw std::invalid_argument("CpuReferenceSdpa::backward: Q head_dim != K head_dim");
         }
         if(v.dims()[2] != seqKv)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: K and V sequence lengths must match");
+                "CpuReferenceSdpa::backward: K and V sequence lengths must match");
         }
         if(o.dims()[1] != numHeadsQ || o.dims()[2] != seqQ || o.dims()[3] != headDimV)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: o shape must be [B, H_q, Sq, Dv]");
+                "CpuReferenceSdpa::backward: o shape must be [B, H_q, Sq, Dv]");
         }
         if(dO.dims()[1] != numHeadsQ || dO.dims()[2] != seqQ || dO.dims()[3] != headDimV)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dO shape must be [B, H_q, Sq, Dv]");
+                "CpuReferenceSdpa::backward: dO shape must be [B, H_q, Sq, Dv]");
         }
         if(dQ.dims()[1] != numHeadsQ || dQ.dims()[2] != seqQ || dQ.dims()[3] != headDim)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dQ shape must be [B, H_q, Sq, D]");
+                "CpuReferenceSdpa::backward: dQ shape must be [B, H_q, Sq, D]");
         }
         if(dK.dims()[1] != numHeadsK || dK.dims()[2] != seqKv || dK.dims()[3] != headDim)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dK shape must be [B, H_k, Skv, D]");
+                "CpuReferenceSdpa::backward: dK shape must be [B, H_k, Skv, D]");
         }
         if(dV.dims()[1] != numHeadsV || dV.dims()[2] != seqKv || dV.dims()[3] != headDimV)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dV shape must be [B, H_v, Skv, Dv]");
+                "CpuReferenceSdpa::backward: dV shape must be [B, H_v, Skv, Dv]");
         }
         if(numHeadsQ % numHeadsK != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsK (GQA)");
+                "CpuReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsK (GQA)");
         }
         if(numHeadsQ % numHeadsV != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsV (GQA)");
+                "CpuReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsV (GQA)");
         }
 
         // Validate LSE tensor if provided
@@ -399,12 +399,12 @@ public:
             if(lse->dims().size() != 3)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa::backward: lse must be rank-3 [B, H_q, Sq]");
+                    "CpuReferenceSdpa::backward: lse must be rank-3 [B, H_q, Sq]");
             }
             if(lse->dims()[0] != batch || lse->dims()[1] != numHeadsQ || lse->dims()[2] != seqQ)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa::backward: lse shape must be [B, H_q, Sq]");
+                    "CpuReferenceSdpa::backward: lse shape must be [B, H_q, Sq]");
             }
         }
 

@@ -5,7 +5,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
@@ -54,7 +54,7 @@ public:
         auto shallowYTensor
             = createShallowTensor<YDataType>(_params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        utilities::CpuFpReferenceReduction::reduce<XDataType, YDataType, ComputeDataType>(
+        utilities::CpuReferenceReduction::reduce<XDataType, YDataType, ComputeDataType>(
             *shallowXTensor, *shallowYTensor, _params.mode);
     }
 

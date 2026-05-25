@@ -14,7 +14,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceBatchnorm
+class CpuReferenceBatchnorm
 {
 public:
     // Uses pre-computed invVariance from fwdTraining (epsilon already baked in as 1/sqrt(var+eps)).

@@ -124,7 +124,7 @@ namespace rmsnorm
 template <typename T>
 constexpr float getTolerance()
 {
-    // RMS tolerance values for use with CpuFpReferenceMiopenRmsValidation
+    // RMS tolerance values for use with CpuReferenceMiopenRmsValidation
     // These match MIOpen's relative RMS error tolerance (typically 0.4% = 4e-3)
     if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, half>)
     {

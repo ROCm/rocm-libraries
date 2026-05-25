@@ -12,7 +12,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceBlockScaleDequantize
+class CpuReferenceBlockScaleDequantize
 {
 public:
     /// Block scale dequantize: Y[i] = X[i] * scale[block_of(i)]

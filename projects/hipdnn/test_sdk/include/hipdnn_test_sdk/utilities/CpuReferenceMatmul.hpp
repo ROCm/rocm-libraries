@@ -9,11 +9,12 @@
 
 #include <algorithm>
 #include <vector>
+#include <thread>
 
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceMatmul
+class CpuReferenceMatmul
 {
 public:
     // Check if this CPU implementation supports the given node configuration
@@ -38,16 +39,12 @@ public:
         const auto batchDims = rank - static_cast<int64_t>(K_BATCH_IDX);
 
         auto matmulFunc = [&](const std::vector<int64_t>& indices) {
-            // C dims: [...batch..., M, N]
             const int64_t m = *(indices.rbegin() + K_M_IDX);
             const int64_t n = *(indices.rbegin() + K_N_IDX);
 
             std::vector<int64_t> aIndices(static_cast<size_t>(rank));
             std::vector<int64_t> bIndices(static_cast<size_t>(rank));
 
-            // Broadcasting for batch dims (divisibility rule):
-            // outDim = C[dim] = max(A[dim], B[dim])
-            // inIdx  = outIdx / (outDim / inDim)
             for(int64_t i = 0; i < batchDims; ++i)
             {
                 const auto idx = static_cast<size_t>(i);
@@ -60,7 +57,6 @@ public:
                 bIndices[idx] = indices[idx] / bScale;
             }
 
-            // Set matrix indices from the last dimension to match the [..., M, K] and [..., K, N] shapes
             *(aIndices.rbegin() + K_M_IDX) = m;
             *(bIndices.rbegin() + K_N_IDX) = n;
 
@@ -73,15 +69,16 @@ public:
 
                 const ADataType aVal = a.getHostValue(aIndices);
                 const BDataType bVal = b.getHostValue(bIndices);
-                acc = acc
-                      + (static_cast<ComputeDataType>(aVal) * static_cast<ComputeDataType>(bVal));
+
+                acc += static_cast<ComputeDataType>(aVal) * static_cast<ComputeDataType>(bVal);
             }
 
             c.setHostValue(hipdnn_test_sdk::detail::safeConvert<CDataType>(acc), indices);
         };
 
-        auto parallelFunc
-            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(matmulFunc, c.dims());
+        auto parallelFunc =
+            hipdnn_test_sdk::detail::makeParallelTensorFunctor(matmulFunc, c.dims());
+
         parallelFunc(std::thread::hardware_concurrency());
 
         c.memory().markHostModified();
@@ -97,13 +94,9 @@ private:
         const auto& bDims = b.dims();
         const auto& cDims = c.dims();
 
-        // Matmul node requires A and B have the same rank
         if(aDims.size() != bDims.size() || aDims.size() != cDims.size())
         {
-            throw std::invalid_argument("Matmul expects A, B, and C to have the same rank (A rank="
-                                        + std::to_string(aDims.size())
-                                        + ", B rank=" + std::to_string(bDims.size())
-                                        + ", C rank=" + std::to_string(cDims.size()) + ")");
+            throw std::invalid_argument("Matmul expects A, B, and C to have the same rank");
         }
 
         const auto rank = aDims.size();
@@ -118,8 +111,6 @@ private:
             throw std::invalid_argument("Matmul batch dimensions are not broadcast-compatible");
         }
 
-        // Matrix dimensions:
-        // A[..., M, K] x B[..., K, N] -> C[..., M, N]
         const int64_t mDim = *(aDims.rbegin() + K_M_IDX);
         const int64_t kDimA = *(aDims.rbegin() + K_K_IDX_A);
         const int64_t kDimB = *(bDims.rbegin() + K_K_IDX_B);
@@ -129,6 +120,7 @@ private:
         {
             throw std::invalid_argument("Matmul shape mismatch: A.K must equal B.K");
         }
+
         if((*(cDims.rbegin() + K_M_IDX)) != mDim || (*(cDims.rbegin() + K_N_IDX)) != nDim)
         {
             throw std::invalid_argument("Matmul shape mismatch: C must be [..., A.M, B.N]");
@@ -166,7 +158,6 @@ private:
         return true;
     }
 
-    // Indexes for the matrix dimensions starting from the last dimension
     constexpr static size_t K_BATCH_IDX = 2;
     constexpr static size_t K_M_IDX = 1;
     constexpr static size_t K_K_IDX_A = 0;

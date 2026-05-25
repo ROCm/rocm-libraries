@@ -14,7 +14,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceConvolution
+class CpuReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration

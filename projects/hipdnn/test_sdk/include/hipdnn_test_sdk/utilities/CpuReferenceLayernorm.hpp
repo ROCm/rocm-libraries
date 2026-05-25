@@ -11,7 +11,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceLayernorm
+class CpuReferenceLayernorm
 {
 public:
     // Layer normalization forward pass.
@@ -115,7 +115,7 @@ public:
             batchDims.push_back(1);
         }
 
-        auto layernormFpropFunc = [&](const std::vector<int64_t>& batchIndices) {
+        auto layernormropFunc = [&](const std::vector<int64_t>& batchIndices) {
             // Pass 1: Welford's online algorithm for mean and variance
             int64_t count = 0;
             auto batchMean = static_cast<ComputeDataType>(0.0);
@@ -173,7 +173,7 @@ public:
 
         // Parallelize over batch dimensions
         auto parallelFunc
-            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(layernormFpropFunc, batchDims);
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(layernormropFunc, batchDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified();

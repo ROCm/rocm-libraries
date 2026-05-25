@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
@@ -54,7 +54,7 @@ public:
         auto shallowCTensor
             = createShallowTensor<CDataType>(_params.cTensor, variantPack.at(_params.cTensor.uid));
 
-        utilities::CpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
+        utilities::CpuReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
             *shallowATensor, *shallowBTensor, *shallowCTensor);
     }
 

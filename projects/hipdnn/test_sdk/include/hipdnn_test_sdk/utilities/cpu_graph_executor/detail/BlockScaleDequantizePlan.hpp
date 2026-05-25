@@ -10,7 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleDequantize.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBlockScaleDequantize.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
@@ -71,7 +71,7 @@ public:
         auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        utilities::CpuFpReferenceBlockScaleDequantize::
+        utilities::CpuReferenceBlockScaleDequantize::
             dequantize<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
                 *shallowXTensor,
                 *shallowScaleTensor,
