@@ -195,6 +195,9 @@ endif()
 # Build the executable used for generating the resource spec file.
 add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
 set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Resource spec test does not generate device code, therefore --offload-compress is not used during
+# compilation and it triggers an error ("argument unused during compilation"). Ignore this error
+target_compile_options(generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
 # code it will give an unused-command-line-argument warning.
