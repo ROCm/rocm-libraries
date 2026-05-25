@@ -31,6 +31,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/llvm/YAML.hpp>
+#include <llvm/Support/MemoryBuffer.h>
 
 namespace TensileLite
 {
@@ -45,6 +46,18 @@ namespace TensileLite
         try
         {
             auto inputFile = llvm::MemoryBuffer::getFileAsStream(filename);
+            if(!inputFile)
+            {
+                // LLVM convention: ErrorOr::operator bool() == true means
+                // success. On failure, dereferencing the wrapped unique_ptr
+                // is undefined behavior (it's null) — that was the SIGSEGV.
+                // Emit a clear diagnostic so the next "wrong library path"
+                // bug is one error line, not a one-day debugging session.
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Error loading " << filename
+                              << ": " << inputFile.getError().message() << std::endl;
+                return nullptr;
+            }
 
             LibraryIOContext<MySolution> context{filename, preloaded, nullptr};
             llvm::yaml::Input            yin((*inputFile)->getMemBufferRef(), &context);
