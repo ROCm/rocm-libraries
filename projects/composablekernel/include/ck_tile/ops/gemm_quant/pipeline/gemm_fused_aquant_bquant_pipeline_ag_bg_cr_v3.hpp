@@ -172,6 +172,64 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     {
         using Base = PipelineImplBase;
 
+        CK_TILE_HOST_DEVICE static constexpr auto MakeAReduceTileDistribution()
+        {
+            constexpr index_t VecLoadSize = gcd(problem_fixed_vector_size_v<Problem>
+                                                    ? Problem::VectorSizeA
+                                                    : Policy::template GetVectorSizeA<Problem>(),
+                                                AQuantGroupSize::kK);
+            constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
+
+            using TileEncodingPattern =
+                tile_distribution_encoding_pattern_2d<BlockSize,
+                                                      MPerBlock * KPerBlockAQ,
+                                                      AQuantGroupSize::kK,
+                                                      VecLoadSize,
+                                                      Policy::getATileAccessPattern(),
+                                                      NumWaveGroups>;
+
+            return TileEncodingPattern::make_2d_static_tile_distribution();
+        }
+
+        template <typename ADramWindow>
+        CK_TILE_DEVICE static auto MakeAReduceDramWindow(const ADramWindow& a_dram_window)
+        {
+            static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
+                          "Grouped fused A quantization currently supports RowMajor A only.");
+
+            const auto& a_tensor_view = a_dram_window.get_bottom_tensor_view();
+            const auto& a_desc        = a_tensor_view.get_tensor_descriptor();
+
+            const auto total_m        = a_desc.get_lengths()[I0{}];
+            const auto total_k        = a_desc.get_lengths()[I1{}];
+            const auto total_k_groups = total_k / AQuantGroupSize::kK;
+
+            const auto a_unmerged = transform_tensor_view(
+                a_tensor_view,
+                make_tuple(make_pass_through_transform(total_m),
+                           make_unmerge_transform(
+                               make_tuple(total_k_groups, number<AQuantGroupSize::kK>{}))),
+                make_tuple(sequence<0>{}, sequence<1>{}),
+                make_tuple(sequence<0>{}, sequence<1, 2>{}));
+
+            const auto a_grouped = transform_tensor_view(
+                a_unmerged,
+                make_tuple(make_merge_transform(make_tuple(total_m, total_k_groups)),
+                           make_pass_through_transform(number<AQuantGroupSize::kK>{})),
+                make_tuple(sequence<0, 1>{}, sequence<2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+
+            const auto& a_origin = a_dram_window.get_window_origin();
+            const index_t grouped_row_origin =
+                a_origin[I0{}] * total_k_groups + a_origin[I1{}] / AQuantGroupSize::kK;
+
+            return make_tile_window(
+                a_grouped,
+                make_tuple(number<MPerBlock * KPerBlockAQ>{}, number<AQuantGroupSize::kK>{}),
+                make_array(grouped_row_origin, index_t{0}),
+                MakeAReduceTileDistribution());
+        }
+
         template <typename ADstStaticTileDist,
                   typename AQDstStaticTileDistribution,
                   typename ADramWindow>
@@ -181,8 +239,29 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             const ADramWindow& a_dram_window)
         {
             static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
-            auto a_tmp = make_static_distributed_tensor<ADataType>(ADstStaticTileDist{});
-            load_tile(a_tmp, a_dram_window);
+
+            // ADstStaticTileDist{} -> AReduceTileDist
+            // Modify the window and match the temp tensor
+
+            auto a_reduce = make_static_distributed_tensor<ADataType>(AReduceTileDist{});
+            load_tile(a_reduce, a_dram_window);
+
+            // ADRAM
+            // MPerBlock x KPerBlock
+            // = MPerBlock x (VecSize * ThreadPerK)
+            // = MPerBlock x (VecSize * warpsize / MPerWarp)
+
+            // a_reduce_tile:
+            // (MPerBlock * BlockAQPerK) x AQGroupSize::kK
+            //
+            // => aq_reduced
+            // (MPerBlock * BlockAQPerK) x 1
+            //
+            // => aq_dst
+            // MPerBlock x BlockAQPerK
+            //
+            // => a_dst
+            //
 
             // Define the reduce problem for quantization
             constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
@@ -200,20 +279,25 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             using ReducePolicy = Reduce2dDefaultPolicy;
 
-            auto blockreduce = ReducePolicy::template GetBlockReduce2d<ReduceProblem>();
-            // auto blockreduce_sync = ReducePolicy::template GetBlockReduce2dSync<ReduceProblem>();
+            auto blockreduce      = ReducePolicy::template GetBlockReduce2d<ReduceProblem>();
+            auto blockreduce_sync = ReducePolicy::template GetBlockReduce2dSync<ReduceProblem>();
             //  Crosswarp sync should not be needed, as
             // quant scales are computed for per-warp values
 
             auto reduce_func = ReduceOp::AbsMax{};
 
-            // auto aq_tmp = blockreduce::template MakeYBlockTile<
-            //     static_distributed_tensor<AQDataType, ADstStaticTileDist>>();
+            auto aq_tmp = blockreduce::template MakeYBlockTile<
+                static_distributed_tensor<AQDataType, ADstStaticTileDist>>();
 
-            set_tile(aq_block_tile, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
+            set_tile(aq_tmp, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
 
-            blockreduce(a_tmp, aq_block_tile, reduce_func);
-            // blockreduce_sync(aq_block_tile, reduce_func);
+            blockreduce(a_tmp, aq_tmp, reduce_func);
+            blockreduce_sync(aq_tmp, reduce_func);
+
+            // TODO: Copy/Sync values across threads to match blockgemm expectation
+            // aq_tmp after reduction is 
+            // a_tmp -> a_block_tile
+            // aq_tmp -> aq_block_tile
 
             sweep_tile<decltype(a_tmp)>([&](auto... idx_) {
                 constexpr auto idx_0 = make_tuple(make_tuple(idx_[number<0>{}]...)[number<0>{}]);
@@ -251,8 +335,15 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                    index_t num_loop,
                    void* p_smem) const
         {
+            static_assert(std::is_same_v<ADataType, bf16_t>, "Only BF16 input is supported!");
             static_assert(is_null_tile_window<AQDramBlockWindowTmp>,
                           "AQ Dram Block window is not used with FusedAQuant!");
+            static_assert(KPerBlock >= AQuantGroupSize::kK,
+                          "Quantization across blocks is not supported!");
+            static_assert(KPerBlock % AQuantGroupSize::kK ==
+                          0); // KPerBlock = AQuantGroupSize * KPerBlockAQ
+            static_assert(KWarp == 1, "Only single KWarp supported!");
+
             static_assert(
                 std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>> &&
                     std::is_same_v<BDataType,
