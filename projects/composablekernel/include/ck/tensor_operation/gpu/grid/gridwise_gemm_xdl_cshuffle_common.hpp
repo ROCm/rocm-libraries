@@ -2315,6 +2315,7 @@ struct GridwiseGemm_xdl_cshuffle_base
     template <InMemoryDataOperationEnum CGlobalMemoryDataOperation,
               bool TransposeC,
               bool IsInputGemm,
+              bool NoCombine,
               typename IndexType,
               typename BlockwiseGemmPipe,
               typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
@@ -2477,7 +2478,7 @@ struct GridwiseGemm_xdl_cshuffle_base
             static_for<0, EMRepeats, 1>{}([&](auto m0) {
                 const index_t fused_token = p_sorted_token_ids[c_token_pos + m0];
                 index_t token_offset      = fused_token & 0xffffff;
-                if constexpr(IsInputGemm)
+                if constexpr(IsInputGemm || NoCombine)
                 {
                     token_offset = token_offset * problemTopK + (fused_token >> 24);
                 }

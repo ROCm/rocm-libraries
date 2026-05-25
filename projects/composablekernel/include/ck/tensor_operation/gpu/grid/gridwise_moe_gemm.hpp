@@ -163,6 +163,7 @@ template <typename ALayout,
           bool IsInputGemm                            = true,
           bool MulRoutedWeight                        = true,
           bool PerTokenQuant                          = false,
+          bool NoCombine                              = false,
           typename IndexType                          = index_t,
           typename ComputeTypeA                       = CDataType,
           typename ComputeTypeB                       = ComputeTypeA,
@@ -1150,7 +1151,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto b_grid_desc_bpreshuffled =
             MakeBGridDescriptor_Preshuffled(BN0Shuffled, BK0Shuffled);
         const auto c_grid_desc_m_n = MakeCGridDescriptor_M_N<CLayout>(
-            IsInputGemm ? problem.NumTokens * problem.TopK : problem.NumTokens,
+            (IsInputGemm || NoCombine) ? problem.NumTokens * problem.TopK : problem.NumTokens,
             problem.MPadded,
             problem.N,
             problem.NPadded,
@@ -1415,7 +1416,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 *c_style_pointer_cast<const vector_type<int32_t, M4>*>(
                                     p_sorted_token_ids + m_pos);
                         }
-                        if constexpr(MulRoutedWeight)
+                        if constexpr(MulRoutedWeight && !NoCombine)
                         {
                             topk_weights = *c_style_pointer_cast<const vector_type<float, M4>*>(
                                 p_ds_grid[I2] + m_pos);
@@ -1453,7 +1454,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -1473,7 +1474,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -1510,7 +1511,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                             else
                             {
                                 c_thread_buf_fp32(cidx) = scale_a * scale_b * c_thread_buf[cidx];
-                                if constexpr(MulRoutedWeight)
+                                if constexpr(MulRoutedWeight && !NoCombine)
                                 {
                                     c_thread_buf_fp32(cidx) =
                                         c_thread_buf_fp32(cidx) *
@@ -1530,7 +1531,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                     static_for<0, M2, 1>{}([&](auto m2) {      // m_inst_num_groups_per_blk
                         const index_t m_pos = block_m_id * MPerBlock + m0 * M1 * M2 * M3 * M4 +
                                               m1 * M2 * M3 * M4 + m2 * M3 * M4 + m3 * M4;
-                        if constexpr(MulRoutedWeight)
+                        if constexpr(MulRoutedWeight && !NoCombine)
                         {
                             topk_weights = *c_style_pointer_cast<const vector_type<float, M4>*>(
                                 p_ds_grid[I2] + m_pos);
@@ -1547,7 +1548,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 {
                                     float gate = c_thread_buf[cidx];
                                     float up   = c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -1559,7 +1560,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 {
                                     float gate = c_thread_buf[cidx];
                                     float up   = c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -1583,7 +1584,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                             else
                             {
                                 c_thread_buf_fp32(cidx) = c_thread_buf[cidx];
-                                if constexpr(MulRoutedWeight)
+                                if constexpr(MulRoutedWeight && !NoCombine)
                                 {
                                     c_thread_buf_fp32(cidx) =
                                         topk_weights.template AsType<float>()[m4] *
@@ -1602,7 +1603,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, IndexType>(
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, NoCombine, IndexType>(
             blockwise_gemm_pipeline,
             c_grid_desc_mblock_mperblock_nblock_nperblock,
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
@@ -1648,7 +1649,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto b_grid_desc_bpreshuffled =
             MakeBGridDescriptor_Preshuffled(BN0Shuffled, BK0Shuffled);
         const auto c_grid_desc_m_n = MakeCGridDescriptor_M_N<CLayout>(
-            IsInputGemm ? problem.NumTokens * problem.TopK : problem.NumTokens,
+            (IsInputGemm || NoCombine) ? problem.NumTokens * problem.TopK : problem.NumTokens,
             problem.MPadded,
             problem.N,
             problem.NPadded,
@@ -1920,7 +1921,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 *c_style_pointer_cast<const vector_type<int32_t, M4>*>(
                                     p_sorted_token_ids + m_pos);
                         }
-                        if constexpr(MulRoutedWeight)
+                        if constexpr(MulRoutedWeight && !NoCombine)
                         {
                             topk_weights = *c_style_pointer_cast<const vector_type<float, M4>*>(
                                 p_ds_grid[I2] + m_pos);
@@ -1958,7 +1959,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -1978,7 +1979,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -2015,7 +2016,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                             else
                             {
                                 c_thread_buf_fp32(cidx) = scale_a * scale_b * c_thread_buf[cidx];
-                                if constexpr(MulRoutedWeight)
+                                if constexpr(MulRoutedWeight && !NoCombine)
                                 {
                                     c_thread_buf_fp32(cidx) =
                                         c_thread_buf_fp32(cidx) *
@@ -2035,7 +2036,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                     static_for<0, M2, 1>{}([&](auto m2) {      // m_inst_num_groups_per_blk
                         const index_t m_pos = block_m_id * MPerBlock + m0 * M1 * M2 * M3 * M4 +
                                               m1 * M2 * M3 * M4 + m2 * M3 * M4 + m3 * M4;
-                        if constexpr(MulRoutedWeight)
+                        if constexpr(MulRoutedWeight && !NoCombine)
                         {
                             topk_weights = *c_style_pointer_cast<const vector_type<float, M4>*>(
                                 p_ds_grid[I2] + m_pos);
@@ -2052,7 +2053,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 {
                                     float gate = c_thread_buf[cidx];
                                     float up   = c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -2064,7 +2065,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 {
                                     float gate = c_thread_buf[cidx];
                                     float up   = c_thread_buf_up[cidx];
-                                    if constexpr(MulRoutedWeight)
+                                    if constexpr(MulRoutedWeight && !NoCombine)
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
@@ -2088,7 +2089,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                             else
                             {
                                 c_thread_buf_fp32(cidx) = c_thread_buf[cidx];
-                                if constexpr(MulRoutedWeight)
+                                if constexpr(MulRoutedWeight && !NoCombine)
                                 {
                                     c_thread_buf_fp32(cidx) =
                                         topk_weights.template AsType<float>()[m4] *
@@ -2108,7 +2109,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, IndexType>(
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, NoCombine, IndexType>(
             blockwise_gemm_pipeline,
             c_grid_desc_mblock_mperblock_nblock_nperblock,
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
