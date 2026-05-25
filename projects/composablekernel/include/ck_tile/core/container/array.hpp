@@ -13,6 +13,7 @@
 #include "ck_tile/core/utility/functional.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -188,9 +189,8 @@ CK_TILE_HOST_DEVICE static void print(const array<T, 0>&)
     printf("array{size: 0, data: []}");
 }
 
-template <typename, typename>
+template <typename T, typename>
 struct vector_traits;
-
 // specialization for array
 template <typename T, index_t N>
 struct vector_traits<array<T, N>, void>

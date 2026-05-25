@@ -264,14 +264,15 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                                        [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     float alpha = 1.0f;
     float beta = 0.0f;
 
     // Extract epsilon from pass-by-value tensor attribute (type-safe, no buffer lookup needed)
     // Note: Type validation already done in constructor
-    double epsilon = _trainingParams.epsilonValue();
+    const double epsilon = _trainingParams.epsilonValue();
 
     // Extract momentum from pass-by-value tensor attribute if running stats exist
     double expAvgFactor = 0.0;

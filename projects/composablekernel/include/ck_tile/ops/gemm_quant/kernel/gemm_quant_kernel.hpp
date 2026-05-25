@@ -15,6 +15,7 @@
 #include "ck_tile/ops/gemm_quant/pipeline/tile_gemm_quant_traits.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -998,7 +999,7 @@ struct QuantGemmKernel
                     // Number of K-dimension quantization groups per block
                     constexpr auto bqk_per_block = TilePartitioner::KPerBlock / BQuantGroupSize::kK;
 
-                    // The pre-shuffled layout flattens warp_n ×
+                    // The pre-shuffled layout flattens warp_n x
                     // bqk_per_block scales per row, Padded up to warp_size
                     // to ensure coalesced memory access.
                     constexpr auto tile_window_width =
@@ -1006,7 +1007,7 @@ struct QuantGemmKernel
 
                     // Adapts based on fine vs coarse quantization granularity:
                     //   - Fine-grained (BQuantGroupSize::kN < warp_n):
-                    //       Multiple quant groups per warp → fewer rows needed per block.
+                    //       Multiple quant groups per warp -> fewer rows needed per block.
                     //       height = block_n / warp_per_group
                     //
                     //   - Coarse-grained (BQuantGroupSize::kN >= warp_n):
@@ -1328,7 +1329,7 @@ struct QuantGemmKernel
 
         if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
         {
-            // For RowMajor C, M is the row dimension — check M alignment here because
+            // For RowMajor C, M is the row dimension - check M alignment here because
             // ALayout=RowMajor does not check M (it only checks K), leaving a gap for
             // the RowMajorA + RowMajorC combination.
             if(kargs.M % TilePartitioner::MPerBlock != 0 && GemmPipeline::kPadM == false &&
@@ -1556,7 +1557,7 @@ struct QuantGemmKernel
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
-
+        assert(kargs.k_batch == 1);
         RunGemm(
             a_ptr, b_ptr, aq_ptr, bq_ptr, c_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
     }

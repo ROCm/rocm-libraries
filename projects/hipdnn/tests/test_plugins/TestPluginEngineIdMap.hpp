@@ -35,3 +35,15 @@ HIPDNN_MAP_TO_ID(KnobsPlugin, -8);
 HIPDNN_MAP_TO_ID(KnobsPluginEngineB, -9);
 HIPDNN_MAP_TO_ID(KnobConstraintValidationPlugin, -10);
 HIPDNN_MAP_TO_ID(IncompatibleVersionPlugin, -11);
+
+// Override-execute fake plugins. Each receives a distinct id.
+HIPDNN_MAP_TO_ID(OverrideImplementingPlugin, -12);
+HIPDNN_MAP_TO_ID(OverrideOmittingPlugin, -13);
+HIPDNN_MAP_TO_ID(VersionLiarPlugin, -14);
+HIPDNN_MAP_TO_ID(SecondOverridePlugin, -15);
+
+// Malformed-version plugin used for load-time API-version parse rejection.
+HIPDNN_MAP_TO_ID(MalformedVersionPlugin, -16);
+
+// Version-zero plugin reports a parseable but too-low API version.
+HIPDNN_MAP_TO_ID(VersionZeroPlugin, -17);

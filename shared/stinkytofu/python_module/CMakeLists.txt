@@ -26,6 +26,17 @@ cmake_minimum_required(VERSION 3.16)
 message(STATUS "Configuring StinkyTofu Python Module")
 
 # ============================================================================
+# Find stinkytofu (supports standalone build against installed package)
+# ============================================================================
+
+if(NOT TARGET stinkytofu)
+    find_package(stinkytofu REQUIRED)
+    set(_stinkytofu_installed TRUE)
+else()
+    set(_stinkytofu_installed FALSE)
+endif()
+
+# ============================================================================
 # Find Python and nanobind
 # ============================================================================
 
@@ -39,11 +50,6 @@ FetchContent_Declare(
   GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
 )
 FetchContent_MakeAvailable(nanobind)
-
-# ============================================================================
-# Note: StinkyTofu and StinkyIR have been moved to the core stinkytofu library
-# The Python module now links directly against the core library
-# ============================================================================
 
 # ============================================================================
 # Create the Python Module
@@ -62,26 +68,48 @@ nanobind_add_module(stinkytofu_python
 # Restore global compile options
 set_directory_properties(PROPERTIES COMPILE_OPTIONS "${SAVED_COMPILE_OPTIONS}")
 
-target_include_directories(stinkytofu_python PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include"
-    # For generated files like gfxIsa.inc
-    ${TABLEGEN_OUTPUT_DIR}
-)
+if(_stinkytofu_installed)
+    # Installed stinkytofu: include dirs come from the exported target.
+    # PythonBindings_generated.inc is installed under include/stinkytofu/bindings/python/.
+    target_include_directories(stinkytofu_python PRIVATE
+        $<TARGET_PROPERTY:stinkytofu,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+else()
+    # Source-tree build: use local paths and tablegen output.
+    target_include_directories(stinkytofu_python PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include"
+        ${TABLEGEN_OUTPUT_DIR}
+    )
+endif()
 
 target_link_libraries(stinkytofu_python PRIVATE
     stinkytofu
-    gfxisa
 )
 
 # Set output name to _stinkytofu (private module, loaded by __init__.py)
 # Place in stinkytofu/ subdirectory
-set_target_properties(stinkytofu_python PROPERTIES
-    OUTPUT_NAME _stinkytofu
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/stinkytofu
-    INSTALL_RPATH "$ORIGIN"
-    BUILD_RPATH "${CMAKE_BINARY_DIR}"
-)
+if(_stinkytofu_installed)
+    get_target_property(_st_loc stinkytofu IMPORTED_LOCATION)
+    if(_st_loc)
+        cmake_path(GET _st_loc PARENT_PATH _st_dir)
+    else()
+        set(_st_dir "")
+    endif()
+    set_target_properties(stinkytofu_python PROPERTIES
+        OUTPUT_NAME _stinkytofu
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/stinkytofu
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_RPATH "${_st_dir}"
+    )
+else()
+    set_target_properties(stinkytofu_python PROPERTIES
+        OUTPUT_NAME _stinkytofu
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/stinkytofu
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_RPATH "${CMAKE_BINARY_DIR}"
+    )
+endif()
 # On Windows there is no RPATH; copy stinkytofu.dll next to _stinkytofu.pyd
 # so the dynamic linker can find it at runtime.
 if(WIN32)
