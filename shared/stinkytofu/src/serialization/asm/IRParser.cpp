@@ -24,6 +24,7 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cctype>
 #include <iostream>
 #include <optional>
