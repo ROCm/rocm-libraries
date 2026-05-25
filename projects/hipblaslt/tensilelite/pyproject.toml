@@ -1,4 +1,4 @@
-# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 [tool.coverage.run]
@@ -82,6 +82,7 @@ dependencies = [
 [project.scripts]
 Tensile = "Tensile.Tensile:main"
 TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
+TensileVerifyStinkyElfText = "Tensile.verify_stinky_comment_vs_elf_text:main"
 TensileGetPath = "Tensile:PrintTensileRoot"
 TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"
 TensileRetuneLibrary = "Tensile.TensileRetuneLibrary:main"
