@@ -1393,12 +1393,33 @@ namespace rocisa
 
     struct SBarrier : public Instruction
     {
-        SBarrier(const std::string& comment = "")
+        SBarrier(const bool separate = false, const bool wait = false,
+                 const bool clusterBarrier = false, const std::string& comment = "")
             : Instruction(InstType::INST_NOTYPE, comment)
         {
             if(getAsmCaps()["HasNewBarrier"])
             {
-                setInst("s_barrier_signal -1 \ns_barrier_wait -1");
+                int code = -1;
+                if (getAsmCaps()["HasClusterBarrier"] and clusterBarrier)
+                {
+                    code = -3;
+                }
+
+                if(separate)
+                {
+                    if(wait)
+                    {
+                        setInst("s_barrier_wait " + std::to_string(code));
+                    }
+                    else
+                    {
+                        setInst("s_barrier_signal " + std::to_string(code));
+                    }
+                }
+                else
+                {
+                    setInst("s_barrier_signal " + std::to_string(code) + "\ns_barrier_wait " + std::to_string(code));
+                }
             }
             else
             {
