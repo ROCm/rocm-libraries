@@ -9,6 +9,26 @@ enabling GPU-accelerated deep neural network operations through a
 high-level Python interface.
 """
 
+# Preload hipDNN backend library when installed via ROCm wheels.
+# The Python extension (hipdnn_frontend_python.so) depends on libhipdnn_backend.so
+# which lives in a separate wheel package directory — not on LD_LIBRARY_PATH.
+# rocm_sdk.preload_libraries loads it with RTLD_GLOBAL so the extension finds it.
+try:
+    import rocm_sdk
+except ImportError:
+    rocm_sdk = None
+
+if rocm_sdk is not None:
+    try:
+        rocm_sdk.preload_libraries("hipdnn")
+    except Exception as e:
+        raise ImportError(
+            "Failed to preload libhipdnn_backend.so via rocm_sdk. "
+            "Ensure the hipDNN library package is installed "
+            "(e.g., pip install rocm[libraries]).\n"
+            f"Original error: {e}"
+        ) from e
+
 # Import everything from the compiled extension module
 try:
     # The compiled extension module
