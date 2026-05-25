@@ -242,9 +242,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             // ADstStaticTileDist{} -> AReduceTileDist
             // Modify the window and match the temp tensor
-
-            auto a_reduce = make_static_distributed_tensor<ADataType>(AReduceTileDist{});
-            load_tile(a_reduce, a_dram_window);
+            auto a_reduce =
+                make_static_distributed_tensor<ADataType>(MakeAReduceTileDistribution());
+            auto a_reduce_dram_window = MakeAReduceDramWindow(a_dram_window);
+            load_tile(a_reduce, a_reduce_dram_window);
 
             // ADRAM
             // MPerBlock x KPerBlock
@@ -286,23 +287,22 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             auto reduce_func = ReduceOp::AbsMax{};
 
-            auto aq_tmp = blockreduce::template MakeYBlockTile<
-                static_distributed_tensor<AQDataType, ADstStaticTileDist>>();
+            auto aq_reduce = blockreduce.template MakeYBlockTile<decltype(a_reduce)>();
 
-            set_tile(aq_tmp, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
+            set_tile(aq_reduce, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
 
-            blockreduce(a_tmp, aq_tmp, reduce_func);
-            blockreduce_sync(aq_tmp, reduce_func);
+            blockreduce(a_reduce, aq_reduce, reduce_func);
+            blockreduce_sync(aq_reduce, reduce_func);
 
             // TODO: Copy/Sync values across threads to match blockgemm expectation
-            // aq_tmp after reduction is 
+            // aq_tmp after reduction is
             // a_tmp -> a_block_tile
             // aq_tmp -> aq_block_tile
 
-            sweep_tile<decltype(a_tmp)>([&](auto... idx_) {
+            sweep_tile<decltype(a_reduce)>([&](auto... idx_) {
                 constexpr auto idx_0 = make_tuple(make_tuple(idx_[number<0>{}]...)[number<0>{}]);
                 (..., [&](auto idx) {
-                    a_block_tile(idx) = type_convert<fp8_t>(a_tmp(idx) / aq_block_tile(idx_0));
+                    a_block_tile(idx) = type_convert<fp8_t>(a_reduce(idx) / aq_block_tile(idx_0));
                 }(idx_));
             });
         }
@@ -342,7 +342,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                           "Quantization across blocks is not supported!");
             static_assert(KPerBlock % AQuantGroupSize::kK ==
                           0); // KPerBlock = AQuantGroupSize * KPerBlockAQ
-            static_assert(KWarp == 1, "Only single KWarp supported!");
 
             static_assert(
                 std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>> &&
@@ -417,6 +416,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Define the reduce problem for quantization
             constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
             constexpr index_t KWarp = BlockGemmShape::BlockWarps::at(number<2>{});
+
+            static_assert(KWarp == 1, "Only single KWarp supported!");
 
             using BlockWarps = ck_tile::sequence<MWarp, KWarp>;
             using BlockTile  = ck_tile::sequence<MPerBlock, KPerBlockAQ>;
