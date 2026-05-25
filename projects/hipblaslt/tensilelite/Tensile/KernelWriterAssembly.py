@@ -13042,7 +13042,7 @@ class KernelWriterAssembly(KernelWriter):
                 for x in range(2, i - 1):
                   strideC = "Size%s"%(INDEX_CHARS[x])
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
-                if(i == 2 and (mat == "C" or mat == "D")):                 
+                if(i == 2 and (mat == "C" or mat == "D")):
                   if(kernel["GlobalSplitU"] != 0):
                     module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
