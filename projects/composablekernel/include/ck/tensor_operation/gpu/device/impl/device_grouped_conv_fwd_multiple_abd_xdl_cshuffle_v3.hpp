@@ -1827,16 +1827,19 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         }
 
         // Gridwise gemm v3 doesn't verify descriptors size
-        if(!arg.conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB())
+        if(!LargeTensors)
         {
-            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            if(!arg.conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB())
             {
-                std::cout
-                    << "[conv_to_gemm_transformer_] One of the descriptors is bigger than 2GB!"
-                    << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
-                    << std::endl;
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "[conv_to_gemm_transformer_] One of the descriptors is bigger than 2GB!"
+                        << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                        << std::endl;
+                }
+                return false;
             }
-            return false;
         }
 
         // check Gridwise GEMM
