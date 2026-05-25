@@ -10,6 +10,7 @@ set(BATCHED_CONTRACTION_NUM_DIM_M "1" CACHE STRING "Number of M dimensions")
 set(BATCHED_CONTRACTION_NUM_DIM_N "1" CACHE STRING "Number of N dimensions")
 set(BATCHED_CONTRACTION_NUM_DIM_K "1" CACHE STRING "Number of K dimensions")
 set(BATCHED_CONTRACTION_NUM_D_TENSORS "0" CACHE STRING "Number of D (auxiliary) tensors")
+set(BATCHED_CONTRACTION_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 
 option(ENABLE_CCACHE_BATCHED_CONTRACTION "Enable ccache for Batched Contraction ops compilation" OFF)
 
@@ -22,30 +23,6 @@ function(create_individual_batched_contraction_target datatype layout trait tile
         message(WARNING "Skipping individual Batched Contraction target ${datatype}_${layout}_${trait}_${tile_config}: No supported GPU targets")
         return()
     endif()
-
-    # Parse tile configuration: format is tile_mxtile_nxtile_k_warp_mxwarp_nxwarp_k_warp_tile_mxwarp_tile_nxwarp_tile_k
-    string(REPLACE "_" ";" config_groups ${tile_config})
-    list(GET config_groups 0 tile_dims)
-    list(GET config_groups 1 warp_dims)
-    list(GET config_groups 2 warp_tile_dims)
-
-    # Parse tile dimensions
-    string(REPLACE "x" ";" tile_parts ${tile_dims})
-    list(GET tile_parts 0 tile_m)
-    list(GET tile_parts 1 tile_n)
-    list(GET tile_parts 2 tile_k)
-
-    # Parse warp dimensions
-    string(REPLACE "x" ";" warp_parts ${warp_dims})
-    list(GET warp_parts 0 warp_m)
-    list(GET warp_parts 1 warp_n)
-    list(GET warp_parts 2 warp_k)
-
-    # Parse warp tile dimensions
-    string(REPLACE "x" ";" warp_tile_parts ${warp_tile_dims})
-    list(GET warp_tile_parts 0 warp_tile_m)
-    list(GET warp_tile_parts 1 warp_tile_n)
-    list(GET warp_tile_parts 2 warp_tile_k)
 
     set(target_name "benchmark_batched_contraction_${datatype}_${layout}_${trait}_${tile_config}")
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
@@ -176,6 +153,18 @@ function(build_individual_batched_contraction_targets datatype layout)
                 --gpu_target ${BATCHED_CONTRACTION_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels ")
 
+    set(extra_list_args "")
+    if(NOT "${BATCHED_CONTRACTION_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${BATCHED_CONTRACTION_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -192,6 +181,7 @@ function(build_individual_batched_contraction_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${BATCHED_CONTRACTION_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -312,6 +302,19 @@ else()
     foreach(scheduler IN LISTS BATCHED_CONTRACTION_SCHEDULERS)
         add_custom_target(benchmark_batched_contraction_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combos's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${BATCHED_CONTRACTION_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH BATCHED_CONTRACTION_DATATYPE num_datatypes)
+        list(LENGTH BATCHED_CONTRACTION_LAYOUT num_layouts)
+        math(EXPR num_combos "${num_datatypes} * ${num_layouts}")
+        if(num_combos GREATER 0)
+            math(EXPR BATCHED_CONTRACTION_MAX_INSTANCES "${BATCHED_CONTRACTION_MAX_INSTANCES} / ${num_combos}")
+            message(STATUS "    batched_contraction: per-combo budget = ${BATCHED_CONTRACTION_MAX_INSTANCES} (${num_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS BATCHED_CONTRACTION_DATATYPE)
