@@ -167,7 +167,7 @@ int main()
                                    reinterpret_cast<void*>(cinput.data()),
                                    HIPFFT_COPY_HOST_TO_DEVICE);
         if(hipfft_rt != HIPFFT_SUCCESS)
-            throw std::runtime_error("hipfftXtMemcpy failed withd code "
+            throw std::runtime_error("hipfftXtMemcpy failed with code "
                                      + std::to_string(hipfft_rt));
     }
 
