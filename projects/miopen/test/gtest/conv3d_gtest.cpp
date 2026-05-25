@@ -8,57 +8,30 @@ namespace {
 
 using TestCase = Conv3DBaseTestCase<>;
 
-template <typename T>
-auto GenCases(bool smoke_test)
+// Dummy unused arguments have been inserted to make the 'INSTANTIATE_MIOPEN_TEST_SUITE' macro
+// happy.
+template <typename T, typename... Args>
+auto GenCases(bool smoke_test, Args&&...)
 {
     return conv3d_test_base<T>::GenTestParams(Conv3DBaseTestParameters<T>(smoke_test));
 }
 
-template <typename T>
-auto GetCasesFull()
-{
-    static const auto cases = GenCases<T>(false);
-    return cases;
-}
-
-template <typename T>
-auto GetCasesSmoke()
-{
-    static const auto cases = GenCases<T>(true);
-    return cases;
-}
-
 } // namespace
 
-using GPU_Conv3d_Base_FP32 = conv3d_test_base<float>;
-using GPU_Conv3d_Base_FP16 = conv3d_test_base<half_float::half>;
-
-TEST_P(GPU_Conv3d_Base_FP32, TestFloat)
+template <typename T>
+struct conv3d_test : public conv3d_test_base<T, TestCase>
 {
-    GetTestParams();
-    run();
-}
+    void SetUp() override
+    {
+        prng::reset_seed();
+        this->GetTestParams();
+    }
+};
 
-TEST_P(GPU_Conv3d_Base_FP16, TestFloat16)
-{
-    GetTestParams();
-    run();
-}
+using MIOPEN_TESTSUITE_NAME(GPU_Conv3d_) = conv3d_test<MIOPEN_GTEST_DATA_TYPE>;
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv3d_Base_FP32,
-                         GetCasesSmoke<float>(),
-                         DefaultTestNameGenerator<TestCase>{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3d_Base_FP32,
-                         GetCasesFull<float>(),
-                         DefaultTestNameGenerator<TestCase>{});
+TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv3d_), MIOPEN_TEST_INFO(Test)) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv3d_Base_FP16,
-                         GetCasesSmoke<half_float::half>(),
-                         DefaultTestNameGenerator<TestCase>{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3d_Base_FP16,
-                         GetCasesFull<half_float::half>(),
-                         DefaultTestNameGenerator<TestCase>{});
+// The last argument is a dummy argument, just to make the 'INSTANTIATE_MIOPEN_TEST_SUITE' macro
+// happy. It is not used in the test.
+INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0), MIOPEN_TESTSUITE_NAME(GPU_Conv3d_), 0);

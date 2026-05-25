@@ -1853,7 +1853,7 @@ std::vector<T> generate_data_limited(const std::vector<T>& dims,
                                      int limit_multiplier,
                                      T single,
                                      bool full_set = true,
-                                     int limit_set = 2)
+                                     int limit_set = MIOPEN_TEST_LIMIT)
 {
     if(full_set)
     {
@@ -1915,6 +1915,7 @@ using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>, // conv_mod
                                         NamedParameter<bool>,        // gen_float
                                         NamedParameter<bool>,        // enable_fdb
                                         NamedParameter<bool>,        // preallocate
+                                        NamedParameter<double>,      // tolerance,
                                         TParams...>;
 
 template <ConvApi api = ConvApi::Find_1_0>
@@ -1942,6 +1943,7 @@ struct BaseConvTestParameters
     std::vector<bool> gen_float{true};
     std::vector<bool> enable_fdb{true};
     std::vector<bool> preallocate{false};
+    std::vector<double> tolerance{80.0f};
 };
 
 template <typename T,
@@ -2121,6 +2123,7 @@ struct conv_test : public testing::TestWithParam<TestCase>
             MakeNamedParameterCollectionValues<bool>("generate-float", baseParams.gen_float),
             MakeNamedParameterCollectionValues<bool>("enable-fdb", baseParams.enable_fdb),
             MakeNamedParameterCollectionValues<bool>("preallocate", baseParams.preallocate),
+            MakeNamedParameterCollectionValues<double>("tolerance", baseParams.tolerance),
             std::forward<TParams>(params)...);
     }
 
@@ -2137,6 +2140,7 @@ struct conv_test : public testing::TestWithParam<TestCase>
                  gen_float,
                  enable_fdb,
                  preallocate,
+                 tolerance,
                  params...) = this->GetParam();
     }
 

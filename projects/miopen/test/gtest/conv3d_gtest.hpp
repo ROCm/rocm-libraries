@@ -22,7 +22,6 @@ using Conv3DBaseTestCase =
                          NamedParameter<size_t>,              // vector_length
                          NamedParameter<std::string>,         // output_type
                          NamedParameter<bool>,                // int8_vectorize
-                         NamedParameter<double>,              // tolerance,
                          TParams...>;
 
 template <typename T, ConvApi api = ConvApi::Find_1_0>
@@ -30,16 +29,20 @@ struct Conv3DBaseTestParameters
 {
     using ct = conv_test<T, Conv3DBaseTestCase<>, api>;
 
-    Conv3DBaseTestParameters(bool smoke_test)
-        : batch_size(generate_data_limited(ct::get_batch_sizes(), 1, {8}, !smoke_test)),
-          input_channels(generate_data_limited(ct::get_input_channels(), 1, {32}, !smoke_test)),
-          output_channels(generate_data_limited(ct::get_output_channels(), 1, {32}, !smoke_test)),
-          spatial_dim_elements(
-              generate_data_limited(ct::get_3d_spatial_dims(), 1, {16, 16, 16}, !smoke_test)),
-          filter_dims(generate_data_limited(ct::get_3d_filter_dims(), 2, {3, 3, 3}, !smoke_test)),
-          pads_strides_dilations(
-              generate_data_limited(ct::get_3d_pads_strides_dilations(), 2, !smoke_test)),
-          trans_output_pads(generate_data_limited(ct::get_3d_trans_output_pads(), 1, !smoke_test))
+    Conv3DBaseTestParameters(bool smoke_test, int limit_set = MIOPEN_TEST_LIMIT)
+        : batch_size(generate_data_limited(ct::get_batch_sizes(), 1, {8}, !smoke_test, limit_set)),
+          input_channels(
+              generate_data_limited(ct::get_input_channels(), 1, {32}, !smoke_test, limit_set)),
+          output_channels(
+              generate_data_limited(ct::get_output_channels(), 1, {32}, !smoke_test, limit_set)),
+          spatial_dim_elements(generate_data_limited(
+              ct::get_3d_spatial_dims(), 1, {16, 16, 16}, !smoke_test, limit_set)),
+          filter_dims(generate_data_limited(
+              ct::get_3d_filter_dims(), 2, {3, 3, 3}, !smoke_test, limit_set)),
+          pads_strides_dilations(generate_data_limited(
+              ct::get_3d_pads_strides_dilations(), 2, !smoke_test, limit_set)),
+          trans_output_pads(
+              generate_data_limited(ct::get_3d_trans_output_pads(), 1, !smoke_test, limit_set))
     {
     }
 
@@ -59,7 +62,6 @@ struct Conv3DBaseTestParameters
     std::vector<size_t> vector_length{1};
     std::vector<std::string> output_type{std::string{"int32"}};
     std::vector<bool> int8_vectorize{false};
-    std::vector<double> tolerance{80.0f};
 };
 
 template <typename T, typename TestCase = Conv3DBaseTestCase<>, ConvApi api = ConvApi::Find_1_0>
@@ -85,7 +87,6 @@ struct conv3d_test_base : public conv_test<T, TestCase, api>
                                                    this->vector_length,
                                                    this->output_type,
                                                    this->int8_vectorize,
-                                                   this->tolerance,
                                                    params...);
     }
 
@@ -123,7 +124,6 @@ struct conv3d_test_base : public conv_test<T, TestCase, api>
                                                             conv3dBaseParams.output_type),
             MakeNamedParameterCollectionValues<bool>("int8_vectorize",
                                                      conv3dBaseParams.int8_vectorize),
-            MakeNamedParameterCollectionValues<double>("tolerance", conv3dBaseParams.tolerance),
             std::forward<TParams>(params)...);
     }
 };

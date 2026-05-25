@@ -23,6 +23,10 @@ auto GenCases(bool smoke_test)
     using ct = conv_test<T, TestCase, ConvApi::Immediate>;
     BaseConvTestParameters<ConvApi::Immediate> baseParams;
 
+#ifdef MIOPEN_OVERRIDDEN_TOLERANCE
+    baseParams.tolerance = {MIOPEN_OVERRIDDEN_TOLERANCE};
+#endif
+
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
         "batch_size", generate_data_limited(ct::get_batch_sizes(), 1, {16}, !smoke_test));
 
