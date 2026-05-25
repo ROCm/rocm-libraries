@@ -52,20 +52,6 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<80, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<81, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
-// Non-grouped convolution v3 — cross-wave LDS reduction (16x16x32)
-// Fprop, direct DRAM epilogue — configs 2-3 (waves 4, 2)
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<2, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<3, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-
-////////////////////////////////////////////////////////////////////////
-// Non-grouped convolution v3 — cross-wave LDS reduction (32x32x16)
-// Fprop, direct DRAM epilogue — configs 6-7 (waves 4, 2)
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<6, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<7, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-
-////////////////////////////////////////////////////////////////////////
 // Non-grouped convolution v3 — CyclicShift swizzle
 // Fprop configs 10-11 (16x16x32), 14-15 (32x32x16)
 ////////////////////////////////////////////////////////////////////////
