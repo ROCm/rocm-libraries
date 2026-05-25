@@ -1613,23 +1613,39 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                                                                          c_thread_buf,
                                                                          num_k_block_main_loop);
 
-        // shuffle C and write out
-        const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
-            MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
-                ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation,
-                                         DoElementwiseBeforeCShuffle,
-                                         false,
-                                         false>(blockwise_gemm_pipeline,
-                                                ds_grid_desc_mblock_mperblock_nblock_nperblock,
-                                                c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                                c_thread_buf,
-                                                block_m_id,
-                                                block_n_id,
-                                                p_shared,
-                                                p_ds_grid,
-                                                p_c_grid,
-                                                c_element_op);
+        if constexpr(LargeTensors)
+        {
+            static_assert(NumDTensor == 0, "Not implemented");
+            Base::template RunEpilogue<CGlobalMemoryDataOperation, false, false>(
+                blockwise_gemm_pipeline,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_c_grid,
+                c_element_op);
+        }
+        else
+        {
+            // shuffle C and write out
+            const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
+                MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
+                    ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
+            Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation,
+                                             DoElementwiseBeforeCShuffle,
+                                             false,
+                                             false>(blockwise_gemm_pipeline,
+                                                    ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                    c_thread_buf,
+                                                    block_m_id,
+                                                    block_n_id,
+                                                    p_shared,
+                                                    p_ds_grid,
+                                                    p_c_grid,
+                                                    c_element_op);
+        }
     }
 
     template <bool HasMainKBlockLoop,
@@ -1938,24 +1954,39 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                                                                          b_block_slice_copy_step,
                                                                          c_thread_buf,
                                                                          num_k_block_main_loop);
-
-        // shuffle C and write out
-        const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
-            MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
-                ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation,
-                                         DoElementwiseBeforeCShuffle,
-                                         false,
-                                         false>(blockwise_gemm_pipeline,
-                                                ds_grid_desc_mblock_mperblock_nblock_nperblock,
-                                                c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                                c_thread_buf,
-                                                block_m_id,
-                                                block_n_id,
-                                                p_shared_0,
-                                                p_ds_grid,
-                                                p_c_grid,
-                                                c_element_op);
+        if constexpr(LargeTensors)
+        {
+            static_assert(NumDTensor == 0, "Not implemented");
+            Base::template RunEpilogue<CGlobalMemoryDataOperation, false, false>(
+                blockwise_gemm_pipeline,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared_0,
+                p_c_grid,
+                c_element_op);
+        }
+        else
+        {
+            // shuffle C and write out
+            const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
+                MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
+                    ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
+            Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation,
+                                             DoElementwiseBeforeCShuffle,
+                                             false,
+                                             false>(blockwise_gemm_pipeline,
+                                                    ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                    c_thread_buf,
+                                                    block_m_id,
+                                                    block_n_id,
+                                                    p_shared_0,
+                                                    p_ds_grid,
+                                                    p_c_grid,
+                                                    c_element_op);
+        }
     }
 };
 

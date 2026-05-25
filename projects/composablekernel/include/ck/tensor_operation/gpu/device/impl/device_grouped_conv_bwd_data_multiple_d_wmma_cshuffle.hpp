@@ -895,8 +895,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
                                           a_element_op,
                                           b_element_op,
                                           cde_element_op,
-                                          split_k,
-                                          stride_ovf);
+                                          split_k);
     }
 
     std::unique_ptr<BaseArgument> MakeArgumentPointer(

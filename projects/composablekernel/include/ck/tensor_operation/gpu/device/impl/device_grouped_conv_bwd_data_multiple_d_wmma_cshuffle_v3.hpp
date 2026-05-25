@@ -1893,8 +1893,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                         a_element_op,
                         b_element_op,
                         cde_element_op,
-                        split_k,
-                        stride_ovf};
+                        split_k};
     }
 
     static auto MakeArgument(
