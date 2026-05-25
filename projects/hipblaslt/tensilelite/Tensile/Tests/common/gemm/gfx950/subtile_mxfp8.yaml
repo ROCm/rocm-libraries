@@ -134,3 +134,42 @@ BenchmarkProblems:
           - Exact: [768, 768, 1, 256]   # K = 1*DU; LCM(MT_M)=LCM(MT_N)=768
           - Exact: [768, 768, 1, 512]   # K = 2*DU
           - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
+
+  ########################################
+  # FP8 TN — PGR=2, multi-DU: data DU=128, scale K=256, MT 256x256
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]                 # data DU = MI_K = 128
+        - DepthUMX: [256]              # scale K = 2*MI_K = 256
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*effective_DU
+          - Exact: [256, 256, 1, 512]   # K = 2*effective_DU
