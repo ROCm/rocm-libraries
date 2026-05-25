@@ -132,7 +132,6 @@ if(BUILD_CODE_COVERAGE)
   )
 endif()
 
-
 # ****************************************************************************
 # Test Filter Standardization
 # ****************************************************************************
@@ -185,7 +184,6 @@ else()
         "skipping hipCUB test category labels")
 endif()
 
-
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
@@ -206,20 +204,22 @@ install(
 # Test control file setup
 # Set the name of the test control file
 set(TEST_CONTROL_FILE_NAME "control.txt")
-# Set the paths to the directories containing the control file
-set(TEST_CONTROL_FILE_SOURCE_PATH "${CMAKE_SOURCE_DIR}/test")
-set(TEST_CONTROL_FILE_BUILD_PATH "${CMAKE_BINARY_DIR}/test")
-set(TEST_CONTROL_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}")
 
 # Copy control file from source to build directory if it has changed.
+# Set up the dependencies to cause this check happen every time a target is built.
+add_custom_command(
+  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test/${TEST_CONTROL_FILE_NAME}" "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
+  VERBATIM
+)
 add_custom_target(copy_control_file_changes
-  ALL
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TEST_CONTROL_FILE_SOURCE_PATH}/${TEST_CONTROL_FILE_NAME}" "${TEST_CONTROL_FILE_BUILD_PATH}/${TEST_CONTROL_FILE_NAME}"
+  DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
 )
 add_dependencies(hipcub copy_control_file_changes)
 
+# Install the file as well, so that installed binaries can pick it up.
 rocm_install(
-  FILES "${TEST_CONTROL_FILE_BUILD_PATH}/control.txt"
-  DESTINATION "${TEST_CONTROL_FILE_INSTALL_PATH}"
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
+  DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
   COMPONENT tests
 )
