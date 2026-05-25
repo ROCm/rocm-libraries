@@ -753,7 +753,18 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     if(device == "gfx950" && !env::disabled(MIOPEN_DEBUG_GFX950_RULES_PICK))
     {
         const auto picked = gfx950::PickSolver(problem);
-        if(picked.IsValid() && picked.GetSolver().IsApplicable(ctx, problem))
+        if(!picked.IsValid())
+        {
+            MIOPEN_LOG_I2("gfx950 rules: no pick (problem outside rules coverage), "
+                          "falling through to TunaNet");
+        }
+        else if(!picked.GetSolver().IsApplicable(ctx, problem))
+        {
+            MIOPEN_LOG_I2("gfx950 rules picked " << picked.ToString()
+                                                 << " but solver reported not applicable, "
+                                                    "falling through to TunaNet");
+        }
+        else
         {
             MIOPEN_LOG_I2("gfx950 rules picked " << picked.ToString());
             std::vector<std::any> any_sol;
@@ -761,14 +772,24 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             StorePredictionCache(problem, device, any_sol);
             return {picked.Value()};
         }
-        MIOPEN_LOG_I2("gfx950 rules: no applicable pick, falling through to TunaNet");
     }
 
     // gfx942 rules-based short-circuit: same pattern as gfx950 above.
     if(device == "gfx942" && !env::disabled(MIOPEN_DEBUG_GFX942_RULES_PICK))
     {
         const auto picked = gfx942::PickSolver(problem);
-        if(picked.IsValid() && picked.GetSolver().IsApplicable(ctx, problem))
+        if(!picked.IsValid())
+        {
+            MIOPEN_LOG_I2("gfx942 rules: no pick (problem outside rules coverage), "
+                          "falling through to TunaNet");
+        }
+        else if(!picked.GetSolver().IsApplicable(ctx, problem))
+        {
+            MIOPEN_LOG_I2("gfx942 rules picked " << picked.ToString()
+                                                 << " but solver reported not applicable, "
+                                                    "falling through to TunaNet");
+        }
+        else
         {
             MIOPEN_LOG_I2("gfx942 rules picked " << picked.ToString());
             std::vector<std::any> any_sol;
@@ -776,7 +797,6 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             StorePredictionCache(problem, device, any_sol);
             return {picked.Value()};
         }
-        MIOPEN_LOG_I2("gfx942 rules: no applicable pick, falling through to TunaNet");
     }
 
     // Strategy:
