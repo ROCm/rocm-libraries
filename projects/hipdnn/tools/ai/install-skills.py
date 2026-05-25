@@ -6,21 +6,33 @@
 This script copies skills as snapshots and automatically detects when installed
 skills differ from the source. If a skill has changed, it is reinstalled.
 
+By default, all available skills are installed to both ~/.codex/skills and
+~/.claude/skills. Specify individual skill names to install only those skills.
+
 Examples:
     # See available skills
-    python3 link-skills.py --list
+    python3 install-skills.py --list
 
-    # Copy skills into Codex global scope
-    python3 link-skills.py --codex hipdnn-superbuild hipdnn-superbuild-test
+    # Install all skills to both Codex and Claude (default)
+    python3 install-skills.py
 
-    # Copy skills into Claude global scope
-    python3 link-skills.py --claude hipdnn-review pr-summary
+    # Install specific skills to both Codex and Claude
+    python3 install-skills.py hipdnn-superbuild hipdnn-superbuild-test
 
-    # Copy skills into an explicit target directory
-    python3 link-skills.py --target /path/to/skills hipdnn-superbuild
+    # Install all skills to Codex only
+    python3 install-skills.py --codex
+
+    # Install specific skills to Claude only
+    python3 install-skills.py --claude hipdnn-review pr-summary
+
+    # Install all skills to both Codex and Claude (explicit)
+    python3 install-skills.py --codex --claude
+
+    # Install to an explicit target directory
+    python3 install-skills.py --target /path/to/skills
 
     # Backward-compatible positional target form
-    python3 link-skills.py /path/to/skills hipdnn-review
+    python3 install-skills.py /path/to/skills hipdnn-review
 """
 
 import argparse
@@ -96,13 +108,13 @@ def claude_target() -> Path:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Install named hipDNN skills as snapshots. Changes in the source are "
+            "Install hipDNN skills as snapshots. By default installs all available skills to both "
+            "~/.codex/skills and ~/.claude/skills. Changes in the source are "
             "detected and installed automatically."
         )
     )
-    host = parser.add_mutually_exclusive_group()
-    host.add_argument("--codex", action="store_true", help="Install into Codex skills")
-    host.add_argument(
+    parser.add_argument("--codex", action="store_true", help="Install into Codex skills")
+    parser.add_argument(
         "--claude", action="store_true", help="Install into Claude skills"
     )
     parser.add_argument("--target", help="Explicit skills target directory")
@@ -111,35 +123,59 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "items",
         nargs="*",
         help=(
-            "Skill names. In backward-compatible mode, the first item is the "
-            "target directory and remaining items are skill names."
+            "Skill names (optional). If not specified, all available skills are installed. "
+            "In backward-compatible mode, the first item is the target directory and "
+            "remaining items are skill names."
         ),
     )
     return parser.parse_args(argv)
 
 
-def resolve_target_and_requested(args: argparse.Namespace) -> tuple[Path | None, list[str]]:
-    host_target_count = sum([bool(args.codex), bool(args.claude), bool(args.target)])
-    if host_target_count > 1:
-        raise ValueError("Choose only one of --codex, --claude, or --target.")
-
-    if args.codex:
-        return codex_target(), args.items
-    if args.claude:
-        return claude_target(), args.items
+def resolve_targets_and_requested(args: argparse.Namespace, available: dict[str, Path]) -> tuple[list[Path], list[str]]:
+    """Resolve target directories and skill names.
+    
+    Args:
+        args: Parsed arguments
+        available: Dict of available skills {name: path}
+    
+    Returns:
+        (list of target directories, list of requested skill names)
+    """
+    targets = []
+    
+    # Explicit targets take precedence
     if args.target:
-        return Path(args.target).expanduser().resolve(), args.items
-
+        targets.append(Path(args.target).expanduser().resolve())
+        # If no skills specified, use all available
+        requested = args.items if args.items else list(available.keys())
+        return targets, requested
+    
+    if args.codex or args.claude:
+        if args.codex:
+            targets.append(codex_target())
+        if args.claude:
+            targets.append(claude_target())
+        # If no skills specified, use all available
+        requested = args.items if args.items else list(available.keys())
+        return targets, requested
+    
+    # Default: both Codex and Claude if no specific host is requested
     if args.list and not args.items:
-        return None, []
-
-    if not args.items:
-        raise ValueError(
-            "Missing target directory. Use --codex, --claude, --target, or "
-            "the positional target-directory form."
-        )
-
-    return Path(args.items[0]).expanduser().resolve(), args.items[1:]
+        return [], []
+    
+    # Check if first item looks like a directory (backward-compatible positional form)
+    if args.items:
+        first_item_path = Path(args.items[0]).expanduser()
+        if not any(c in args.items[0] for c in ["@", ":"]) and (
+            "/" in args.items[0] or "\\" in args.items[0] or first_item_path.exists()
+        ):
+            # Looks like a directory path
+            targets.append(first_item_path.resolve())
+            return targets, args.items[1:]
+    
+    # Default to both Codex and Claude, and all available skills if none specified
+    requested = args.items if args.items else list(available.keys())
+    return [codex_target(), claude_target()], requested
 
 
 def print_available(skills_dir: Path, skills: dict[str, Path]) -> None:
@@ -158,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        target_dir, requested = resolve_target_and_requested(args)
+        targets, requested = resolve_targets_and_requested(args, skills)
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -174,35 +210,44 @@ def main(argv: list[str] | None = None) -> int:
         print_available(skills_dir, skills)
         return 1
 
-    if not requested:
-        print("ERROR: no skills requested.", file=sys.stderr)
+    if not targets:
+        print("ERROR: no target directories resolved.", file=sys.stderr)
         return 2
 
-    if target_dir is None:
-        print("ERROR: no target directory resolved.", file=sys.stderr)
-        return 2
+    # Create all target directories
+    for target_dir in targets:
+        target_dir.mkdir(parents=True, exist_ok=True)
 
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    # Install mode: install or update based on SHA
+    # Install to all targets
     print(f"Source:  {skills_dir}")
-    print(f"Target:  {target_dir}")
+    if len(targets) == 1:
+        print(f"Target:  {targets[0]}")
+    else:
+        print(f"Targets: {', '.join(str(t) for t in targets)}")
     print()
 
-    errors = 0
-    for name in requested:
-        skill = skills[name]
-        target = target_dir / skill.name
-        try:
-            status = install_or_update_copy(skill, target)
-            print(f"  {skill.name:30s} {status}")
-        except OSError as error:
-            print(f"  {skill.name:30s} FAILED: {error}")
-            errors += 1
+    total_errors = 0
+    for target_dir in targets:
+        if len(targets) > 1:
+            print(f"Installing to {target_dir}:")
+        
+        errors = 0
+        for name in requested:
+            skill = skills[name]
+            target = target_dir / skill.name
+            try:
+                status = install_or_update_copy(skill, target)
+                print(f"  {skill.name:30s} {status}")
+            except OSError as error:
+                print(f"  {skill.name:30s} FAILED: {error}")
+                errors += 1
+        
+        total_errors += errors
+        if len(targets) > 1:
+            print()
 
-    print()
-    if errors:
-        print(f"Done with {errors} error(s).")
+    if total_errors:
+        print(f"Done with {total_errors} error(s).")
         return 1
 
     print("Done.")
