@@ -4545,15 +4545,10 @@ class KernelWriterAssembly(KernelWriter):
       return module
 
     # Pull subtile state — we need the per-lane vaddr vgpr and the soffset sgpr
-    # the regular dwordx4 load uses for this subtile.
+    # the regular dwordx4 load uses for subtile 0; multi-subtile cases add a
+    # runtime byte delta to point at the subtile that owns the trailing element.
     tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
-    if float(tileInfo.loadRatioGR) != 1.0:
-      return module
-    if tileInfo.numGRPerSubtile != 1:
-      return module
     regList = tileInfo.localSubtilesRegister[0]
-    # If the first regList is empty, the regular load uses soffset=0 (immediate);
-    # otherwise it must be an sgpr-typed list. Bail on the vgpr-soffset path.
     if len(regList) > 0 and not regList.is_sgpr:
       return module
     hasSoffsetSgpr = (len(regList) > 0)
@@ -4566,13 +4561,31 @@ class KernelWriterAssembly(KernelWriter):
     waveSize = kernel["WavefrontSize"]
     vaddrVgprIdx   = tileInfo.sharedVgprGROffset[0]
     soffsetSgprIdx = regList.indices[0] if hasSoffsetSgpr else None
+    depthU = kernel["DepthU"]
+    matrixInstK = kernel["MatrixInstK"]
+
+    # Per-subtile geometry in problem-space units.
+    # Use mmaTileShape (= (instM, instK)) — the actual MMA tile dimensions —
+    # not loadRatioGR (which is a load/subtile coverage ratio, not a size).
+    subtileKElems       = int(tileInfo.subtileShape[1]) * int(tileInfo.mmaTileShape[1])
+    mElemsPerSubtileRow = int(tileInfo.subtileShape[0]) * int(tileInfo.mmaTileShape[0])
+    def _isPow2(n): return n > 0 and (n & (n - 1)) == 0
+    assert _isPow2(subtileKElems), \
+      "tail boundary load requires power-of-2 subtileKElems (got %d)" % subtileKElems
+    assert _isPow2(mElemsPerSubtileRow), \
+      "tail boundary load requires power-of-2 mElemsPerSubtileRow (got %d)" % mElemsPerSubtileRow
+    assert _isPow2(depthU), \
+      "tail boundary load requires power-of-2 DepthU (got %d)" % depthU
+    # Per-subtile K-element mask (within a subtile): keep bits below subtileKElems,
+    # drop the lowest log2(elemsPerLane) bits (those go into intra_K_byte).
+    withinSubMask = (subtileKElems - 1) & ~(elemsPerLane - 1)
 
     module.add(Label("sebB%s"%tc,""))
     module.addComment1("Tail-loop boundary DTL load for %s (Option C1: v_cmp + readlane)" % tc)
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkip%s" % tc), "")
 
-    with self.allocTmpSgpr(6, 2) as tmpSgprInfo:
+    with self.allocTmpSgpr(10, 2) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
       # --- Runtime gate: skip boundary load when K_rem is even ------------
       # For even K_rem the regular dwordx4 + boundaryMask path is complete;
@@ -4582,11 +4595,15 @@ class KernelWriterAssembly(KernelWriter):
                          comment="K_rem & 1 (SCC=1 if odd)"))
       module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
                               comment="K_rem even -> skip boundary load"))
-      # stmp+0 : sTarget       (numLine*stride*bpe + alignedK_byte - soffset)
-      # stmp+1 : K_rem - 1     (then intra_K_byte, aligned_K_byte)
-      # stmp+2 : numLine
-      # stmp+3 : sLaneId / scratch
+      # stmp+0 : sTarget -> sLaneId
+      # stmp+1 : K_rem_m1 -> alignedK_within_subtile -> ff1/readlane scratch
+      # stmp+2 : numLine -> numLine_within_subtile
+      # stmp+3 : intra_K_byte (held)
       # stmp+4, +5 : v_cmp result (sgpr pair, even-aligned for wave64)
+      # stmp+6 : offsetK_bytes (held)
+      # stmp+7 : offsetM_glb_bytes (held)
+      # stmp+8 : offsetM_lds_bytes (held)
+      # stmp+9 : scratch
 
       # --- numLine = min(SizeI/J - WG*MT, MT) - 1 --------------------------
       module.add(SMulI32(dst=sgpr(stmp+2), src0=sgpr(tP["wg"]), src1=mt,
@@ -4598,7 +4615,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SSubU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=1,
                          comment="numLine = min - 1 (0-based)"))
 
-      # --- K_rem_m1 = K_rem - 1, derive intra / aligned K bytes -----------
+      # --- K_rem_m1 = K_rem - 1, derive intra / within-subtile-aligned / offsetK
       module.add(SSubU32(dst=sgpr(stmp+1), src0=sgpr(loopCounterName), src1=1,
                          comment="K_rem_m1 = K_rem - 1"))
       # intra_K_byte = (K_rem_m1 & 7) * bpe  -> kept in stmp+3
@@ -4606,20 +4623,50 @@ class KernelWriterAssembly(KernelWriter):
                          comment="K_rem_m1 & (elemsPerLane-1)"))
       module.add(SLShiftLeftB32(dst=sgpr(stmp+3), shiftHex=log2(bpe), src=sgpr(stmp+3),
                                 comment="intra_K_byte = (K_rem_m1 & 7) * bpe"))
-      # aligned_K_byte = (K_rem_m1 & ~(elemsPerLane-1)) * bpe  -> stmp+1
+      # offsetK_bytes = (K_rem_m1 & ~(subtileKElems-1)) * bpe  -> stmp+6
+      module.add(SAndB32(dst=sgpr(stmp+6), src0=sgpr(stmp+1),
+                         src1=hex(0xFFFFFFFF & ~(subtileKElems - 1)),
+                         comment="K_rem_m1 & ~(subtileKElems-1)"))
+      module.add(SLShiftLeftB32(dst=sgpr(stmp+6), shiftHex=log2(bpe), src=sgpr(stmp+6),
+                                comment="offsetK_bytes = K-subtile-floor * bpe"))
+      # alignedK_within_subtile = (K_rem_m1 & withinSubMask) * bpe  -> stmp+1 (overwrite)
       module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1),
-                         src1=-int(elemsPerLane),
-                         comment="K_rem_m1 & ~(elemsPerLane-1)"))
+                         src1=hex(withinSubMask),
+                         comment="K_rem_m1 & withinSubMask (=%d)" % withinSubMask))
       module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(bpe), src=sgpr(stmp+1),
-                                comment="aligned_K_byte = (K_rem_m1 & ~7) * bpe"))
+                                comment="alignedK_within_subtile = ... * bpe"))
 
-      # --- sTarget = numLine * strideF * bpe + aligned_K_byte - soffset ---
+      # --- offsetM_floor (in M-elements, aligned down to mEPSR) ------------
+      # offsetM_floor = numLine & ~(mEPSR-1)  -> stmp+9 (held briefly)
+      module.add(SAndB32(dst=sgpr(stmp+9), src0=sgpr(stmp+2),
+                         src1=hex(0xFFFFFFFF & ~(mElemsPerSubtileRow - 1)),
+                         comment="offsetM_floor = numLine & ~(mEPSR-1)"))
+      # offsetM_glb_bytes = offsetM_floor * strideF * bpe  -> stmp+7
+      # (Alik: per-M-element global stride is strideF=SizeL; one subtile-row
+      # bump covers mEPSR M-elements, so the byte step is mEPSR*strideF*bpe.)
+      module.add(SMulI32(dst=sgpr(stmp+7), src0=sgpr(stmp+9), src1=strideF,
+                         comment="offsetM_floor * strideF (elements)"))
+      module.add(scalarMultiplyBpe(stmp+7, stmp+7, float(bpe),
+                                   comment="offsetM_glb_bytes = * bpe"))
+      # offsetM_lds_bytes = offsetM_floor * DepthU * bpe  -> stmp+8 (pow2 shift)
+      module.add(SLShiftLeftB32(dst=sgpr(stmp+8),
+                                shiftHex=log2(depthU * bpe),
+                                src=sgpr(stmp+9),
+                                comment="offsetM_lds_bytes = offsetM_floor * DepthU * bpe"))
+
+      # --- numLine_within_subtile = numLine & (mEPSR - 1) -> stmp+2 --------
+      module.add(SAndB32(dst=sgpr(stmp+2), src0=sgpr(stmp+2),
+                         src1=hex(mElemsPerSubtileRow - 1),
+                         comment="numLine_within_subtile = numLine & (mEPSR-1)"))
+
+      # --- sTarget = numLine_within_subtile * strideF * bpe
+      #               + alignedK_within_subtile - soffset_subtile0 ----------
       module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+2), src1=strideF,
-                         comment="numLine * stride (elements)"))
+                         comment="numLine_within_subtile * stride (elements)"))
       module.add(scalarMultiplyBpe(stmp+0, stmp+0, float(bpe),
                                    comment="-> bytes"))
       module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1),
-                         comment="+ aligned_K_byte"))
+                         comment="+ alignedK_within_subtile"))
       if hasSoffsetSgpr:
         module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(soffsetSgprIdx),
                            comment="- soffset (per-lane vaddr space)"))
@@ -4653,27 +4700,34 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
                            comment="sLaneId = ff1(vcc)"))
 
-      # --- m0 = LocalWriteBaseAddr + sLaneId*16 + intra_K_byte -------------
-      # intra_K_byte in stmp+3, sLaneId in stmp+0 (=sLaneId).
+      # --- m0 = LocalWriteBaseAddr + laneId*16 + intra_K_byte
+      #         + offsetK_bytes + offsetM_lds_bytes -------------------------
       module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(16), src=sgpr(sLaneId),
                                 comment="sLaneId * 16 (per-lane LDS stride)"))
       module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
                          comment="+ intra_K_byte"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
+                         comment="+ offsetK_bytes"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+8),
+                         comment="+ offsetM_lds_bytes"))
       module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
                          src1=sgpr(stmp+1),
-                         comment="m0 = LocalWriteBaseAddr%s + laneId*16 + intra_K_byte" % tc))
+                         comment="m0 = LocalWriteBaseAddr%s + laneId*16 + intra_K_byte + offsetK + offsetM(lds)" % tc))
 
-      # --- vaddr = (per-lane vaddr at lane sLaneId) + intra_K_byte ---------
-      # Use v_readlane to grab that lane's (already swizzled) vaddr directly,
-      # then add the intra-16B byte so the ushort load picks the right slot.
+      # --- vaddr = (per-lane vaddr at lane sLaneId) + intra_K_byte
+      #             + offsetK_bytes + offsetM_glb_bytes --------------------
       vTmp = self.vgprPool.checkOut(1, "tailBoundaryVTmp")
       module.add(VReadlaneB32(dst=sgpr(stmp+1), src0=vgpr(vaddrVgprIdx),
                               src1=sgpr(sLaneId),
-                              comment="sTarget = v[vaddr][sLaneId] (per-lane vaddr)"))
+                              comment="sTarget = v[vaddr][sLaneId] (subtile-0 per-lane vaddr)"))
       module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
                          comment="+ intra_K_byte (within 16B chunk)"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
+                         comment="+ offsetK_bytes (K-subtile bump)"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+7),
+                         comment="+ offsetM_glb_bytes (M-subtile bump)"))
       module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1),
-                         comment="vaddr = sTarget + intra_K_byte"))
+                         comment="vaddr = subtile-0 lane vaddr + intra + offsetK + offsetM(glb)"))
 
       # --- EXEC = lane 0 only, emit DTL load, wait, restore EXEC -----------
       module.add(SMovB64(dst=EXEC(), src=0x1, comment="EXEC = lane 0 only"))
