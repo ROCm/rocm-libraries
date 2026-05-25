@@ -296,6 +296,20 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
         return {If{in_bound, stmts}};
     }
 
+    StatementList real_trans_pre_post() override
+    {
+        if(ebtype == EmbeddedType::NONE)
+            return {};
+
+        std::string   pre_post   = (ebtype == EmbeddedType::C2Real_PRE) ? " before " : " after ";
+        auto          twd_offset = (length - factors.front());
+        StatementList stmts;
+        stmts += CommentLines{"handle even-length real to complex pre-process in lds" + pre_post
+                              + "transform"};
+        stmts += real2cmplx_pre_post(length, threads_per_transform, twd_offset);
+        return stmts;
+    }
+
     ArgumentList global_arguments() override
     {
         auto arguments
@@ -423,6 +437,7 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
         // handle even-length real to complex post-process in lds after full pass
         if(ebtype == EmbeddedType::Real2C_POST)
         {
+            std::cerr << "ebtype == EmbeddedType::Real2C_POST: " << std::endl;
             body += LineBreak{};
             body += real_trans_pre_post();
         }
