@@ -608,7 +608,7 @@ class LocalReadMFMA(LocalRead):
 
                 ds = DSModifiers(na=1, offset=paramList[0])
                 LocalReadX = instruction.getInst()
-                localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
+                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCode, comment=comment)
 
                 valufIdx += numVgpr
 
