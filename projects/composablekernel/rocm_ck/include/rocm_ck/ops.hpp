@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Role: meta — operator structs, Op variant. No runtime, no CK deps.
+// Role: meta - operator structs, Op variant. No runtime, no CK deps.
 //
 // Operators are the edges of a Signature's compute graph. Each operator
 // names its tensor slots as string_view labels (e.g., "A", "bias", "query")
@@ -8,13 +8,13 @@
 // owns the tensor definitions; operators just reference them by name.
 //
 // This separation means operators are reusable across different tensor
-// configurations — a GemmOp doesn't care whether its "lhs" is FP16 or BF16,
+// configurations - a GemmOp doesn't care whether its "lhs" is FP16 or BF16,
 // Row or Col. That's resolved later when the Signature is validated.
 //
 // The Op variant is the closed set of supported operator types. Adding a
 // new operator means adding a struct here and a variant alternative.
-// Fused operations (like FMHA) are single operators — not chains of
-// elementwise + GEMM — because CK Tile implements them as monolithic kernels.
+// Fused operations (like FMHA) are single operators - not chains of
+// elementwise + GEMM - because CK Tile implements them as monolithic kernels.
 
 #pragma once
 
@@ -26,7 +26,7 @@
 namespace rocm_ck {
 
 // Matrix multiplication: out = lhs x rhs.
-// acc_dtype is the accumulation type — defaults to FP32, the universal safe
+// acc_dtype is the accumulation type - defaults to FP32, the universal safe
 // choice across all input types.
 struct GemmOp
 {
@@ -103,25 +103,6 @@ struct ScaleOp
     std::string_view scale;
 };
 
-// Fused multi-head attention backward pass.
-// Implemented as a single CK Tile kernel, not a chain of ops.
-// Feature flags (mask, dropout, bias, deterministic) belong in the Algorithm.
-struct FmhaBwdOp
-{
-    std::string_view q;   // query
-    std::string_view k;   // key
-    std::string_view v;   // value
-    std::string_view lse; // log-sum-exp from forward pass
-    std::string_view do_; // output gradient
-    std::string_view d;   // dot(output_grad, output)
-
-    std::string_view dq; // query gradient
-    std::string_view dk; // key gradient
-    std::string_view dv; // value gradient
-
-    DataType acc_dtype = DataType::FP32;
-};
-
 // The closed set of supported operators. std::monostate marks empty slots.
 using Op = std::variant<std::monostate,
                         GemmOp,
@@ -133,7 +114,6 @@ using Op = std::variant<std::monostate,
                         SiluOp,
                         SigmoidOp,
                         SoftmaxOp,
-                        ScaleOp,
-                        FmhaBwdOp>;
+                        ScaleOp>;
 
 } // namespace rocm_ck

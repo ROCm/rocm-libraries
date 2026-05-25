@@ -263,6 +263,151 @@ BenchmarkProblems:
           - Range: [[33, 64, 161], [33, 64, 161], [1], [128]]
 
   ########################################
+  # BF16 TN — PGR2 + MIWT 2x2 with 1x4/4x1 wave groups, DU=256
+  #
+  # Regression test for NLL standalone sync missing vmcnt(0).
+  # When build_nll() removes GR ops, standalone SyncOps lose their
+  # GR prerequisites. Without vmcnt(0), barriers fire before GR-to-LDS
+  # writes complete, causing correctness failures on multi-tile StreamK
+  # sizes (where the NLL executes on repeated persistent loop iterations).
+  # DU=256 (8 subIterK) is required to trigger the orphaned sync pattern.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # MIWT 2x2 with 1x4 and 4x1 wave groups — NLL vmcnt regression
+          - [16, 16, 32, 1,  1, 2, 2,  1, 4]  # MT 32x128  (WG 1x4)
+          - [16, 16, 32, 1,  1, 2, 2,  4, 1]  # MT 128x32  (WG 4x1)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Single-tile (baseline, always passed)
+          - Exact: [32, 128, 1, 256]
+          # Multi-tile sizes (failed before NLL vmcnt fix)
+          - Exact: [64, 128, 1, 256]
+          - Exact: [64, 256, 1, 256]
+          - Exact: [96, 128, 1, 256]
+          - Exact: [128, 256, 1, 512]
+
+  ########################################
+  # BF16 TN — deferred activation segfault reproducer (BBS)
+  #
+  # Regression test for label_GW_End fall-through into deferred
+  # activation functions (s_setpc_b64 with stale sgpr →
+  # hipErrorIllegalAddress). PGR=0 + UseSubtileImpl triggers
+  # hasDeferredActivation=True with hasAnyDeferred=False, taking
+  # the else branch in KernelWriter where the activation modules
+  # were appended without a skip branch.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 1, 4,  2, 2]  # MT 32x128  (MIWT 1x4, original segfault)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [544, 128, 1, 30720]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # BF16 TN — hipblaslt_all activations, no bias (BBS)
+  #
+  # Covers asymmetric wavetiles (MIWT 1x4, 4x2) and deep DU with
+  # PGR=0 and PGR=2 + StreamK.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 1, 4,  2, 2]  # MT 32x128  (MIWT 1x4)
+          - [16, 16, 32, 1,  1, 4, 2,  2, 2]  # MT 128x64  (MIWT 4x2)
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]  # MT 64x64   (MIWT 2x2)
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64, 256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [544, 128, 1, 256]   # edge for MT 32x128
+          - Exact: [160, 160, 1, 256]
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+          - [Enum: gelu]
+
+  ########################################
   # BF16 TN — bias epilogue, BF16 output (BBS)
   #
   # Covers even and odd wavetile sizes, both StreamK=0 and SK=3.
@@ -297,6 +442,9 @@ BenchmarkProblems:
           # Odd M wavetile (exercises NonEdge guard ceiling division)
           - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128  (waveGroupM=48)
           - [16, 16, 32, 1,  1, 6, 4,  2, 2]  # MT 192x128 (waveGroupM=96)
+          # Asymmetric wavetiles
+          - [16, 16, 32, 1,  1, 1, 4,  2, 2]  # MT 32x128  (MIWT 1x4)
+          - [16, 16, 32, 1,  1, 4, 2,  2, 2]  # MT 128x64  (MIWT 4x2)
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
@@ -349,6 +497,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
           - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128  (odd M wavetile)
+          - [16, 16, 32, 1,  1, 1, 4,  2, 2]  # MT 32x128  (MIWT 1x4)
+          - [16, 16, 32, 1,  1, 4, 2,  2, 2]  # MT 128x64  (MIWT 4x2)
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [64]

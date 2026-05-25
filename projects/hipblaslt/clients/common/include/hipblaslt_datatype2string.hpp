@@ -43,6 +43,13 @@ enum class hipblaslt_initialization
     integer_exact = 888, // A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta 0 or -2; exact when K bounded
     // Near-FP16-max A, paired ±2 along K in B; FP32-math reference is 0 (rocBLAS-style accum probe)
     fp16_accumulator_probe = 889,
+    inf                     = 890,
+    neg_zero                = 891,
+    neg_inf                 = 892,
+    nan                     = 893,
+    // norm_dist with one element overwritten by +inf, -inf, or quiet NaN; index and special kind are
+    // deterministic from the fixed seed (NaN uses canonical quiet_NaN, not RNG).
+    norm_dist_one_special = 894,
     // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
     uniform_low_precision  = 999,
 };
@@ -252,6 +259,16 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "integer_exact";
     case hipblaslt_initialization::fp16_accumulator_probe:
         return "fp16_accumulator_probe";
+    case hipblaslt_initialization::inf:
+        return "inf";
+    case hipblaslt_initialization::neg_zero:
+        return "neg_zero";
+    case hipblaslt_initialization::neg_inf:
+        return "neg_inf";
+    case hipblaslt_initialization::nan:
+        return "nan";
+    case hipblaslt_initialization::norm_dist_one_special:
+        return "norm_dist_one_special";
     case hipblaslt_initialization::uniform_low_precision:
         return "uniform_low_precision";
     }
@@ -277,6 +294,11 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "uniform_01" ? hipblaslt_initialization::uniform_01 :
         value == "integer_exact" ? hipblaslt_initialization::integer_exact :
         value == "fp16_accumulator_probe" ? hipblaslt_initialization::fp16_accumulator_probe :
+        value == "inf"        ? hipblaslt_initialization::inf        :
+        value == "neg_zero"   ? hipblaslt_initialization::neg_zero   :
+        value == "neg_inf"    ? hipblaslt_initialization::neg_inf    :
+        value == "nan"        ? hipblaslt_initialization::nan        :
+        value == "norm_dist_one_special" ? hipblaslt_initialization::norm_dist_one_special :
         value == "uniform_low_precision" ? hipblaslt_initialization::uniform_low_precision :
         static_cast<hipblaslt_initialization>(0);
 }

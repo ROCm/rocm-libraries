@@ -204,7 +204,7 @@ TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
+TEST(TestRMSnormFwdPlanFp32, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -240,7 +240,7 @@ TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
-TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
+TEST(TestRMSnormFwdPlanFp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -278,7 +278,7 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
-TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
+TEST(TestRMSnormFwdPlanBfp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
