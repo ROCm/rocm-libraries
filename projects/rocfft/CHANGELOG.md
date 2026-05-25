@@ -9,7 +9,7 @@ Documentation for rocFFT is available at
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
 
 ### Resolved issues
-* Fixed a thread-safety issue in `function_pool` that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
+* Fixed a thread-safety issue that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
 
 ## rocFFT 1.0.37 for ROCm 7.13
 
