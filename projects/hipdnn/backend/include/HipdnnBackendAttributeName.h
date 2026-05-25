@@ -211,7 +211,7 @@ typedef enum
     /** @brief Total number of engines available globally */
     HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT = 602,
 
-    /** @brief Whether dynamic shapes are enabled for this graph */
+    /** @brief Whether dynamic shape support is enabled for this graph */
     HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603,
 
     /** @brief Compute data type for the operation graph (hipdnnDataType_t, extension) */
@@ -228,6 +228,9 @@ typedef enum
 
     /** @brief Name of the operation graph (HIPDNN_TYPE_CHAR, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT = 608,
+
+    /** @brief Whether execute-time override shapes are enabled for this graph (bool, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT = 609,
 
     /** @} */
 
@@ -248,6 +251,50 @@ typedef enum
 
     /** @brief Workspace pointer for execution */
     HIPDNN_ATTR_VARIANT_PACK_WORKSPACE = 703,
+
+    /**
+     * @brief Per-execute UIDs of tensors whose shape/stride is being overridden
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * Selector array: each entry identifies which tensor in the graph the
+     * corresponding entries in OVERRIDE_LENGTHS / OVERRIDE_SHAPES /
+     * OVERRIDE_STRIDES describe. The four override attributes share this
+     * ordering. UIDs must be unique and must also be present in
+     * HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS_EXT = 704,
+
+    /**
+     * @brief Per-execute override shapes, packed flat across all UIDs
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * Concatenation of each tensor's shape vector in the order given by
+     * OVERRIDE_UNIQUE_IDS. The per-tensor rank used to slice this flat
+     * array comes from OVERRIDE_LENGTHS. The total element count must equal
+     * the sum of OVERRIDE_LENGTHS.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_EXT = 705,
+
+    /**
+     * @brief Per-execute override strides, packed flat across all UIDs
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * Concatenation of each tensor's stride vector in the order given by
+     * OVERRIDE_UNIQUE_IDS. Sliced using OVERRIDE_LENGTHS like OVERRIDE_SHAPES,
+     * and must have the same total element count.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_EXT = 706,
+
+    /**
+     * @brief Per-UID rank of the override shape/stride vectors
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * One positive entry per UID in OVERRIDE_UNIQUE_IDS, giving the rank used
+     * to slice OVERRIDE_SHAPES / OVERRIDE_STRIDES at dispatch. Stored as
+     * int64_t in the variant pack and narrowed to uint32_t only at the SDK
+     * dispatch boundary.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS_EXT = 707,
 
     /** @} */
 
