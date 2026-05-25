@@ -438,7 +438,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     // Host buff printer
     auto printhostbuf = [](const char*                hostbuf,
                            const bool                 isreal,
-                           const std::vector<size_t>  batchlengths,
+                           const std::vector<size_t>& batchlengths,
                            const std::vector<size_t>& hostdiststrides) -> void {
         switch(batchlengths.size())
         {
