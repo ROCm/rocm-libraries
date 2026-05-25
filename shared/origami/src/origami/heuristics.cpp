@@ -91,11 +91,6 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
   postgsu_wavefront_size              = other.postgsu_wavefront_size;
   lsu_reduction_overhead              = other.lsu_reduction_overhead;
-  ntd_ksplit_penalty                  = other.ntd_ksplit_penalty;
-  d_pollution_penalty                 = other.d_pollution_penalty;
-  d_writealloc_factor                 = other.d_writealloc_factor;
-  mall_capacity_bytes                 = other.mall_capacity_bytes;
-  mall_overflow_fade_slope            = other.mall_overflow_fade_slope;
   one_lds_buffer_overhead             = other.one_lds_buffer_overhead;
   pack_transpose_overhead             = other.pack_transpose_overhead;
   tail_loop_overhead                  = other.tail_loop_overhead;

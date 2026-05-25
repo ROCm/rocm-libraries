@@ -98,74 +98,6 @@ struct heuristic_defaults_t {
   // Intra-WG LDS reduction overhead after the K-loop; scales as lsu * log2(lsu).
   static constexpr double LSU_REDUCTION_OVERHEAD = 1.0;   // cycles per element-group per log2(lsu) pass
 
-  // --- NTD (NonTemporalD) ---
-  // NTD=4 + K-split: partials bypass cache, so reduction reads hit DRAM.
-  // Penalty per split factor (cycles).  0 = no penalty (non-split case).
-  static constexpr double NTD_KSPLIT_PENALTY = 5000.0;
-
-  // Cached-D (cache_hints_d < 4) L2 pollution of the input working set.
-  // Fires only when ALL THREE conditions hold:
-  //   (A) D output overflows L2 capacity, AND
-  //   (B) per-tile input working set (k_iters x Ld_CU_bytes) exceeds the
-  //       CU's fair L2 share, AND
-  //   (C) the global working set (A + B + D) fits in MALL (last-level
-  //       cache) so that cached D writes actually evict something that
-  //       would otherwise be served from MALL.  When (A+B+D) >> MALL,
-  //       inputs are streaming from HBM regardless and NTD0 vs NTD4
-  //       behave identically at steady state -- no penalty applies.
-  // Physically captures:
-  //   * Small K / tiny tiles -> input WS fits in L2 -> cached D writes
-  //     coexist with A+B, no eviction, no penalty.
-  //   * Medium footprint (A+B+D <= MALL) with large K -> input loops
-  //     thrash L2 and reuse through MALL; cached D evicts MALL-cached
-  //     inputs -> penalty applies.
-  //   * Large footprint (A+B+D >> MALL) -> MALL already cold for inputs;
-  //     cached D neither hurts nor helps -> penalty attenuated to zero.
-  // Multiplier on L_mem_dram:
-  //   (1 + D_POLLUTION_PENALTY * d_overflow * input_overflow * mall_fit),
-  // where mall_fit fades linearly from 1.0 (at WS = MALL) to 0.0 past
-  // the fade point (default 1.5*MALL, controlled by
-  // MALL_OVERFLOW_FADE_SLOPE).  The linear, narrow transition matches
-  // the observed HW behavior: borderline overflows (WS just over MALL)
-  // already lose all benefit of cached writes because some of A/B must
-  // stream from HBM, so NTD0 and NTD4 converge quickly.
-  static constexpr double D_POLLUTION_PENALTY = 1.0;
-
-  // Cached-D (cache_hints_d < 4) write-allocate penalty in the epilogue.
-  // On GPUs with write-allocate L2, a cached store that misses L2 must
-  // first fetch the cache line from HBM, modify, and eventually write
-  // back -- effectively doubling HBM traffic for large outputs.
-  // NT writes (cache_hints_d >= 4) bypass this entirely.
-  // Applied to effective epilogue store bandwidth:
-  //   effective_store_bw =
-  //       store_bw / (1 + D_WRITEALLOC_FACTOR * intensity * mall_fit)
-  // when D overflows L2.  When D fits in L2, cached writes hit L2
-  // bandwidth (mem1) instead, which is typically 2-3x HBM -- modeled by
-  // switching the bandwidth tier, not by this factor.  The mall_fit
-  // factor (linear fade-out, see D_POLLUTION_PENALTY and
-  // MALL_OVERFLOW_FADE_SLOPE) attenuates the penalty when the GEMM's
-  // total footprint exceeds MALL, since there is no input reuse to
-  // protect.
-  static constexpr double D_WRITEALLOC_FACTOR = 1.0;
-
-  // Approximate MALL (Infinity Cache / last-level cache) capacity in
-  // bytes for archs that carry a MALL stage (gfx942/gfx950 = 256 MiB).
-  // Used only as a gate by the cached-D pollution penalty above -- it
-  // does not affect the existing H_mem_mall_* hit-rate estimation.
-  // Archs without MALL should not trigger the cached-D gate anyway since
-  // hardware.has_MALL() governs the MALL stage in the latency model.
-  static constexpr size_t MALL_CAPACITY_BYTES = 256u * 1024u * 1024u;
-
-  // Slope of the mall_fit linear fade-out past MALL capacity.
-  // mall_fit = clamp(1 + slope * (1 - WS/MALL), 0, 1).
-  // With slope = 2.0:  mall_fit = 1 at WS <= MALL, 0.5 at WS=1.25*MALL,
-  // 0 at WS >= 1.5*MALL.  A larger slope means the penalty disappears
-  // faster past the fit boundary.  Empirically tuned so borderline
-  // cases (WS just above MALL, where inputs are streaming from HBM)
-  // do not incur a penalty despite the global D footprint overflowing
-  // L2.
-  static constexpr double MALL_OVERFLOW_FADE_SLOPE = 2.0;
-
   // --- 1LDSBuffer ---
   // Per-iteration overhead (cycles) when using a single LDS buffer instead
   // of double-buffering.  Represents the read-sync-write barrier stall.
@@ -180,7 +112,7 @@ struct heuristic_defaults_t {
   // --- Tail Loop ---
   // Fixed overhead per tail-loop sub-iteration (cycles).
   // Covers K-masking, LDS address reset, barrier, ds_read/write, conditional branching.
-  static constexpr double TAIL_LOOP_OVERHEAD = 1500.0;
+  static constexpr double TAIL_LOOP_OVERHEAD = 700.0;
 
   // --- Tile Fixed Overhead ---
   // Fixed per-tile cost (cycles) that does not scale with tile dimensions.
@@ -262,13 +194,8 @@ struct heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
-  // === PGR / LSU / DTL / NTD parameters ===
-  double lsu_reduction_overhead = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
-  double ntd_ksplit_penalty     = heuristic_defaults_t::NTD_KSPLIT_PENALTY;
-  double d_pollution_penalty    = heuristic_defaults_t::D_POLLUTION_PENALTY;
-  double d_writealloc_factor    = heuristic_defaults_t::D_WRITEALLOC_FACTOR;
-  size_t mall_capacity_bytes    = heuristic_defaults_t::MALL_CAPACITY_BYTES;
-  double mall_overflow_fade_slope = heuristic_defaults_t::MALL_OVERFLOW_FADE_SLOPE;
+  // === PGR / LSU / DTL parameters ===
+  double lsu_reduction_overhead    = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
   double one_lds_buffer_overhead   = heuristic_defaults_t::ONE_LDS_BUFFER_OVERHEAD;
   double pack_transpose_overhead   = heuristic_defaults_t::PACK_TRANSPOSE_OVERHEAD;
   double tail_loop_overhead        = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
