@@ -396,8 +396,8 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_spmv_csr_reuse_descr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     J                    m        = argus.M;
     J                    n        = argus.N;
     T                    h_alpha  = argus.get_alpha<T>();
