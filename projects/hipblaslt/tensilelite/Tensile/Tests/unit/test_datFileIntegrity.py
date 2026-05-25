@@ -88,6 +88,8 @@ def _loadMapping(libDir: Path, arch: str):
     with open(path, "rb") as f:
         return msgpack.unpack(f, raw=False)
 
+# TODO: Tests always skipped — need markers to run in CI.
+# Issue: https://github.com/ROCm/rocm-libraries/issues/7486
 
 # ---------------------------------------------------------------------------
 # 1. Discovery: a built directory must have at least one (master, Mapping) pair.

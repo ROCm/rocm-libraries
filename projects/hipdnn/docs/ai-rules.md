@@ -23,6 +23,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/pr-summary/SKILL.md`
   - Drafts or revises new or existing pull request titles and bodies with hipDNN's preferred summary, risk, testing, and technical-change format.
   - Suggest this skill when the user asks for PR creation, PR body updates, PR summaries, risk summaries, testing sections, or review-ready PR descriptions.
+- `tools/ai/skills/hipdnn-review/SKILL.md`
+  - Reviews hipDNN pull requests or local diffs for correctness, public API compatibility, provider behavior, resource ownership, code reuse, and testing coverage/quality.
+  - Suggest this skill when the user asks for a hipDNN code review, PR review, merge-readiness assessment, or a focused review of testing quality and coverage.
 - `tools/ai/skills/hipdnn-superbuild/SKILL.md`
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
