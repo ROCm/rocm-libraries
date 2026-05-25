@@ -74,20 +74,20 @@ def calculate_skill_sha(source: Path) -> str:
 def install_or_update_copy(source: Path, target: Path) -> str:
     """Install skill or update if source has changed."""
     source_sha = calculate_skill_sha(source)
-    
+
     if not target.exists():
         # First install
         shutil.copytree(source, target, ignore=copy_ignore)
         return "installed"
-    
+
     if target.is_symlink():
         return f"skipped (symlink exists at {target})"
-    
+
     # Check if installed version differs from source
     target_sha = calculate_skill_sha(target)
     if source_sha == target_sha:
         return "up to date"
-    
+
     # Source changed, reinstall
     shutil.rmtree(target)
     shutil.copytree(source, target, ignore=copy_ignore)
@@ -113,7 +113,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "detected and installed automatically."
         )
     )
-    parser.add_argument("--codex", action="store_true", help="Install into Codex skills")
+    parser.add_argument(
+        "--codex", action="store_true", help="Install into Codex skills"
+    )
     parser.add_argument(
         "--claude", action="store_true", help="Install into Claude skills"
     )
@@ -131,25 +133,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def resolve_targets_and_requested(args: argparse.Namespace, available: dict[str, Path]) -> tuple[list[Path], list[str]]:
+def resolve_targets_and_requested(
+    args: argparse.Namespace, available: dict[str, Path]
+) -> tuple[list[Path], list[str]]:
     """Resolve target directories and skill names.
-    
+
     Args:
         args: Parsed arguments
         available: Dict of available skills {name: path}
-    
+
     Returns:
         (list of target directories, list of requested skill names)
     """
     targets = []
-    
+
     # Explicit targets take precedence
     if args.target:
         targets.append(Path(args.target).expanduser().resolve())
         # If no skills specified, use all available
         requested = args.items if args.items else list(available.keys())
         return targets, requested
-    
+
     if args.codex or args.claude:
         if args.codex:
             targets.append(codex_target())
@@ -158,11 +162,11 @@ def resolve_targets_and_requested(args: argparse.Namespace, available: dict[str,
         # If no skills specified, use all available
         requested = args.items if args.items else list(available.keys())
         return targets, requested
-    
+
     # Default: both Codex and Claude if no specific host is requested
     if args.list and not args.items:
         return [], []
-    
+
     # Check if first item looks like a directory (backward-compatible positional form)
     if args.items:
         first_item_path = Path(args.items[0]).expanduser()
@@ -172,7 +176,7 @@ def resolve_targets_and_requested(args: argparse.Namespace, available: dict[str,
             # Looks like a directory path
             targets.append(first_item_path.resolve())
             return targets, args.items[1:]
-    
+
     # Default to both Codex and Claude, and all available skills if none specified
     requested = args.items if args.items else list(available.keys())
     return [codex_target(), claude_target()], requested
@@ -230,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     for target_dir in targets:
         if len(targets) > 1:
             print(f"Installing to {target_dir}:")
-        
+
         errors = 0
         for name in requested:
             skill = skills[name]
@@ -241,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as error:
                 print(f"  {skill.name:30s} FAILED: {error}")
                 errors += 1
-        
+
         total_errors += errors
         if len(targets) > 1:
             print()

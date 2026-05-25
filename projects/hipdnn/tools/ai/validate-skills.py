@@ -25,9 +25,7 @@ FORBIDDEN_SKILL_TEXT = (
     "skills/helpers",
 )
 
-FORBIDDEN_SKILL_PATTERNS = (
-    re.compile(r"\bAskUserQuestion\b"),
-)
+FORBIDDEN_SKILL_PATTERNS = (re.compile(r"\bAskUserQuestion\b"),)
 
 SLASH_SKILL_PATTERN = re.compile(r"(?<![\w:/])/(?:hipdnn|pr-summary)[A-Za-z0-9_-]*")
 
@@ -130,7 +128,12 @@ def validate_skill(skill: Path) -> list[str]:
             errors.append(f"{skill}: missing scripts/{script}")
 
     # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
-    claude_commands = {"hipdnn-review", "hipdnn-superbuild", "hipdnn-superbuild-test", "pr-summary"}
+    claude_commands = {
+        "hipdnn-review",
+        "hipdnn-superbuild",
+        "hipdnn-superbuild-test",
+        "pr-summary",
+    }
     if skill.name in claude_commands:
         for field in REQUIRED_CLAUDE_COMMAND_FIELDS:
             if f"{field}:" not in text:
