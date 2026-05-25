@@ -51,7 +51,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   FlatStoreD16B16, FlatStoreD16HIB16, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
-  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCmpEQI32, \
+  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
   SEndpgm, SFf1B32, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
@@ -4678,10 +4678,18 @@ class KernelWriterAssembly(KernelWriter):
       sCmpLo = stmp + 4
       sCmpHi = stmp + 5
       sLaneId = stmp + 0   # reuse stmp+0 after we no longer need sTarget
+      # sAnyMatch: per-wave gate. Only the wave whose subtile-0 per-lane vaddr
+      # matches sTarget owns the trailing element; the other waves must not
+      # fire the boundary load (otherwise they corrupt their LDS region with
+      # a ff1=-1 → sLaneId=31 garbage write). We leave barrier execution to
+      # every wave and only gate EXEC (and thus the buffer_load + waitcnt).
+      sAnyMatch = stmp + 9
       if waveSize == 64:
         module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
                              src1=vgpr(vaddrVgprIdx),
                              comment="find lane whose vaddr == sTarget"))
+        module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
+                          comment="sAnyMatch = vcc_lo | vcc_hi (per-wave match indicator)"))
         # 64-bit ff1: lo half first; if lo == -1, use ff1(hi)+32.
         module.add(SFf1B32(dst=sgpr(stmp+1), src=sgpr(sCmpHi),
                            comment="ff1(vcc_hi)"))
@@ -4697,6 +4705,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
                              src1=vgpr(vaddrVgprIdx),
                              comment="find lane whose vaddr == sTarget"))
+        module.add(SMovB32(dst=sgpr(sAnyMatch), src=sgpr(sCmpLo),
+                           comment="sAnyMatch = vcc (per-wave match indicator)"))
         module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
                            comment="sLaneId = ff1(vcc)"))
 
@@ -4729,8 +4739,14 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1),
                          comment="vaddr = subtile-0 lane vaddr + intra + offsetK + offsetM(glb)"))
 
-      # --- EXEC = lane 0 only, emit DTL load, wait, restore EXEC -----------
-      module.add(SMovB64(dst=EXEC(), src=0x1, comment="EXEC = lane 0 only"))
+      # --- EXEC = (lane 0 on matching wave, else 0), emit DTL load, wait, restore
+      # Per-wave gate: non-matching waves get EXEC=0 so their buffer_load is a
+      # no-op; matching wave gets EXEC=1 (lane 0) and writes the trailing 16b
+      # to its LDS slot. All waves still reach the surrounding barriers.
+      module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
+                           comment="SCC=1 if this wave had no matching lane"))
+      module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
+                             comment="EXEC = match ? 1 (lane 0 only) : 0"))
       mubuf = MUBUFModifiers(offen=True, offset12=0, glc=False, slc=False, nt=False, lds=True)
       ldSoffset = sgpr(soffsetSgprIdx) if hasSoffsetSgpr else 0
       module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
