@@ -466,13 +466,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     constexpr int number_of_passes = 3;
 
     // Scenario 1: SpMV-only. Never call bufferSize or preprocess, only
-    // hipsparseSpMV with a null externalBuffer. This scenario runs first
-    // so the wrapper's per-configuration cache on matA is still empty --
-    // that way we exercise the "first-touch via SpMV" code path where
-    // hipsparseSpMV has to query the analysis buffer size and allocate
-    // its own transient buffer (no user-provided externalBuffer to fall
-    // back on). Subsequent scenarios then reuse the same matA, on top of
-    // the entries populated here.
+    // hipsparseSpMV with a null externalBuffer.
     call_spmv_only<I, J, A, X, Y, T>(handle,
                                      matA,
                                      m,
@@ -490,11 +484,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
 
     // Scenario 2: per-call bufferSize / buffer allocation. Exercises that
     // the per-(op,alg,datatype) cache entries survive being re-queried via
-    // bufferSize on the same sparse matrix descriptor. Run twice, once
-    // skipping hipsparseSpMV_preprocess (so the wrapper has to perform the
-    // analysis stage from inside hipsparseSpMV using the user's external
-    // buffer) and once invoking it explicitly (so the analysis stage is
-    // already done by the time hipsparseSpMV runs).
+    // bufferSize on the same sparse matrix descriptor.
     for(bool use_preprocess : {false, true})
     {
         for(int pass = 0; pass < number_of_passes; ++pass)
@@ -525,11 +515,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     // Scenario 3: bufferSize is queried once per configuration up front, a
     // single externalBuffer is allocated to the max of those sizes, and
     // hipsparseSpMV is then called repeatedly across configurations with
-    // that one shared buffer (no further bufferSize calls). Each
-    // configuration's analysis and compute buffer must be cached
-    // per-configuration so that switching back to a previously used
-    // configuration does not corrupt its results. Like scenario 2, run
-    // with and without the explicit preprocess call.
+    // that one shared buffer (no further bufferSize calls). 
     for(bool use_preprocess : {false, true})
     {
         call_spmv_shared_buffer<I, J, A, X, Y, T>(handle,
