@@ -7,13 +7,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
 endif()
 
-project(stinkytofu)
-
 set(STINKYTOFU_VERSION "0.1.0")
-string(REPLACE "." ";" _ver_list ${STINKYTOFU_VERSION})
-list(GET _ver_list 0 STINKYTOFU_VERSION_MAJOR)
-list(GET _ver_list 1 STINKYTOFU_VERSION_MINOR)
-list(GET _ver_list 2 STINKYTOFU_VERSION_PATCH)
+project(stinkytofu VERSION ${STINKYTOFU_VERSION} LANGUAGES CXX)
+
+set(STINKYTOFU_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(STINKYTOFU_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(STINKYTOFU_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 
 find_package(ROCmCMakeBuildTools QUIET CONFIG)
 set(STINKYTOFU_VERSION_TWEAK "")
@@ -212,7 +211,6 @@ add_subdirectory(tools)
 # Install targets
 ##===----------------------------------------------------------------------===##
 
-# Install the stinkytofu library and export targets for find_package().
 install(TARGETS stinkytofu stinkytofu-warnings
     EXPORT stinkytofu-targets
     LIBRARY DESTINATION lib
@@ -241,6 +239,7 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
     DESTINATION lib/cmake/stinkytofu
 )
+
 # --------------------------------------------------------------------------- #
 # clang-tidy
 # --------------------------------------------------------------------------- #
@@ -250,7 +249,9 @@ include(ClangTidy)
 add_clang_tidy_custom_target()
 
 # Build-tree export so find_package() works without installing.
-export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
+# Write targets to stinkytofu-targets.cmake (not stinkytofuConfig.cmake) to
+# avoid clobbering the configure_package_config_file output above.
+export(EXPORT stinkytofu-targets NAMESPACE stinkytofu:: FILE stinkytofu-targets.cmake)
 
 # Install public header files with stinkytofu/ namespace
 # Exclude ir/python/ (Python-specific, internal headers)
@@ -268,4 +269,10 @@ install(FILES
 install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
     DESTINATION include/stinkytofu
+)
+# Tablegen-generated file needed by the Python module when built standalone
+# against an installed stinkytofu.
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc
+    DESTINATION include/stinkytofu/bindings/python
 )
