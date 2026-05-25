@@ -136,15 +136,15 @@ inline void execute_gpu_fft(Tparams&              params,
     std::vector<void*> store_cb_data;
 
     // Legacy callbacks are provided at execution time
-    if(params.run_callbacks)
+    if(params.run_callbacks == fft_callback_type_legacy)
     {
-        get_rank_load_callbacks(
+        get_rank_load_callbacks_legacy(
             params, load_cb_func, load_cb_data, round_trip_inverse, all_cb_data);
-        get_rank_store_callbacks(
+        get_rank_store_callbacks_legacy(
             params, store_cb_func, store_cb_data, round_trip_inverse, all_cb_data);
 
-        auto fft_status
-            = params.set_callbacks(&load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
+        auto fft_status = params.set_legacy_callbacks(
+            &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
         if(fft_status != fft_status_success)
             throw std::runtime_error("set callback failure");
     }

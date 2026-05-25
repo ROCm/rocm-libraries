@@ -83,7 +83,8 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
 
     // legacy callbacks need -fgpu-rdc, but that causes build
     // nondeterminism in kpack
-    for(auto run_callbacks : {false, /*true*/})
+    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_legacy, */};
+
     {
         auto params = param_generator_complex(test_prob,
                                               multi_gpu_sizes,
@@ -95,7 +96,7 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                               ooffset_range_zero,
                                               {fft_placement_inplace, fft_placement_notinplace},
                                               false,
-                                              run_callbacks,
+                                              multi_device_callbacks,
                                               auto_alloc_setting);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
 
@@ -109,7 +110,7 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                       ooffset_range_zero,
                                       {fft_placement_notinplace},
                                       false,
-                                      run_callbacks,
+                                      multi_device_callbacks,
                                       auto_alloc_setting);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
     }

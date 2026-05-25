@@ -730,7 +730,7 @@ public:
     // expected size.  Optionally also check that each pointer is
     // non-null.  Throws an exception if a check fails.  The vector
     // itself can be null, as callbacks are optional.
-    static void check_callback_vec(std::vector<void*>* cb, size_t expected_size, bool nonnull)
+    static void check_callback_vec(const std::vector<void*>* cb, size_t expected_size, bool nonnull)
     {
         if(!cb)
             return;
@@ -747,7 +747,7 @@ public:
     size_t multiGPU = 0;
 
     // run testing load/store callbacks
-    bool                    run_callbacks   = false;
+    fft_callback_type       run_callbacks   = fft_callback_type_none;
     static constexpr double load_cb_scalar  = 0.457813941;
     static constexpr double store_cb_scalar = 0.391504938;
 
@@ -1077,8 +1077,14 @@ public:
             append_size_vec(ooffset);
         }
 
-        if(run_callbacks)
+        switch(run_callbacks)
+        {
+        case fft_callback_type_legacy:
             ret += "_CB";
+            break;
+        case fft_callback_type_none:
+            break;
+        }
 
         if(scale_factor != 1.0)
             ret += "_scale";
@@ -1238,7 +1244,7 @@ public:
 
         if(pos < vals.size() && vals[pos] == "CB")
         {
-            run_callbacks = true;
+            run_callbacks = fft_callback_type_legacy;
             ++pos;
         }
 
@@ -1944,7 +1950,7 @@ public:
     }
     bool is_callback() const
     {
-        return run_callbacks;
+        return run_callbacks != fft_callback_type_none;
     }
     // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
     bool is_using_default_layout() const
@@ -2272,18 +2278,18 @@ public:
         }
     }
 
-    // A callback is expressed as a pair of device function pointer +
-    // device function data.
+    // A legacy callback is expressed as a pair of device function
+    // pointer + device function data.
     //
     // Load and store callbacks are provided as vectors of those
     // pointers, as we need a separate function+data for each device
     // being loaded from or stored to.
-    virtual fft_status set_callbacks(std::vector<void*>* load_cb_func,
-                                     std::vector<void*>* load_cb_data,
-                                     std::vector<void*>* store_cb_func,
-                                     std::vector<void*>* store_cb_data,
-                                     size_t              load_cb_shared_mem_bytes,
-                                     size_t              store_cb_shared_mem_bytes)
+    virtual fft_status set_legacy_callbacks(std::vector<void*>* load_cb_func,
+                                            std::vector<void*>* load_cb_data,
+                                            std::vector<void*>* store_cb_func,
+                                            std::vector<void*>* store_cb_data,
+                                            size_t              load_cb_shared_mem_bytes,
+                                            size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2833,6 +2839,18 @@ static bool lexical_cast(const std::string& word, fft_params::fft_mp_lib& mp_lib
         mp_lib = fft_params::fft_mp_lib_mpi;
     else
         throw std::runtime_error("Invalid multi-process library specified");
+    return true;
+}
+
+// Used for CLI11 parsing of callbacks enum
+static bool lexical_cast(const std::string& word, fft_callback_type& cbtype)
+{
+    if(word == "none")
+        cbtype = fft_callback_type_none;
+    else if(word == "legacy")
+        cbtype = fft_callback_type_legacy;
+    else
+        throw std::runtime_error("Invalid callback type specified");
     return true;
 }
 

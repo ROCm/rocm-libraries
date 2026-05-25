@@ -34,39 +34,45 @@ struct callback_test_data
     double scalar;
 };
 
-// Get a pointer (on the host) to a load callback device function for
-// the current device
-void* get_load_callback_host(fft_array_type itype,
-                             fft_precision  precision,
-                             bool           round_trip_inverse = false);
+// Get a pointer (on the host) to a legacy load callback device
+// function for the current device
+void* get_load_callback_legacy(fft_array_type itype,
+                               fft_precision  precision,
+                               bool           round_trip_inverse = false);
 
-// Get a pointer (on the host) to a store callback device function for
-// the current device
-void* get_store_callback_host(fft_array_type otype,
-                              fft_precision  precision,
-                              bool           round_trip_inverse = false);
+// Get a pointer (on the host) to a legacy store callback device
+// function for the current device
+void* get_store_callback_legacy(fft_array_type otype,
+                                fft_precision  precision,
+                                bool           round_trip_inverse = false);
 
-// Collect load callback function and data pointers for the given
-// params.  We'd expect N pointers for N input bricks on the current
-// multi-processing rank.
+// Collect legacy load callback function and data pointers for the
+// given params.  We'd expect N pointers for N input bricks on the
+// current multi-processing rank.
 //
 // Data structs are allocated on the device in all_cb_data.
-void get_rank_load_callbacks(const fft_params&                          params,
-                             std::vector<void*>&                        load_cb_func,
-                             std::vector<void*>&                        load_cb_data,
-                             bool                                       round_trip_inverse,
-                             std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
+void get_rank_load_callbacks_legacy(const fft_params&                          params,
+                                    std::vector<void*>&                        load_cb_func,
+                                    std::vector<void*>&                        load_cb_data,
+                                    bool                                       round_trip_inverse,
+                                    std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 
-// Collect store callback function and data pointers for the given
-// params.  We'd expect N pointers for N output bricks on the current
-// multi-processing rank.
+// Collect legacy store callback function and data pointers for the
+// given params.  We'd expect N pointers for N output bricks on the
+// current multi-processing rank.
 //
 // Data structs are allocated on the device in all_cb_data.
-void get_rank_store_callbacks(const fft_params&                          params,
-                              std::vector<void*>&                        store_cb_func,
-                              std::vector<void*>&                        store_cb_data,
-                              bool                                       round_trip_inverse,
-                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
+void get_rank_store_callbacks_legacy(const fft_params&                          params,
+                                     std::vector<void*>&                        store_cb_func,
+                                     std::vector<void*>&                        store_cb_data,
+                                     bool                                       round_trip_inverse,
+                                     std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
+
+// Collect JIT load callback function and data pointers for the given
+// params.  We'd expect N data pointers for N input bricks on the
+// current multi-processing rank.
+//
+// Data structs are allocated on the device in all_cb_data.
 
 // Execute the load/store callback function on a host buffer, to
 // ensure that the reference host FFT is comparable to a device FFT
