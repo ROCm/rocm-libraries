@@ -42,7 +42,7 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
-from Tensile.SolutionStructs.Problem import ProblemType, _defaultProblemType
+from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
 from Tensile.Components.CustomSchedule import hasCustomSchedule
 
@@ -73,13 +73,6 @@ def _getExpectedTypes(validParams):
 
 # Pre-compute once at import time so the per-Solution cost is a dict lookup.
 _expectedParamTypes = _getExpectedTypes(validParameters)
-
-# Pre-compute expected types for ProblemType parameters from _defaultProblemType
-# Note: For _defaultProblemType, the values are defaults (not lists of allowed values),
-# so we just take type(defaultValue) directly.
-_expectedProblemTypeParamTypes = {
-    key: {type(value)} for key, value in _defaultProblemType.items()
-}
 
 # Parameters to skip during type validation because YAML serialization
 # inherently produces a different type (e.g. [9, 0, 10] -> list) and the
@@ -162,43 +155,6 @@ def validateParameterTypes(state, srcFile=""):
     if key not in _expectedParamTypes or key in _skipTypeCheck:
       continue
     expectedTypes = _expectedParamTypes[key]
-    actualType = type(value)
-    # Use type() not isinstance() so that bool and int are distinguished
-    if actualType not in expectedTypes:
-      expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
-      collectorKey = (key, actualType.__name__, expectedStr)
-      if collectorKey not in _typeMismatchCollector:
-        _typeMismatchCollector[collectorKey] = {
-          "count": 0,
-          "values": set(),
-          "files": set(),
-        }
-      entry = _typeMismatchCollector[collectorKey]
-      entry["count"] += 1
-      entry["values"].add(repr(value))
-      if srcFile:
-        entry["files"].add(srcFile)
-
-
-def validateProblemTypeParameterTypes(state, srcFile=""):
-  """Validate that every ProblemType parameter has the correct Python type.
-
-  Similar to validateParameterTypes, but checks ProblemType parameters
-  against the types implied by ``_defaultProblemType``.  A ``bool`` where
-  ``int`` is expected (or vice versa) is the most common error.
-
-  Mismatches are collected into the module-level ``_typeMismatchCollector``
-  dict. Call ``printTypeMismatchSummary()`` at the end of the build to emit a
-  consolidated warning.
-
-  Args:
-      state: The ProblemType state dict (parameter name -> value).
-      srcFile: The YAML source file path, included in warning messages.
-  """
-  for key, value in state.items():
-    if key not in _expectedProblemTypeParamTypes or key in _skipTypeCheck:
-      continue
-    expectedTypes = _expectedProblemTypeParamTypes[key]
     actualType = type(value)
     # Use type() not isinstance() so that bool and int are distinguished
     if actualType not in expectedTypes:

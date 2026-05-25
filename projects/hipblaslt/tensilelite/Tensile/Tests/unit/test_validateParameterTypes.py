@@ -24,17 +24,19 @@ import pytest
 
 from Tensile.SolutionStructs.Solution import (
     validateParameterTypes,
-    validateProblemTypeParameterTypes,
     _getExpectedTypes,
     _expectedParamTypes,
-    _expectedProblemTypeParamTypes,
     _skipTypeCheck,
     _typeMismatchCollector,
     resetTypeMismatchCollector,
     printTypeMismatchSummary,
 )
+from Tensile.SolutionStructs.Problem import (
+    validateProblemTypeParameterTypes,
+    _expectedProblemTypeParamTypes,
+    _defaultProblemType,
+)
 from Tensile.Common.ValidParameters import validParameters
-from Tensile.SolutionStructs.Problem import _defaultProblemType
 
 
 class TestGetExpectedTypes:

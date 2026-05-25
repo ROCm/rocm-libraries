@@ -502,6 +502,10 @@ def parseLibraryLogicData(
         lazyLibraryLoading: bool
     ):
     """Parses the data of a library logic file."""
+    # Reset the type mismatch collector at the start to capture all type
+    # mismatches from both ProblemType and Solution constructors
+    resetTypeMismatchCollector()
+
     if isinstance(data, List):
         data = parseLibraryLogicList(data, srcFile)
 
@@ -578,7 +582,6 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
-    resetTypeMismatchCollector()
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
     typeMismatches = getTypeMismatchCollector()
 
