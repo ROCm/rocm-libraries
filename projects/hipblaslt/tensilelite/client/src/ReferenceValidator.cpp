@@ -55,11 +55,13 @@ namespace TensileLite
             m_printTensorD             = args["print-tensor-d"].as<bool>();
             m_printTensorRef           = args["print-tensor-ref"].as<bool>();
             m_printTensorBias          = args["print-tensor-bias"].as<bool>();
+            m_printTensorGate          = args["print-tensor-gate"].as<bool>();
             m_printTensorScaleAlphaVec = args["print-tensor-scale-alpha-vec"].as<bool>();
             m_printTensorAmaxD         = args["print-tensor-amaxd"].as<bool>();
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
-                         || m_printTensorRef || m_printTensorBias || m_printTensorAmaxD;
+                         || m_printTensorRef || m_printTensorBias || m_printTensorGate
+                         || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
         }
@@ -466,6 +468,12 @@ namespace TensileLite
                     resPtr = result.bias;
                 }
                 break;
+                case ContractionProblemGemm::TENSOR::GATE_RESIDUAL:
+                {
+                    refPtr = reference.gateResidual;
+                    resPtr = result.gateResidual;
+                }
+                break;
                 case ContractionProblemGemm::TENSOR::SCALEA:
                 {
                     refPtr = reference.scaleA;
@@ -586,6 +594,9 @@ namespace TensileLite
             if(m_printTensorBias)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.bias().totalAllocatedBytes());
+            if(m_printTensorGate)
+                requiredBufferSize
+                    = std::max(requiredBufferSize, problem.gateResidual().totalAllocatedBytes());
             if(m_printTensorScaleAlphaVec)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.scaleAlphaVec().totalAllocatedBytes());
@@ -703,6 +714,18 @@ namespace TensileLite
                                       m_cpuResultBuffer.get(),
                                       problem.bias(),
                                       result.bias);
+            }
+            if(m_printTensorGate)
+            {
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
+                                        result.gateResidual,
+                                        problem.gateResidual().totalAllocatedBytes(),
+                                        hipMemcpyDeviceToHost));
+                m_reporter->logTensor(LogLevel::Verbose,
+                                      "gateResidual",
+                                      m_cpuResultBuffer.get(),
+                                      problem.gateResidual(),
+                                      result.gateResidual);
             }
             if(m_printTensorScaleAlphaVec)
             {

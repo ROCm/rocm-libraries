@@ -569,6 +569,7 @@ namespace TensileLite
             bool             useGradient               = false;
             int              useBias                   = 0;
             bool             useE                      = false;
+            bool             useGateResidual           = false;
             std::string      useScaleAB                = "";
             bool             useScaleCD                = false;
             int              useScaleAlphaVec          = 0;
@@ -583,6 +584,7 @@ namespace TensileLite
 
             std::vector<int>              biasSrcWhiteList;
             std::vector<rocisa::DataType> biasDataTypeWhiteList;
+            std::vector<rocisa::DataType> gateResidualDataTypeWhiteList;
 
             int  sparse                     = 0;
             bool stochasticRounding         = false;

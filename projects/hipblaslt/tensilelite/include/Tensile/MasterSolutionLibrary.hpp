@@ -265,6 +265,8 @@ namespace TensileLite
                                                       solution->problemType.useGradient,
                                                       solution->problemType.biasDataTypeWhiteList,
                                                       solution->problemType.biasSrcWhiteList,
+                                                      solution->problemType.useGateResidual,
+                                                      solution->problemType.gateResidualDataTypeWhiteList,
                                                       solution->problemType.groupedGemm,
                                                       std::numeric_limits<size_t>::max(),
                                                       nop,

@@ -173,6 +173,7 @@ globalParameters["DataInitTypeE"] = 0
 globalParameters["DataInitTypeAlpha"] = 2
 globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
+globalParameters["DataInitTypeGate"] = 3
 globalParameters["DataInitTypeScaleA"] = 2
 globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2

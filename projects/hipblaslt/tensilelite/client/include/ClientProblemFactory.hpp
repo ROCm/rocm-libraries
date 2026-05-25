@@ -80,7 +80,8 @@ namespace TensileLite
             int         m_useScaleAlphaVec;
             bool        m_useSynchronizer;
             bool        m_useE;
-            bool        m_useGradient = false;
+            bool        m_useGradient     = false;
+            bool        m_useGateResidual = false;
             bool        m_outputAmaxD;
 
             int                              m_sparse;
@@ -88,6 +89,7 @@ namespace TensileLite
             PerformanceMetric                m_performanceMetric;
             ActivationType                   m_activationType;
             std::vector<rocisa::DataType>    m_biasTypeArgs;
+            std::vector<rocisa::DataType>    m_gateTypeArgs;
             std::vector<int>                 m_factorDimArgs;
             std::vector<bool>                m_icacheFlushArgs;
             bool                             m_activationNoGuard;

@@ -301,6 +301,7 @@ def writeBenchmarkFiles(
         srcToolchain: SourceToolchain,
         sourcePath: Path,
         debugConfig: DebugConfig,
+        gateTypeArgs,
         deviceId: int,
         gfxName: str,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
@@ -412,13 +413,13 @@ def writeBenchmarkFiles(
                 idealProblemSizes = ProblemSizes(problemType, idealSizes)
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                                  newLibrary, codeObjectFiles, True, deviceId, gfxName, \
+                                  newLibrary, codeObjectFiles, True, gateTypeArgs, deviceId, gfxName, \
                                   libraryFile=newLibraryFileFull, probSolMap=probSolMap,
                                   sourceDir=str(sourcePath))
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                                  newLibrary, codeObjectFiles, False, deviceId, gfxName, \
+                                  newLibrary, codeObjectFiles, False, gateTypeArgs, deviceId, gfxName, \
                                   libraryFile=newLibraryFileFull, probSolMap=probSolMap,
                                   sourceDir=str(sourcePath))
 
@@ -477,6 +478,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         print1("# Factor Dim steps: {}".format(benchmarkStep.factorDimArgs.totalProblemSizes))
         print1("# Bias Type steps: {}".format(benchmarkStep.biasTypeArgs.totalProblemSizes))
         print1("# Activation steps: {}".format(benchmarkStep.activationArgs.totalProblemSizes))
+        print1("# Gate Type steps: {}".format(benchmarkStep.gateTypeArgs.totalProblemSizes))
         print1("# ICacheFlush steps: {}".format(len(benchmarkStep.icacheFlushArgs)))
         print1("# Fork Parameters:")
         for k, v in benchmarkStep.forkParams.items():
@@ -565,7 +567,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                         benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                         benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                         benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                        sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+                        sourcePath, debugConfig, benchmarkStep.gateTypeArgs, deviceId, gfxName, isaInfoMap, probSolMap)
             # ^ this mutates solutions
 
             # write cache data
@@ -610,7 +612,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         # but for now it's needed, so we update it even in the cache case
         with timing_context("python_write_solutions"):
             LibraryIO.writeSolutions(solutionsFileName, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
-                benchmarkStep.activationArgs, solutions, cacheValid)
+                benchmarkStep.activationArgs, benchmarkStep.gateTypeArgs, solutions, cacheValid)
 
         # run benchmarking client
         if buildOnly:

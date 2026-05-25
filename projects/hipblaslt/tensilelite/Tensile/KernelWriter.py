@@ -310,6 +310,8 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
+  GateType: int                          = 0
+  GateStride: int                        = 0
   freeSgprVarPool: set                   = field(init=False)
 
   numReadsPerIterA: int                  = 0
@@ -372,8 +374,9 @@ class StateValues:
   # Epilogue states
   preloadScaleA = False
   preloadScaleB = False
-  useBias       = DataDirection.NONE
-  needBiasType  = False
+  useBias          = DataDirection.NONE
+  needBiasType     = False
+  useGateResidual  = False
 
   def __post_init__(self):
     """ How many SGPRs does it take to have one bit per lane? """
@@ -8683,6 +8686,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Epilogue related
     self.states.useBias = DataDirection.NONE
     self.states.needBiasType = False
+    self.states.useGateResidual = kernel["ProblemType"].get("UseGateResidual", False)
     if kernel["ProblemType"]["UseBias"]:
       if kernel["ProblemType"]["Gradient"]:
         if kernel["ProblemType"]["BiasSrc"] == "D":
@@ -8772,9 +8776,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-    self.states.numStoreSgprToLoad = storeSgprLoad
 
-
+    if self.states.useGateResidual:
+      self.states.numSgprAddressGate = self.states.rpga # 64-bit
+      self.states.numStoreSgprNames.append("AddressGate")
+      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
+      self.states.GateType   = 1
+      self.states.GateStride = 2
+      self.states.numStoreSgprNames.append("GateType")
+      self.states.numStoreSgprNameSizes.append(self.states.GateType)
+      self.states.numStoreSgprNames.append("GateStride")
+      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
+      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
+  
+    self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
     if self.db["InitVgpr"] : print ("\n***WARNING: InitVgpr enabled, may impact performance\n")

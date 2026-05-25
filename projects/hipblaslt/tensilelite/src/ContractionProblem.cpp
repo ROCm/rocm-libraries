@@ -1552,6 +1552,8 @@ namespace TensileLite
         bool                           useGradient,
         std::vector<rocisa::DataType>& biasDataTypeWhiteList,
         std::vector<int>&              biasSrcWhiteList,
+        bool                           useGateResidual,
+        std::vector<rocisa::DataType>& gateResidualDataTypeWhiteList,
         bool                           isGroupedGemm,
         size_t                         maxWorkspaceBytes,
         TensorOps const&               aOps,
@@ -1642,6 +1644,7 @@ namespace TensileLite
         TensileLite::TensorDescriptor scaleC("scaleC");
         TensileLite::TensorDescriptor scaleD("scaleD");
         TensileLite::TensorDescriptor scaleAlpha{"scaleAlpha"};
+        TensileLite::TensorDescriptor gate{"gate", typeA, {m, n, batch_count}, {1, m, m * n}};
         TensorOps                     nop;
 
         // The ContractionProblemGemm
@@ -1677,6 +1680,17 @@ namespace TensileLite
             problem.setBias(biasType, 1, 0, useGradient, biasSrc);
             problem.setParams().setBiasEnum(rocisa::DataType::None);
         }
+
+        // set gate residual mode
+        if(useGateResidual)
+        {
+            problem.setUseGateResidual(true);
+            auto const& d = problem.d();
+            // Use first whitelisted type if provided, otherwise default to A's datatype (DataType::None)
+            rocisa::DataType gateType = gateResidualDataTypeWhiteList[0];
+            problem.setGateResidual(gateType, d.sizes(), d.strides());
+        }
+
         // Add problem predicates for CEqualsD
         problem.setCEqualsD(false);
         return problem;
