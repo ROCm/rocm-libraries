@@ -59,6 +59,7 @@ struct Mfma16x16x32
 {
     // fp16x8_t is ck_tile::direct_conv::fp16x8_t (vector_size), matching InputLoaderToeplitz.
     using input_type = fp16x8_t;
+    using acc_type = fp32x4_t;
     __device__ fp32x4_t operator()(fp16x8_t weight, fp16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_f16(weight, input, acc, 0, 0, 0);
@@ -80,6 +81,7 @@ struct Mfma16x16x32
 struct Mfma16x16x32_32c
 {
     using input_type = fp16x8_t;
+    using acc_type = fp32x4_t;
     __device__ fp32x4_t operator()(fp16x8_t weight, fp16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_f16(weight, input, acc, 0, 0, 0);
@@ -120,9 +122,49 @@ struct Mfma16x16x16_bf16
 struct Mfma16x16x32_bf16
 {
     using input_type = bf16x8_t;
+    using acc_type = fp32x4_t;
     __device__ fp32x4_t operator()(bf16x8_t weight, bf16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_bf16(weight, input, acc, 0, 0, 0);
+    }
+};
+
+// =====================================================================
+// 32x32x16 MFMA functors
+// =====================================================================
+
+// MFMA functor for mfma_f32_32x32x16_f16.
+//
+// Lane mapping (64-lane wave, single 32x32 matmul):
+//   lane_q  = lane % 32 -> output column (N dimension, spatial)
+//   lane_kg = lane / 32 -> K-group (0..1, each has 8 values)
+//
+// Each lane provides 8 fp16 for A and B from its reduction group,
+// receives 16 fp32 for C. C[32x32] += A[32xK] * B[Kx32] where K=16.
+//
+// Output layout per thread (16 fp32 values):
+//   v=0..3   -> K-output rows {m_block*4 + 0..3}
+//   v=4..7   -> K-output rows {8 + m_block*4 + 0..3}
+//   v=8..11  -> K-output rows {16 + m_block*4 + 0..3}
+//   v=12..15 -> K-output rows {24 + m_block*4 + 0..3}
+// where m_block = lane / 32.
+struct Mfma32x32x16
+{
+    using input_type = fp16x8_t;
+    using acc_type = fp32x16_t;
+    __device__ fp32x16_t operator()(fp16x8_t weight, fp16x8_t input, fp32x16_t acc) const
+    {
+        return __builtin_amdgcn_mfma_f32_32x32x16_f16(weight, input, acc, 0, 0, 0);
+    }
+};
+
+struct Mfma32x32x16_bf16
+{
+    using input_type = bf16x8_t;
+    using acc_type = fp32x16_t;
+    __device__ fp32x16_t operator()(bf16x8_t weight, bf16x8_t input, fp32x16_t acc) const
+    {
+        return __builtin_amdgcn_mfma_f32_32x32x16_bf16(weight, input, acc, 0, 0, 0);
     }
 };
 
