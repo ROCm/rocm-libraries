@@ -5238,11 +5238,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tPBSnap     = deepcopy(tensorParametersB)
 
       def _restoreNtabState():
-        # pack / packPre are lists of Module objects; tensorParameters*
-        # are dicts. Rebuild contents in-place so that references held
-        # by callers remain valid.
+        # pack / packPre are lists of Module objects; tensorParameters* are dicts.
+        # Rebuild contents in-place so references held by callers remain valid.
+        # Also preserve aliases that existed before the NTAB snapshot. Codegen
+        # often assumes kernel is self.states.kernel and mutates that shared
+        # metadata in-place. If another restored metadata object must remain
+        # aliased with an outer active object, explicitly rebind it here as well.
         self.states.__dict__.clear()
         self.states.__dict__.update(deepcopy(stateSnap))
+        self.states.kernel = kernel
         pack[:]    = deepcopy(packSnap)
         packPre[:] = deepcopy(packPreSnap)
         tensorParametersA.clear(); tensorParametersA.update(deepcopy(tPASnap))

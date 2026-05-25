@@ -26,6 +26,7 @@ GlobalParameters:
   ForkParameters:
     - MatrixInstruction:
       - [16, 16, 32, 1, 1, 6, 4, 2, 2] # MT192x128, 4 waves; MFMA bf16 16x16x32, gfx950 CMS specific
+      - [32, 32, 16, 1, 1, 1, 5, 4, 1] # MT128x160, 4 waves; MFMA bf16 32x32x16, AGNTAB+SK coverage
     - DepthU: [64]
     - 1LDSBuffer: [-1]
     - ExpandPointerSwap: [0]
@@ -59,9 +60,11 @@ GlobalParameters:
   BenchmarkJoinParameters:
   BenchmarkFinalParameters:
     - ProblemSizes:
-      - Exact: [128,    128, 1, 128]   # baseline       -> NTA0_NTB0  (loopIters=2; 'enough' is False)
-      - Exact: [65536,  128, 1, 192]   # NTA4 fires     -> NTA4_NTB0  (skinnyA, longA, K/DU=3 > 2)
-      - Exact: [128,  16384, 1, 256]   # NTB4 fires     -> NTA0_NTB4  (skinnyB, longB, K/DU=4 > 2)
+      - Exact: [128,    128, 1, 128]  # baseline       -> NTA0_NTB0  (loopIters=2; 'enough' is False)
+      - Exact: [65536,  128, 1, 192]  # NTA4 fires     -> NTA4_NTB0  (skinnyA, longA, K/DU=3 > 2)
+      - Exact: [128,  16384, 1, 256]  # NTB4 fires     -> NTA0_NTB4  (skinnyB, longB, K/DU=4 > 2)
+      - Exact: [ 464,  1872, 1, 6736] # AGNTAB+SK=3 store-path state selection regression
+      - Exact: [1024,  1024, 1, 1024] # AGNTAB+SK=3 workspace/partial-store regression
 
 .AdaptiveBaseDtl: &adaptive_base_dtl
   CustomKernels:
@@ -71,6 +74,7 @@ GlobalParameters:
   ForkParameters:
     - MatrixInstruction:
       - [16, 16, 32, 1, 1, 4, 4, 2, 2] # MT128x128, 4 waves; MFMA bf16 16x16x32
+      - [32, 32, 16, 1, 1, 1, 5, 4, 1] # MT128x160, 4 waves; MFMA bf16 32x32x16, AGNTAB+SK coverage
     - DepthU: [64]
     - 1LDSBuffer: [-1]
     - ExpandPointerSwap: [0]
@@ -99,9 +103,11 @@ GlobalParameters:
   BenchmarkJoinParameters:
   BenchmarkFinalParameters:
     - ProblemSizes:
-      - Exact: [128,    128, 1, 128] # baseline       -> NTA0_NTB0  (loopIters=2; 'enough' is False)
-      - Exact: [32768,  128, 1, 192] # NTA4 fires     -> NTA4_NTB0  (skinnyA, longA, K/DU=3 > 2)
-      - Exact: [128,  16384, 1, 256] # NTB4 fires     -> NTA0_NTB4  (skinnyB, longB, K/DU=4 > 2)
+      - Exact: [128,    128, 1, 128]  # baseline       -> NTA0_NTB0  (loopIters=2; 'enough' is False)
+      - Exact: [32768,  128, 1, 192]  # NTA4 fires     -> NTA4_NTB0  (skinnyA, longA, K/DU=3 > 2)
+      - Exact: [128,  16384, 1, 256]  # NTB4 fires     -> NTA0_NTB4  (skinnyB, longB, K/DU=4 > 2)
+      - Exact: [ 464,  1872, 1, 6736] # AGNTAB+SK=3 store-path state selection regression
+      - Exact: [1024,  1024, 1, 1024] # AGNTAB+SK=3 workspace/partial-store regression
 
 BenchmarkProblems:
   # =================================================================
