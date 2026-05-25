@@ -41,10 +41,12 @@
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #include <miopen/conv/heuristics/gfx950_rules.hpp>
+#include <miopen/conv/heuristics/gfx942_rules.hpp>
 #endif
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GFX950_RULES_PICK)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GFX942_RULES_PICK)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -760,6 +762,21 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             return {picked.Value()};
         }
         MIOPEN_LOG_I2("gfx950 rules: no applicable pick, falling through to TunaNet");
+    }
+
+    // gfx942 rules-based short-circuit: same pattern as gfx950 above.
+    if(device == "gfx942" && !env::disabled(MIOPEN_DEBUG_GFX942_RULES_PICK))
+    {
+        const auto picked = gfx942::PickSolver(problem);
+        if(picked.IsValid() && picked.GetSolver().IsApplicable(ctx, problem))
+        {
+            MIOPEN_LOG_I2("gfx942 rules picked " << picked.ToString());
+            std::vector<std::any> any_sol;
+            any_sol.push_back(picked.Value());
+            StorePredictionCache(problem, device, any_sol);
+            return {picked.Value()};
+        }
+        MIOPEN_LOG_I2("gfx942 rules: no applicable pick, falling through to TunaNet");
     }
 
     // Strategy:

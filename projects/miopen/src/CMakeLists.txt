@@ -325,6 +325,7 @@ endif()
 
 if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/gfx950_rules.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/gfx942_rules.cpp)
 endif()
 
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
