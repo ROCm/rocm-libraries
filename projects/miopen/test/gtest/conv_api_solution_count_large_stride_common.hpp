@@ -255,11 +255,14 @@ SetupDescriptorsImpl(const int* x_dims, const int* w_dims, miopenDataType_t dtyp
 
 // CI-covered architectures for these sweeps. IsKnownFailing* lists below were
 // hand-tuned for gfx942 CK tile coverage; we only run on arches whose CK
-// coverage has been (or will be) characterized in CI, so non-allowlisted GPUs
-// SKIP instead of emitting stale FAILED lines.
+// coverage has been characterized in CI, so non-allowlisted GPUs SKIP instead
+// of emitting stale FAILED lines. gfx115X (RDNA 3.5) is intentionally omitted:
+// the CK *Xdlops solvers target CDNA MFMA, and a gfx1151 CI run produced 26
+// failures across sub- and >INT_MAX shapes -- re-add once gfx115X CK coverage
+// is characterized and the IsKnownFailing* lists grow per-arch entries.
 inline bool IsArchInCiAllowlist()
 {
-    return IsTestSupportedByDevice(Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx115X);
+    return IsTestSupportedByDevice(Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950);
 }
 
 // Run* helpers -- templated on Shape, SetupFn (per-rank descriptor wrapper),
@@ -279,7 +282,7 @@ void RunCompileFwd(const Shape& s,
                    const char* solver_name)
 {
     if(!IsArchInCiAllowlist())
-        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950/gfx115X)";
+        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950)";
 
     if(is_known_failing(dtype, s))
         GTEST_SKIP() << solver_name << " known-failing (CK applicability gap)";
@@ -300,7 +303,7 @@ void RunCompileBwdData(const Shape& s,
                        const char* solver_name)
 {
     if(!IsArchInCiAllowlist())
-        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950/gfx115X)";
+        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950)";
 
     if(is_known_failing(dtype, s))
         GTEST_SKIP() << solver_name << " known-failing (CK applicability gap)";
@@ -322,7 +325,7 @@ void RunCompileWrw(const Shape& s,
                    const char* solver_name)
 {
     if(!IsArchInCiAllowlist())
-        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950/gfx115X)";
+        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950)";
 
     if(is_known_failing(dtype, s))
         GTEST_SKIP() << solver_name << " known-failing (CK applicability gap)";
