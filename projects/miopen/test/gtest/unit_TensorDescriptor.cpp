@@ -318,7 +318,7 @@ public:
     {
         const auto p  = GetParam();
         const auto td = p.tp.GetTensorDescriptor();
-        ASSERT_EQ(td.GetLayout_t(), p.actual_layout);
+        ASSERT_EQ(td.GetLayoutEnum(), p.actual_layout);
     }
 };
 

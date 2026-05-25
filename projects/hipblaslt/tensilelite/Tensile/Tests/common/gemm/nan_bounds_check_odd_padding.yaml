@@ -1,0 +1,62 @@
+# Test for NaN bounds checking with odd-sized padding
+# Verifies that pointer alignment is correct when padding elements is odd
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 128
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  SleepPercent: 0
+  NumBenchmarks: 1
+  PrintSolutionRejectionReason: True
+  LibraryFormat: yaml
+  BoundsCheck: True
+
+BenchmarkProblems:
+  ########################################
+  # NaN Bounds Check with odd padding
+  # Tests problem sizes that create odd-element padding
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # Configuration
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+        - DepthU: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - GlobalSplitU: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Mix of problem sizes to test padding alignment
+          # Padding = (maxElements - problemElements + basePadding) where buffer is reused
+          # This can create odd-byte padding after multiplyElementSize conversion
+          - Exact: [256, 256, 1, 256]
+          - Exact: [137, 129, 1, 64]
+          - Exact: [141, 131, 1, 128]
+          - Exact: [17, 19, 1, 32]

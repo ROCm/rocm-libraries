@@ -379,6 +379,8 @@ struct TileOptimizations
     bool explicit_gemm;
     // Two-stage kernels
     bool two_stage;
+    // StreamK work distribution
+    ckb::StreamKConfig streamk = ckb::StreamKConfig::disabled();
 };
 static_assert(ckb::TileOptimizationsDescriptor<TileOptimizations>);
 
@@ -742,7 +744,7 @@ using ConvAlgorithm_Tile_GroupedConvolutionKernel_StreamK =
                           TileOptimizations_,
                           TileStreamK_>;
 
-// CK Tile depthwise convolution algorithm (no GEMM — direct spatial pipeline)
+// CK Tile depthwise convolution algorithm (no GEMM - direct spatial pipeline)
 using ConvAlgorithm_Tile_DepthwiseConvolutionKernel =
     ConvAlgorithmTemplate<TileDepthwiseConvParams_>;
 

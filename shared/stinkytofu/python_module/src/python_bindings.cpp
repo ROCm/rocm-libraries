@@ -368,7 +368,7 @@ NB_MODULE(_stinkytofu, m) {
     // which provides validation and automatic argument reordering.
     m.def(
         "Intrinsic",
-        [](const std::string& name, nb::kwargs kwargs) {
+        [](const std::string& name, const nb::kwargs& kwargs) {
             // Convert kwargs to ordered vector of registers
             // Note: Python dicts maintain insertion order (Python 3.7+)
             std::vector<StinkyRegister> args;
