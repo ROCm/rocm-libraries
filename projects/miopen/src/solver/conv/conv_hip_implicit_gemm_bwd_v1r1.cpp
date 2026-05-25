@@ -639,7 +639,7 @@ bool ConvHipImplicitGemmBwdDataV1R1::IsApplicable(const ExecutionContext& ctx,
     const std::string name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
-    // ALMIOPEN-718: Reject non-deterministic configs when determinism is requested.
+    // Reject non-deterministic configs when determinism is requested.
     // BwdV1R1 uses AtomicAdd when stride < dilation*(kernel_size-1)+1.
     // This causes non-deterministic results due to FP rounding order dependency.
     if(problem.GetConv().attribute.deterministic.Get() != 0)

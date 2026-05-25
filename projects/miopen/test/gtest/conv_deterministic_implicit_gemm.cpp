@@ -1,30 +1,7 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
-// ALMIOPEN-718: Bit-exact determinism tests for implicit GEMM convolution solvers.
+// Bit-exact determinism tests for implicit GEMM convolution solvers.
 // Runs each solver 3 times with identical input and verifies bit-exact output match.
 
 #include <cstring>
@@ -307,15 +284,44 @@ protected:
 } // namespace
 
 // ============================================================================
-// Type aliases for the 2 tested solvers (BFP16)
+// Type aliases for all 7 solvers (BFP16)
+// GPU_ConvDeterministic_* naming matches TheRock CI positive filter */GPU_Conv*
 // ============================================================================
 
-using GPU_Deterministic_FwdV4R4Xdlops_BFP16 =
+// Forward solvers
+using GPU_ConvDeterministic_FwdV4R1_BFP16 =
+    GPU_ConvDeterministicImplicitGemm<bfloat16,
+                                      Direction::Forward,
+                                      miopen::solver::conv::ConvHipImplicitGemmV4R1Fwd>;
+
+using GPU_ConvDeterministic_FwdV4R4Xdlops_BFP16 =
     GPU_ConvDeterministicImplicitGemm<bfloat16,
                                       Direction::Forward,
                                       miopen::solver::conv::ConvHipImplicitGemmForwardV4R4Xdlops>;
 
-using GPU_Deterministic_WrwV4R4Xdlops_BFP16 =
+using GPU_ConvDeterministic_FwdV4R5Xdlops_BFP16 =
+    GPU_ConvDeterministicImplicitGemm<bfloat16,
+                                      Direction::Forward,
+                                      miopen::solver::conv::ConvHipImplicitGemmForwardV4R5Xdlops>;
+
+// Backward Data solvers
+using GPU_ConvDeterministic_BwdV1R1_BFP16 =
+    GPU_ConvDeterministicImplicitGemm<bfloat16,
+                                      Direction::BackwardData,
+                                      miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1>;
+
+using GPU_ConvDeterministic_BwdV4R1_BFP16 =
+    GPU_ConvDeterministicImplicitGemm<bfloat16,
+                                      Direction::BackwardData,
+                                      miopen::solver::conv::ConvHipImplicitGemmBwdDataV4R1>;
+
+// Weight-update solvers
+using GPU_ConvDeterministic_WrwV4R4_BFP16 =
+    GPU_ConvDeterministicImplicitGemm<bfloat16,
+                                      Direction::BackwardWeights,
+                                      miopen::solver::conv::ConvHipImplicitGemmV4R4WrW>;
+
+using GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16 =
     GPU_ConvDeterministicImplicitGemm<bfloat16,
                                       Direction::BackwardWeights,
                                       miopen::solver::conv::ConvHipImplicitGemmWrwV4R4Xdlops>;
@@ -324,16 +330,59 @@ using GPU_Deterministic_WrwV4R4Xdlops_BFP16 =
 // Test definitions
 // ============================================================================
 
-TEST_P(GPU_Deterministic_FwdV4R4Xdlops_BFP16, DeterministicTest) { this->RunTest(); };
-TEST_P(GPU_Deterministic_WrwV4R4Xdlops_BFP16, DeterministicTest) { this->RunTest(); };
+// Forward
+TEST_P(GPU_ConvDeterministic_FwdV4R1_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_ConvDeterministic_FwdV4R4Xdlops_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_ConvDeterministic_FwdV4R5Xdlops_BFP16, DeterministicTest) { this->RunTest(); };
 
-// Config format: {N, C, K, H, W, y, x, pad_h, pad_w, stride_h, stride_w, dilation_h, dilation_w}
+// Backward Data
+TEST_P(GPU_ConvDeterministic_BwdV1R1_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_ConvDeterministic_BwdV4R1_BFP16, DeterministicTest) { this->RunTest(); };
+
+// Weight-update
+TEST_P(GPU_ConvDeterministic_WrwV4R4_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16, DeterministicTest) { this->RunTest(); };
+
+// ============================================================================
+// Test configs — small shapes for fast CI execution.
+// Tests GTEST_SKIP if solver is not applicable on the current GPU.
+// Config: {N, C, K, H, W, y, x, pad_h, pad_w, stride_h, stride_w, dilation_h, dilation_w}
+// ============================================================================
+
+// Forward solvers
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministic_FwdV4R1_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Deterministic_FwdV4R4Xdlops_BFP16,
+                         GPU_ConvDeterministic_FwdV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              128, 48, 192, 13, 13, 1, 1, 0, 0, 1, 1, 1, 1}));
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Deterministic_WrwV4R4Xdlops_BFP16,
+                         GPU_ConvDeterministic_FwdV4R5Xdlops_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
+
+// Backward Data solvers
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministic_BwdV1R1_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministic_BwdV4R1_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
+
+// Weight-update solvers
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministic_WrwV4R4_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             1, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              1, 192, 16, 28, 28, 1, 1, 0, 0, 1, 1, 1, 1}));

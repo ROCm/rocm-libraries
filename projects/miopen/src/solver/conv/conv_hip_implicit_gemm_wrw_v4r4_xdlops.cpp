@@ -1109,7 +1109,7 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
     std::tie(std::ignore, gemm_m, gemm_n, gemm_k_total, GemmKBlock, std::ignore) =
         config.CalculateGemmSizeAndGemmKBlock(ctx, problem);
 
-    // ALMIOPEN-718: Reject non-deterministic configs when determinism is requested.
+    // Reject non-deterministic configs when determinism is requested.
     // WrwV4R4Xdlops kernel uses AtomicAdd when GemmKBlock > 1
     // (kernel code: GemmKBlock > 1 ? InMemoryDataOperation::AtomicAdd : Set).
     // GemmKBlock > 2 is proven non-deterministic due to FP non-associativity:
