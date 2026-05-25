@@ -60,14 +60,8 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<80, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<81, direct_conv::Version::v2>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
-// Non-grouped (standard) convolution — 32c MFMA with C-reduction
-// G=1, C > 32, K > 32. Fprop configs: 3 (direct DRAM) + 3 (LDS epilogue)
+// Non-grouped convolution v3 — cross-wave LDS reduction
+// Fprop, direct DRAM epilogue — configs 2-3 (waves 4, 2)
 ////////////////////////////////////////////////////////////////////////
-// Fprop, direct DRAM epilogue — configs 3-5 (waves 8, 4, 2)
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<3, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<4, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<5, direct_conv::Version::v1>, SIGNATURE>);
-// Fprop, LDS-staged epilogue — configs 9-11 (waves 8, 4, 2)
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<9, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<10, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<11, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<2, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<3, direct_conv::Version::v3>, SIGNATURE>);

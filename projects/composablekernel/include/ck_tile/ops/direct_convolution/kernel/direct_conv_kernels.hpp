@@ -11,7 +11,7 @@
 #include "ck_tile/ops/direct_convolution/kernel/grouped_8c_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_32c_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/conv_32c_tile_impl_v1.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/conv_32c_tile_impl_v3.hpp"
 
 // HIP conv impl headers
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_hip_conv_impl.hpp"
@@ -73,17 +73,17 @@ struct TileConvVariant32c<Version::v2, DT>
     static constexpr auto  make_variant     = &grouped_32c_tile::v2::make_variant<DT>;
 };
 
-// Non-grouped (standard) conv — 32c MFMA with C-reduction
+// Non-grouped (standard) conv — 32c MFMA with C-reduction (v3 cross-wave LDS reduction)
 template <Version V, DataType DT = DataType::fp16>
 struct TileConvVariant32cDense;
 
 template <DataType DT>
-struct TileConvVariant32cDense<Version::v1, DT>
+struct TileConvVariant32cDense<Version::v3, DT>
 {
-    static constexpr auto& configs         = conv_32c_tile::v1::KernelConfigurations<DT>::configs;
-    static constexpr auto  get_launch_params = &conv_32c_tile::v1::get_launch_params<DT>;
-    static constexpr auto  launch           = &conv_32c_tile::v1::launch<DT>;
-    static constexpr auto  make_variant     = &conv_32c_tile::v1::make_variant<DT>;
+    static constexpr auto& configs         = conv_32c_tile::v3::KernelConfigurations<DT>::configs;
+    static constexpr auto  get_launch_params = &conv_32c_tile::v3::get_launch_params<DT>;
+    static constexpr auto  launch           = &conv_32c_tile::v3::launch<DT>;
+    static constexpr auto  make_variant     = &conv_32c_tile::v3::make_variant<DT>;
 };
 
 // ============================================================================
@@ -259,7 +259,7 @@ struct DirectTileConvBwdData32CKernel
 };
 
 // Non-grouped (standard) conv 32c TileConv
-template <int ConfigIdx, Version Ver = Version::v1, DataType DT = DataType::fp16>
+template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvForward32CDenseKernel
     : DirectConvKernel<DirectTileConvForward32CDenseKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
@@ -275,7 +275,7 @@ struct DirectTileConvForward32CDenseKernel
     }
 };
 
-template <int ConfigIdx, Version Ver = Version::v1, DataType DT = DataType::fp16>
+template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData32CDenseKernel
     : DirectConvKernel<DirectTileConvBwdData32CDenseKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {

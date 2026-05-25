@@ -165,6 +165,13 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
             else
             {
                 std::cout << "[Error] " << op_name << std::endl;
+                const auto conv_param  = args.to_ck_tile_conv_param();
+                float tflops           = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+                float gb_per_sec       = static_cast<float>(
+                    conv_param.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
+                std::cout << "[Invalid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                        << " TFlops, " << gb_per_sec << " GB/s, " << op_name
+                        << " (instance " << num_kernel - 1 << ")" << std::endl;
                 for(const auto& error : report.get_errors())
                 {
                     valid = false;
@@ -187,12 +194,12 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_fp16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_4c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_16c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_8c())
-            run_alg(fn);
+        // for(auto fn : get_fwd_direct_instances_nhwgc_fp16_4c())
+        //     run_alg(fn);
+        // for(auto fn : get_fwd_direct_instances_nhwgc_fp16_16c())
+        //     run_alg(fn);
+        // for(auto fn : get_fwd_direct_instances_nhwgc_fp16_8c())
+        //     run_alg(fn);
         for(auto fn : get_fwd_direct_instances_nhwgc_fp16_32c())
             run_alg(fn);
     }
@@ -201,12 +208,12 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_bf16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_4c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_16c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_8c())
-            run_alg(fn);
+        // for(auto fn : get_fwd_direct_instances_nhwgc_bf16_4c())
+        //     run_alg(fn);
+        // for(auto fn : get_fwd_direct_instances_nhwgc_bf16_16c())
+        //     run_alg(fn);
+        // for(auto fn : get_fwd_direct_instances_nhwgc_bf16_8c())
+        //     run_alg(fn);
         for(auto fn : get_fwd_direct_instances_nhwgc_bf16_32c())
             run_alg(fn);
     }
