@@ -6,6 +6,7 @@
 #include "HipdnnAttentionImplementation.h"
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
@@ -179,6 +180,27 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
     }
 }
 
+inline const char* hipdnnGetBehaviorNoteString(hipdnnBackendBehaviorNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
+        return "HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION";
+    case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
+        return "HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM";
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
+        return "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE";
+    case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
+        return "HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY";
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    case HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT:
+        return "HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT";
+    default:
+        return "HIPDNN_BEHAVIOR_NOTE_UNKNOWN";
+    }
+}
+
 inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorType_t type)
 {
     switch(type)
@@ -321,6 +343,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT";
     case HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED:
         return "HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED";
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        return "HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT";
     case HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT:
         return "HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT";
     case HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT:
@@ -340,6 +364,14 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_VARIANT_PACK_INTERMEDIATES";
     case HIPDNN_ATTR_VARIANT_PACK_WORKSPACE:
         return "HIPDNN_ATTR_VARIANT_PACK_WORKSPACE";
+    case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS_EXT:
+        return "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS_EXT";
+    case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_EXT:
+        return "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_EXT";
+    case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_EXT:
+        return "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_EXT";
+    case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS_EXT:
+        return "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS_EXT";
 
     case HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID:
         return "HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID";

@@ -22,14 +22,14 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, EXECLO, EXECHI, VCC, vgpr, sgpr, ContinuousRegister
+  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
-  SCBranchSCC0, SCBranchSCC1, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
-  SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, \
+  SCBranchSCC0, SCBranchSCC1, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpGtI32, SCmpLeI32, SMinU32, \
+  SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
@@ -121,6 +121,7 @@ class GlobalWriteBatchWriter:
     self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
+    self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -469,8 +470,9 @@ class GlobalWriteBatchWriter:
             d1, d0 = element[0], element[1]
             # N guard: emit once per d1 group.
             if nGuardSgpr is not None and d1 != self._subtileCloadPrevD1:
-              module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=d1,
-                                    comment="subtile C load: numNBlocks > d1=%d?" % d1))
+              d1Cmp = d1 * 16 if self.parentWriter.states.storeAlign8 else d1
+              module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=d1Cmp,
+                                    comment="subtile C load: clamped > %d?" % d1Cmp))
               module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
                                      comment="SrdC+2 = BufferOOB if N valid, else 0"))
               self._subtileCloadPrevD1 = d1
@@ -1351,7 +1353,7 @@ class GlobalWriteBatchWriter:
               sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
               sumIdx1 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
-              blockIdxN = element[0]  # d1 = tt1
+              blockIdxN = element[0]
               # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
               # This also handles N-group transitions.
               blockIdxM = tt0 - 1
@@ -1370,16 +1372,16 @@ class GlobalWriteBatchWriter:
                                                comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
                 storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
                                                  comment=f"only d0={tt0-1} valid -> scalar fallback"))
-                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
                 storeCodeModule.add(tmpStoreCode)
                 storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
                                             comment="skip scalar fallback"))
                 storeCodeModule.add(fallbackLabel)
-                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1)
+                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
                 storeCodeModule.add(tmpFallbackCode)
                 storeCodeModule.add(afterPairedLabel)
               else:
-                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
                 storeCodeModule.add(tmpStoreCode)
               if skipLabel is not None:
                 storeCodeModule.add(skipLabel)
@@ -1392,7 +1394,7 @@ class GlobalWriteBatchWriter:
                                                           labelPrefix="subtile_skip_orphan")
               sumIdx0 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
-              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
               storeCodeModule.add(tmpStoreCode)
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
@@ -1414,7 +1416,7 @@ class GlobalWriteBatchWriter:
                                                           labelPrefix="subtile_skip_orphan")
               sumIdx0 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
-              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
               storeCodeModule.add(tmpStoreCode)
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
@@ -1429,12 +1431,19 @@ class GlobalWriteBatchWriter:
           if isSubtileNonEdge:
             tt0 = element[1]
             blockIdxM = tt0  # each tt0 maps to one mBlockSize-row block
-            blockIdxN = element[0]  # tt1
+            blockIdxN = element[0]
             # Early exit: skip this store if the wave group is outside the valid M/N tile bounds.
             skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
                                                   labelPrefix="subtile_skip_store")
+          # Apply exec mask for partial M/N blocks (regular fp32 store path)
+          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+            self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                                     mGuardOffset=1, rowScaleShift=2)
+            storeCodeModule.add(SMovB64(dst=EXEC(), src=sgpr(self.tmpS01, 2), comment="apply exec mask"))
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D")
           storeCodeModule.add(tmpStoreCode)
+          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+            storeCodeModule.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
           if skipLabel is not None:
             storeCodeModule.add(skipLabel)
           self.storesIssued += 1
@@ -1567,7 +1576,7 @@ class GlobalWriteBatchWriter:
                                comment=f"perm dword {k}"))
 
     if addrWhilePermuting is not None:
-      addrWhilePermuting()
+      addrWhilePermuting(module)
 
     module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
 
@@ -1634,8 +1643,9 @@ class GlobalWriteBatchWriter:
         f"{labelPrefix}_N{blockIdxN}_end")
       nGroupEndLabel = Label(nGroupEndLabelName,
                              f"end of N group blockIdxN={blockIdxN} (M cbranch target)")
-      targetModule.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=blockIdxN,
-                                   comment=f"quick-exit: numValidNBlocks > {blockIdxN}? (OOB -> skip all stores)"))
+      nGuardCmp = blockIdxN * 16 if self.parentWriter.states.storeAlign8 else blockIdxN
+      targetModule.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=nGuardCmp,
+                                   comment=f"quick-exit: clamped > {nGuardCmp}? (OOB -> skip all stores)"))
       targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
                                      comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
       self._subtileNGroupSkipLabel = nGroupEndLabel
@@ -1680,7 +1690,104 @@ class GlobalWriteBatchWriter:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
 
-  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0) -> Module:
+  def _emitAlign8ExecMask(self, module, tmpS, tmpS2, blockIdxM, blockIdxN, mGuardOffset, rowScaleShift):
+    """Emit exec mask for partial M/N blocks in the NonEdge store path.
+
+    Computes a 64-bit exec mask that disables OOB lanes for partial M and N
+    blocks at the tile boundary.  The mask is the AND of an M component and
+    an N component, each computed independently.
+
+    MMA output layout (MI16x16, wavefront=64):
+      64 lanes = 4 lane-groups (LGs) of 16 lanes each.
+      Each LG owns consecutive M-rows:
+        - Paired bf16 store: 8 M-rows per LG (32 rows total, 2 MMA tiles)
+        - Scalar/fp32 store: 4 M-rows per LG (16 rows total, 1 MMA tile)
+      Within each LG, lane_id % 16 selects the N-column (0..15).
+
+    M mask algorithm:
+      Given validRows (number of valid M-rows in this block), the number of
+      active lane-groups is validRows / rowsPerLG.  Each LG occupies 16
+      consecutive lanes, so the mask is the bottom (numValidLGs * 16) bits of
+      a 64-bit word.  This is computed as:
+        shiftAmt = 64 - validRows * (16 / rowsPerLG)
+        mask = (uint64_t)-1 >> shiftAmt
+      validM_wave is precomputed once per tile in _emitSubtileGuards.
+
+    N mask algorithm:
+      SubtileNGuard holds the clamped valid-N-column count for this wave.
+      partialN = SubtileNGuard % 16 gives the number of valid columns within
+      the last 16-column MMA tile.  The N mask disables columns >= partialN:
+        nMask = (1 << partialN) - 1        e.g. partialN=5 -> 0x001F
+        nMask = nMask | (nMask << 16)      replicate across both LG halves
+      This 32-bit word is ANDed into both lo and hi halves of the exec mask.
+
+    This sequence is designed to fit within the ds_bpermute latency window
+    (~88 cycles at 4 cyc/issue) for zero-overhead execution on interior blocks.
+
+    Args:
+        module:         Target module to emit instructions into.
+        tmpS:           SGPR index for mask result (2 consecutive, even-aligned).
+        tmpS2:          SGPR index for scratch (2 consecutive).
+        blockIdxM:      M block index for this store element.
+        blockIdxN:      N block index for this store element.
+        mGuardOffset:   Number of MMA tiles this store spans (2=paired, 1=single).
+        rowScaleShift:  Left-shift to convert validRows to lane-count
+                        (1 for paired/8-rows-per-LG, 2 for scalar-fp32/4-rows-per-LG).
+    """
+    miM = self.kernel["MatrixInstM"]
+    blockStartRow = blockIdxM * miM
+    validMWaveSgpr = self.parentWriter.states.subtileTotalMOffsetSgpr
+    mMaskDone = Label(self.parentWriter.labels.getNameInc("align8_m_done"), "")
+
+    # --- M mask: per-lane-group selection via 64-bit right-shift ---
+    module.add(SMovB64(dst=sgpr(tmpS, 2), src=-1, comment="mask = full"))
+    module.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=blockIdxM + mGuardOffset,
+                          comment=f"SubtileMGuard > {blockIdxM + mGuardOffset}? (block fully interior)"))
+    module.add(SCBranchSCC1(labelName=mMaskDone.getLabelName(),
+                            comment="interior M block -> mask stays -1"))
+    if blockStartRow > 0:
+      module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(validMWaveSgpr), src1=blockStartRow,
+                         comment=f"validRows = validM_wave - {blockStartRow}"))
+      module.add(SCSelectB32(dst=sgpr(tmpS2), src0=0, src1=sgpr(tmpS2), comment="clamp to 0"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=sgpr(tmpS2), shiftHex=rowScaleShift,
+                                comment=f"validRows * {1 << rowScaleShift}"))
+    else:
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=sgpr(validMWaveSgpr), shiftHex=rowScaleShift,
+                                comment=f"validM_wave * {1 << rowScaleShift}"))
+    module.add(SSubU32(dst=sgpr(tmpS2), src0=64, src1=sgpr(tmpS2),
+                       comment="shiftAmt = 64 - validRows * scale"))
+    module.add(SLShiftRightB64(dst=sgpr(tmpS, 2), src=-1, shiftHex=sgpr(tmpS2),
+                               comment="M mask = -1 >> shiftAmt"))
+    module.add(mMaskDone)
+
+    # --- N mask: per-column bit-mask for arbitrary partial N ---
+    nCmpVal = (blockIdxN + 1) * 16
+    nMaskDone = Label(self.parentWriter.labels.getNameInc("align8_n_done"), "")
+    module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=nCmpVal,
+                          comment=f"clamped > {nCmpVal}? (not last N block)"))
+    module.add(SCBranchSCC1(labelName=nMaskDone.getLabelName(),
+                            comment="interior N block -> mask unchanged"))
+    module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=0xF,
+                       comment="partialN = clamped %% 16, SCC=1 if non-zero"))
+    nFullLabel = Label(self.parentWriter.labels.getNameInc("align8_n_full"), "")
+    module.add(SCBranchSCC0(labelName=nFullLabel.getLabelName(),
+                            comment="partialN==0 -> full 16-col block"))
+    module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
+                              comment="1 << partialN"))
+    module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
+                       comment="(1 << partialN) - 1"))
+    module.add(SLShiftLeftB32(dst=sgpr(tmpS2+1), src=sgpr(tmpS2), shiftHex=16,
+                              comment="replicate to hi16"))
+    module.add(SOrB32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr(tmpS2+1),
+                      comment="N mask word = lo16 | hi16"))
+    module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr(tmpS2),
+                       comment="mask_lo &= N mask"))
+    module.add(SAndB32(dst=sgpr(tmpS+1), src0=sgpr(tmpS+1), src1=sgpr(tmpS2),
+                       comment="mask_hi &= N mask"))
+    module.add(nFullLabel)
+    module.add(nMaskDone)
+
+  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
     """Emit a paired 16bit store combining sba=0 and sba=1 subtile data.
 
     Works for both bf16 and fp16 HPA output types.
@@ -1752,8 +1859,19 @@ class GlobalWriteBatchWriter:
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
     addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
 
-    def emitAddrWhilePermuting():
-      """Compute vAddrScratch overlapped with the in-flight ds_bpermute."""
+    useAlign8 = self.parentWriter.states.storeAlign8
+
+    def emitAddrWhilePermuting(module):
+      """Callback emitted between ds_bpermute and s_waitcnt lgkmcnt(0).
+
+      The ds_bpermute has ~88 cycles of LDS latency.  We overlap SALU/VALU
+      work in this window to hide the cost:
+        1. Compute the adjusted D store address (VALU).
+        2. Compute the exec mask for partial M/N blocks (SALU) — this
+           suppresses OOB lanes at tile boundaries without adding any
+           latency to the critical path.
+      `module` is the permute Module, so instructions emitted here land
+      between the ds_bpermute issue and the s_waitcnt that consumes results."""
       if addrScaleShift:
         module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
                                    src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
@@ -1762,8 +1880,15 @@ class GlobalWriteBatchWriter:
       else:
         module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
                            comment="adjusted D addr = addrDVgpr + lane_group*8"))
+      if useAlign8:
+        self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                                 mGuardOffset=2, rowScaleShift=1)
 
     module.add(self._emitSubtilePackedPermute(vPack, vPermAddr, addrWhilePermuting=emitAddrWhilePermuting))
+
+    if useAlign8:
+      tmpS = self.tmpS01
+      module.add(SMovB64(dst=EXEC(), src=sgpr(tmpS, 2), comment="apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
     module.add(BufferStoreB128(
@@ -1775,6 +1900,9 @@ class GlobalWriteBatchWriter:
       comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
     ))
 
+    if useAlign8:
+      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
+
     # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
     # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
     # Insert nop to ensure the store has latched its source VGPRs.
@@ -1782,7 +1910,7 @@ class GlobalWriteBatchWriter:
 
     return module
 
-  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0) -> Module:
+  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
     """Emit a 16bit store for an orphan subtile element with no partner.
 
     Used when MIWaveTile[0] is odd and the last sba=0 element has no sba=1
@@ -1933,6 +2061,13 @@ class GlobalWriteBatchWriter:
     module.add(VCvtPkF32to16(dst=vgpr(vPack+0), src0=vc(0), src1=vc(1), comment=f"M-row+0/+1 -> {typeStr}"))
     module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
     module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
+
+    useAlign8 = self.parentWriter.states.storeAlign8
+    if useAlign8:
+      self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                               mGuardOffset=1, rowScaleShift=2)
+      module.add(SMovB64(dst=EXEC(), src=sgpr(self.tmpS01, 2), comment="apply exec mask"))
+
     module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
     module.add(BufferStoreB64(
       src=vgpr(vPack+0, 2),
@@ -1942,6 +2077,10 @@ class GlobalWriteBatchWriter:
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
       comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
     ))
+
+    if useAlign8:
+      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
+
     return module
 
   def _emitAtomicAdd(self, module: Module):
