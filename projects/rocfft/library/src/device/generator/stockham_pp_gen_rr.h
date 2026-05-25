@@ -437,7 +437,6 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
         // handle even-length real to complex post-process in lds after full pass
         if(ebtype == EmbeddedType::Real2C_POST)
         {
-            std::cerr << "ebtype == EmbeddedType::Real2C_POST: " << std::endl;
             body += LineBreak{};
             body += real_trans_pre_post();
         }
