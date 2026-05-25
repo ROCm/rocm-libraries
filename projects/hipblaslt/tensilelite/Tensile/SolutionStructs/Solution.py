@@ -3900,16 +3900,29 @@ class Solution(collections.abc.Mapping):
 
     wmmaV3 = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
     if wmmaV3:
-      padPairs = [("A", True), ("B", True),
-                  ("MXSA", bool(state["ProblemType"]["MXBlockA"])),
-                  ("MXSB", bool(state["ProblemType"]["MXBlockB"]))]
-      for tc, active in padPairs:
-        if not active:
-          continue
-        ldsPadVal = state[f"LdsPad{tc}"]
-        if ldsPadVal != 0 and state[f"LdsBlockSizePerPad{tc}"] == 0:
+      # Todo: f64 needs to verify bank conflict.
+      ldsPadChecks = {
+        "MXSA": (bool(state["ProblemType"]["MXBlockA"]), True),
+        "MXSB": (bool(state["ProblemType"]["MXBlockB"]), True),
+        "A":    (True, state["enableTDMA"] or (state["EnableMatrixInstruction"] and not state["UnrollMajorLDSA"])),
+        "B":    (True, state["enableTDMB"] or (state["EnableMatrixInstruction"] and not state["UnrollMajorLDSB"])),
+      }
+      for tc, (check, mustHaveBlk) in ldsPadChecks.items():
+        if not check: continue
+        pad = state[f"LdsPad{tc}"]
+        blk = state[f"LdsBlockSizePerPad{tc}"]
+
+        if pad != 0 and (pad == -1) != (blk == -1):
           reject(state, printRejectionReason,
-                 f"LdsPad{tc}={ldsPadVal} with LdsBlockSizePerPad{tc}=0 is not supported, explicitly set LdsBlockSizePerPad{tc}.")
+                 f"Require LdsPad{tc} and LdsBlockSizePerPad{tc} "
+                 f"to both be -1 (auto) or both explicit when LdsPad{tc} != 0; "
+                 f"got LdsPad{tc}={pad}, LdsBlockSizePerPad{tc}={blk}.")
+          return False
+
+        if mustHaveBlk and pad != 0 and blk == 0:
+          reject(state, printRejectionReason,
+                 f"LdsPad{tc}={pad} with LdsBlockSizePerPad{tc}=0 is not "
+                 f"supported here; set LdsBlockSizePerPad{tc} explicitly.")
           return False
 
     auto_LdsPadA = (state["LdsPadA"] == -1)
