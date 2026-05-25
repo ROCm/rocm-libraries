@@ -115,7 +115,8 @@ from .SubtileLREmit import (
     _emitLRDTLInit, _emitLRLDSBufferSwap,
     lraTileAssignment, localReadDoSubtile, localReadDTLInitCommonSwapVgpr,
     localReadLDSBufferSwap, localReadResetOffsetsSubtile,
-    emitSingleDsRead, emitSubtileDsRead, setExecMask,
+    emitSingleDsRead, emitSubtileDsRead,
+    setExecMask,
 )
 from .SubtileScaleEmit import (
     emitScaleGROffset, emitScaleLROffset,
@@ -858,6 +859,88 @@ class TileInfo:
       if vtiles.regList.indices:
         vtiles.regList.pool.checkIn(vtiles.regList.indices[0])
     self.vgprTiles = []
+
+  def initVgprTileSlots(self, writer, kernel):
+    """Create empty `vgprTiles` RegisterTileInfo slots without
+    checking out VGPRs from the pool.
+
+    The tail scaffold's per-mmak interleave alloc/free pattern
+    populates one K-slice of slots per mmak via
+    `allocVgprTileRegistersForMmak` and releases them via
+    `freeVgprTileRegistersForMmak`. Emit code (`emitSubtileDsRead*`,
+    `emitMfmaInstruction`, byte-refine mask chain) reads
+    `vgprTiles[idx].regList.indices[0]`, so the slot list must exist
+    at full length even when only one slice is populated.
+
+    Only supports AB and MXScaleTilePair geometries; CD tiles still
+    use the full `allocVgprTileRegisters_legacy` path.
+    """
+    self.vgprTiles = []
+    numMMATiles = int(self.localMMATileGrid[0] * self.localMMATileGrid[1])
+    isDTile = isinstance(self.geometry, CDTileGeometry)
+    assert not isDTile, "initVgprTileSlots only supports AB / MXScale tiles"
+    for _ in range(numMMATiles):
+      self.vgprTiles.append(RegisterTileInfo(writer.vgprPool, RegisterType.Vgpr))
+
+  def allocVgprTileRegistersForMmak(self, writer, kernel, mmak):
+    """Allocate VGPRs for the K-slice of `vgprTiles` owned by `mmak`.
+
+    For each `mma` index in the M dimension the slice tile id is:
+
+        sId0 = mma // lrSubtileShape[0]
+        sId1 = mmak // lrSubtileShape[1]
+        innerK = mmak % lrSubtileShape[1]
+        tileId = (sId1 * lrLocalGrid0 + sId0) *
+                 (lrSubtileShape[0] * lrSubtileShape[1]) + innerK
+
+    Each unique `tileId` in the slice gets `ceil(mmaTileRegCount)`
+    aligned VGPRs checked out from the writer's vgprPool. Returns the
+    list of allocated tile ids so the caller can pair it with a
+    matching `freeVgprTileRegistersForMmak` call.
+
+    `initVgprTileSlots` must have populated `self.vgprTiles` first.
+    Only supports AB tiles (the MX-scale path's `(2,2)` LR subtile
+    shape interleaves a `_mma0` index that this slice formula does
+    not unroll; tail scales stay allocated up front).
+    """
+    assert not isinstance(self.geometry, MXScaleTilePair), (
+      "allocVgprTileRegistersForMmak does not support MX scale tiles; "
+      "their LR subtile shape interleaves _mma0 in the tile id which "
+      "the slice formula does not cover")
+    ss = self.lr.subtileShape
+    numMmaTilePerSubtile = ss[0] * ss[1]
+    lrLocalGrid0 = self.localMMATileGrid[0] // ss[0]
+    sId1 = mmak // ss[1]
+    innerK = mmak % ss[1]
+    numDword = int(math.ceil(self.mmaTileRegCount))
+    allocated = []
+    seen = set()
+    for mma in range(self.localMMATileGrid[0]):
+      sId0 = mma // ss[0]
+      tileId = (sId1 * lrLocalGrid0 + sId0) * numMmaTilePerSubtile + innerK
+      if tileId in seen:
+        continue
+      seen.add(tileId)
+      vstart = writer.vgprPool.checkOutAligned(numDword, numDword)
+      slot = self.vgprTiles[tileId]
+      slot.regList.indices.clear()
+      for k in range(numDword):
+        slot.append(vstart + k)
+      allocated.append(tileId)
+    return allocated
+
+  def freeVgprTileRegistersForMmak(self, writer, kernel, allocated):
+    """Release VGPRs allocated by `allocVgprTileRegistersForMmak`.
+
+    `allocated` is the list returned by the matching alloc call. The
+    slot's `regList.indices` is cleared so a downstream re-alloc (or
+    a leak assertion) sees an empty slot.
+    """
+    for tileId in allocated:
+      slot = self.vgprTiles[tileId]
+      if slot.regList.indices:
+        writer.vgprPool.checkIn(slot.regList.indices[0])
+        slot.regList.indices.clear()
 
   def __str__(self):
     return (f"TileInfo(tc={self.tc}, geometry={type(self.geometry).__name__}, "

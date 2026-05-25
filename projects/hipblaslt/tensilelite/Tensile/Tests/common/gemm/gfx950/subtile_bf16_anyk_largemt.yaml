@@ -2,9 +2,18 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 #######################################################################
-# Subtile BF16 K-tail: K_remain even, K_remain % 8 != 0
-# (K_remain ∈ {2, 4, 6, 10, 12, 14, 18, 22}, ASEM=2).
-# Exercises the sub-lane refinement in `_emitTailSubLaneMaskRefineSubtile`.
+# Subtile BF16 K-tail: large MT (320x288) where the historic
+# bulk A/B vgprTiles alloc + per-mmak LR pushed the wave-64 vgpr
+# budget over 256 (high-water ~302), failing assembly with
+# "Occupancy limit". The per-mmak interleave restructure of
+# `_emitTailLoopScaffoldSubtile` drops the slice live-range to one
+# mmak at a time, bringing the high-water back to ~210.
+#
+# Coverage is intentionally tight (one MT shape, three ASEMs ×
+# StreamK ∈ {0, 3}) so CI cost stays close to the existing anyk
+# yamls; the largemt regression is about VGPR pressure on a single
+# tile-grid shape, not exhaustive K-tail correctness (other anyk
+# yamls already cover the small/medium MTs).
 #######################################################################
 GlobalParameters:
   NumElementsToValidate: -1
@@ -28,14 +37,13 @@ GlobalParameters:
   KeepBuildTmp: True
   DeviceLDS: 163840
   MaxLDS: 163840
-  #PrintSolutionRejectionReason: True
-  #GenerateSourcesAndExit: False
   CpuThreads: 1
   RotatingBufferSize: 0
 
 BenchmarkProblems:
   ########################################
-  # BF16 TN — no bias, DU = 2*MI_K = 64
+  # BF16 TN — MT 320x288, DU = 2*MI_K = 64, ASEM=2 (the failure
+  # report mode: nakajee's K=66 / MT 320x288 repro).
   ########################################
   -
     - # ProblemType
@@ -55,13 +63,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # 1x1 wave group
-          - [16, 16, 32, 1,  1, 4, 4,  1, 1]  # MT 64x64
-          # 2x2 wave group
-          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
-          # 4x1 wave group
-          - [16, 16, 32, 1,  1, 2, 2,  4, 1]  # MT 128x32
-        - PrefetchGlobalRead: [0, 1, 2]
+          - [16, 16, 32, 1,  1, 5, 18,  4, 1]  # MT 320x288 (4x1 WG)
+        - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -73,40 +76,20 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # K_remain ∈ {2, 4, 6} (tail-only)
-          - Exact: [128, 128, 1,   2]
-          - Exact: [128, 128, 1,   4]
-          - Exact: [128, 128, 1,   6]
-          # K_remain ∈ {10, 12, 14} (tail-only)
-          - Exact: [128, 128, 1,  10]
-          - Exact: [128, 128, 1,  12]
-          - Exact: [128, 128, 1,  14]
-          # K_remain ∈ {18, 22} (tail-only)
-          - Exact: [128, 128, 1,  18]
-          - Exact: [128, 128, 1,  22]
-          # K = 1*DU + 2 = 66 (one main + tail with K_remain=2)
-          - Exact: [128, 128, 1,  66]
-          # K = 1*DU + 14 = 78
-          - Exact: [128, 128, 1,  78]
-          # K = 2*DU + 6 = 134 (two main + tail)
-          - Exact: [128, 128, 1, 134]
-          # Asymmetric M/N
-          - Exact: [128,  32, 1,  10]
-          - Exact: [ 32, 128, 1,  10]
-          # Batched
-          - Exact: [128, 128, 2,  14]
-          - Exact: [128, 128, 3,   6]
+          # K = 1*DU + 2 — the nakajee repro
+          - Exact: [320, 288, 1,  66]
+          # K = 1*DU + 14 — different K_remain on the same MT
+          - Exact: [320, 288, 1,  78]
 
   ########################################
-  # BSS TN — BF16 input, F32 output, DU = 2*MI_K = 64
-  #
-  # Smaller wavetile coverage.
+  # BF16 TN — MT 320x288, ASEM=8 (K%8 path: coarse cmp + cndmask
+  # only, byte-refine gate rejects).
   ########################################
   -
     - # ProblemType
       OperationType: GEMM
       DataType: b
-      DestDataType: s
+      DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: 1
@@ -120,9 +103,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
-          - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128 (odd M wavetile)
-        - PrefetchGlobalRead: [0, 1, 2]
+          - [16, 16, 32, 1,  1, 5, 18,  4, 1]  # MT 320x288 (4x1 WG)
+        - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -130,18 +112,16 @@ BenchmarkProblems:
         - StreamK: [0, 3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
-        - AssertSummationElementMultiple: [2]
+        - AssertSummationElementMultiple: [8]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1,   2]
-          - Exact: [128, 128, 1,  14]
-          - Exact: [128, 128, 1,  66]   # K = 1*DU + 2
-          - Exact: [128, 128, 1, 134]   # K = 2*DU + 6
-          - Exact: [128, 128, 2,  10]
+          # K = 1*DU + 8 — coarse mask path on the same shape
+          - Exact: [320, 288, 1,  72]
 
   ########################################
-  # BBS TN — BF16 bias epilogue + activation, DU = 2*MI_K = 64
+  # BF16 TN — MT 320x288, ASEM=1 (odd K: runtime-gated mod>0 chain
+  # in the sub-lane byte refine).
   ########################################
   -
     - # ProblemType
@@ -154,18 +134,15 @@ BenchmarkProblems:
       TransposeB: 0
       UseBeta: True
       Batched: True
-      Activation: True
-      ActivationType: hipblaslt_all
-      UseBias: 1
-      BiasDataTypeList: [s]
+      ActivationFuncCall: True
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
-        - PrefetchGlobalRead: [0, 1, 2]
+          - [16, 16, 32, 1,  1, 5, 18,  4, 1]  # MT 320x288 (4x1 WG)
+        - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -173,14 +150,9 @@ BenchmarkProblems:
         - StreamK: [0, 3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
-        - AssertSummationElementMultiple: [2]
+        - AssertSummationElementMultiple: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1,  66]   # K = 1*DU + 2, with bias
-          - Exact: [128, 128, 1,  78]   # K = 1*DU + 14, with bias
-        - BiasTypeArgs: ['s']
-        - ActivationArgs:
-          - [Enum: none]
-          - [Enum: relu]
-          - [Enum: gelu]
+          # K = 1*DU + 1 — odd K_remain triggering byte-refine partial-mod chain
+          - Exact: [320, 288, 1,  65]

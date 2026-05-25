@@ -639,6 +639,7 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
   return module
 
+
 ##################################################
 # Subroutine to generate LR load code
 # Initial idea: maybe store asm in modules in a separate obj?

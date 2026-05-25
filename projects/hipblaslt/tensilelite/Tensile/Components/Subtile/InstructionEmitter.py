@@ -77,17 +77,15 @@ class InstructionEmitter:
 
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
-            'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
-            'lr':           lambda em, ui: self.emit_lr(em.source, ui),
-            'gr':           lambda em, ui: self.emit_gr(em.source),
-            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
-            'wait_lr':      lambda em, ui: self.emit_wait_lr(),
-            'sync':         lambda em, ui: self.emit_sync(),
-            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
-            'gr_ptr_inc':   lambda em, ui: self.emit_gr_ptr_inc(em.source),
-            'gr_lds_swap':  lambda em, ui: self.emit_gr_lds_swap(em.source),
-            'skip':         lambda em, ui: self.emit_skip(em.source),
+            'mfma':     lambda em, ui: self.emit_mfma(em.source, ui),
+            'lr':       lambda em, ui: self.emit_lr(em.source, ui),
+            'gr':       lambda em, ui: self.emit_gr(em.source),
+            'wait_gr':  lambda em, ui: self.emit_wait_gr(em.source),
+            'wait_lr':  lambda em, ui: self.emit_wait_lr(),
+            'sync':     lambda em, ui: self.emit_sync(),
+            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source),
+            'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source),
+            'skip':     lambda em, ui: self.emit_skip(em.source),
         }
 
     def emit_mfma(self, placement, unroll_iter=0):
@@ -221,31 +219,6 @@ class InstructionEmitter:
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
-        return list(module.flatitems())
-
-    def emit_gr_ptr_inc(self, source):
-        """Emit globalReadPtrUpdates only (SRD advance, no LDS-buffer toggle).
-
-        Used by preloop's PGR=2 path so the SRD advance can happen
-        unconditionally while the LDS swap (`emit_gr_lds_swap`) is gated
-        by the `SkipOp(LE 1, NLL)` jump over GR(MT 1). See PR #7636
-        nakajee review on the small-counter realign.
-        """
-        tensor = source.tensor
-        tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        module = Module()
-        if tensor in ('SA', 'SB'):
-            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
-        else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        return list(module.flatitems())
-
-    def emit_gr_lds_swap(self, source):
-        """Emit globalReadLDSBufferSwap only (LDS-buffer toggle, no SRD advance)."""
-        tensor = source.tensor
-        tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        module = Module()
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 

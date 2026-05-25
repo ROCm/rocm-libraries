@@ -14,10 +14,6 @@ two test suites have different kernel-builder helpers
 in `gpu_test_helpers`). Once a caller has a kernel dict it passes it
 to `build_minimal_subtile_kwa(kernel)` to get a fully-wired
 `KernelWriterAssembly` ready for a single scaffold emit.
-
-See `Components/Subtile/docs/subtile-tailloop-emit-points.md` section 5b
-for the design rationale (why the scaffold is driven directly rather
-than through the full subtile kernel emit path).
 """
 
 import shutil

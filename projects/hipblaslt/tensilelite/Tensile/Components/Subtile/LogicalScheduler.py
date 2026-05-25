@@ -348,15 +348,7 @@ class LRIncOp(BaseOp):
 
 @dataclass
 class GRIncOp(BaseOp):
-    """Pointer update + LDS swap for global reads on a specific tensor.
-
-    The compound op is used in mainloop placements via `assign_grinc_lrinc`,
-    where SRD advance and LDS-buffer toggle always happen together as a
-    pair (one mainloop iter consumes one LDS half and prefetches into the
-    other). Preloop instead splits the two halves via `GRPtrIncOp` +
-    `GRLDSwapOp` so the LDS toggle can sit under the `SkipOp(LE 1, NLL)`
-    guard while the SRD advance still happens unconditionally.
-    """
+    """Pointer update + LDS swap for global reads on a specific tensor."""
     tensor: str = ""
 
     def __post_init__(self):
@@ -364,43 +356,6 @@ class GRIncOp(BaseOp):
 
     def __str__(self):
         return f"gr_inc({self.tensor})"
-
-
-@dataclass
-class GRPtrIncOp(BaseOp):
-    """SRD pointer advance only (no LDS-buffer toggle).
-
-    Used in preloop alongside `GRLDSwapOp` so the SRD advance can happen
-    unconditionally (the tail body needs SRD pointing at the right K for
-    every origCounter value, even when GR(MT 1) is bypassed by
-    `SkipOp(LE 1, NLL)`).
-    """
-    tensor: str = ""
-
-    def __post_init__(self):
-        self.kind = 'gr_ptr_inc'
-
-    def __str__(self):
-        return f"gr_ptr_inc({self.tensor})"
-
-
-@dataclass
-class GRLDSwapOp(BaseOp):
-    """LDS double-buffer toggle for global reads (no SRD advance).
-
-    Paired with `GRPtrIncOp` in preloop so the LDS swap can be placed
-    under the `SkipOp(LE 1, NLL)` guard. Skipping the swap when
-    origCounter <= 1 leaves LWA aligned with the LR buffer half that
-    actually got drained, removing the need for a tail-time XOR-back
-    realign for the small-counter case (per nakajee review on PR #7636).
-    """
-    tensor: str = ""
-
-    def __post_init__(self):
-        self.kind = 'gr_lds_swap'
-
-    def __str__(self):
-        return f"gr_lds_swap({self.tensor})"
 
 
 @dataclass
@@ -2192,23 +2147,13 @@ class LogicalScheduler:
                 SkipOp(compare='LE', value=1, target='NLL'),
             ])
         else:
-            # PGR=2: split the n→n+1 GR_INC into ptr-inc (always fires;
-            # the tail body relies on Srd<tc> being advanced by one DU
-            # regardless of origCounter) and lds-swap (fires only when
-            # we will actually use the swapped LDS half, i.e. when
-            # GR(MT 1) is not bypassed by `SkipOp(LE 1, NLL)`). For
-            # origCounter==1 the swap is skipped, leaving LWA aligned
-            # with the LR buffer half that NLL drains from, so the
-            # subtile tail scaffold no longer needs a small-counter
-            # XOR-back realign. See nakajee PR #7636 review comment.
             emitted = self._to_emitted([
                 *self._make_gr_all_tensors(0, all_tiles),
-                *self._make_depops_all_tensors(GRPtrIncOp),
+                *self._make_depops_all_tensors(GRIncOp),
                 WaitGROp(wait_gr_counts=WaitGRCounts()),
                 SyncOp(),
                 *self._make_lr_all_tensors(lr_tiles),
                 SkipOp(compare='LE', value=1, target='NLL'),
-                *self._make_depops_all_tensors(GRLDSwapOp),
                 *self._make_preloop_mt1_grs(),
                 SkipOp(compare='LE', value=2, target='NGLL'),
             ])

@@ -29,6 +29,10 @@ Pins:
   - At ASEM=1 (strictest case: triggers the `aemA*bpeA % 4 != 0` outer
     guard in `Solution.py`), `NonDTLTailLoop{A,B}` stays False because
     the inner guards include `and not state["UseSubtileImpl"]`.
+  - The UseSubtileImpl narrowing to gfx950 must run BEFORE the
+    NonDTLTailLoop gates (covered by `TestSubtileBf16NonGfx950Gate`).
+  - The B-side gate also fires when TLUB is False (covered by
+    `_build_subtile_bf16_state_nt`).
   - MX subtile still bumps to 32 via `minASEMforMX`.
 """
 import pytest
@@ -50,25 +54,33 @@ _isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, _cxxCompiler)
 
 # ── State factories ──────────────────────────────────────────────────────────
 
-def _build_subtile_bf16_state(*, asem=8, depthU=64, mt0=128, mt1=128):
-    """State factory for a subtile BF16 (TN) kernel, no MX scales."""
+def _build_subtile_bf16_state(*, asem=8, depthU=64, mt0=128, mt1=128,
+                              transA=True, transB=False, isa=None):
+    """State factory for a subtile BF16 kernel, no MX scales.
+
+    Defaults to TN (transA=True, transB=False) for backward compat with
+    pre-existing tests; `transA=False, transB=True` produces the NT
+    layout that exercises the B-side `NonDTLTailLoopB` gate.
+    `isa` overrides the target ISA (default gfx950).
+    """
     config = yaml.safe_load(
-        """
+        f"""
         ProblemType:
           OperationType: GEMM
           DataType: b
           DestDataType: b
           ComputeDataType: s
           HighPrecisionAccumulate: True
-          TransposeA: True
-          TransposeB: False
+          TransposeA: {transA}
+          TransposeB: {transB}
           UseBeta: True
           Batched: True
           StridedBatched: True
           ActivationFuncCall: True
         """
     )
-    isa = IsaVersion(9, 5, 0)
+    if isa is None:
+        isa = IsaVersion(9, 5, 0)
     mi = [16, 16, 32, 1, 1, mt0 // 64, mt1 // 64, 2, 2]
     mi_params = matrixInstructionToMIParameters(
         mi, isa, 64, config["ProblemType"], [16, 16, 1], _isaInfoMap
@@ -98,6 +110,17 @@ def _build_subtile_bf16_state(*, asem=8, depthU=64, mt0=128, mt1=128):
     state.update(mi_params)
     state["ProblemType"] = ProblemType(config["ProblemType"], False)
     return state
+
+
+def _build_subtile_bf16_state_nt(*, asem=8, depthU=64, mt0=128, mt1=128,
+                                 isa=None):
+    """NT-layout (transA=False, transB=True) factory: exercises the
+    B-side gate at Solution.py because TLUB is False here.
+    """
+    return _build_subtile_bf16_state(
+        asem=asem, depthU=depthU, mt0=mt0, mt1=mt1,
+        transA=False, transB=True, isa=isa,
+    )
 
 
 def _build_subtile_mx_state(*, asem=16, depthU=256, mt0=128, mt1=128):
@@ -217,6 +240,9 @@ class TestSubtileBf16KeepsDTL:
     True` for a subtile kernel; the subtile tail-loop emit path is
     structurally DTL-only and masks its own tail at sub-dword
     granularity.
+
+    TN layout exercises the A-side gate (`TLUA=False`); NT layout
+    exercises the B-side gate (`TLUB=False`). Both must stay on DTL.
     """
 
     def test_subtile_bf16_asem_1_keeps_dtl(self):
@@ -230,6 +256,72 @@ class TestSubtileBf16KeepsDTL:
         assert state.get("NonDTLTailLoopB") is False, (
             f"bf16 subtile ASEM=1: NonDTLTailLoopB = "
             f"{state.get('NonDTLTailLoopB')} (expected False)."
+        )
+
+    def test_subtile_bf16_asem_1_keeps_dtl_nt(self):
+        """NT mirror of the TN test. On NT (`TLUB=True`) the B-side
+        inner gate's `not TLUB` clause is False, so the gate never
+        reaches `not UseSubtileImpl`. The result is still
+        `NonDTLTailLoopB=False`, but via a different code path. This
+        pins the property end-to-end across both layouts.
+        """
+        state = _build_subtile_bf16_state_nt(asem=1, depthU=64)
+        _run_assign_problem_independent(state)
+
+        assert state.get("NonDTLTailLoopA") is False, (
+            f"bf16 subtile NT ASEM=1: NonDTLTailLoopA = "
+            f"{state.get('NonDTLTailLoopA')} (expected False)."
+        )
+        assert state.get("NonDTLTailLoopB") is False, (
+            f"bf16 subtile NT ASEM=1: NonDTLTailLoopB = "
+            f"{state.get('NonDTLTailLoopB')} (expected False)."
+        )
+
+
+# ── Tests: UseSubtileImpl narrowing happens before NonDTL gate ──────────────
+
+class TestSubtileBf16NonGfx950Gate:
+    """Pin the ordering between the gfx950 narrowing and the NonDTL
+    gates: on a non-gfx950 ISA an explicit `UseSubtileImpl=True` must
+    be narrowed to False BEFORE the NonDTL gates run, so the kernel
+    ends up on the legacy NonDTL path *with* `NonDTLTailLoop`
+    populated rather than silently on the legacy path with the flag
+    still False.
+
+    The B-side inner gate requires `not TLUB`; on the TN layout
+    (`TransposeA=True, TransposeB=False`) both `TLUA` and `TLUB` are
+    False, so both A- and B-side gates can fire. NT (`TLUB=True`)
+    short-circuits both inner gates before they ever look at
+    `UseSubtileImpl`, so it cannot exercise the ordering bug.
+    """
+
+    def test_non_gfx950_falls_back_with_nondtl_tail(self):
+        # Build a valid gfx950 MI-params dict, then override the ISA
+        # to gfx900 so the narrowing fires when derivation runs. TN
+        # layout (`TLUA=False, TLUB=False`) is required for the inner
+        # gates to reach the `not UseSubtileImpl` clause.
+        state = _build_subtile_bf16_state(asem=1, depthU=64,
+                                          transA=True, transB=False)
+        state["ISA"] = IsaVersion(9, 0, 0)
+        state["UseSubtileImpl"] = True
+
+        _run_assign_problem_independent(state)
+
+        assert state.get("UseSubtileImpl") is False, (
+            "Non-gfx950 ISA must narrow UseSubtileImpl to False, got "
+            f"{state.get('UseSubtileImpl')}."
+        )
+        assert state.get("NonDTLTailLoopA") is True, (
+            "Non-gfx950 + TN + ASEM=1 must end up on the legacy "
+            "NonDTL path with NonDTLTailLoopA=True. Got "
+            f"{state.get('NonDTLTailLoopA')}. The narrowing of "
+            "UseSubtileImpl must run BEFORE the NonDTL gate."
+        )
+        assert state.get("NonDTLTailLoopB") is True, (
+            "Non-gfx950 + TN + ASEM=1 must end up on the legacy "
+            "NonDTL path with NonDTLTailLoopB=True. Got "
+            f"{state.get('NonDTLTailLoopB')}. The narrowing of "
+            "UseSubtileImpl must run BEFORE the NonDTL gate."
         )
 
 

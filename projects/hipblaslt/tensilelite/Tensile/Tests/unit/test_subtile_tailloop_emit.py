@@ -133,10 +133,8 @@ def _build_minimal_kwa(kernel):
 def _emit_tail_loop_asm(*, fp4: bool, no_tail_loop: bool, pgr: int) -> str:
     """Drive `KernelWriter._emitTailLoopScaffoldSubtile` and return the
     flat asm string. The scaffold runs for all PGR values; PGR>0 layers
-    a single `origCounter < PGR` entry-gate branch (covering both the
-    upstream-skipped c=0 case and the small-counter c=1 case) plus a
-    +1 DU SRD advance for the large-counter case on top of the PGR=0
-    baseline.
+    the entry-gate branches (c=0 reset / small-counter realign /
+    +1 DU SRD advance) on top of the PGR=0 baseline.
     """
     kernel = _create_kernel(256, 256, fp4=fp4,
                             depthU=256 if fp4 else 64,
@@ -149,6 +147,51 @@ def _emit_tail_loop_asm(*, fp4: bool, no_tail_loop: bool, pgr: int) -> str:
     module = kwa._emitTailLoopScaffoldSubtile(kernel, tPA, tPB)
 
     return wrap_with_skiptoend(module)
+
+
+def _collect_per_mmak_early_exit_thresholds(tail: str):
+    """Walk the tail asm in order and return the `MIK*(subIterK+1)`
+    threshold value for each per-mmak early-exit cmp, in emission
+    order. Accepts both forms emitted by
+    `_emitSubtileScalarCmpLitOrStaged`:
+
+      * Inline (threshold in [-16..64]):
+          `s_cmp_le_u32 ..., 0xN ... MIK*(subIterK+1)?`
+      * Staged (threshold > 64 or < -16):
+          `s_mov_b32 sN, 0xT ... stage literal T (non-inline) for cmp src1`
+          `s_cmp_le_u32 ..., sN ... MIK*(subIterK+1)?`
+
+    Pairs each cmp with its immediately-preceding staging mov by
+    matching sgpr name (so a future ordering change doesn't silently
+    cross-pair).
+    """
+    thresholds = []
+    pending_stage = {}  # sgpr name -> staged literal value
+    for line in tail.split("\n"):
+        m_stage = re.search(
+            r"s_mov_b32\s+s(\d+)\s*,\s*(0x[0-9a-fA-F]+)[^\n]*"
+            r"stage literal\s+(-?\d+)\s+\(non-inline\) for cmp src1", line)
+        if m_stage:
+            pending_stage["s" + m_stage.group(1)] = int(m_stage.group(2), 0)
+            continue
+        if "MIK*(subIterK+1)" not in line:
+            continue
+        m_inline = re.search(
+            r"s_cmp_le_u32[^\n]*sgprLoopCounterL[^\n]*,\s*(0x[0-9a-fA-F]+)",
+            line)
+        if m_inline:
+            thresholds.append(int(m_inline.group(1), 0))
+            continue
+        m_staged = re.search(
+            r"s_cmp_le_u32[^\n]*sgprLoopCounterL[^\n]*,\s*(s\d+)\b", line)
+        assert m_staged, "per-mmak cmp didn't match inline or staged form: %r" % line
+        sg = m_staged.group(1)
+        assert sg in pending_stage, (
+            "per-mmak cmp references %s but no preceding "
+            "`stage literal ... (non-inline) for cmp src1` s_mov_b32 "
+            "was found for it.\nLine: %r" % (sg, line))
+        thresholds.append(pending_stage.pop(sg))
+    return thresholds
 
 
 def _extract_tail_section(asm: str) -> str:
@@ -511,16 +554,197 @@ class TestTailEmitContent_PGR0:
             "SkipTailLoopL must remain emitted even with NoTailLoop=True"
         assert not re.search(r"s_sub_u32.*SrdA.*K_rem", asm)
 
+    def test_emits_per_mmak_early_exit(self, bf16_pgr0_asm):
+        """After each non-final mmak the scaffold must emit
+        `s_cmp_le_u32 LoopCounterL, MIK*(mmak+1)` + `s_cbranch_scc1
+        label_SkipTailLoopL`. Once LoopCounterL is consumed by the
+        mmaks already issued, remaining mmaks operate on lanes that
+        the cndmask + sub-lane refine have already zeroed -- branching
+        past them skips wasted MFMA cycles.
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail, "No tail block emitted"
+        cmpMatches = re.findall(
+            r"s_cmp_le_u32[^\n]*sgprLoopCounterL[^\n]*MIK\*\(subIterK\+1\)",
+            tail)
+        brMatches = re.findall(
+            r"s_cbranch_scc1[^\n]*label_SkipTailLoopL[^\n]*early-exit tail",
+            tail)
+        assert cmpMatches, (
+            "Tail must emit at least one per-mmak `s_cmp_le_u32 LoopCounterL, "
+            "MIK*(subIterK+1)` early-exit guard.\nTail excerpt:\n" + tail[-1500:]
+        )
+        assert len(cmpMatches) == len(brMatches), (
+            "Per-mmak early exit must pair s_cmp_le_u32 with s_cbranch_scc1; "
+            "got %d cmps vs %d branches" % (len(cmpMatches), len(brMatches))
+        )
+
+    def test_per_mmak_early_exit_threshold_progression(self, fp4_pgr0_asm):
+        """Each emitted per-mmak early exit must compare against
+        `MIK * (subIterK + 1)`, so the threshold strictly increases
+        with subIterK. Pins the formula rather than a fixed value
+        (so future tile-grid changes don't silently corrupt it).
+
+        gfx950 VOPC/SOPC inline-constant range is -16..64, so a
+        threshold > 64 (FP4 MIK=128 hits every entry) is staged via
+        `s_mov_b32 sN, <lit> ... stage literal <lit> (non-inline) for
+        cmp src1` immediately before the cmp; thresholds in range
+        appear directly as a hex literal in the cmp's src1.
+        """
+        tail = _extract_tail_section(fp4_pgr0_asm)
+        assert tail
+        thresholds = _collect_per_mmak_early_exit_thresholds(tail)
+        assert thresholds, (
+            "Tail must emit at least one per-mmak `s_cmp_le_u32 LoopCounterL, "
+            "MIK*(subIterK+1)`"
+        )
+        miK = 128  # FP4 fixture: MatrixInstK
+        for idx, thr in enumerate(thresholds):
+            assert thr == miK * (idx + 1), (
+                "Per-mmak early-exit threshold[%u]=%#x must equal "
+                "MIK*(subIterK+1)=%#x" % (idx, thr, miK * (idx + 1))
+            )
+
+    def test_per_mmak_early_exit_omits_after_final_mmak(self, bf16_pgr0_asm):
+        """The final mmak's natural exit is the closeLoop sub +
+        single-iter zero, so emitting an early-exit after it would be
+        wasted asm. Pin that the early-exit branch count == mmak count
+        - 1 (one branch between every consecutive mmak pair, none
+        after the last).
+
+        The bf16 fixture has localMMATileGrid[1] == 2 -> exactly one
+        early-exit branch in the tail. If the production tile grid
+        changes, this pin still holds via the parameterised count.
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        brCount = len(re.findall(
+            r"s_cbranch_scc1[^\n]*label_SkipTailLoopL[^\n]*early-exit tail",
+            tail))
+        # bf16 fixture: MIK=32, DepthU=64 -> 2 mmak iters, so 1 exit.
+        assert brCount == 1, (
+            "bf16 fixture should emit exactly 1 per-mmak early exit "
+            "(localMMATileGrid[1]=2 -> mmak in {0,1}, exit only after "
+            "mmak=0). Got %d.\nTail excerpt:\n%s"
+            % (brCount, tail[-2000:])
+        )
+
+    def test_per_mmak_early_exit_absent_when_NoTailLoop(self):
+        """NoTailLoop=True elides the entire tail body, so no per-mmak
+        early-exit should be emitted anywhere.
+        """
+        asm = _emit_tail_loop_asm(fp4=False, no_tail_loop=True, pgr=0)
+        assert not re.search(
+            r"s_cmp_le_u32[^\n]*sgprLoopCounterL[^\n]*MIK\*\(subIterK\+1\)",
+            asm
+        ), "NoTailLoop must not emit per-mmak early exits"
+
+    def test_per_mmak_early_exit_inline_when_consumedK_fits(self, bf16_pgr0_asm):
+        """BF16 fixture has MIK=32, DepthU=64 -> the only per-mmak
+        threshold is `32 * 1 = 32`, which fits the gfx950 inline range
+        [-16..64]. The scaffold must emit the cmp with the literal
+        directly in src1 -- NO staging `s_mov_b32 sN, 0x20 ... stage
+        literal ... for cmp src1` should appear before the cmp.
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        thresholds = _collect_per_mmak_early_exit_thresholds(tail)
+        assert thresholds == [32], (
+            "BF16 fixture expected one cmp at consumedK=32. Got %r" % (thresholds,)
+        )
+        assert not re.search(
+            r"s_mov_b32[^\n]*stage literal\s+32\s+\(non-inline\)", tail), (
+            "consumedK=32 fits the gfx950 inline range; the scaffold "
+            "must NOT stage it through a scratch sgpr."
+        )
+        assert re.search(
+            r"s_cmp_le_u32[^\n]*sgprLoopCounterL[^\n]*,\s*0x20\b"
+            r"[^\n]*MIK\*\(subIterK\+1\)", tail), (
+            "consumedK=32 must appear as a direct inline literal 0x20 "
+            "in the s_cmp_le_u32 src1."
+        )
+
+    def test_per_mmak_early_exit_staged_when_consumedK_exceeds_inline(self, fp4_pgr0_asm):
+        """FP4 fixture has MIK=128 -> every per-mmak threshold is
+        128, 256, ... (all > 64). The scaffold must stage each via
+        `s_mov_b32 sN, 0xT ... stage literal T (non-inline) for cmp
+        src1` before the cmp, and the cmp's src1 must reference an
+        sgpr (not a raw literal).
+        """
+        tail = _extract_tail_section(fp4_pgr0_asm)
+        assert tail
+        cmpLines = [ln for ln in tail.split("\n")
+                    if "MIK*(subIterK+1)" in ln and "s_cmp_le_u32" in ln]
+        assert cmpLines, "Expected at least one per-mmak early-exit cmp in FP4 tail"
+        for ln in cmpLines:
+            assert re.search(
+                r"s_cmp_le_u32[^\n]*sgprLoopCounterL[^\n]*,\s*s\d+\b", ln), (
+                "FP4 per-mmak early-exit cmp must use a staged sgpr "
+                "(consumedK >= 128 exceeds the gfx950 inline range).\n"
+                "Got: %r" % ln
+            )
+        stageCount = len(re.findall(
+            r"s_mov_b32[^\n]*stage literal\s+\d+\s+\(non-inline\) for cmp src1",
+            tail))
+        assert stageCount == len(cmpLines), (
+            "Each staged cmp must have exactly one preceding `stage "
+            "literal ... (non-inline) for cmp src1` s_mov_b32. "
+            "Got %d stages for %d cmps." % (stageCount, len(cmpLines))
+        )
+
+    def test_per_mmak_early_exit_boundary_consumedK_64(self):
+        """Direct-vs-staged boundary: consumedK == 64 sits at the high
+        end of the gfx950 inline range and must remain inline. Drives
+        a custom bf16 fixture with DU=128 -> mmak ∈ {0,1,2,3} so the
+        first non-final boundary (mmak=0 -> consumedK=32) and the
+        second (mmak=1 -> consumedK=64) both fit inline, while
+        mmak>=2 (consumedK >= 96) must stage. Pins that 64 is treated
+        as the inclusive upper bound.
+        """
+        kernel = _create_kernel(MT0=256, MT1=256, fp4=False, depthU=128,
+                                no_tail_loop=False)
+        _augment_kernel_for_tail_scaffold(kernel, pgr=0)
+        kwa = _build_minimal_kwa(kernel)
+        tPA = {"is_sparse": False, "tpsMetadata": None}
+        tPB = {"is_sparse": False, "tpsMetadata": None}
+        module = kwa._emitTailLoopScaffoldSubtile(kernel, tPA, tPB)
+        tail = _extract_tail_section(wrap_with_skiptoend(module))
+        assert tail
+        thresholds = _collect_per_mmak_early_exit_thresholds(tail)
+        # DU=128, MIK=32 -> 4 mmaks -> 3 non-final boundaries:
+        #   consumedK = 32, 64, 96.
+        assert thresholds == [32, 64, 96], (
+            "Expected DU=128 bf16 fixture to emit 3 per-mmak early "
+            "exits at consumedK in {32,64,96}; got %r" % (thresholds,)
+        )
+        # 32 and 64 must NOT be staged; 96 MUST be staged.
+        assert not re.search(
+            r"s_mov_b32[^\n]*stage literal\s+32\s+\(non-inline\)", tail), (
+            "consumedK=32 must not be staged (inline range)."
+        )
+        assert not re.search(
+            r"s_mov_b32[^\n]*stage literal\s+64\s+\(non-inline\)", tail), (
+            "consumedK=64 must not be staged: 64 is the inclusive "
+            "upper bound of the gfx950 inline-constant range."
+        )
+        assert re.search(
+            r"s_mov_b32[^\n]*stage literal\s+96\s+\(non-inline\) for cmp src1",
+            tail), (
+            "consumedK=96 exceeds the gfx950 inline range and must be "
+            "staged through a scratch sgpr."
+        )
+
 
 # ── Tests: PGR=2 ─────────────────────────────────────────────────────────────
 
 class TestTailEmitContent_PGR2:
     """PGR=2 (scheduler-managed prefetch) tail-emit assertions.
 
-    The PGR>0 path reuses the PGR=0 scaffold and layers a single
-    `origCounter < PGR` entry-gate branch (covering both c=0 and
-    small-counter cases — both handled upstream in preLoop) plus a
-    +1 DU SRD advance for the large-counter case (origCounter >= PGR).
+    The PGR>0 path reuses the PGR=0 scaffold and layers three mutually-
+    exclusive entry-gate branches on top, keyed off origCounter:
+      - c == 0:                reset (zero accD, undo preLoop GR_INC).
+      - 0 < origCounter < PGR: small-counter LWA realign.
+      - origCounter >= PGR:    +1 DU SRD advance.
     The assertions below pin the structural presence of each gate;
     they avoid coupling to alloc-order-dependent sgpr/imm operands.
     """
@@ -537,72 +761,108 @@ class TestTailEmitContent_PGR2:
         """PGR=2 must reuse the same SkipTailLoopL label as PGR=0."""
         assert "SkipTailLoopL:" in fp4_pgr2_asm
 
-    def test_emits_origCounter_snapshot(self, fp4_pgr2_asm):
-        r"""PGR>0 must snapshot `OrigLoopCounter` before
-        `calculateLoopNumIter` resets it; the entry-gate decisions
-        downstream need the original K // DU value.
+    def test_omits_origCounter_snapshot_after_hoist(self, fp4_pgr2_asm):
+        r"""PGR>0 tail-entry gating is now hoisted ABOVE
+        `calculateLoopNumIter` (per sebvince #PR-7683 design), so the
+        `s_mov_b32 sX, sgprOrigLoopCounter ... snapshot K//DU` SGPR
+        snapshot is no longer needed -- the gate cmps read
+        `sgprOrigLoopCounter` directly while it still holds the
+        original K//DU value (calculateLoopNumIter zeroes it).
         """
-        assert re.search(
+        assert not re.search(
             r"s_mov_b32\s+s\[?\d+\]?,\s*s\[sgprOrigLoopCounter\][^\n]*snapshot K//DU",
             fp4_pgr2_asm
         ), (
-            "PGR=2 must snapshot OrigLoopCounter before "
-            "calculateLoopNumIter overwrites it. Asm head:\n"
+            "PGR=2 must NOT emit the legacy OrigLoopCounter snapshot "
+            "(the gating block reads sgprOrigLoopCounter directly now "
+            "that it sits before calculateLoopNumIter).\nAsm head:\n"
             + fp4_pgr2_asm[:2500]
         )
 
-    def test_emits_lt_pgr_compare_and_branch(self, fp4_pgr2_asm):
-        """A single `origCounter < PGR` compare routes BOTH the c=0
-        (upstream-skipped) and the small-counter (PGR=2 origCounter==1)
-        cases directly into the tail body (PGRTailEntry<L>), skipping
-        the large-counter SRD-advance path.
+    def test_gating_reads_OrigLoopCounter_directly(self, fp4_pgr2_asm):
+        r"""After the hoist, the c=0 cmp must source from
+        `sgprOrigLoopCounter` directly (not a scratch snapshot sgpr).
+        """
+        tail = _extract_tail_section(fp4_pgr2_asm)
+        assert tail
+        assert re.search(
+            r"s_cmp_eq_u32\s+s\[sgprOrigLoopCounter\][^\n]*\b0\b"
+            r"[^\n]*origCounter == 0", tail
+        ), (
+            "PGR=2 c=0 gate must compare sgprOrigLoopCounter directly "
+            "against 0 (no intermediate snapshot sgpr).\nTail head:\n"
+            + tail[:1500]
+        )
 
-        Background: with the upstream `SkipSubtileMainLoop<L>` gate
-        (kernelBodySubtile) and the preloop `GRPtrIncOp` /
-        `GRLDSwapOp` split (LogicalScheduler.build_preloop, PGR=2
-        branch), neither c=0 nor c=1 requires any in-tail SRD/LWA
-        fix-up. The pre-refactor shape (separate `s_cmp_eq_u32 == 0`
-        + `s_cmp_lt_u32 < PGR` with a `PGRTailSmallCounterRealign<L>`
-        XOR-back block) was collapsed into one compare per nakajee
-        PR #7636 review on the small-counter case.
+    def test_gating_block_precedes_TailLoopBeginL(self, fp4_pgr2_asm):
+        r"""Per sebvince #PR-7683 design, the PGR>0 SRD-advance / LWA-
+        XOR gating block must sit BEFORE `TailLoopBeginL` (the openLoop
+        label) AND BEFORE the calculateLoopNumIter K%DU==0 early-exit
+        cmp/branch. Pin by checking the c=0 origCounter cmp appears
+        before the SkipTailLoopL early-exit cmp/branch.
+        """
+        tail = _extract_tail_section(fp4_pgr2_asm)
+        assert tail
+        c0_pos = tail.find("origCounter == 0")
+        early_exit_pos = tail.find("skip to end of tail loop")
+        assert c0_pos >= 0, "c=0 origCounter gate not found in tail"
+        assert early_exit_pos >= 0, (
+            "calculateLoopNumIter's K%DU==0 early-exit not found in tail"
+        )
+        assert c0_pos < early_exit_pos, (
+            "PGR>0 gating block must precede the K%%DU==0 early-exit "
+            "cmp/branch (c0_pos=%d, early_exit_pos=%d).\n"
+            "Tail head:\n%s" % (c0_pos, early_exit_pos, tail[:2500])
+        )
+        # And the gating block must precede TailLoopBeginL too.
+        tail_begin_pos = tail.find("TailLoopBeginL")
+        if tail_begin_pos >= 0:
+            assert c0_pos < tail_begin_pos, (
+                "PGR>0 gating must precede TailLoopBeginL "
+                "(c0_pos=%d, tail_begin=%d)." % (c0_pos, tail_begin_pos)
+            )
+
+    def test_emits_c0_reset_compare_and_branch(self, fp4_pgr2_asm):
+        """For origCounter==0, the tail scaffold's c=0 compare branches
+        directly into the tail body (PGRTailEntry<L>), skipping the
+        small-counter realign and large-counter SRD-advance paths.
+
+        Background: with the upstream SkipSubtileMainLoop<L> gate in
+        kernelBodySubtile (added per reviewer comment), origCounter==0
+        skips the entire preLoop / mainloop / NGLL / NLL block. SRDs
+        stay at K=0, LWA/LRA stay at buf 0, accD stays at zero — so the
+        tail body just needs to run as-is, no undo needed. The legacy
+        PGRTailC0Reset<L> block (which used to live here) is gone.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail, (
             "Tail section not extractable.\n"
             "Full asm head:\n" + fp4_pgr2_asm[:2500]
         )
-        # Single `< PGR` compare; the literal `, 2` immediate pins
-        # the PGR=2 case (rather than the unrelated `... , 0` of an
-        # unrolled c=0 compare).
-        assert re.search(
-            r"s_cmp_lt_u32[^\n]*\b2\b[^\n]*origCounter < PGR", tail
-        ), (
-            "Tail must emit a single `s_cmp_lt_u32 ..., 2` for the "
-            "combined c=0 + small-counter gate. Tail head:\n"
-            + tail[:1500]
-        )
-        # The dedicated c=0 compare (`s_cmp_eq_u32 ..., 0 ... "
-        # origCounter == 0"`) is gone — only the `< PGR` compare
-        # remains.
-        assert not re.search(
-            r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail
-        ), (
-            "Tail must NOT emit the legacy dedicated c=0 compare "
-            "(folded into the `< PGR` compare)."
+        # Match on the literal `, 0` immediate of the c=0 cmp.
+        assert re.search(r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail), (
+            "Tail must emit `s_cmp_eq_u32 ..., 0` for the c=0 gate"
         )
         assert re.search(
             r"s_cbranch_scc1[^\n]*PGRTailEntry", tail
         ), (
-            "Tail must conditionally branch to PGRTailEntry<L> on "
-            "the `< PGR` compare hit."
+            "Tail must conditionally branch to PGRTailEntry<L> on the "
+            "c=0 compare hit (the legacy PGRTailC0Reset<L> block has "
+            "been replaced by an upstream skip gate)"
         )
+        # The c=0 path must NOT branch to SkipTailLoopL or
+        # PGRTailC0Reset (legacy): pin by checking the c=0 cmp's
+        # matching branch points at PGRTailEntry.
         assert "PGRTailC0Reset" not in tail, (
-            "Tail must not reference the legacy PGRTailC0Reset block."
+            "Tail must no longer reference the legacy PGRTailC0Reset "
+            "block (handled upstream by SkipSubtileMainLoop<L>)"
         )
-        assert "PGRTailSmallCounterRealign" not in tail, (
-            "Tail must not reference the legacy "
-            "PGRTailSmallCounterRealign block."
-        )
+        c0_cmp_pos = tail.find("origCounter == 0")
+        if c0_cmp_pos >= 0:
+            after_c0 = tail[c0_cmp_pos:c0_cmp_pos + 400]
+            assert "SkipTailLoop" not in after_c0, (
+                "c=0 path must not branch to SkipTailLoopL"
+            )
 
     def test_omits_c0_reset_label(self, fp4_pgr2_asm):
         """The tail must NOT define a PGRTailC0Reset<L> label any more.
@@ -678,38 +938,21 @@ class TestTailEmitContent_PGR2:
             r"s_add_u32[^\n]*sgprSrdMXSB[^\n]*advance SrdMXSB by 1 DU", tail
         ), "MX FP4 tail must advance SrdMXSB"
 
-    def test_omits_small_counter_lwa_realign(self, fp4_pgr2_asm):
-        """The tail must NOT XOR LWA back for the small-counter
-        (PGR=2 origCounter==1) case.
-
-        Per nakajee PR #7636 review: the small-counter realign
-        moves from the tail into preLoop. `build_preloop`'s PGR=2
-        path now splits the n→n+1 GR_INC into `GRPtrIncOp` (always
-        fires) + `GRLDSwapOp` (under the `SkipOp(LE 1, NLL)`
-        guard), so for origCounter==1 the LDS swap is skipped and
-        LWA stays aligned with the LR buffer NLL drains from —
-        no in-tail XOR-back needed.
+    def test_emits_small_counter_lwa_realign(self, fp4_pgr2_asm):
+        """Small-counter (PGR=2 origCounter==1) path must XOR LWA back
+        to match the LR buffer; preLoop's lone gr_inc left it out of
+        sync with LR (NGLL never ran for counter<=1).
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
-        assert not re.search(
+        assert re.search(
             r"s_xor_b32[^\n]*LocalWriteBaseAddrA[^\n]*SwapA",
             tail
-        ), (
-            "Tail must NOT emit `s_xor_b32 LocalWriteBaseAddrA ..., "
-            "SwapA` any more (preLoop split keeps LWA aligned)."
-        )
-        assert not re.search(
+        ), "Tail must XOR LocalWriteBaseAddrA with SwapA"
+        assert re.search(
             r"s_xor_b32[^\n]*LocalWriteBaseAddrB[^\n]*SwapB",
             tail
-        ), (
-            "Tail must NOT emit `s_xor_b32 LocalWriteBaseAddrB ..., "
-            "SwapB` any more (preLoop split keeps LWA aligned)."
-        )
-        assert "PGRTailSmallCounterRealign" not in tail, (
-            "Tail must not define `PGRTailSmallCounterRealignL` "
-            "any more (folded into the single `< PGR` branch)."
-        )
+        ), "Tail must XOR LocalWriteBaseAddrB with SwapB"
 
     def test_omits_old_srd_rewind_in_main_tail_body(self, fp4_pgr2_asm):
         """No unconditional SRD rewind in the main tail body. Any
@@ -775,16 +1018,12 @@ class TestTailEmitContent_PGR2:
 class TestTailEmitContent_PGR1:
     """PGR=1 (single-buffer prefetch) tail-emit assertions.
 
-    PGR=1 has no NGLL block and no preLoop GR_INC (and thus no
-    `GRPtrIncOp` / `GRLDSwapOp` split either), so the LDS double-
-    buffers never get out of sync (LWA and LR both stay at buf 0 until
-    a mainloop iter flips both). The combined `< PGR` compare for
-    PGR=1 resolves to `< 1`, which is only true for origCounter==0 —
-    the upstream `SkipSubtileMainLoop<L>` gate already short-circuits
-    that case, so the compare's branch is inert at runtime; it is
-    still emitted for structural symmetry with PGR=2. The SRD-advance
-    branch DOES still fire for origCounter >= 1 (mainloop runs
-    `counter-1` iters, leaving SRD at `(N-1)*DU`).
+    PGR=1 has no NGLL block and no preLoop `gr_inc`, so the LDS double-
+    buffers never get out of sync (LWA and LR both stay at buf 0 until a
+    mainloop iter flips both). The small-counter realign branch is
+    therefore inert for PGR=1 (`origCounter < 1` only means `==0`, which
+    already returned via skip-tail). The SRD-advance branch DOES still
+    fire (mainloop runs `counter-1` iters, leaving SRD at `(N-1)*DU`).
     """
 
     @pytest.fixture
@@ -794,44 +1033,33 @@ class TestTailEmitContent_PGR1:
     def test_emits_SkipTailLoopL_label(self, bf16_pgr1_asm):
         assert "SkipTailLoopL:" in bf16_pgr1_asm
 
-    def test_emits_origCounter_snapshot(self, bf16_pgr1_asm):
-        assert re.search(
+    def test_omits_origCounter_snapshot_after_hoist(self, bf16_pgr1_asm):
+        """PGR=1 must NOT emit the legacy OrigLoopCounter snapshot;
+        the gating block reads sgprOrigLoopCounter directly now that
+        it sits before calculateLoopNumIter (per sebvince #PR-7683
+        design).
+        """
+        assert not re.search(
             r"s_mov_b32\s+s\[?\d+\]?,\s*s\[sgprOrigLoopCounter\][^\n]*snapshot K//DU",
             bf16_pgr1_asm
         )
 
-    def test_emits_lt_pgr_compare_and_branch(self, bf16_pgr1_asm):
-        """PGR=1 also folds c=0 into a single `origCounter < PGR`
-        compare. For PGR=1 the `< 1` compare is equivalent to
-        `== 0` at runtime (the upstream `SkipSubtileMainLoop<L>` gate
-        already filters origCounter==0 anyway), but the compare is
-        still emitted for structural symmetry with PGR=2.
+    def test_emits_c0_reset_compare_and_branch(self, bf16_pgr1_asm):
+        """PGR=1 also routes c=0 through the tail-entry gate. With the
+        upstream SkipSubtileMainLoop<L> gate, the preLoop/mainloop/NLL
+        block is skipped for origCounter==0; SRDs stay at K=0, LWA/LRA
+        at buf 0, accD at zero, so the c=0 path branches directly to
+        the tail body (PGRTailEntry<L>) — no in-tail reset needed.
         """
         tail = _extract_tail_section(bf16_pgr1_asm)
         assert tail
-        assert re.search(
-            r"s_cmp_lt_u32[^\n]*\b1\b[^\n]*origCounter < PGR", tail
-        ), (
-            "PGR=1 tail must emit `s_cmp_lt_u32 ..., 1 ... origCounter "
-            "< PGR` (combined c=0 + small-counter gate)."
-        )
-        # No dedicated `== 0` compare any more.
-        assert not re.search(
-            r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail
-        ), (
-            "PGR=1 tail must NOT emit the legacy dedicated c=0 "
-            "compare (folded into the `< PGR` compare)."
-        )
+        assert re.search(r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail)
         assert re.search(
             r"s_cbranch_scc1[^\n]*PGRTailEntry", tail
         )
         assert "PGRTailC0Reset" not in tail, (
             "PGR=1 tail must not reference the legacy PGRTailC0Reset "
             "block (handled upstream by SkipSubtileMainLoop<L>)"
-        )
-        assert "PGRTailSmallCounterRealign" not in tail, (
-            "PGR=1 tail must not define the legacy "
-            "PGRTailSmallCounterRealignL label."
         )
 
     def test_emits_srd_advance_AB(self, bf16_pgr1_asm):
@@ -863,18 +1091,575 @@ class TestTailEmitContent_PGR1:
             tail
         )
 
-    def test_emits_lt_pgr_compare_immediate(self, bf16_pgr1_asm):
-        """Pin the immediate of the `< PGR` compare to `1` (the
-        PGR=1 case). For PGR=1 the compare resolves to `< 1` and
-        catches the upstream-filtered origCounter==0 case as a
-        no-op fast-path (the upstream `SkipSubtileMainLoop<L>` gate
-        already short-circuits origCounter==0 before reaching the
-        tail). Emitted for structural symmetry with PGR=2.
+    def test_emits_small_counter_compare(self, bf16_pgr1_asm):
+        """The compare against PGR is still emitted; for PGR=1 it
+        resolves to `< 1` and is inert at runtime (origCounter==0
+        already branched away via the c=0 reset path above). Emitted
+        for structural symmetry with PGR=2.
+
+        After the sebvince #PR-7683 hoist, the source is
+        `sgprOrigLoopCounter` directly (the snapshot scratch sgpr is
+        gone), so the cmp src0 must spell out `sgprOrigLoopCounter`.
         """
         tail = _extract_tail_section(bf16_pgr1_asm)
         assert tail
-        # Source is the unnamed snapshot sgpr (rendered as `s29`);
-        # accept any `s\[?\d+\]?, 1`.
         assert re.search(
-            r"s_cmp_lt_u32\s+s\[?\d+\]?,\s*1\b[^\n]*origCounter < PGR", tail
+            r"s_cmp_lt_u32\s+s\[sgprOrigLoopCounter\],\s*1\b"
+            r"[^\n]*origCounter < PGR", tail
+        )
+
+
+# ── Tests: Srd<tc>+2 tightening at tail entry ────────────────────────────────
+
+class TestTailSrdTightenSubtile:
+    """`_emitTailSrdTightenSubtile` emit shape (nakajee #PR-7661 OOR review
+    + follow-up tightening to bpr=4 alignment).
+
+    The tightening fires once at tail entry (after the PGR>0 entry
+    gating, before openLoop), shrinks `SrdA+2` and `SrdB+2` by
+    `DepthU*bpe - roundUp(K_remain*bpe, bpr=4)`, and is gated to
+    non-MX, non-swizzled, bpe in {1,2}, symmetric A/B kernels. Earlier
+    m-rows are over-protected (handled by lane mask + sub-lane refine);
+    the tightening's job is exclusively the last m-row's last GR thread
+    which would otherwise read past A/B's allocated K bytes.
+
+    Under align-UP to bpr=4, `delta = DepthU*bpe - alignedBytes` is
+    provably >= 0, so there is NO runtime cbranch/skip-label -- when
+    delta=0 the SSubs are harmless no-ops (see nakajee #PR-7661
+    review cleanup (2)).
+    """
+
+    @pytest.fixture
+    def bf16_pgr0_asm(self):
+        return _emit_tail_loop_asm(fp4=False, no_tail_loop=False, pgr=0)
+
+    @pytest.fixture
+    def bf16_pgr2_asm(self):
+        return _emit_tail_loop_asm(fp4=False, no_tail_loop=False, pgr=2)
+
+    @pytest.fixture
+    def fp4_pgr0_asm(self):
+        return _emit_tail_loop_asm(fp4=True, no_tail_loop=False, pgr=0)
+
+    def test_emits_srd_tighten_banner(self, bf16_pgr0_asm):
+        """bf16 subtile must emit the SRD tighten comment banner so
+        the rest of the structural pins below have a stable anchor.
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        assert "OOR review" in tail or "nakajee #PR-7661" in tail, (
+            "Tail must emit the `_emitTailSrdTightenSubtile` banner "
+            "referencing the nakajee #PR-7661 OOR review.\n"
+            "Tail head:\n" + tail[:2000]
+        )
+
+    def test_emits_alignedBytes_chain(self, bf16_pgr0_asm):
+        """The aligned-K-bytes chain is the runtime fingerprint of the
+        helper: `s_lshl_b32 <s>, sgprLoopCounterL, 0x1` (bf16 bpe=2)
+        then `s_add_u32 <s>, <s>, 3` and `s_and_b32 <s>, <s>, 0xfffffffc`
+        for bpr=4 alignment (nakajee #PR-7661 follow-up cleanup #1:
+        align to bpr=4, not loadBytes=16, since BufferLoad's natural
+        granularity is bpr).
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        assert re.search(
+            r"s_lshl_b32\s+s\[?\d+\]?,\s*s\[sgprLoopCounterL\]\s*,\s*0x1\b"
+            r"[^\n]*K_remain \* bpe \(bpe=2\)",
+            tail
+        ), "Tail must compute `K_remain * bpe` via s_lshl_b32 ..., 0x1"
+        assert re.search(
+            r"s_add_u32\s+s\[?\d+\]?,\s*s\[?\d+\]?,\s*3\b"
+            r"[^\n]*\+ \(bpr-1\) for roundUp",
+            tail
+        ), "Tail must add (bpr-1)=3 before align-mask"
+        assert re.search(
+            r"s_and_b32\s+s\[?\d+\]?,\s*s\[?\d+\]?,\s*0xfffffffc\b"
+            r"[^\n]*alignedBytes = roundUp\(K_remain\*bpe, 4\)",
+            tail
+        ), (
+            "Tail must mask to align up to bpr=4 boundary "
+            "(alignMaskInv = 0xfffffffc), per nakajee follow-up #1"
+        )
+
+    def test_no_runtime_skip_branch(self, bf16_pgr0_asm):
+        """Under align-UP to bpr=4 the delta is provably non-negative
+        (`alignedBytes <= roundUp((DepthU-1)*bpe, 4) <= DepthU*bpe`
+        for bpe in {1, 2}). The runtime `s_cmp_lt_u32 alignedBytes,
+        DepthU*bpe` + `s_cbranch_scc0 TailSrdTightenSkip<L>` short-
+        circuit from the original commit is dead and must be removed
+        (nakajee #PR-7661 follow-up cleanup #2). When delta=0 the
+        two `s_sub_u32` lines become harmless no-ops.
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        # Negative pin: scan only the tightening region (lives
+        # between the banner and the first `s_sub_u32 SrdA+2` line)
+        # so we don't mis-flag an unrelated `s_cmp_lt_u32` elsewhere
+        # in the tail.
+        banner_pos = max(
+            tail.find("OOR review"),
+            tail.find("nakajee #PR-7661"),
+        )
+        srdA_match = re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\][^\n]*Srd A\+2 -= delta",
+            tail)
+        assert banner_pos >= 0 and srdA_match, (
+            "Tail must have both the SRD tighten banner and the SrdA+2 "
+            "sub. tail head:\n" + tail[:2000]
+        )
+        region = tail[banner_pos:srdA_match.end()]
+        assert not re.search(
+            r"s_cmp_lt_u32[^\n]*alignedBytes < DepthU", region
+        ), (
+            "Tail must NOT emit `s_cmp_lt_u32 alignedBytes < DepthU*bpe` "
+            "in the tighten region -- delta is provably >= 0 under "
+            "align-UP to bpr=4 (nakajee #PR-7661 cleanup #2). Region:\n"
+            + region
+        )
+        assert "TailSrdTightenSkip" not in tail, (
+            "Tail must NOT reference `TailSrdTightenSkip<L>` -- the "
+            "runtime skip-label was removed in the bpr=4 tightening "
+            "follow-up (delta is provably >= 0)."
+        )
+
+    def test_emits_srd_tighten_ssub_chain(self, bf16_pgr0_asm):
+        """The actual tightening: `s_sub_u32 SrdA+2, SrdA+2, <delta>`
+        and the matching `s_sub_u32 SrdB+2, SrdB+2, <delta>`. Pin the
+        `delta = DepthU*bpe - alignedBytes` precompute too so the
+        emit order isn't accidentally rearranged.
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        # bf16 fixture has DepthU=64 -> depthUBytes=128 (0x80).
+        assert re.search(
+            r"s_sub_u32\s+s\[?\d+\]?,\s*(?:128|0x80)\s*,\s*s\[?\d+\]?"
+            r"[^\n]*delta = DepthU\*bpe - alignedBytes",
+            tail
+        ), (
+            "Tail must precompute `delta = depthUBytes - alignedBytes`"
+            " before applying it to Srd<tc>+2"
+        )
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\]\s*,\s*s\[sgprSrdA\+2\]\s*,\s*s\[?\d+\]?"
+            r"[^\n]*Srd A\+2 -= delta",
+            tail
+        ), "Tail must subtract delta from Srd A+2"
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdB\+2\]\s*,\s*s\[sgprSrdB\+2\]\s*,\s*s\[?\d+\]?"
+            r"[^\n]*Srd B\+2 -= delta",
+            tail
+        ), "Tail must subtract delta from Srd B+2"
+
+    def test_ssub_chain_ordering(self, bf16_pgr0_asm):
+        """Strict ordering inside the tighten region: the delta
+        precompute lands BEFORE the SrdA+2 sub, which lands BEFORE
+        the SrdB+2 sub. Pins emit order so a refactor doesn't
+        scramble the dependent SSub chain (delta is the src of both
+        Srd subs).
+        """
+        tail = _extract_tail_section(bf16_pgr0_asm)
+        assert tail
+        delta_match = re.search(
+            r"s_sub_u32\s+s\[?\d+\]?,\s*(?:128|0x80)\s*,\s*s\[?\d+\]?"
+            r"[^\n]*delta = DepthU\*bpe - alignedBytes",
+            tail)
+        srdA_match = re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\][^\n]*Srd A\+2 -= delta",
+            tail)
+        srdB_match = re.search(
+            r"s_sub_u32\s+s\[sgprSrdB\+2\][^\n]*Srd B\+2 -= delta",
+            tail)
+        assert delta_match and srdA_match and srdB_match, (
+            "Missing one of: delta precompute / SrdA+2 sub / SrdB+2 sub. "
+            "tail head:\n" + tail[:2000]
+        )
+        assert delta_match.start() < srdA_match.start() < srdB_match.start(), (
+            "Tail must order delta < SrdA+2 sub < SrdB+2 sub. "
+            "Got delta=%d, srdA=%d, srdB=%d" %
+            (delta_match.start(), srdA_match.start(), srdB_match.start())
+        )
+
+    def test_srd_tighten_omitted_for_fp4(self, fp4_pgr0_asm):
+        """MX kernels (MXBlockA/B > 0) must not emit the bf16/fp16
+        SRD tighten helper: the MX path has its own
+        `_emitTailSrdTightenSubtileMX` for MXSA/MXSB (statically
+        gated to DepthU > 256). MX data SRD tightening for swizzled
+        A/B remains deferred (DTV path, separate tail emitter).
+        """
+        tail = _extract_tail_section(fp4_pgr0_asm)
+        assert tail
+        assert "OOR review" not in tail, (
+            "MX FP4 tail must NOT emit the bf16/fp16 SRD tighten."
+        )
+        assert "TailSrdTightenSkip" not in tail, (
+            "MX FP4 tail must NOT define TailSrdTightenSkip<L>"
+        )
+
+    def test_srd_tighten_omitted_for_NoTailLoop(self):
+        """`NoTailLoop=True` (aligned K) emits no tail body at all,
+        so the SRD tighten helper must short-circuit early.
+        """
+        asm = _emit_tail_loop_asm(fp4=False, no_tail_loop=True, pgr=0)
+        assert "OOR review" not in asm
+        assert "TailSrdTightenSkip" not in asm
+
+    def test_srd_tighten_fires_for_pgr2(self, bf16_pgr2_asm):
+        """PGR=2 emits the SRD tighten in the same slot (after the
+        PGR>0 entry gating, before openLoop). Pin its presence so
+        a refactor of the PGR>0 gate ordering doesn't drop it.
+        """
+        tail = _extract_tail_section(bf16_pgr2_asm)
+        assert tail
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\][^\n]*Srd A\+2 -= delta",
+            tail
+        ), (
+            "PGR=2 bf16 tail must still emit SrdA+2 tighten. "
+            "Tail head:\n" + tail[:2000]
+        )
+
+    def test_srd_tighten_ordering_after_PGRTailEntry(self, bf16_pgr2_asm):
+        """For PGR>0, the tighten must fire AFTER `PGRTailEntry<L>:`
+        (so the c=0 / small-counter realign / large-counter advance
+        paths have all converged) and BEFORE the tail GR call (so
+        `globalReadDoSubtile` sees the tightened SRD).
+        """
+        tail = _extract_tail_section(bf16_pgr2_asm)
+        assert tail
+        entry_pos = tail.find("PGRTailEntryL:")
+        if entry_pos < 0:
+            entry_pos = tail.find("label_PGRTailEntryL:")
+        srdA_match = re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\][^\n]*Srd A\+2 -= delta", tail)
+        assert entry_pos >= 0 and srdA_match, (
+            "PGR=2 tail must have both PGRTailEntryL: label and "
+            "SrdA+2 tighten. tail head:\n" + tail[:2000]
+        )
+        assert entry_pos < srdA_match.start(), (
+            "PGR=2 tail must emit SRD tighten AFTER PGRTailEntryL: "
+            "so c=0 / small-counter / large-counter all converge "
+            "before the tightening fires. entry=%d, srdA=%d"
+            % (entry_pos, srdA_match.start())
+        )
+
+
+# ── Tests: MX scale Srd<MXS{A,B}>+2 tightening (DepthU > 256) ────────────────
+
+class TestTailSrdTightenSubtileMX:
+    """`_emitTailSrdTightenSubtileMX` emit shape.
+
+    Per nakajee #PR-7661 spec the MX scale SRD+2 needs an extra
+    tightening step at tail entry when `DepthU > 256` (= MX K-padding
+    unit). For `DepthU <= 256` the host's
+    `rearrangePaddedMXScaleLayout` already pads K-blocks out to the
+    next 256-K boundary, so the natural NumRecords already covers any
+    K_remain on the last m-row -- the MX helper must be a static
+    no-op (no instructions, no comments).
+
+    For `DepthU > 256` (only `DepthU=512` in our current MX yaml
+    gauntlet), the helper emits a roundUp(K_remain, 256) chain plus
+    `s_sub_u32 SrdMXS{A,B}+2, -, <delta_K>`. `bytesPerKElement_MX`
+    is 1 for all current MXSA_B4/MXSB_B4/MXSA_B8/MXSB_B8 layouts so
+    the K-element delta is applied directly without scaling.
+    """
+
+    def _emit_fp4_asm(self, *, depthU, pgr=0):
+        kernel = _create_kernel(256, 256, fp4=True, depthU=depthU,
+                                no_tail_loop=False)
+        _augment_kernel_for_tail_scaffold(kernel, pgr)
+        kwa = _build_minimal_kwa(kernel)
+        tPA = {"is_sparse": False, "tpsMetadata": None}
+        tPB = {"is_sparse": False, "tpsMetadata": None}
+        module = kwa._emitTailLoopScaffoldSubtile(kernel, tPA, tPB)
+        return wrap_with_skiptoend(module)
+
+    def test_mx_tighten_static_noop_when_depthU_eq_padK(self):
+        """`DepthU == 256` is the boundary case: every K_remain in
+        [1, 255] rounds up to 256 = DepthU, so delta_K = 0 always.
+        The helper must short-circuit (emit nothing) -- no banner,
+        no SrdMXSA/B+2 sub, no temp sgpr alloc.
+        """
+        asm = self._emit_fp4_asm(depthU=256)
+        tail = _extract_tail_section(asm)
+        assert tail, "fp4 fixture must produce a tail body"
+        assert "MX follow-up" not in tail, (
+            "DepthU=256 must NOT emit the MX SRD tighten banner "
+            "(static no-op: K_remain < 256 == padK already covered "
+            "by host padding)."
+        )
+        assert not re.search(r"s_sub_u32[^\n]*SrdMXSA\+2", tail), (
+            "DepthU=256 must NOT emit `s_sub_u32 SrdMXSA+2` (static "
+            "no-op)."
+        )
+        assert not re.search(r"s_sub_u32[^\n]*SrdMXSB\+2", tail), (
+            "DepthU=256 must NOT emit `s_sub_u32 SrdMXSB+2` (static "
+            "no-op)."
+        )
+
+    def test_mx_tighten_emits_when_depthU_gt_padK(self):
+        """`DepthU=512` exceeds the MX K-padding unit (256), so the
+        helper must emit the roundUp chain and the SrdMXSA+2 /
+        SrdMXSB+2 sub. Pin the full chain: banner, roundUp
+        precompute, delta = DepthU - remainK_MX, and per-operand
+        sub.
+        """
+        asm = self._emit_fp4_asm(depthU=512)
+        tail = _extract_tail_section(asm)
+        assert tail
+        assert "MX follow-up" in tail, (
+            "DepthU=512 fp4 tail must emit the MX SRD tighten banner. "
+            "Tail head:\n" + tail[:2500]
+        )
+        assert re.search(
+            r"s_add_u32\s+s\[?\d+\]?,\s*s\[sgprLoopCounterL\]\s*,\s*255\b"
+            r"[^\n]*K_remain \+ \(MX_pad_K - 1\)",
+            tail
+        ), (
+            "DepthU=512 tail must add (256-1)=255 to LoopCounterL for "
+            "the MX roundUp chain"
+        )
+        assert re.search(
+            r"s_and_b32\s+s\[?\d+\]?,\s*s\[?\d+\]?,\s*0xffffff00\b"
+            r"[^\n]*remainK_MX = roundUp\(K_remain, 256\)",
+            tail
+        ), (
+            "DepthU=512 tail must mask with 0xffffff00 to align K to "
+            "256-element MX padding boundary"
+        )
+        assert re.search(
+            r"s_sub_u32\s+s\[?\d+\]?,\s*(?:512|0x200)\s*,\s*s\[?\d+\]?"
+            r"[^\n]*delta_K = DepthU - remainK_MX",
+            tail
+        ), (
+            "DepthU=512 tail must precompute `delta_K = 512 - remainK_MX`"
+        )
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdMXSA\+2\]\s*,\s*s\[sgprSrdMXSA\+2\]"
+            r"\s*,\s*s\[?\d+\]?[^\n]*SrdMXSA\+2 -= delta",
+            tail
+        ), "DepthU=512 tail must subtract delta from SrdMXSA+2"
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdMXSB\+2\]\s*,\s*s\[sgprSrdMXSB\+2\]"
+            r"\s*,\s*s\[?\d+\]?[^\n]*SrdMXSB\+2 -= delta",
+            tail
+        ), "DepthU=512 tail must subtract delta from SrdMXSB+2"
+
+    def test_mx_tighten_skipped_for_non_mx(self):
+        """Non-MX (bf16) kernels must NOT emit the MX SRD tighten
+        helper regardless of DepthU.
+        """
+        asm = _emit_tail_loop_asm(fp4=False, no_tail_loop=False, pgr=0)
+        tail = _extract_tail_section(asm)
+        assert tail
+        assert "MX follow-up" not in tail, (
+            "Non-MX (bf16) tail must NOT emit the MX SRD tighten "
+            "banner"
+        )
+        assert not re.search(r"s_sub_u32[^\n]*SrdMXSA\+2", tail), (
+            "Non-MX tail must NOT emit `s_sub_u32 SrdMXSA+2`"
+        )
+        assert not re.search(r"s_sub_u32[^\n]*SrdMXSB\+2", tail), (
+            "Non-MX tail must NOT emit `s_sub_u32 SrdMXSB+2`"
+        )
+
+    def test_mx_tighten_fires_for_pgr2_at_depthU_512(self):
+        """The MX tightening must also fire under PGR=2 (the same
+        slot as the bf16 tightener: after `PGRTailEntry<L>:`, before
+        the tail GR). Pins both PGR=0 and PGR=2 emit the helper.
+        """
+        asm = self._emit_fp4_asm(depthU=512, pgr=2)
+        tail = _extract_tail_section(asm)
+        assert tail
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdMXSA\+2\][^\n]*SrdMXSA\+2 -= delta",
+            tail
+        ), (
+            "PGR=2 DepthU=512 fp4 tail must still emit SrdMXSA+2 "
+            "tighten. Tail head:\n" + tail[:2500]
+        )
+        entry_pos = tail.find("PGRTailEntryL:")
+        if entry_pos < 0:
+            entry_pos = tail.find("label_PGRTailEntryL:")
+        srdMXSA_match = re.search(
+            r"s_sub_u32\s+s\[sgprSrdMXSA\+2\][^\n]*SrdMXSA\+2 -= delta",
+            tail)
+        assert entry_pos >= 0 and srdMXSA_match, (
+            "PGR=2 DU=512 tail must have both PGRTailEntryL: label and "
+            "SrdMXSA+2 tighten. tail head:\n" + tail[:2500]
+        )
+        assert entry_pos < srdMXSA_match.start(), (
+            "PGR=2 DU=512 tail must emit MX SRD tighten AFTER "
+            "PGRTailEntryL: so the c=0 / small-counter / large-counter "
+            "paths converge before the tightening fires. entry=%d, "
+            "srdMXSA=%d" % (entry_pos, srdMXSA_match.start())
+        )
+
+
+# ── Tests: MX data Srd<{A,B}>+2 tightening (DepthU > 256) ─────────────────────
+
+class TestTailSrdTightenSubtileMXData:
+    """`_emitTailSrdTightenSubtileMXData` emit shape.
+
+    Companion to `_emitTailSrdTightenSubtileMX`: where the scale
+    tightener clips `SrdMXS{A,B}+2`, the data tightener clips
+    `Srd{A,B}+2` on the MX **data** tensor side. nakajee #PR-7661
+    review pointed out that the data side needs the same K=256-padded
+    clip as the scale side -- otherwise the natural DepthU-shaped data
+    over-read on the last m-row can fault past the data buffer's
+    allocated bytes (the per-lane-mask + 0-scale absorb keeps the MFMA
+    result correct under garbage data, but garbage reads can still
+    page fault past the data buffer).
+
+    Static gate (must emit nothing): `DepthU <= 256`. The host MX
+    K-padding already covers any K_remain < 256 in that regime, so
+    the helper short-circuits with zero instructions / zero comments.
+
+    Active gate: `DepthU > 256` AND at least one MX side AND
+    non-swizzled MX operand AND bpe in {0.5, 1}. The current MX
+    yamls all use mxfp4/mxfp4 (bpe=0.5 on both sides), so the helper
+    emits a roundUp(K_remain, 256) chain, a single delta_K =
+    DepthU - remainK_MX precompute, ONE `s_lshr_b32 delta, delta, 1`
+    (delta_K * 0.5 = delta_K >> 1), and one `s_sub_u32 Srd{A,B}+2`
+    per MX operand. Swizzled MX operands bail (separate DTV emit
+    path; deferred per nakajee review reply).
+    """
+
+    def _emit_fp4_asm(self, *, depthU, pgr=0):
+        kernel = _create_kernel(256, 256, fp4=True, depthU=depthU,
+                                no_tail_loop=False)
+        _augment_kernel_for_tail_scaffold(kernel, pgr)
+        kwa = _build_minimal_kwa(kernel)
+        tPA = {"is_sparse": False, "tpsMetadata": None}
+        tPB = {"is_sparse": False, "tpsMetadata": None}
+        module = kwa._emitTailLoopScaffoldSubtile(kernel, tPA, tPB)
+        return wrap_with_skiptoend(module)
+
+    def test_mxdata_tighten_static_noop_when_depthU_eq_padK(self):
+        """`DepthU == 256` is the static no-op boundary: every
+        K_remain in [1, 255] rounds up to 256 == DepthU, so
+        delta_K = 0 always. The helper must short-circuit -- no
+        banner, no `Srd{A,B}+2` sub, no temp sgpr alloc.
+        """
+        asm = self._emit_fp4_asm(depthU=256)
+        tail = _extract_tail_section(asm)
+        assert tail, "fp4 fixture must produce a tail body"
+        assert "MX data follow-up" not in tail, (
+            "DepthU=256 must NOT emit the MX data SRD tighten banner"
+        )
+
+    def test_mxdata_tighten_emits_when_depthU_gt_padK(self):
+        """`DepthU=512` (only DepthU>256 fp4 config in our gauntlet)
+        must emit the roundUp chain, the per-MX-operand bpe shift,
+        and per-MX-operand SrdA+2 / SrdB+2 sub.
+
+        Pinned shape (mxfp4 / mxfp4, uniform bpe=0.5 on both sides):
+          banner ("MX data follow-up")
+          s_add_u32  remKMx, LoopCounterL, 255
+          s_and_b32  remKMx, remKMx, 0xffffff00
+          s_sub_u32  delta, 0x200, remKMx
+          s_lshr_b32 delta, delta, 1            # bpe=1/2
+          s_sub_u32  SrdA+2, SrdA+2, delta
+          s_sub_u32  SrdB+2, SrdB+2, delta
+        """
+        asm = self._emit_fp4_asm(depthU=512)
+        tail = _extract_tail_section(asm)
+        assert tail
+        assert "MX data follow-up" in tail, (
+            "DepthU=512 fp4 tail must emit the MX data SRD tighten "
+            "banner. Tail head:\n" + tail[:2500]
+        )
+        assert re.search(
+            r"s_add_u32\s+s\[?\d+\]?,\s*s\[sgprLoopCounterL\]\s*,\s*255\b"
+            r"[^\n]*K_remain \+ \(MX_pad_K - 1\)",
+            tail
+        ), "DepthU=512 fp4 tail must add 255 to LoopCounterL for roundUp"
+        assert re.search(
+            r"s_and_b32\s+s\[?\d+\]?,\s*s\[?\d+\]?,\s*0xffffff00\b"
+            r"[^\n]*remainK_MX = roundUp\(K_remain, 256\)",
+            tail
+        ), "DepthU=512 fp4 tail must mask with 0xffffff00 for MX K=256 align"
+        assert re.search(
+            r"s_sub_u32\s+s\[?\d+\]?,\s*(?:512|0x200)\s*,\s*s\[?\d+\]?"
+            r"[^\n]*delta_K = DepthU - remainK_MX",
+            tail
+        ), "DepthU=512 fp4 tail must precompute delta_K = 512 - remainK_MX"
+        # bpe=0.5 → single shr by 1 (uniformShr path)
+        assert re.search(
+            r"s_lshr_b32\s+s\[?\d+\]?,\s*s\[?\d+\]?,\s*0x1\b"
+            r"[^\n]*delta_bytes = delta_K \* bpe_data \(bpe=1/2\)",
+            tail
+        ), (
+            "DepthU=512 fp4 (bpe=0.5) tail must shift delta right by 1 "
+            "to scale K-element delta to bytes"
+        )
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\]\s*,\s*s\[sgprSrdA\+2\]"
+            r"\s*,\s*s\[?\d+\]?[^\n]*clip MX data past remainK_MX",
+            tail
+        ), "DepthU=512 fp4 tail must subtract delta from SrdA+2"
+        assert re.search(
+            r"s_sub_u32\s+s\[sgprSrdB\+2\]\s*,\s*s\[sgprSrdB\+2\]"
+            r"\s*,\s*s\[?\d+\]?[^\n]*clip MX data past remainK_MX",
+            tail
+        ), "DepthU=512 fp4 tail must subtract delta from SrdB+2"
+
+    def test_mxdata_tighten_skipped_for_non_mx(self):
+        """Non-MX (bf16) kernels must NOT emit the MX data SRD
+        tighten helper regardless of DepthU.
+        """
+        asm = _emit_tail_loop_asm(fp4=False, no_tail_loop=False, pgr=0)
+        tail = _extract_tail_section(asm)
+        assert tail
+        assert "MX data follow-up" not in tail, (
+            "Non-MX (bf16) tail must NOT emit the MX data SRD tighten "
+            "banner"
+        )
+
+    def test_mxdata_tighten_after_scale_tighten(self):
+        """Emit order at DepthU=512 fp4: the MX **scale** tighten
+        (`MX follow-up`) must precede the MX **data** tighten
+        (`MX data follow-up`); the scaffold call site adds them in
+        scale-then-data order so a refactor that swaps them gets
+        caught here.
+        """
+        asm = self._emit_fp4_asm(depthU=512)
+        tail = _extract_tail_section(asm)
+        assert tail
+        scale_pos = tail.find("MX follow-up")
+        data_pos  = tail.find("MX data follow-up")
+        assert scale_pos >= 0 and data_pos >= 0, (
+            "DepthU=512 fp4 tail must emit BOTH scale and data "
+            "tightener banners; got scale_pos=%d data_pos=%d. "
+            "Tail head:\n%s" % (scale_pos, data_pos, tail[:2500])
+        )
+        assert scale_pos < data_pos, (
+            "MX scale tighten must precede MX data tighten in the "
+            "scaffold (got scale=%d, data=%d)" % (scale_pos, data_pos)
+        )
+
+    def test_mxdata_tighten_fires_for_pgr2_at_depthU_512(self):
+        """The MX data tightening must also fire under PGR=2, in the
+        same slot as the scale tightener (after `PGRTailEntry<L>:`,
+        before the tail GR). Mirrors the scale-side PGR2 pin.
+        """
+        asm = self._emit_fp4_asm(depthU=512, pgr=2)
+        tail = _extract_tail_section(asm)
+        assert tail
+        entry_pos = tail.find("PGRTailEntryL:")
+        if entry_pos < 0:
+            entry_pos = tail.find("label_PGRTailEntryL:")
+        data_match = re.search(
+            r"s_sub_u32\s+s\[sgprSrdA\+2\]\s*,\s*s\[sgprSrdA\+2\]"
+            r"\s*,\s*s\[?\d+\]?[^\n]*clip MX data past remainK_MX",
+            tail
+        )
+        assert entry_pos >= 0 and data_match, (
+            "PGR=2 DU=512 fp4 tail must have BOTH PGRTailEntryL: label "
+            "and SrdA+2 MX-data tighten. Tail head:\n" + tail[:2500]
+        )
+        assert entry_pos < data_match.start(), (
+            "PGR=2 DU=512 fp4 must emit MX data SRD tighten AFTER "
+            "PGRTailEntryL: (entry=%d, srdA-data=%d)"
+            % (entry_pos, data_match.start())
         )

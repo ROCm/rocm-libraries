@@ -3,7 +3,7 @@ TestParameters:
 
 #######################################################################
 # Subtile BF16 K-tail: odd K (ASEM=1). Exercises the runtime-gated
-# hi16 clear in `_emitTailByteShiftMaskSubtile` Step 2.
+# hi16 clear in `_emitTailSubLaneMaskRefineSubtile` Step 2.
 #######################################################################
 GlobalParameters:
   NumElementsToValidate: -1
@@ -66,6 +66,8 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 4, 4,  1, 1]  # MT 64x64
           # 2x2 wave group
           - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          # 4x1 wave group
+          - [16, 16, 32, 1,  1, 2, 2,  4, 1]  # MT 128x32
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [64]

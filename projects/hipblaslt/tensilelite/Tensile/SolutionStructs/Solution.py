@@ -714,6 +714,13 @@ class Solution(collections.abc.Mapping):
     bpeB = state["ProblemType"]["DataTypeB"].numBytes()
     aemA = state["AssertSummationElementMultiple"] if not state["ProblemType"]["TLUA"] else state["AssertFree0ElementMultiple"]
     aemB = state["AssertSummationElementMultiple"] if not state["ProblemType"]["TLUB"] else state["AssertFree1ElementMultiple"]
+    # Narrow UseSubtileImpl to gfx950 BEFORE the NonDTLTailLoop gates below
+    # check it. Otherwise on a non-gfx950 ISA an explicit UseSubtileImpl=True
+    # would skip the NonDTLTailLoop assignment and then get silently dropped
+    # back to False below, leaving the kernel on the legacy NonDTL path
+    # without NonDTLTailLoop set.
+    isgfx950 = state["ISA"] == IsaVersion(9,5,0)
+    state["UseSubtileImpl"] = state["UseSubtileImpl"] and isgfx950
     # For DTL, we use nonDTL loads in tail loop only if
     # a partial 32b read is required to read the last few elements of a row/col of A/B
     # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
@@ -798,9 +805,8 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
-    # Only enable UseSubtileImpl on gfx950; ignore user request on other ISAs.
-    isgfx950 = state["ISA"] == IsaVersion(9,5,0)
-    state["UseSubtileImpl"] = state["UseSubtileImpl"] and isgfx950
+    # `isgfx950` and the UseSubtileImpl narrowing live above the
+    # NonDTLTailLoop gates so those gates see the post-narrowing value.
 
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
