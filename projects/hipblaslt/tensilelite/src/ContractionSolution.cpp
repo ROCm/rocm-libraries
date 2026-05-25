@@ -2331,7 +2331,7 @@ namespace TensileLite
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
         // Added the extra check for useScaleAlphaVec with value 3 to match the condition in KernelWriterConversion.py for expecting
         // argument in the kernel side.
-        if((useBias && problemType.useBias == 3) || (problemType.useScaleAlphaVec && problemType.useScaleAlphaVec == 3))
+        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec == 3)
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
