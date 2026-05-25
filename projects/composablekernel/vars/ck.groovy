@@ -1398,7 +1398,8 @@ def runTileEngineGemmTests(String arch, String compiler) {
 def runBuildCKAndTests(String arch) {
     def gpuTarget
     def extraSetupArgs = ""
-    def execute_cmd
+    def execute_cmd = ""
+    def extraBuildArgs = [:]
 
     switch (arch) {
         case "gfx90a":
@@ -1406,20 +1407,16 @@ def runBuildCKAndTests(String arch) {
             extraSetupArgs = " -DCK_CXX_STANDARD=\"17\""
             execute_cmd = build_client_examples_and_codegen_tests(gpuTarget)
             break
+        case "gfx1250":
+            gpuTarget = "gfx1250"
+            extraSetupArgs = " -DDISABLE_DL_KERNELS=\"ON\""
+            extraBuildArgs = [docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest", no_reboot: true]
+            break
         case "gfx10-1-generic":
-            gpuTarget = "gfx10-1-generic"
-            execute_cmd = build_client_examples(gpuTarget)
-            break
         case "gfx10-3-generic":
-            gpuTarget = "gfx10-3-generic"
-            execute_cmd = build_client_examples(gpuTarget)
-            break
         case "gfx11-generic":
-            gpuTarget = "gfx11-generic"
-            execute_cmd = build_client_examples(gpuTarget)
-            break
         case "gfx12-generic":
-            gpuTarget = "gfx12-generic"
+            gpuTarget = arch
             execute_cmd = build_client_examples(gpuTarget)
             break
         default:
@@ -1428,18 +1425,12 @@ def runBuildCKAndTests(String arch) {
     }
 
     def setup_args = """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="${gpuTarget}"${extraSetupArgs} """
-    Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_cmd, prefixpath: '/usr/local')
-}
-
-def runBuildCKForGfx1250() {
-    Build_CK_and_Reboot(
-        setup_args: """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="gfx1250" -DDISABLE_DL_KERNELS="ON" """,
-        docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest",
-        config_targets: "install",
-        no_reboot: true,
-        build_type: 'Release',
-        prefixpath: '/usr/local'
-    )
+    def buildArgs = [setup_args: setup_args, config_targets: "install", build_type: 'Release', prefixpath: '/usr/local']
+    if (execute_cmd) {
+        buildArgs.execute_cmd = execute_cmd
+    }
+    buildArgs.putAll(extraBuildArgs)
+    Build_CK_and_Reboot(buildArgs)
 }
 
 def runBuildInstancesOnly(String compiler) {

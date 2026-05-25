@@ -724,7 +724,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        script { ck.runBuildCKForGfx1250() }
+                        script { ck.runBuildCKAndTests("gfx1250") }
                         cleanWs()
                     }
                 }
