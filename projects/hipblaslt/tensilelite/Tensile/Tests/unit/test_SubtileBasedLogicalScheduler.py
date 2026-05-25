@@ -1602,7 +1602,7 @@ class TestIntegration:
         })
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
-        def _pap_hook(_kernel, _tPA, _tPB, _preloop_gr):
+        def _pap_hook(_kernel, _tPA, _tPB, _preloop_gr, skipBarrier=False):
             module = Module("Subtile PAP test hook")
             module.addComment0("Subtile PAP test hook")
             return module
@@ -1630,10 +1630,17 @@ class TestIntegration:
             assert "SubtilePAPPreloopFirstGRMerge" in asm
             assert "Subtile PAP test hook" in asm
             assert writer.prefetchAcrossPersistentSubtile.call_count == sched.unroll_factor
+            assert all(call.kwargs["skipBarrier"] for call in writer.prefetchAcrossPersistentSubtile.call_args_list)
 
             pap_idx = asm.index("Subtile PAP test hook")
-            assert asm.rfind("NGLL", 0, pap_idx) != -1
-            assert pap_idx < asm.index("NLL", pap_idx)
+            nll_idx = asm.rfind("NLL_C", 0, pap_idx)
+            assert nll_idx != -1
+            wait_gr_idx = asm.rfind("Wait GR", nll_idx, pap_idx)
+            barrier_idx = asm.rfind("Barrier", nll_idx, pap_idx)
+            assert nll_idx < wait_gr_idx < barrier_idx < pap_idx
+            mfma_idx = asm.find("MFMA C[", pap_idx)
+            assert mfma_idx != -1
+            assert pap_idx < mfma_idx
         finally:
             sched.deallocVgprTiles(writer)
 

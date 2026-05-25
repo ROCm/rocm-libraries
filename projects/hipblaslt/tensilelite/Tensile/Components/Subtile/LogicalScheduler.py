@@ -2233,7 +2233,7 @@ class LogicalScheduler:
         module = Module("AllLoops")
         uf = self.unroll_factor
 
-        def emit_pap_before_nll():
+        def make_subtile_pap_module(skip_barrier=False):
             if (kernel.get("UseSubtileImpl")
                 and kernel.get("PrefetchAcrossPersistent")
                 and kernel.get("StreamK") == 3
@@ -2244,8 +2244,49 @@ class LogicalScheduler:
                         break
                     for inst in em.instructions:
                         preloop_gr.add(copy.deepcopy(inst))
-                module.add(writer.prefetchAcrossPersistentSubtile(
-                    kernel, tensorParametersA, tensorParametersB, preloop_gr))
+                return writer.prefetchAcrossPersistentSubtile(
+                    kernel, tensorParametersA, tensorParametersB, preloop_gr,
+                    skipBarrier=skip_barrier)
+            return None
+
+        def inject_pap_after_nll_drain(emitted_3d):
+            emitted_3d = copy.deepcopy(emitted_3d)
+
+            def insert_after_drain(em_list):
+                wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
+                if wait_gr is None:
+                    return False
+
+                tail_id = wait_gr.moduleId
+                sync = next((em for em in em_list
+                             if em.opType == 'sync' and em.before == tail_id), None)
+                if sync is not None:
+                    tail_id = sync.moduleId
+
+                pap_module = make_subtile_pap_module(skip_barrier=(sync is not None))
+                if pap_module is None:
+                    return False
+
+                pap_id = max(em.moduleId for em in em_list) + 1
+                consumers = [em for em in em_list if em.before == tail_id]
+                em_list.append(EmittedModule(moduleId=pap_id,
+                                             instructions=[pap_module],
+                                             before=tail_id,
+                                             source=None))
+                # Place PAP between the final drain and the first NLL work that
+                # was waiting on that drain. The existing before-link graph is a
+                # chain, so this preserves scheduler ordering while moving PAP
+                # past the vlcnt(0) that would otherwise drain it immediately.
+                for consumer in consumers:
+                    consumer.before = pap_id
+                return True
+
+            for partition_emitted in emitted_3d:
+                for em_list in partition_emitted:
+                    if insert_after_drain(em_list):
+                        return emitted_3d
+
+            return emitted_3d
 
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
@@ -2299,10 +2340,9 @@ class LogicalScheduler:
                                       self._ngll_per_unroll[(last + 1) % uf]))
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
-        emit_pap_before_nll()
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  self._nll_per_unroll[nll_ft]))
+                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
         module.add(SBranch(labelName=endLabel.getLabelName(),
                            comment="skip other exit paths"))
 
@@ -2315,10 +2355,9 @@ class LogicalScheduler:
                                           self._ngll_per_unroll[(ui + 1) % uf]))
             if nll_idx == 0:
                 module.add(Label("SkipToNLL", ""))
-            emit_pap_before_nll()
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      self._nll_per_unroll[nll_idx]))
+                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
             if ui < uf - 2:
                 module.add(SBranch(labelName=endLabel.getLabelName(),
                                    comment="skip other exit paths"))

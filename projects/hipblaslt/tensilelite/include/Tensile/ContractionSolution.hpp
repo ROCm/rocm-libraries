@@ -142,6 +142,7 @@ namespace TensileLite
         int    magicDivAlg                = 1;
         int    streamK                    = 0;
         int    streamKAtomic              = 0;
+        int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;
 

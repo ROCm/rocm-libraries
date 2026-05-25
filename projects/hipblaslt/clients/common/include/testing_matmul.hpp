@@ -57,6 +57,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <string>
 
 extern "C" __global__ void flush_icache()
 {
@@ -3676,6 +3677,50 @@ void testing_matmul_with_bias(const Arguments& arg,
     // Get Heuristic results
     int32_t requestAlgoCount = arg.requested_solution_num < 0 ? HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM
                                                               : arg.requested_solution_num;
+    enum class PrefetchAcrossPersistentFilter : int32_t
+    {
+        Any = -1,
+        Off = 0,
+        On  = 1,
+    };
+    const auto papFilter
+        = static_cast<PrefetchAcrossPersistentFilter>(arg.prefetch_across_persistent);
+    const bool filterByPap = papFilter != PrefetchAcrossPersistentFilter::Any;
+    if(filterByPap && arg.algo_method == 0)
+        requestAlgoCount = HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM;
+
+    auto papModeName = [&]() -> const char* {
+        return papFilter == PrefetchAcrossPersistentFilter::On ? "StreamK=3 PAP1"
+                                                               : "StreamK=3 PAP0";
+    };
+    auto requestedPapValue = [&]() {
+        return papFilter == PrefetchAcrossPersistentFilter::On ? 1 : 0;
+    };
+    auto solutionPropertiesMatchPapMode = [&](const hipblaslt_ext::SolutionProperties& props) {
+        if(!filterByPap)
+            return true;
+        return props.streamK == 3 && props.prefetchAcrossPersistent == requestedPapValue();
+    };
+    auto algoMatchesPapMode = [&](hipblasLtMatmulHeuristicResult_t& candidate) {
+        if(!filterByPap)
+            return true;
+        return solutionPropertiesMatchPapMode(
+            hipblaslt_ext::getSolutionPropertiesFromAlgo(handle, candidate.algo));
+    };
+    auto filterPapCandidates = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates) {
+        if(!filterByPap)
+            return;
+        candidates.erase(std::remove_if(candidates.begin(),
+                                        candidates.end(),
+                                        [&](auto& candidate) {
+                                            return !algoMatchesPapMode(candidate);
+                                        }),
+                         candidates.end());
+    };
+    auto printNoPapSolutionFound = [&](const char* source) {
+        hipblaslt_cerr << source << ": no " << papModeName()
+                       << " solution found for this problem" << std::endl;
+    };
     int     returnedAlgoCount = 0;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
     std::vector<size_t>                           heuristicTuningIndex;
@@ -3964,7 +4009,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             validIndices.reserve(allAlgos.size());
             for(auto& a : allAlgos)
             {
-                validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
+                if(algoMatchesPapMode(a))
+                    validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
             }
         };
 
@@ -3974,6 +4020,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         bool selectionWasAttempted = false;
+        bool papFilterRejectedExplicitIndex = false;
+        hipblaslt_ext::SolutionProperties rejectedExplicitSolutionProperties{};
+        std::string rejectedExplicitSolutionName;
 
         auto searchForSupportedAlgoViaIndexAPI = [&]() {
             constexpr size_t batchSize        = 100;
@@ -4011,6 +4060,28 @@ void testing_matmul_with_bias(const Arguments& arg,
                       if(indicesAreDiscovered)
                       {
                           EXPECT_HIPBLAS_STATUS(status, HIPBLAS_STATUS_SUCCESS);
+                      }
+                      if(filterByPap)
+                      {
+                          if(!indicesAreDiscovered && !candidates.empty())
+                          {
+                              rejectedExplicitSolutionProperties
+                                  = hipblaslt_ext::getSolutionPropertiesFromAlgo(handle,
+                                                                                 candidates[0].algo);
+                              if(!solutionPropertiesMatchPapMode(
+                                     rejectedExplicitSolutionProperties))
+                              {
+                                  rejectedExplicitSolutionName
+                                      = hipblaslt_ext::getSolutionNameFromAlgo(handle,
+                                                                               candidates[0].algo);
+                                  papFilterRejectedExplicitIndex = true;
+                                  candidates.clear();
+                              }
+                          }
+                          else
+                          {
+                              filterPapCandidates(candidates);
+                          }
                       }
                   };
 
@@ -4271,7 +4342,18 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(!indicesAreDiscovered)
         {
-            if(!selectionWasAttempted)
+            if(papFilterRejectedExplicitIndex)
+            {
+                hipblaslt_cerr << "MatmulAlgoIndex: explicit solution_index="
+                               << arg.solution_index << " is "
+                               << rejectedExplicitSolutionName << " (StreamK="
+                               << rejectedExplicitSolutionProperties.streamK
+                               << ", PrefetchAcrossPersistent="
+                               << rejectedExplicitSolutionProperties.prefetchAcrossPersistent
+                               << "), not " << papModeName() << std::endl;
+                CHECK_SOLUTION_FOUND(0);
+            }
+            else if(!selectionWasAttempted)
             {
                 hipblaslt_cerr
                     << "MatmulAlgoIndex: explicit solution_index=" << arg.solution_index
@@ -4290,6 +4372,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 CHECK_SOLUTION_FOUND(heuristicResult.size());
             }
+        }
+        else if(validIndices.empty() && filterByPap)
+        {
+            printNoPapSolutionFound("MatmulAlgoIndex");
+            CHECK_SOLUTION_FOUND(0);
         }
         else if(!validIndices.empty())
         {
@@ -4327,6 +4414,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                          arg.compute_type,
                                                          tmpAlgo),
                               HIPBLAS_STATUS_SUCCESS);
+        filterPapCandidates(tmpAlgo);
         returnedAlgoCount = tmpAlgo.size();
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -4554,6 +4642,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 CHECK_HIPBLASLT_ERROR(
                     gemmVec[0].algoGetHeuristic(requestAlgoCount, gemmPref, tmpAlgo));
+                filterPapCandidates(tmpAlgo);
                 heuristicResult.clear();
                 heuristicTuningIndex.clear();
                 for(int j = 0; j < tmpAlgo.size(); j++)
@@ -4595,8 +4684,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 heuristicResult.clear();
                 for(int32_t i = 0; i < returnedAlgoCount; i++)
                 {
-                    heuristicResult.push_back(tmpAlgo[i]);
+                    if(algoMatchesPapMode(tmpAlgo[i]))
+                        heuristicResult.push_back(tmpAlgo[i]);
                 }
+                returnedAlgoCount = heuristicResult.size();
                 heuristicTuningIndex.resize(heuristicResult.size(), 0); // C API not supported yet
             }
 
@@ -4650,6 +4741,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             CHECK_HIPBLASLT_ERROR(
                 groupedGemmVec[0].algoGetHeuristic(requestAlgoCount, gemmPref, tmpAlgo));
+            filterPapCandidates(tmpAlgo);
             heuristicResult.clear();
             heuristicTuningIndex.clear();
             for(int j = 0; j < tmpAlgo.size(); j++)
@@ -4672,6 +4764,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     returnedAlgoCount = heuristicResult.size();
 
+    if(returnedAlgoCount == 0 && filterByPap)
+        printNoPapSolutionFound("MatmulAlgo");
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
     dWorkspace = new device_vector<unsigned char>(workspace_size * block_count, 1, HMM);

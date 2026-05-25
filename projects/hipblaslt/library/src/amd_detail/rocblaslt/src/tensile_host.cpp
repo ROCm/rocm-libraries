@@ -5128,6 +5128,61 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
     return solution->solutionName;
 }
 
+int getStreamKFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
+{
+    int* solutionIndex = (int*)algo.data;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(*solutionIndex < 0)
+    {
+        return 0;
+    }
+#endif
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+
+    if(!library)
+    {
+        return 0;
+    }
+
+    auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
+    return solution ? solution->sizeMapping.streamK : 0;
+}
+
+int getPrefetchAcrossPersistentFromAlgoIndex(rocblaslt_handle             handle,
+                                             const rocblaslt_matmul_algo& algo)
+{
+    int* solutionIndex = (int*)algo.data;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(*solutionIndex < 0)
+    {
+        return 0;
+    }
+#endif
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+
+    if(!library)
+    {
+        return 0;
+    }
+
+    auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
+    return solution ? solution->sizeMapping.prefetchAcrossPersistent : 0;
+}
+
 /***************************************************************
  * ! \brief  Initialize rocblaslt for the current HIP device, to *
  * avoid costly startup time at the first call on that device. *

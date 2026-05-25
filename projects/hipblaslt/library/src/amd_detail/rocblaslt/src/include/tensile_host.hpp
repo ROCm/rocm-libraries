@@ -137,6 +137,11 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
                                          const rocblaslt_matmul_algo& algo);
 
+int getStreamKFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
+
+int getPrefetchAcrossPersistentFromAlgoIndex(rocblaslt_handle             handle,
+                                             const rocblaslt_matmul_algo& algo);
+
 /***********************************************************************************
  * Whether Tensile has been initialized for at least one device (used for
  *testing) *

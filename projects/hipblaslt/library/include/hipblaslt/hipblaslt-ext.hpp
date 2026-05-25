@@ -1107,6 +1107,27 @@ namespace hipblaslt_ext
     HIPBLASLT_EXPORT std::string getKernelNameFromAlgo(hipblasLtHandle_t      handle,
                                                        hipblasLtMatmulAlgo_t& algo);
 
+    struct SolutionProperties
+    {
+        int streamK;
+        int prefetchAcrossPersistent;
+    };
+
+    /*! \ingroup library_module
+     *  \brief Retrieve structured solution properties from an algorithm.
+     *
+     *  @param[in]
+     *  handle  Pointer to the allocated hipBLASLt handle for the
+     * hipBLASLt context. See \ref hipblasLtHandle_t .
+     *  @param[in]
+     *  algo    The algorithm.
+     *
+     *  \retval SolutionProperties The StreamK and PrefetchAcrossPersistent
+     * values for the algorithm's solution.
+     */
+    HIPBLASLT_EXPORT SolutionProperties getSolutionPropertiesFromAlgo(
+        hipblasLtHandle_t handle, hipblasLtMatmulAlgo_t& algo);
+
     /*! \ingroup library_module
      *  \brief Retrieve the possible algorithms.
      *

@@ -186,6 +186,7 @@ struct Arguments
     int     algo_method; // 0 for getheuristic, 1 for get all algos, 2 for algo index
     int     api_method; // 0 for c, 1 for mix, 2 for cpp
     bool    use_user_args;
+    int32_t prefetch_across_persistent;
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
@@ -292,6 +293,7 @@ struct Arguments
     OPER(algo_method) SEP            \
     OPER(api_method) SEP             \
     OPER(use_user_args) SEP          \
+    OPER(prefetch_across_persistent) SEP \
     OPER(rotating) SEP               \
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\

@@ -45,6 +45,9 @@ class _ClassicPapWriter:
     def isSwapGlobalReadOrderForDtvOrDtl(self, kernel, prefetch1=False):
         return False
 
+    def isPrefetchAcrossPersistentEnabled(self, kernel):
+        return True
+
     def openSumAtLeastUnroll(self, kernel, prefetch=False, isOptNLL=True):
         return _module_with_comment("openSumAtLeastUnroll", "unit: open sum")
 
@@ -261,6 +264,30 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
         assert setup_pap_loads < loop_restore
         assert loop_restore < orig_loop_restore
         assert writer.vgprPool.checked_in == [70]
+    finally:
+        kwa_module.Component.StreamK.find = original_find
+
+
+def test_classic_pap_can_skip_internal_barrier_after_caller_sync():
+    original_find = kwa_module.Component.StreamK.find
+    kwa_module.Component.StreamK.find = lambda writer: _StubStreamK()
+    try:
+        writer = _ClassicPapWrapperWriter()
+        kernel = _classic_kernel(
+            PrefetchAcrossPersistent=1,
+            StreamK=3,
+            SpaceFillingAlgo=[],
+            ProblemType={"MXBlockA": 0, "MXBlockB": 0, "Sparse": 0},
+        )
+        tpa, tpb = _tensor_parameters()
+
+        with_barrier = str(kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
+            writer, kernel, tpa, tpb, skipBarrier=False))
+        without_barrier = str(kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
+            writer, kernel, tpa, tpb, skipBarrier=True))
+
+        assert "PAP: sync before next-tile prefetch" in with_barrier
+        assert "PAP: sync before next-tile prefetch" not in without_barrier
     finally:
         kwa_module.Component.StreamK.find = original_find
 

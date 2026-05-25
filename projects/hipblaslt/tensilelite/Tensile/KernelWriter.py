@@ -3163,7 +3163,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                    comment="restore current %s after Subtile PAP" % name))
     return module
 
-  def prefetchAcrossPersistentSubtile(self, kernel, tensorParametersA, tensorParametersB, preloopGrModule=None):
+  def prefetchAcrossPersistentSubtile(self, kernel, tensorParametersA, tensorParametersB, preloopGrModule=None, skipBarrier=False):
     module = Module("prefetchAcrossPersistentSubtile")
     if not (kernel.get("UseSubtileImpl") and self.isPrefetchAcrossPersistentEnabled(kernel)):
       return module
@@ -3175,7 +3175,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch"))
+    if not skipBarrier:
+      module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch"))
 
     skComponent = Component.StreamK.find(self)
     tileIdentityNames = self.papTileIdentityNames(kernel)
@@ -3839,6 +3840,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                         tailloopInNll=useTailloopInNll)
     module.add(openSum)
 
+    papPriorSync = False
     if not self.states.numItersPLR and not kernel["UseCustomMainLoopSchedule"]:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
         vlcntVal = remainPgr if kernel["PrefetchGlobalRead"] >= 2 and isNGLL else 0
@@ -3846,12 +3848,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
       module.add(self._syncThreads(kernel, "wait for local write done, sync LDS%u"%self.states.ldsBarrierTokenIdx, memoryToken=[self.states.ldsBarrierTokenIdx]))
+      papPriorSync = True
       # swap barrier token, locked by OptNll
       if not isOptNLL:
         self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
     elif kernel["enableTDMA"] and kernel["enableTDMB"]:
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
       module.add(self._syncThreads(kernel, "wait for tensor load done, sync LDS%u"%self.states.ldsBarrierTokenIdx, memoryToken=[self.states.ldsBarrierTokenIdx]))
+      papPriorSync = True
       # swap barrier token
       if not isOptNLL:
         self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
@@ -3860,7 +3864,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 and self.isPrefetchAcrossPersistentEnabled(kernel))
 
     if isPapNll:
-      module.add(self.prefetchAcrossPersistent(kernel, tensorParametersA, tensorParametersB))
+      module.add(self.prefetchAcrossPersistent(kernel, tensorParametersA, tensorParametersB,
+                                               skipBarrier=papPriorSync))
 
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \

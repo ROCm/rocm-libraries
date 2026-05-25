@@ -488,6 +488,10 @@ try
          value<int32_t>(&arg.solution_index)->default_value(-1),
          "Used with --algo_method 2.  Specify solution index to use in benchmark.")
 
+        ("prefetch_across_persistent",
+         value<int32_t>(&arg.prefetch_across_persistent)->default_value(-1),
+         "Filter StreamK=3 PrefetchAcrossPersistent solutions. -1 = no filter, 0 = PAP0, 1 = PAP1.")
+
         ("requested_solution",
          value<int32_t>(&arg.requested_solution_num)->default_value(tuningEnv? -1 : 1),
          "Requested solution num. Set to -1 to get all solutions. Only valid when algo_method is set to heuristic.")
@@ -683,6 +687,14 @@ try
     else
     {
         hipblaslt_cerr << "Invalid algo method: " << algo_method_str << std::endl;
+        return 1;
+    }
+
+    if(arg.prefetch_across_persistent < -1 || arg.prefetch_across_persistent > 1)
+    {
+        hipblaslt_cerr << "Invalid prefetch_across_persistent: "
+                       << arg.prefetch_across_persistent << ". Expected -1, 0, or 1."
+                       << std::endl;
         return 1;
     }
 

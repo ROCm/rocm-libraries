@@ -16552,7 +16552,7 @@ class KernelWriterAssembly(KernelWriter):
   # identity, descriptor, stagger, and TDM/DTL descriptor state and restores it
   # before current-tile code observes those registers again.
   ##############################################################################
-  def prefetchAcrossPersistent(self, kernel, tensorParametersA, tensorParametersB):
+  def prefetchAcrossPersistent(self, kernel, tensorParametersA, tensorParametersB, skipBarrier=False):
     module = Module("prefetchAcrossPersistent")
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
       return module
@@ -16564,7 +16564,8 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
 
-    module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
+    if not skipBarrier:
+      module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
 
     skComponent = Component.StreamK.find(self)
     with self.allocPapTileIdentitySgprs(kernel) as prevTile:
