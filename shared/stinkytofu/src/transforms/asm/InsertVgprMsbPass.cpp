@@ -166,6 +166,7 @@ class InsertVgprMsbPassImpl : public Pass {
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
         VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
+        if (msbMode == VgprMsbMode::None) return preserveAllAnalyses();
 
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
