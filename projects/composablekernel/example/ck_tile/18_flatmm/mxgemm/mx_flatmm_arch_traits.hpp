@@ -57,6 +57,12 @@ struct MXfp4_FlatmmConfig16 : public MXFlatmmConfigBase16
     static constexpr ck_tile::index_t N_Tile = 512;
 };
 
+// K_Tile=512 required for 3×dwordx4 sync path (K2=48, K1=8 → K0=512*3/4/384=1).
+struct MXfp6_FlatmmConfigSync : public MXFlatmmConfigBase16
+{
+    static constexpr ck_tile::index_t K_Tile = 512;
+};
+
 // Architecture traits for MX Flatmm - Primary template (gfx950 implementation)
 template <ck_tile::core::arch::TargetId Arch, typename FlatmmConfig>
 struct MXFlatmmArchTraits
@@ -176,3 +182,19 @@ using MXFlatmm_GFX950_FP8FP4_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
 using MXFlatmm_GFX950_FP4FP8_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
+
+// Isolation test: baseline (async) pipeline with K_Tile=512.
+// If this fails → K_Tile=512 is broken regardless of sync.
+// If this passes → problem is in sync pipeline itself.
+using MXFlatmm_GFX950_FP6FP6_K512_Traits =
+    MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXfp6_FlatmmConfigSync>;
+
+// Sync fp6xfp6 path: buffer_load_dwordx4→VGPR→ds_write instead of async buffer_load_lds.
+// K_Tile=256 (baseline). DRAM uses K1=4 so K0×K1×K2 = 3×4×16 = 192 = K_bytes.
+struct MXFlatmm_GFX950_FP6FP6_Sync_Traits
+    : MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>
+{
+    template <typename MXPipelineProblem>
+    using MXFlatmmPipeline =
+        ck_tile::MXFlatmmPipelineAGmemBGmemCRegV1Sync<MXPipelineProblem>;
+};

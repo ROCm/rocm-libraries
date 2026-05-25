@@ -155,8 +155,8 @@ auto create_args(int argc, char* argv[])
         .insert("v", "1", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
         .insert("mx_prec",
                 "fp4xfp4",
-                "data type for activation and weight, support: fp4xfp4, fp6xfp6, fp8xfp8, fp8xfp4 "
-                "and fp4xfp8")
+                "data type for activation and weight, support: fp4xfp4, fp6xfp6, fp8xfp8, fp8xfp4, "
+                "fp4xfp8, fp6xfp6_sync (experimental: 3xdwordx4 sync load variant of fp6xfp6)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")
@@ -201,6 +201,30 @@ int run_mx_flatmm_example(const ck_tile::ArgParser& arg_parser)
                                                   ck_tile::pk_fp6x16_t,
                                                   ck_tile::fp16_t,
                                                   MXFlatmm_GFX950_FP6FP6_Traits,
+                                                  false>(arg_parser, Row{}, Col{}, Row{});
+            else
+                throw std::runtime_error("Only support non-persistent kernel now!");
+        }
+        // Isolation test: async pipeline with K_Tile=512
+        else if(mx_prec == "fp6xfp6_k512")
+        {
+            if(persistent_opt == 0)
+                return run_mx_flatmm_with_layouts<ck_tile::pk_fp6x16_t,
+                                                  ck_tile::pk_fp6x16_t,
+                                                  ck_tile::fp16_t,
+                                                  MXFlatmm_GFX950_FP6FP6_K512_Traits,
+                                                  false>(arg_parser, Row{}, Col{}, Row{});
+            else
+                throw std::runtime_error("Only support non-persistent kernel now!");
+        }
+        // Sync 3xdwordx4 load variant for fp6xfp6.
+        else if(mx_prec == "fp6xfp6_sync")
+        {
+            if(persistent_opt == 0)
+                return run_mx_flatmm_with_layouts<ck_tile::pk_fp6x16_t,
+                                                  ck_tile::pk_fp6x16_t,
+                                                  ck_tile::fp16_t,
+                                                  MXFlatmm_GFX950_FP6FP6_Sync_Traits,
                                                   false>(arg_parser, Row{}, Col{}, Row{});
             else
                 throw std::runtime_error("Only support non-persistent kernel now!");

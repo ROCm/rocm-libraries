@@ -14,14 +14,27 @@ function(mx_flatmm_instance_generate FILE_LIST)
     endif()
 
     # foreach(PERSISTENT false true)
-    # TODO: Persistent kernels are disabled due to compilation failures with some LLVM versions.  
+    # TODO: Persistent kernels are disabled due to compilation failures with some LLVM versions.
     foreach(PERSISTENT false)
-        foreach(DATA_TYPE FP4xFP4 FP8xFP8 FP6xFP6 FP8xFP4 FP4xFP8)
-            string(REPLACE "x" ";" DATA_TYPE_AB ${DATA_TYPE})
+        # [v3 P0.1] FP6xFP6_Sync is a sync-load variant of FP6xFP6. The trailing
+        # _Sync suffix is preserved through to the generated traits name
+        # (MXFlatmm_GFX950_FP6FP6_Sync_Traits) but stripped before the AxB split
+        # so A_DATA_TYPE/B_DATA_TYPE still resolve to plain FP6/FP6.
+        foreach(DATA_TYPE FP4xFP4 FP8xFP8 FP6xFP6 FP8xFP4 FP4xFP8 FP6xFP6_Sync FP6xFP6_K512)
+            set(VARIANT_SUFFIX "")
+            set(DATA_TYPE_BASE ${DATA_TYPE})
+            if(${DATA_TYPE} MATCHES "_Sync$")
+                string(REGEX REPLACE "_Sync$" "" DATA_TYPE_BASE ${DATA_TYPE})
+                set(VARIANT_SUFFIX "_Sync")
+            elseif(${DATA_TYPE} MATCHES "_K512$")
+                string(REGEX REPLACE "_K512$" "" DATA_TYPE_BASE ${DATA_TYPE})
+                set(VARIANT_SUFFIX "_K512")
+            endif()
+            string(REPLACE "x" ";" DATA_TYPE_AB ${DATA_TYPE_BASE})
             list(GET DATA_TYPE_AB 0 A_DATA_TYPE)
             list(GET DATA_TYPE_AB 1 B_DATA_TYPE)
             foreach(ARCH ${MXFLATMM_ARCH})
-                set(MXFLATMM_ARCH_TRAITS "${ARCH}${A_DATA_TYPE}${B_DATA_TYPE}_Traits")
+                set(MXFLATMM_ARCH_TRAITS "${ARCH}${A_DATA_TYPE}${B_DATA_TYPE}${VARIANT_SUFFIX}_Traits")
                 foreach(SPLIT_K false true)
                     foreach(HAS_HOT_LOOP false true)
                         foreach(TAIL_NUMBER ODD EVEN)
