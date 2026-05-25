@@ -44,6 +44,103 @@ void testing_spmv_csr_reuse_descr_bad_arg(const Arguments& argus)
 {
 }
 
+// Exercises the SpMV-only path: never call hipsparseSpMV_bufferSize and
+// never call hipsparseSpMV_preprocess -- only hipsparseSpMV itself, and
+// pass a null externalBuffer. 
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+static void
+    call_spmv_only(hipsparseHandle_t&                        handle,
+                   hipsparseSpMatDescr_t&                    matA,
+                   J                                         m,
+                   J                                         n,
+                   I                                         nnz,
+                   std::vector<I>&                           hcsr_row_ptr,
+                   std::vector<J>&                           hcsr_col_ind,
+                   std::vector<A>&                           hcsr_val,
+                   T                                         alpha,
+                   T                                         beta,
+                   hipsparseIndexBase_t                      idx_base,
+                   const std::vector<hipsparseOperation_t>&  ops,
+                   const std::vector<hipsparseSpMVAlg_t>&    algs,
+                   int                                       number_of_passes)
+{
+    hipDataType xType       = getDataType<X>();
+    hipDataType yType       = getDataType<Y>();
+    hipDataType computeType = getDataType<T>();
+
+    const J max_dim = std::max(m, n);
+
+    std::vector<X> hx(max_dim);
+    hipsparseInit<X>(hx, 1, max_dim);
+
+    auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(X) * max_dim), device_free};
+    auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(Y) * max_dim), device_free};
+    X*   dx         = (X*)dx_managed.get();
+    Y*   dy         = (Y*)dy_managed.get();
+
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(X) * max_dim, hipMemcpyHostToDevice));
+
+    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+
+    for(int pass = 0; pass < number_of_passes; ++pass)
+    {
+        for(hipsparseOperation_t op : ops)
+        {
+            const J x_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
+            const J y_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
+
+            std::vector<Y> hy(y_size);
+            hipsparseInit<Y>(hy, 1, y_size);
+
+            hipsparseDnVecDescr_t x, y;
+            CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
+            CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, y_size, dy, yType));
+
+            for(hipsparseSpMVAlg_t alg : algs)
+            {
+                CHECK_HIP_ERROR(
+                    hipMemcpy(dy, hy.data(), sizeof(Y) * y_size, hipMemcpyHostToDevice));
+
+                // No bufferSize, no preprocess: only SpMV with a null
+                // externalBuffer. The wrapper must handle all analysis
+                // and compute-buffer bookkeeping internally.
+                CHECK_HIPSPARSE_ERROR(hipsparseSpMV(
+                    handle, op, &alpha, matA, x, &beta, y, computeType, alg, nullptr));
+
+                std::vector<Y> hy_out(y_size);
+                CHECK_HIP_ERROR(
+                    hipMemcpy(hy_out.data(), dy, sizeof(Y) * y_size, hipMemcpyDeviceToHost));
+
+                std::vector<Y> hy_ref(hy);
+                host_csrmv<I, J, A, X, Y, T>(op,
+                                             m,
+                                             n,
+                                             nnz,
+                                             alpha,
+                                             hcsr_row_ptr.data(),
+                                             hcsr_col_ind.data(),
+                                             hcsr_val.data(),
+                                             hx.data(),
+                                             beta,
+                                             hy_ref.data(),
+                                             idx_base);
+
+                unit_check_near(1, y_size, 1, hy_ref.data(), hy_out.data());
+            }
+
+            CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
+            CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
+        }
+    }
+}
+
+// Exercises the per-call bufferSize / per-call buffer-allocation pattern
+// for a single (operation, algorithm) configuration: query
+// hipsparseSpMV_bufferSize, hipMalloc a fresh externalBuffer of that size,
+// optionally run hipsparseSpMV_preprocess, then run hipsparseSpMV. When 
+// called repeatedly with the same (op, alg) on the same matA, the wrapper must
+// continue to return correct results despite the bufferSize / buffer
+// being re-queried and re-allocated on every call.
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 static void call_spmv(hipsparseHandle_t&     handle,
                       hipsparseSpMatDescr_t& matA,
@@ -57,7 +154,8 @@ static void call_spmv(hipsparseHandle_t&     handle,
                       T                      beta,
                       hipsparseIndexBase_t   idx_base,
                       hipsparseOperation_t   transA,
-                      hipsparseSpMVAlg_t     alg)
+                      hipsparseSpMVAlg_t     alg,
+                      bool                   use_preprocess)
 {
     hipDataType xType       = getDataType<X>();
     hipDataType yType       = getDataType<Y>();
@@ -116,11 +214,21 @@ static void call_spmv(hipsparseHandle_t&     handle,
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+    if(use_preprocess)
+    {
+        CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
+            handle, transA, &alpha, matA, x, &beta, y1, computeType, alg, buffer));
+    }
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, y1, computeType, alg, buffer));
 
     // HIPSPARSE pointer mode device
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
+    if(use_preprocess)
+    {
+        CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
+            handle, transA, d_alpha, matA, x, d_beta, y2, computeType, alg, buffer));
+    }
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMV(handle, transA, d_alpha, matA, x, d_beta, y2, computeType, alg, buffer));
 
@@ -149,6 +257,142 @@ static void call_spmv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
+}
+
+// Exercises the multi-configuration cache path: query bufferSize once per
+// (operation, algorithm) configuration, allocate a single externalBuffer
+// sized to the max, then repeatedly call hipsparseSpMV alternating among
+// the configurations without ever calling hipsparseSpMV_bufferSize again.
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+static void
+    call_spmv_shared_buffer(hipsparseHandle_t&                        handle,
+                            hipsparseSpMatDescr_t&                    matA,
+                            J                                         m,
+                            J                                         n,
+                            I                                         nnz,
+                            std::vector<I>&                           hcsr_row_ptr,
+                            std::vector<J>&                           hcsr_col_ind,
+                            std::vector<A>&                           hcsr_val,
+                            T                                         alpha,
+                            T                                         beta,
+                            hipsparseIndexBase_t                      idx_base,
+                            const std::vector<hipsparseOperation_t>&  ops,
+                            const std::vector<hipsparseSpMVAlg_t>&    algs,
+                            int                                       number_of_passes,
+                            bool                                      use_preprocess)
+{
+    hipDataType xType       = getDataType<X>();
+    hipDataType yType       = getDataType<Y>();
+    hipDataType computeType = getDataType<T>();
+
+    // For non-transpose: y(m) = alpha * A(m x n) * x(n) + beta * y(m)
+    // For transpose/conj-transpose: y(n) = alpha * A^T/A^H(n x m) * x(m) + beta * y(n)
+    // Use vectors sized to max(m, n) so the same allocation works for all
+    // operations; the descriptors below restrict the actual logical lengths.
+    const J max_dim = std::max(m, n);
+
+    std::vector<X> hx(max_dim);
+    hipsparseInit<X>(hx, 1, max_dim);
+
+    auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(X) * max_dim), device_free};
+    auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(Y) * max_dim), device_free};
+    X*   dx         = (X*)dx_managed.get();
+    Y*   dy         = (Y*)dy_managed.get();
+
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(X) * max_dim, hipMemcpyHostToDevice));
+
+    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+
+    // Step 1: query the bufferSize for every (operation, algorithm)
+    // configuration we will use, and take the max. The externalBuffer we
+    // allocate below will be reused for all configurations.
+    size_t buffer_size_max = 0;
+    for(hipsparseOperation_t op : ops)
+    {
+        const J x_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
+        const J y_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
+
+        hipsparseDnVecDescr_t x, y;
+        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
+        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, y_size, dy, yType));
+
+        for(hipsparseSpMVAlg_t alg : algs)
+        {
+            size_t bufferSize;
+            CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
+                handle, op, &alpha, matA, x, &beta, y, computeType, alg, &bufferSize));
+            buffer_size_max = std::max(buffer_size_max, bufferSize);
+        }
+
+        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
+        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
+    }
+
+    void* buffer = nullptr;
+    CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+
+    // Step 2: repeatedly loop over every (operation, algorithm) configuration
+    // and call hipsparseSpMV with the shared buffer, never calling
+    // bufferSize again. Verify each call's result against a CPU reference.
+    for(int pass = 0; pass < number_of_passes; ++pass)
+    {
+        for(hipsparseOperation_t op : ops)
+        {
+            const J x_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
+            const J y_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
+
+            std::vector<Y> hy(y_size);
+            std::vector<Y> hy_gold(y_size);
+            hipsparseInit<Y>(hy, 1, y_size);
+            hy_gold = hy;
+
+            CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(Y) * y_size, hipMemcpyHostToDevice));
+
+            hipsparseDnVecDescr_t x, y;
+            CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
+            CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, y_size, dy, yType));
+
+            for(hipsparseSpMVAlg_t alg : algs)
+            {
+                CHECK_HIP_ERROR(
+                    hipMemcpy(dy, hy.data(), sizeof(Y) * y_size, hipMemcpyHostToDevice));
+
+                if(use_preprocess)
+                {
+                    CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
+                        handle, op, &alpha, matA, x, &beta, y, computeType, alg, buffer));
+                }
+
+                CHECK_HIPSPARSE_ERROR(hipsparseSpMV(
+                    handle, op, &alpha, matA, x, &beta, y, computeType, alg, buffer));
+
+                std::vector<Y> hy_out(y_size);
+                CHECK_HIP_ERROR(
+                    hipMemcpy(hy_out.data(), dy, sizeof(Y) * y_size, hipMemcpyDeviceToHost));
+
+                std::vector<Y> hy_ref(hy);
+                host_csrmv<I, J, A, X, Y, T>(op,
+                                             m,
+                                             n,
+                                             nnz,
+                                             alpha,
+                                             hcsr_row_ptr.data(),
+                                             hcsr_col_ind.data(),
+                                             hcsr_val.data(),
+                                             hx.data(),
+                                             beta,
+                                             hy_ref.data(),
+                                             idx_base);
+
+                unit_check_near(1, y_size, 1, hy_ref.data(), hy_out.data());
+            }
+
+            CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
+            CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
+        }
+    }
+
+    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
@@ -213,34 +457,96 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
 
-    const hipsparseOperation_t ops[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                        HIPSPARSE_OPERATION_TRANSPOSE,
-                                        HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
-    const hipsparseSpMVAlg_t   algs[]
+    const std::vector<hipsparseOperation_t> ops = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                                   HIPSPARSE_OPERATION_TRANSPOSE,
+                                                   HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    const std::vector<hipsparseSpMVAlg_t>   algs
         = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG1, HIPSPARSE_SPMV_CSR_ALG2};
 
     constexpr int number_of_passes = 3;
-    for(int pass = 0; pass < number_of_passes; ++pass)
+
+    // Scenario 1: SpMV-only. Never call bufferSize or preprocess, only
+    // hipsparseSpMV with a null externalBuffer. This scenario runs first
+    // so the wrapper's per-configuration cache on matA is still empty --
+    // that way we exercise the "first-touch via SpMV" code path where
+    // hipsparseSpMV has to query the analysis buffer size and allocate
+    // its own transient buffer (no user-provided externalBuffer to fall
+    // back on). Subsequent scenarios then reuse the same matA, on top of
+    // the entries populated here.
+    call_spmv_only<I, J, A, X, Y, T>(handle,
+                                     matA,
+                                     m,
+                                     n,
+                                     nnz,
+                                     hcsr_row_ptr,
+                                     hcol_ind,
+                                     hval,
+                                     h_alpha,
+                                     h_beta,
+                                     idx_base,
+                                     ops,
+                                     algs,
+                                     number_of_passes);
+
+    // Scenario 2: per-call bufferSize / buffer allocation. Exercises that
+    // the per-(op,alg,datatype) cache entries survive being re-queried via
+    // bufferSize on the same sparse matrix descriptor. Run twice, once
+    // skipping hipsparseSpMV_preprocess (so the wrapper has to perform the
+    // analysis stage from inside hipsparseSpMV using the user's external
+    // buffer) and once invoking it explicitly (so the analysis stage is
+    // already done by the time hipsparseSpMV runs).
+    for(bool use_preprocess : {false, true})
     {
-        for(hipsparseOperation_t op : ops)
+        for(int pass = 0; pass < number_of_passes; ++pass)
         {
-            for(hipsparseSpMVAlg_t alg : algs)
+            for(hipsparseOperation_t op : ops)
             {
-                call_spmv<I, J, A, X, Y, T>(handle,
-                                            matA,
-                                            m,
-                                            n,
-                                            nnz,
-                                            hcsr_row_ptr,
-                                            hcol_ind,
-                                            hval,
-                                            h_alpha,
-                                            h_beta,
-                                            idx_base,
-                                            op,
-                                            alg);
+                for(hipsparseSpMVAlg_t alg : algs)
+                {
+                    call_spmv<I, J, A, X, Y, T>(handle,
+                                                matA,
+                                                m,
+                                                n,
+                                                nnz,
+                                                hcsr_row_ptr,
+                                                hcol_ind,
+                                                hval,
+                                                h_alpha,
+                                                h_beta,
+                                                idx_base,
+                                                op,
+                                                alg,
+                                                use_preprocess);
+                }
             }
         }
+    }
+
+    // Scenario 3: bufferSize is queried once per configuration up front, a
+    // single externalBuffer is allocated to the max of those sizes, and
+    // hipsparseSpMV is then called repeatedly across configurations with
+    // that one shared buffer (no further bufferSize calls). Each
+    // configuration's analysis and compute buffer must be cached
+    // per-configuration so that switching back to a previously used
+    // configuration does not corrupt its results. Like scenario 2, run
+    // with and without the explicit preprocess call.
+    for(bool use_preprocess : {false, true})
+    {
+        call_spmv_shared_buffer<I, J, A, X, Y, T>(handle,
+                                                  matA,
+                                                  m,
+                                                  n,
+                                                  nnz,
+                                                  hcsr_row_ptr,
+                                                  hcol_ind,
+                                                  hval,
+                                                  h_alpha,
+                                                  h_beta,
+                                                  idx_base,
+                                                  ops,
+                                                  algs,
+                                                  number_of_passes,
+                                                  use_preprocess);
     }
 
     // Destroy matrix
