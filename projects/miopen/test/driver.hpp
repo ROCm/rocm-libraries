@@ -756,8 +756,8 @@ struct test_driver
     /// Winograd-specific precision loss is roughly 2+2 bits.
     /// Let's adjust tolerance (only for FP32 WrW for now).
     template <class V>
-    auto adjust_parameters_impl(miopen::rank<1>, V&& v)
-        -> decltype(v.stats, v.is_conv_wrw_f32, void())
+    auto adjust_parameters_impl(miopen::rank<1>,
+                                V&& v) -> decltype(v.stats, v.is_conv_wrw_f32, void())
     {
         if(v.is_conv_wrw_f32 && v.stats->algorithm == miopenConvolutionAlgoWinograd)
             tolerance *= 16.0;
@@ -770,8 +770,8 @@ struct test_driver
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs)
-        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
+                                                                          v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;

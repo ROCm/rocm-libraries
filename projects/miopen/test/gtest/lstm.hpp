@@ -1411,16 +1411,16 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 
     std::vector<miopen::TensorDescriptor> inputCPPDescs;
     std::vector<miopenTensorDescriptor_t> inputDescs;
-    miopen::createTensorDescArray(
+    createTensorDescArray(
         inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
     std::vector<miopen::TensorDescriptor> outputCPPDescs;
     std::vector<miopenTensorDescriptor_t> outputDescs;
-    miopen::createTensorDescArray(outputCPPDescs,
-                                  outputDescs,
-                                  batch_seq,
-                                  hiddenSize * ((dirMode != 0) ? 2 : 1),
-                                  miopen::deref(rnnDesc).dataType);
+    createTensorDescArray(outputCPPDescs,
+                          outputDescs,
+                          batch_seq,
+                          hiddenSize * ((dirMode != 0) ? 2 : 1),
+                          miopen::deref(rnnDesc).dataType);
 
     Workspace wspace{};
     wspace.Write(workSpace);
@@ -1573,8 +1573,8 @@ struct Verifier
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs)
-        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
+                                                                          v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
