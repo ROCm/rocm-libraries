@@ -171,7 +171,7 @@ int ReduceCalculationDriver<Tgpu, Tref>::GetandSetData()
 
     std::vector<int> out_len;
 
-    for(auto i = 0ULL; i < in_len.size(); ++i)
+    for(size_t i = 0ULL; i < in_len.size(); ++i)
     {
         if(i != static_cast<size_t>(dim))
         {
@@ -245,7 +245,7 @@ int ReduceCalculationDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     out     = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
     outhost = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
-    for(auto i = 0ULL; i < in_sz; ++i)
+    for(size_t i = 0ULL; i < in_sz; ++i)
     {
         in[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
     }

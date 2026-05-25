@@ -196,7 +196,7 @@ int ReduceExtremeDriver<Tgpu, Tref>::GetandSetData()
 
     std::vector<int> out_len;
 
-    for(auto i = 0ULL; i < in_len.size(); ++i)
+    for(size_t i = 0ULL; i < in_len.size(); ++i)
     {
         if(i != static_cast<size_t>(dim))
         {
@@ -256,7 +256,7 @@ int ReduceExtremeDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     indice     = std::vector<int32_t>(out_sz, static_cast<int32_t>(0));
     indicehost = std::vector<int32_t>(out_sz, static_cast<int32_t>(0));
 
-    for(auto i = 0ULL; i < in_sz; ++i)
+    for(size_t i = 0ULL; i < in_sz; ++i)
     {
         x[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1.0), static_cast<Tgpu>(1.0));
     }

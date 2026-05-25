@@ -178,7 +178,7 @@ protected:
 
         std::vector<size_t> out_dims;
 
-        for(auto i = 0ULL; i < in_dims.size(); i++)
+        for(size_t i = 0ULL; i < in_dims.size(); i++)
         {
             if(i != static_cast<size_t>(dim))
             {

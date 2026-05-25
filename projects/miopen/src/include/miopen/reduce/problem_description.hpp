@@ -71,7 +71,7 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
             return true;
 
         int32_t posy = 0;
-        for(auto i = 0U; i < xDesc.GetLengths().size(); ++i)
+        for(size_t i = 0ULL; i < xDesc.GetLengths().size(); ++i)
         {
             if(i == static_cast<size_t>(dim))
                 continue;
@@ -92,7 +92,7 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
             return true;
 
         int32_t posy = 0;
-        for(auto i = 0U; i < xDesc.GetLengths().size(); ++i)
+        for(size_t i = 0ULL; i < xDesc.GetLengths().size(); ++i)
         {
             if(i == static_cast<size_t>(dim))
                 continue;
@@ -222,7 +222,7 @@ struct ProblemDescriptionCalculation : ProblemDescriptionBase
             return true;
 
         int32_t posy = 0;
-        for(auto i = 0U; i < xDesc.GetLengths().size(); ++i)
+        for(size_t i = 0ULL; i < xDesc.GetLengths().size(); ++i)
         {
             if(i == static_cast<size_t>(dim))
                 continue;

@@ -146,7 +146,7 @@ int ReduceDriver<Tgpu, Tref>::GetandSetData()
 
     for(int toReduceDim : toReduceDims)
     {
-        assert(static_cast<size_t>(toReduceDim) < inLengths.size());
+        assert(toReduceDim < inLengths.size());
 
         // set the lengths of the dimensions to be reduced to 1 to represent the output Tensor
         outLengths[toReduceDim] = 1;
@@ -158,7 +158,7 @@ int ReduceDriver<Tgpu, Tref>::GetandSetData()
 
     this->dimsToReduce = toReduceDims;
 
-    for(auto i = 0U; i < inLengths.size(); i++)
+    for(size_t i = 0ULL; i < inLengths.size(); i++)
         if(inLengths[i] == outLengths[i])
             invariantDims.push_back(i);
 
@@ -290,7 +290,7 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(!rdResult)
     {
-        for(auto i = 0U; i < in_nelem; i++)
+        for(size_t i = 0ULL; i < in_nelem; i++)
         {
             in[i] = prng::gen_canonical<Tgpu>();
         };
