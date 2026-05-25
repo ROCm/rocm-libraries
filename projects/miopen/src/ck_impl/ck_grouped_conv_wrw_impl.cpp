@@ -46,19 +46,27 @@ struct CKArgs : CKArgsSplitK<CKArgs>
     {
         (void)alpha;
         (void)beta;
+        // CK WRW interface accepts int32 arrays only; narrow at the boundary.
+        // The narrowed bundle is a mutable member of CKArgs (populated by
+        // GetNarrowedArrays) so its arrays outlive any arg_ptr referencing
+        // them -- CK's MakeArgumentPointer captures references into the
+        // bundle. Safe because RequiresLargeTensorCKInstance blocks overflow
+        // shapes from selecting any WRW instance (no WRW large-tensor
+        // registrations), so MakeArgPtr is never reached on >INT_MAX inputs.
+        const auto& a = this->GetNarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
-                                             input,
-                                             in_strides,
-                                             weight,
-                                             wei_strides,
-                                             output,
-                                             out_strides,
-                                             strides,
-                                             dilation,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              {},
                                              {},
                                              {},
