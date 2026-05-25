@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include "utility.hpp"
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -52,6 +53,8 @@
 extern "C" {
 float  slange_(char* norm_type, int* m, int* n, float* A, int* lda, float* work);
 double dlange_(char* norm_type, int* m, int* n, double* A, int* lda, double* work);
+float  clange_(char* norm_type, int* m, int* n, std::complex<float>* A, int* lda, float* work);
+double zlange_(char* norm_type, int* m, int* n, std::complex<double>* A, int* lda, double* work);
 
 float  slansy_(char* norm_type, char* uplo, int* n, float* A, int* lda, float* work);
 double dlansy_(char* norm_type, char* uplo, int* n, double* A, int* lda, double* work);
@@ -69,6 +72,16 @@ inline float xlange(char* norm_type, int* m, int* n, float* A, int* lda, float* 
 inline double xlange(char* norm_type, int* m, int* n, double* A, int* lda, double* work)
 {
     return dlange_(norm_type, m, n, A, lda, work);
+}
+
+inline float xlange(char* norm_type, int* m, int* n, std::complex<float>* A, int* lda, float* work)
+{
+    return clange_(norm_type, m, n, A, lda, work);
+}
+
+inline double xlange(char* norm_type, int* m, int* n, std::complex<double>* A, int* lda, double* work)
+{
+    return zlange_(norm_type, m, n, A, lda, work);
 }
 
 inline float xlanhe(char* norm_type, char* uplo, int* n, float* A, int* lda, float* work)
@@ -108,7 +121,8 @@ template <
     typename T,
     std::enable_if_t<!(std::is_same<T, hipblaslt_f8_fnuz>{} || std::is_same<T, hipblaslt_bf8_fnuz>{}
                        || std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}
-                       ),
+                       || std::is_same<T, std::complex<float>>{}
+                       || std::is_same<T, std::complex<double>>{}),
                      int>
     = 0>
 double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
@@ -145,6 +159,86 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
     double cpu_norm = xlange(&norm_type, &m, &n, hCPU_double.data(), &l, work);
     m_axpy(&size, &alpha, hCPU_double.data(), &incx, hGPU_double.data(), &incx);
     double gpu_norm = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work);
+    if (std::abs(cpu_norm) <= tolerance && std::abs(gpu_norm) <= tolerance) return 0.0f;
+
+    double error = gpu_norm / cpu_norm;
+    return error;
+}
+
+template <
+    typename T,
+    std::enable_if_t<(std::is_same<T, std::complex<float>>{}), int> = 0>
+double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
+{
+    if(M * N == 0)
+        return 0;
+
+    size_t size = N * (size_t)lda;
+
+    host_vector<std::complex<float>> hCPU_complex_float(size);
+    host_vector<std::complex<float>> hGPU_complex_float(size);
+
+    for(int64_t i = 0; i < N; i++)
+    {
+        for(int64_t j = 0; j < M; j++)
+        {
+            size_t idx       = j + i * (size_t)lda;
+            hCPU_complex_float[idx] = static_cast<T>(hCPU[idx]);
+            hGPU_complex_float[idx] = static_cast<T>(hGPU[idx]);
+        }
+    }
+
+    float work[1];
+    int    incx  = 1;
+    std::complex<float> alpha(-1.0f, 0.0f);  // -1 + 0i
+    int    m = static_cast<int>(M);
+    int    n = static_cast<int>(N);
+    int    l = static_cast<int>(lda);
+
+    const double tolerance = std::numeric_limits<double>::epsilon();
+    double cpu_norm = xlange(&norm_type, &m, &n, hCPU_complex_float.data(), &l, work);
+    m_axpy(&size, &alpha, hCPU_complex_float.data(), &incx, hGPU_complex_float.data(), &incx);
+    double gpu_norm = xlange(&norm_type, &m, &n, hGPU_complex_float.data(), &l, work);
+    if (std::abs(cpu_norm) <= tolerance && std::abs(gpu_norm) <= tolerance) return 0.0f;
+
+    double error = gpu_norm / cpu_norm;
+    return error;
+}
+
+template <
+    typename T,
+    std::enable_if_t<(std::is_same<T, std::complex<double>>{}), int> = 0>
+double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
+{
+    if(M * N == 0)
+        return 0;
+
+    size_t size = N * (size_t)lda;
+
+    host_vector<std::complex<double>> hCPU_complex_double(size);
+    host_vector<std::complex<double>> hGPU_complex_double(size);
+
+    for(int64_t i = 0; i < N; i++)
+    {
+        for(int64_t j = 0; j < M; j++)
+        {
+            size_t idx       = j + i * (size_t)lda;
+            hCPU_complex_double[idx] = static_cast<T>(hCPU[idx]);
+            hGPU_complex_double[idx] = static_cast<T>(hGPU[idx]);
+        }
+    }
+
+    double work[1];
+    int    incx  = 1;
+    std::complex<double> alpha(-1.0f, 0.0f);  // -1 + 0i
+    int    m = static_cast<int>(M);
+    int    n = static_cast<int>(N);
+    int    l = static_cast<int>(lda);
+
+    const double tolerance = std::numeric_limits<double>::epsilon();
+    double cpu_norm = xlange(&norm_type, &m, &n, hCPU_complex_double.data(), &l, work);
+    m_axpy(&size, &alpha, hCPU_complex_double.data(), &incx, hGPU_complex_double.data(), &incx);
+    double gpu_norm = xlange(&norm_type, &m, &n, hGPU_complex_double.data(), &l, work);
     if (std::abs(cpu_norm) <= tolerance && std::abs(gpu_norm) <= tolerance) return 0.0f;
 
     double error = gpu_norm / cpu_norm;
@@ -365,6 +459,12 @@ double norm_check_general(
     case HIP_R_64F:
         return norm_check_general<double>(
             norm_type, M, N, lda, static_cast<double*>(hCPU), static_cast<double*>(hGPU));
+    case HIP_C_32F:
+        return norm_check_general<std::complex<float>>(
+            norm_type, M, N, lda, static_cast<std::complex<float>*>(hCPU), static_cast<std::complex<float>*>(hGPU));
+    case HIP_C_64F:
+        return norm_check_general<std::complex<double>>(
+            norm_type, M, N, lda, static_cast<std::complex<double>*>(hCPU), static_cast<std::complex<double>*>(hGPU));
     case HIP_R_16F:
         return norm_check_general<hipblasLtHalf>(norm_type,
                                                  M,
@@ -452,6 +552,24 @@ double norm_check_general(char        norm_type,
                                           stride_a,
                                           static_cast<double*>(hCPU),
                                           static_cast<double*>(hGPU),
+                                          batch_count);
+    case HIP_C_32F:
+        return norm_check_general<std::complex<float>>(norm_type,
+                                         M,
+                                         N,
+                                         lda,
+                                         stride_a,
+                                         static_cast<std::complex<float>*>(hCPU),
+                                         static_cast<std::complex<float>*>(hGPU),
+                                         batch_count);
+    case HIP_C_64F:
+        return norm_check_general<std::complex<double>>(norm_type,
+                                          M,
+                                          N,
+                                          lda,
+                                          stride_a,
+                                          static_cast<std::complex<double>*>(hCPU),
+                                          static_cast<std::complex<double>*>(hGPU),
                                           batch_count);
     case HIP_R_16F:
         return norm_check_general<hipblasLtHalf>(norm_type,
@@ -557,45 +675,64 @@ bool norm_check(double norm_error)
     return false;
 }
 
-// TODO: norm_check determines the required norm solely based on
-//       To (type). This might cause tests to fail when the input
-//       matrices are MX types (F4/F8/F6). A better way is
-//       needed to determine the required norm for MX types.
-bool norm_check(double norm_error, hipDataType type)
+// TODO: tune norm tolerance for MX FP6 and FP8 types
+double norm_tolerance(hipDataType type)
 {
     switch(type)
     {
     case HIP_R_32F:
-        return norm_error < 0.00001;
+        return 0.00001;
     case HIP_R_64F:
-        return norm_error < 0.000000000001;
+        return 0.000000000001;
+    case HIP_C_32F:
+        return 0.00001; 
+    case HIP_C_64F:
+        return 0.000000000001;    
     case HIP_R_16F:
-        return norm_error < 0.01;
+        return 0.01;
     case HIP_R_16BF:
-        return norm_error < 0.1;
+        return 0.1;
     case HIP_R_8F_E4M3_FNUZ:
     case HIP_R_8F_E4M3:
-        return norm_error < 0.125;
+        return 0.125;
     case HIP_R_8F_E5M2_FNUZ:
     case HIP_R_8F_E5M2:
-        return norm_error < 0.25;
+        return 0.25;
     case HIP_R_32I:
-        return norm_error < 0.0001;
+        return 0.0001;
     case HIP_R_8I:
-        return norm_error < 0.01;
-    // TODO: find a suitable rnom value for f6 and f4
-    case HIP_R_6F_E2M3_EXT:
-    case HIP_R_6F_E3M2_EXT:
-    case HIP_R_4F_E2M1_EXT:
-        return norm_error < 0.5;
+        return 0.01;
+    case HIP_R_4F_E2M1:
+        return 0.3;
+    case HIP_R_6F_E2M3:
+    case HIP_R_6F_E3M2:
+        return 0.5;
     default:
-        return false;
+        return 0.0;
     }
 }
 
-bool norm_check(double norm_error, hipDataType type, hipblasComputeType_t compute_type)
+bool norm_check(double norm_error, hipDataType type)
 {
-    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && type == HIP_R_32F)
-        return norm_error < 0.5;
-    return norm_check(norm_error, type);
+    double tol = norm_tolerance(type);
+    return tol > 0.0 && norm_error < tol;
+}
+
+bool norm_check(double                 norm_error,
+                hipDataType            outputType,
+                hipblasComputeType_t   compute_type,
+                hipDataType            inputTypeA = static_cast<hipDataType>(-1),
+                hipDataType            inputTypeB = static_cast<hipDataType>(-1))
+{
+    double tol = norm_tolerance(outputType);
+
+    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && outputType == HIP_R_32F)
+        tol = std::max(tol, 0.5);
+
+    if(static_cast<int>(inputTypeA) >= 0)
+        tol = std::max(tol, norm_tolerance(inputTypeA));
+    if(static_cast<int>(inputTypeB) >= 0)
+        tol = std::max(tol, norm_tolerance(inputTypeB));
+
+    return tol > 0.0 && norm_error < tol;
 }

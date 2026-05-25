@@ -55,7 +55,7 @@ Graph makeGraph(const UnsupportedBnDtypeCase& tc, const TensorLayout& layout = T
     auto scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
     auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
-    BatchnormInferenceAttributes bn;
+    const BatchnormInferenceAttributes bn;
     auto y = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
     y->set_output(true);
 
@@ -112,7 +112,7 @@ TEST_P(IntegrationGpuBatchnormUnsupportedDataTypes, RejectsUnsupportedDataTypes)
 
     auto result = g.build(_handle);
 
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << "err_msg: " << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED) << "err_msg: " << result.err_msg;
 
     EXPECT_FALSE(result.err_msg.empty()) << "err_msg is empty";
 }

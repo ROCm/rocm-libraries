@@ -89,7 +89,7 @@ inline void getSpatialMultipleConfig(size_t c,
     xlocalsize = 1;
     ylocalsize = 1;
 
-    size_t inCstride = h * w;
+    const size_t inCstride = h * w;
 
     if(isLayoutNHWC)
     {
@@ -144,13 +144,14 @@ inline bool isSpatialMultipleApplicable(size_t n,
         }
 
         stashValues *= (isFp32 ? 1 : 2);
-        unsigned int lastYlocalsize = inCstride % ylocalsize == 0
-                                          ? static_cast<unsigned int>(ylocalsize)
-                                          : inCstride % ylocalsize;
+        const unsigned int lastYlocalsize = inCstride % ylocalsize == 0
+                                                ? static_cast<unsigned int>(ylocalsize)
+                                                : inCstride % ylocalsize;
 
-        unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
-                                         ? static_cast<unsigned int>(zlocalsize * nelements)
-                                         : n % static_cast<unsigned int>(zlocalsize * nelements);
+        const unsigned int lastZocalsize
+            = n % (zlocalsize * nelements) == 0
+                  ? static_cast<unsigned int>(zlocalsize * nelements)
+                  : n % static_cast<unsigned int>(zlocalsize * nelements);
 
         // FP32:
         //  - last block must have enough space to stash intermediate results in HW dimension
@@ -176,13 +177,14 @@ inline bool isSpatialMultipleApplicable(size_t n,
             return false;
         }
 
-        unsigned int lastYlocalsize = inCstride % ylocalsize == 0
-                                          ? static_cast<unsigned int>(ylocalsize)
-                                          : inCstride % ylocalsize;
+        const unsigned int lastYlocalsize = inCstride % ylocalsize == 0
+                                                ? static_cast<unsigned int>(ylocalsize)
+                                                : inCstride % ylocalsize;
 
-        unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
-                                         ? static_cast<unsigned int>(zlocalsize * nelements)
-                                         : n % static_cast<unsigned int>(zlocalsize * nelements);
+        const unsigned int lastZocalsize
+            = n % (zlocalsize * nelements) == 0
+                  ? static_cast<unsigned int>(zlocalsize * nelements)
+                  : n % static_cast<unsigned int>(zlocalsize * nelements);
         // Restrictions:
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
@@ -214,11 +216,12 @@ inline bool useMultiple(
 
     if(!isLayoutNHWC && direction == Direction::FORWARD_TRAINING)
     {
-        bool condition1 = (n < 3) || (inCstride <= 512) || (inNhw < 33554432 && inCstride > 1024)
-                          || (n >= 256 && inCstride > 60 && isFp16OrBfp16Mix)
-                          || (isFp16OrBfp16Mix && inCstride > 512);
+        const bool condition1 = (n < 3) || (inCstride <= 512)
+                                || (inNhw < 33554432 && inCstride > 1024)
+                                || (n >= 256 && inCstride > 60 && isFp16OrBfp16Mix)
+                                || (isFp16OrBfp16Mix && inCstride > 512);
 
-        bool condition2 = (n <= 768) || (inCstride <= 150);
+        const bool condition2 = (n <= 768) || (inCstride <= 150);
 
         if(condition1 && condition2)
         {
@@ -243,12 +246,12 @@ inline int getStashMethod(bool isLayoutNHWC,
     // See `batchnorm_functions.hpp` for stash implementation of different methods
     int stashMethod = 0;
     stashValues *= (isFp32 ? 1 : 2);
-    unsigned int lastYlocalsize = (inCstride) % ylocalsize == 0
-                                      ? static_cast<unsigned int>(ylocalsize)
-                                      : static_cast<unsigned int>((inCstride) % ylocalsize);
-    unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
-                                     ? static_cast<unsigned int>(zlocalsize * nelements)
-                                     : n % static_cast<unsigned int>(zlocalsize * nelements);
+    const unsigned int lastYlocalsize = (inCstride) % ylocalsize == 0
+                                            ? static_cast<unsigned int>(ylocalsize)
+                                            : static_cast<unsigned int>((inCstride) % ylocalsize);
+    const unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
+                                           ? static_cast<unsigned int>(zlocalsize * nelements)
+                                           : n % static_cast<unsigned int>(zlocalsize * nelements);
     if(lastYlocalsize < stashValues && lastZocalsize >= stashValues)
     {
         stashMethod = 1;
@@ -388,9 +391,9 @@ inline void defaultConfigSpatialMultiple(size_t n,
 {
     size_t xlocalsizeDefault = 1;
     size_t ylocalsizeDefault = 1;
-    size_t zlocalsizeDefault = 1;
+    const size_t zlocalsizeDefault = 1;
     size_t vectorsizeDefault = 4;
-    size_t nelementsDefault = n;
+    const size_t nelementsDefault = n;
 
     if(isLayoutNHWC)
     {

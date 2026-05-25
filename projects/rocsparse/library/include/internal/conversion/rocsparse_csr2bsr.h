@@ -34,21 +34,21 @@ extern "C" {
 /*! \ingroup conv_module
 *  \details
 *  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr,
-*  and the total number of nonzero blocks, \p bsr_nnz, that will result from converting the CSR format input
+*  and the total number of non-zero blocks, \p bsr_nnz, that will result from converting the CSR format input
 *  matrix to a BSR format output matrix. This function is the first step in the conversion and is used in
 *  conjunction with \ref rocsparse_scsr2bsr "rocsparse_Xcsr2bsr()".
 *
 *  \note
-*  The routine does support asynchronous execution if the pointer mode is set to device.
+*  The routine supports asynchronous execution if the pointer mode is set to device.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *
 *  @param[in]
-*  dir         direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by
+*  dir         direction that specifies whether to count non-zero elements by \ref rocsparse_direction_row or by
 *              \ref rocsparse_direction_column.
 *
 *  @param[in]
@@ -61,27 +61,27 @@ extern "C" {
 *  csr_descr    descriptor of the sparse CSR matrix. Currently, only
 *               \ref rocsparse_matrix_type_general is supported.
 *  @param[in]
-*  csr_row_ptr integer array containing \p m+1 elements that point to the start of each row of the CSR matrix
+*  csr_row_ptr integer array containing \p m+1 elements that point to the start of each row of the CSR matrix.
 *
 *  @param[in]
-*  csr_col_ind integer array of the column indices for each non-zero element in the CSR matrix
+*  csr_col_ind integer array of the column indices for each non-zero element in the CSR matrix.
 *
 *  @param[in]
-*  block_dim   the block dimension of the BSR matrix. Between 1 and min(m, n)
+*  block_dim   the block dimension of the BSR matrix. Between 1 and min(m, n).
 *
 *  @param[in]
 *  bsr_descr    descriptor of the sparse BSR matrix. Currently, only
 *               \ref rocsparse_matrix_type_general is supported.
 *  @param[out]
-*  bsr_row_ptr integer array containing \p mb+1 elements that point to the start of each block row of the BSR matrix
+*  bsr_row_ptr integer array containing \p mb+1 elements that point to the start of each block row of the BSR matrix.
 *
 *  @param[out]
-*  bsr_nnz     total number of nonzero elements in device or host memory.
+*  bsr_nnz     total number of non-zero elements in device or host memory.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m or \p n or \p block_dim is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p csr_row_ptr or \p csr_col_ind or \p bsr_row_ptr or \p bsr_nnz
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p block_dim is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p csr_row_ptr, \p csr_col_ind, \p bsr_row_ptr, or \p bsr_nnz
 *              pointer is invalid.
 */
 ROCSPARSE_EXPORT
@@ -98,28 +98,28 @@ rocsparse_status rocsparse_csr2bsr_nnz(rocsparse_handle          handle,
                                        rocsparse_int*            bsr_nnz);
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse BSR matrix
+*  \brief Convert a sparse CSR matrix into a sparse BSR matrix.
 *
 *  \details
-*  \p rocsparse_csr2bsr converts a CSR matrix into a BSR matrix. It is assumed,
-*  that \p bsr_val, \p bsr_col_ind and \p bsr_row_ptr are allocated. Allocation size
-*  for \p bsr_row_ptr is computed as \p mb+1 where \p mb is the number of block rows
+*  \p rocsparse_csr2bsr converts a CSR matrix into a BSR matrix. It is assumed
+*  that \p bsr_val, \p bsr_col_ind, and \p bsr_row_ptr are allocated. The allocation size
+*  for \p bsr_row_ptr is computed as \p mb+1, where \p mb is the number of block rows
 *  and \p nb is the number of block columns in the BSR matrix:
 *  \f[
 *    mb = (m + block\_dim - 1) / block\_dim \\
 *    nb = (n + block\_dim - 1) / block\_dim
 *  \f]
-*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz()
+*  The allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz(),
 *  which also fills in \p bsr_row_ptr.
 *
-*  Converting from a sparse CSR matrix to a sparse BSR matrix requires two steps. First, the user
-*  allocates the \p bsr_row_ptr array to have length \p mb+1 and passes this to the function
+*  Converting from a sparse CSR matrix to a sparse BSR matrix requires two steps. First,
+*  allocate the \p bsr_row_ptr array to have length \p mb+1 and pass this to the function
 *  \ref rocsparse_csr2bsr_nnz. This will fill the \p bsr_row_ptr array and also compute the total
-*  number of nonzero blocks in the BSR matrix. Now that the total number of nonzero blocks is known,
-*  the user can allocate the \p bsr_col_ind and \p bsr_val arrays. Finally, the user calls
-*  \p rocsparse_csr2bsr to complete the conversion. See example below.
+*  number of non-zero blocks in the BSR matrix. Now that the total number of non-zero blocks is known,
+*  allocate the \p bsr_col_ind and \p bsr_val arrays. Finally, call
+*  \p rocsparse_csr2bsr to complete the conversion. See the example below.
 *
-*  \p rocsparse_csr2bsr requires extra temporary storage that is allocated internally if \p block_dim>16
+*  \p rocsparse_csr2bsr requires extra temporary storage that is allocated internally if \p block_dim>16.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -128,9 +128,9 @@ rocsparse_status rocsparse_csr2bsr_nnz(rocsparse_handle          handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir          the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column
+*  dir          the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column.
 *  @param[in]
 *  m            number of rows in the sparse CSR matrix.
 *  @param[in]
@@ -160,9 +160,9 @@ rocsparse_status rocsparse_csr2bsr_nnz(rocsparse_handle          handle,
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m or \p n or \p block_dim is invalid.
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p block_dim is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p bsr_val,
-*              \p bsr_row_ptr, \p bsr_col_ind, \p csr_val, \p csr_row_ptr or
+*              \p bsr_row_ptr, \p bsr_col_ind, \p csr_val, \p csr_row_ptr, or
 *              \p csr_col_ind pointer is invalid.
 *
 *  \par Example
