@@ -1471,17 +1471,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                 };
 
                 // Dispatch: use flat-descriptor path (non-grouped GEMM) for G=1,
-                // NDim=2. The non-grouped kernel uses packed (flat) descriptors
-                // with fewer transform layers, avoiding the grouped GEMM overhead.
-                // The NoShuffle epilogue used by this path supports only unary
-                // element-wise ops (e.g. PassThrough). When D tensors are present
-                // the cde_element_op is multi-input (e.g. AddRelu(y, x0, x1)),
-                // which is incompatible with the unary VGPR->global writer; fall
-                // back to the regular CShuffle path in that case.
+                // NDim=2, no D tensors, and a single sub-GEMM per dispatch
+                // (gemms_count_ == 1, i.e. stride == dilation on every spatial
+                // axis). The non-grouped kernel uses packed (flat) descriptors
+                // with fewer transform layers, but processes exactly one
+                // sub-GEMM per launch. When stride > dilation the implicit GEMM
+                // is split into gemms_count_ sub-GEMMs whose output cells tile
+                // dx disjointly; routing those through the flat path would
+                // require gemms_count_ separate launches, which has been
+                // measured to be 6-32% slower than letting the grouped CShuffle
+                // path walk the sub-GEMMs in a single launch via the packed
+                // descriptor array. The NoShuffle epilogue used by the flat
+                // path is also unary-only, so D tensors fall back here as well.
                 bool used_flat_desc = false;
                 if constexpr(NDimSpatial == 2 && !CTranspose && NumDTensor == 0)
                 {
-                    if(arg.num_group_ == 1 && arg.k_batch_ == 1 &&
+                    if(arg.num_group_ == 1 && arg.k_batch_ == 1 && arg.gemms_count_ == 1 &&
                        !arg.flat_a_container_.empty())
                     {
                         used_flat_desc          = true;
