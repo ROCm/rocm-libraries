@@ -102,18 +102,20 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     constexpr int NUM_WAVES = cfg.waves_per_wg;
 
     // --- LDS layout ---
-    // Phase 1 (weight prologue): weight LDS sized for one c_slice.
+    // Phase 1 (weight prologue): each wave loads its own c_slice into a private
+    // LDS region. Layout: [NUM_WAVES][WEIGHT_LDS_SIZE_UINT4].
     // Phase 2 (compute): input double-buffer + reduction buffer (coexist).
     //
     // The reduction buffer is placed after the input double-buffer region.
-    // We use a unified LDS allocation sized to the max of (weight, input+reduction).
+    // We use a unified LDS allocation sized to the max of (weight_all_waves,
+    // input+reduction).
     static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
     // Reduction buffer: NUM_WAVES * 64 * ACC_FLOATS floats
     // In uint4 units: NUM_WAVES * 64 * ACC_FLOATS * sizeof(float) / sizeof(uint4)
     static constexpr int REDUCE_LDS_UINT4 = NUM_WAVES * 64 * ACC_FLOATS / 4;
     static constexpr int IO_REDUCE_LDS = INPUT_TOTAL + REDUCE_LDS_UINT4;
 
-    static constexpr int WEIGHT_LDS = TC::WEIGHT_LDS_SIZE_UINT4;
+    static constexpr int WEIGHT_LDS = TC::WEIGHT_LDS_ALL_WAVES;
     static constexpr int UNIFIED_LDS_SIZE = (WEIGHT_LDS > IO_REDUCE_LDS) ? WEIGHT_LDS : IO_REDUCE_LDS;
 
     __shared__ uint4 lds_buf[UNIFIED_LDS_SIZE];
@@ -135,28 +137,27 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     constexpr int stride = 1;
     constexpr int dilation = 1;
 
-    // --- Weight prologue: each wave loads only its own C-slice weights ---
-    // Load all c_local weight slices through LDS, each wave keeps only its own.
+    // --- Weight prologue: all waves load their own C-slice in parallel ---
+    // Each wave loads into its private LDS region and reads back into registers,
+    // with no inter-wave serialization. This eliminates the (NUM_WAVES - 1)
+    // redundant DRAM reads of the old serial approach.
     WeightLoaderT wl;
-    constexpr int C_LOCAL_COUNT = cfg.c_local_count();
     constexpr int CPG = cfg.channels_per_group();
+    constexpr int WEIGHT_SLICE_UINT4 = TC::WEIGHT_LDS_SIZE_UINT4;
 
-    for(int c_local = 0; c_local < C_LOCAL_COUNT; c_local++)
-    {
-        __syncthreads();
-        if constexpr(is_dgrad)
-            WeightLoaderT::load_kyxc_to_lds_dgrad(lds_buf, wei,
-                                                    c_local * CPG, weight_block_k, C);
-        else
-            WeightLoaderT::load_kyxc_to_lds(lds_buf, wei,
-                                              weight_block_k, c_local, C);
-        wait_vmcnt<0>();
-        __syncthreads();
+    uint4* wave_weight_lds = lds_buf + wave_id * WEIGHT_SLICE_UINT4;
 
-        // Each wave reads only the weights for its own C-slice.
-        if(c_local == wave_id)
-            wl.read_from_lds(lds_buf);
-    }
+    if constexpr(is_dgrad)
+        WeightLoaderT::load_kyxc_to_lds_dgrad_wave(
+            wave_weight_lds, wei, wave_id * CPG, weight_block_k, C);
+    else
+        WeightLoaderT::load_kyxc_to_lds_wave(
+            wave_weight_lds, wei, weight_block_k, wave_id, C);
+
+    wait_vmcnt<0>();
+    __syncthreads();
+
+    wl.read_from_lds(wave_weight_lds);
 
     __syncthreads();
 
