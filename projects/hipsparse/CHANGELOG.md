@@ -11,8 +11,10 @@ Documentation for hipSPARSE is available at
 * Add BSR format support to `hipsparseSpMV`.
 
 ### Resolved issues
+* Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatypes using the same sparse matrix descriptor resulted in errors.
 
-* Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatype configurations on the same sparse matrix descriptor returned errors or produced incorrect results.
+### Upcoming changes
+* The routines `hipsparseXcsrgeamNnz`, `hipsparseScsrgeam`, `hipsparseDcsrgeam`, `hipsparseCcsrgeam`, and `hipsparseZcsrgeam` have been deprecated and will be removed in a future release. Users should use the generic SpGEAM routines instead.
 
 ## hipSPARSE 4.5.0 for ROCm 7.12.0
 

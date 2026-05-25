@@ -889,6 +889,16 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
               lenB -= lenBFooter
             numDummy += lenB
             insertDummyTop = swapped
+        if kernel["ProblemType"]["Sparse"]:
+            if kernel["DirectToLdsMetadata"]:
+                # DirectToLdsMetadata M0 update
+                numDummy -= 1
+            else:
+                # Workaround, Sparse B + (DTLB only) don't need this since there's no meta GR in globalReadB
+                sparseTc = 'B' if kernel["ProblemType"]["Sparse"] == 2 else 'A'
+                if not (sparseTc == 'B' and kernel["DirectToLdsB"] and not kernel["DirectToLdsA"]) and kernel["DirectToLds%s"%sparseTc]:
+                    numMetaGR = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
+                    numDummy -= numMetaGR
     # extend localWrite by inserting empty Module
     # See getNumLocalWritePerMfma for how this work
     itemsLWToSchedTemp = []
