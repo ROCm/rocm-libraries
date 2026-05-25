@@ -46,7 +46,7 @@ struct TransformersAdamWTestCase
     {
         os << "transformers_adam_w ";
         os << "input:" << tc.input[0];
-        for(auto i = 1ULL; i < tc.input.size(); i++)
+        for(size_t i = 1ULL; i < tc.input.size(); i++)
         {
             os << "x" << tc.input[i];
         }
