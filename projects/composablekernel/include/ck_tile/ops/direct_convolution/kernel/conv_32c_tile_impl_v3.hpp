@@ -1,32 +1,24 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// CK Tile v3 implementation of non-grouped (standard) convolution using
-// mfma_f32_16x16x32_f16 with cross-wave LDS reduction.
+// CK Tile v3 implementation of non-grouped (standard) convolution with
+// cross-wave LDS reduction. Supports two MFMA shapes:
+//
+//   mfma_f32_16x16x32: 16 spatial × 16 K-output, 32-ch C-reduction
+//   mfma_f32_32x32x16: 32 spatial × 32 K-output, 16-ch C-reduction
 //
 // Splits the C-reduction across waves within the same workgroup. Each wave
-// handles a different 32-channel C-slice, all producing partial sums for
-// the same 16 K-channels. An LDS-based cross-wave reduction combines the
-// partial sums before output.
+// handles one channels_per_group C-slice, all producing partial sums for
+// the same block_k_size K-channels. An LDS-based cross-wave reduction
+// combines the partial sums before output.
 //
 // Design:
 //   - waves_per_group = 1 (each wave is its own C-group)
-//   - block_k_size = 16 (all waves share the same 16 K-channels)
-//   - block_c = waves_per_wg * 32 (all C processed in one workgroup)
+//   - block_k_size = mfma_n (16 or 32 K-channels)
+//   - channels_per_group = mfma_k (32 or 16 C-channels per wave)
+//   - block_c = waves_per_wg * channels_per_group
 //   - No atomics, no serial C-loop per wave
 //   - Cross-wave LDS reduction at flush points
-//
-// VGPR budget (4-wave, C=128): ~64 VGPRs
-//   - 1 weight register set: 18 VGPRs
-//   - Circular accumulator acc[3]: 12 VGPRs
-//   - Input register: 4 VGPRs
-//   - LDS offsets, coords, misc: ~30 VGPRs
-//
-// LDS budget (4-wave, C=128):
-//   - Weight (phase 1): 16×9×32×2 = 9,216 B
-//   - Input (phase 2, 2 buffers): 2×18×16×16 = 9,216 B
-//   - Reduction buffer: 4×64×4×4 = 4,096 B
-//   - Total (phase 2): 13,312 B = 13 KB
 //
 // Supported: fp16 and bf16, Fprop and Dgrad.
 
@@ -53,13 +45,15 @@ namespace ck_tile::direct_conv::conv_32c_tile::v3
 {
 
 constexpr int WAVE_SIZE = 64;
-constexpr int BLOCK_Q = 16;
+
+enum class MfmaShape { M16N16K32, M32N32K16 };
 
 // ===================================================================
 // weight_load_to_lds_kyxc — load one c_slice of KYXC weights to LDS.
 //
-// Loads weight[block_k_start : +block_k_size, :, c_slice*32 : +32]
-// from KYXC DRAM layout into contiguous [block_k_size, KH_KW, 32] LDS.
+// Loads weight[block_k_start : +block_k_size, :, c_slice*cpg : +cpg]
+// from KYXC DRAM layout into contiguous [block_k_size, KH_KW, cpg] LDS.
+// cpg = channels_per_group (32 for M16N16K32, 16 for M32N32K16).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
 __device__ void weight_load_to_lds_kyxc(
@@ -71,7 +65,7 @@ __device__ void weight_load_to_lds_kyxc(
 {
     constexpr int WEIGHT_K = cfg.block_k_size();
     constexpr int KH_KW = cfg.kh * cfg.kw;
-    constexpr int C_SLICE = 32;
+    constexpr int C_SLICE = cfg.channels_per_group();
     constexpr int TOTAL_UINT4 = WEIGHT_K * KH_KW * C_SLICE / 8;
     constexpr int NUM_PASSES = (TOTAL_UINT4 + cfg.block_size() - 1) / cfg.block_size();
 
@@ -106,11 +100,11 @@ __device__ void weight_load_to_lds_kyxc(
 // weight_load_to_lds_kyxc_dgrad — load one k_slice of KYXC weights
 // for Dgrad into LDS.
 //
-// Loads weight[k_slice_start : +32, :, block_c_start : +block_c_size]
-// from KYXC DRAM layout into contiguous [32_K, KH_KW, block_c_size_C] LDS.
+// Loads weight[k_slice_start : +cpg, :, block_c_start : +block_k_size]
+// from KYXC DRAM layout into contiguous [cpg_K, KH_KW, block_k_size_C] LDS.
 //
-// For Dgrad: K dimension = 32 (MFMA reduction), C dimension = block_k_size
-// (each wave handles 16 C-channels of the input gradient).
+// For Dgrad: K dimension = channels_per_group (MFMA reduction),
+// C dimension = block_k_size (output channels of input gradient).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
 __device__ void weight_load_to_lds_kyxc_dgrad(
@@ -120,7 +114,7 @@ __device__ void weight_load_to_lds_kyxc_dgrad(
     int block_c_start,
     int C_total)
 {
-    constexpr int K_SLICE = 32;
+    constexpr int K_SLICE = cfg.channels_per_group();
     constexpr int KH_KW = cfg.kh * cfg.kw;
     constexpr int BLOCK_C = cfg.block_k_size();
     // Total uint4s = K_SLICE * KH_KW * BLOCK_C / 8 = same as Fprop weight LDS size.
@@ -157,33 +151,42 @@ __device__ void weight_load_to_lds_kyxc_dgrad(
 // Config — kernel configuration for v3 cross-wave LDS reduction.
 //
 // Parameters:
+//   mfma_shape: M16N16K32 or M32N32K16
 //   waves_per_group() = 1 (each wave is its own C-group)
 //   block_groups() = waves_per_wg
-//   block_c() = waves_per_wg * 32
-//   block_k_size() = 16 (all waves share the same 16 K-channels)
-//   c_local_count() = waves_per_wg (one 32-ch slice per wave)
+//   channels_per_group() = mfma_k (32 or 16)
+//   block_c() = waves_per_wg * channels_per_group
+//   block_k_size() = mfma_n (16 or 32 K-channels)
+//   block_q() = mfma_m (16 or 32 spatial positions)
+//   c_local_count() = waves_per_wg (one cpg slice per wave)
 // ===================================================================
 template <DataType DT = DataType::fp16>
 struct Config
 {
     static constexpr DataType data_type = DT;
+    MfmaShape mfma_shape = MfmaShape::M16N16K32;
     int waves_per_wg;
     int kh = 3;
     int kw = 3;
     int n_fold = 8;
-    int channels_per_group = 32;
 
-    constexpr int group_size() const { return channels_per_group; }
+    // Derived from MFMA shape:
+    constexpr int mfma_m() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : 32; }
+    constexpr int mfma_n() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : 32; }
+    constexpr int mfma_k() const { return (mfma_shape == MfmaShape::M16N16K32) ? 32 : 16; }
+
+    constexpr int channels_per_group() const { return mfma_k(); }
+    constexpr int group_size() const { return channels_per_group(); }
     constexpr int waves_per_group() const { return 1; }
     constexpr int block_groups() const { return waves_per_wg; }
 
     constexpr int num_waves() const { return waves_per_wg; }
-    constexpr int block_c() const { return channels_per_group * block_groups(); }
-    constexpr int block_q() const { return BLOCK_Q; }
+    constexpr int block_c() const { return channels_per_group() * block_groups(); }
+    constexpr int block_q() const { return mfma_m(); }
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
 
-    // All waves share the same 16 K-channels (single MFMA N-dimension).
-    constexpr int block_k_size() const { return 16; }
+    // All waves share the same block_k_size K-channels.
+    constexpr int block_k_size() const { return mfma_n(); }
 
     // C-sections per c_block = waves_per_wg (one per wave).
     constexpr int c_local_count() const { return block_groups(); }
@@ -197,6 +200,7 @@ struct Config
 
     std::string GetName() const
     {
+        std::string mfma_str = (mfma_shape == MfmaShape::M32N32K16) ? "32x32x16" : "16x16x32";
         std::string swizzle_type_str = "_no_swizzle";
         if (swizzle_type == SwizzleType::CyclicShift)
         {
@@ -207,7 +211,7 @@ struct Config
             swizzle_type_str = "_xor_swizzle";
         }
 
-        std::string base = "32c_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
+        std::string base = "mfma_" + mfma_str + "_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
 
         if (epilogue == EpilogueType::RegistersToGlobalMemory)
         {
@@ -231,12 +235,21 @@ template <DataType DT = DataType::fp16>
 struct KernelConfigurations
 {
 static constexpr Config<DT> configs[] = {
+    // 16x16x32 configs (channels_per_group=32, block_k_size=16, block_q=16)
     // Dgrad, direct DRAM epilogue
     {.waves_per_wg = 4, .direction = Direction::Dgrad},   // 0
     {.waves_per_wg = 2, .direction = Direction::Dgrad},   // 1
     // Fprop, direct DRAM epilogue
     {.waves_per_wg = 4},                                  // 2
     {.waves_per_wg = 2},                                  // 3
+
+    // 32x32x16 configs (channels_per_group=16, block_k_size=32, block_q=32)
+    // Dgrad, direct DRAM epilogue
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad}, // 4
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad}, // 5
+    // Fprop, direct DRAM epilogue
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4},                                // 6
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2},                                // 7
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -249,11 +262,11 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
 {
     if(par.direction != cfg.direction)
         return false;
-    // C must equal block_c (= waves_per_wg * 32) for num_c_blocks = 1.
+    // C_in must equal block_c (= waves_per_wg * channels_per_group).
     const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
     if(C_in != cfg.block_c())
         return false;
-    // K must be divisible by block_k_size (= 16).
+    // K_out must be divisible by block_k_size.
     const int K_out = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
     if(K_out % cfg.block_k_size() != 0)
         return false;
@@ -269,9 +282,8 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 // ===================================================================
 // TileConstants — extends TileConstantsBase for v3.
 //
-// Weight LDS is sized for [16_K, KH*KW, 32_C] — one c_slice at a time.
-// The MFMA/Weight distributions differ from v1 because block_k_size = 16
-// (not waves_per_wg * 16). Each wave independently handles 16 K-channels.
+// Weight LDS is sized for [block_k_size, KH*KW, cpg] — one c_slice.
+// block_k_size × cpg = 512 for both MFMA shapes.
 // ===================================================================
 template <auto cfg>
 struct TileConstants : direct_conv::TileConstantsBase<cfg>
@@ -281,14 +293,17 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     static constexpr int WAVES_PER_WG = cfg.waves_per_wg;
     static constexpr int KH_KW_       = cfg.kh * cfg.kw;
 
-    // Weight LDS sizing for one c_slice: [16_K, KH_KW, 32_C].
-    // = 16 * 9 * 32 = 4,608 fp16 elements = 9,216 B
-    static constexpr int WEIGHT_LDS_ELEMENTS = cfg.block_k_size() * cfg.kh * cfg.kw * 32;
+    // Weight LDS sizing for one c_slice: [block_k_size, KH_KW, cpg].
+    // Both MFMA shapes: block_k_size * cpg = 512, so 512 * 9 = 4,608 elements.
+    static constexpr int WEIGHT_LDS_ELEMENTS =
+        cfg.block_k_size() * cfg.kh * cfg.kw * cfg.channels_per_group();
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_ELEMENTS / 8;
 
     // Mfma distribution — needed by InputLoader's static type declarations.
     // Not used at runtime (ConvInputLoader passes init_mfma_offsets=false).
-    // Reuse v1's encoding; the distribution is only used for type deduction.
+    // The distribution must be well-formed for type deduction to compile.
+    static constexpr int SPATIAL_LANES = cfg.mfma_m();   // 16 or 32
+    static constexpr int K_GROUPS      = 64 / SPATIAL_LANES; // 4 or 2
     struct Mfma
     {
         static constexpr auto MakeAccTileDistribution()
@@ -296,8 +311,8 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
                     ck_tile::sequence<>,
-                    ck_tile::tuple<ck_tile::sequence<16>,
-                                   ck_tile::sequence<WAVES_PER_WG, 4>,
+                    ck_tile::tuple<ck_tile::sequence<SPATIAL_LANES>,
+                                   ck_tile::sequence<WAVES_PER_WG, K_GROUPS>,
                                    ck_tile::sequence<4>>,
                     ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<2, 1>>,
                     ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
@@ -307,8 +322,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // Weight — only LDS sizing overrides needed. Weight reads use manual
-    // addressing (not tile distributions) since all waves read the same
-    // 16 K-channels from a [16_K, KH_KW, 32_C] LDS buffer.
+    // addressing (not tile distributions).
     struct Weight : Base::Weight
     {
     };
@@ -370,18 +384,20 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
 
-        const int lane_q  = lane % 16;
-        const int lane_c8 = lane / 16;
+        constexpr int MFMA_M = cfg.mfma_m();
+        const int lane_q  = lane % MFMA_M;
+        const int lane_c8 = lane / MFMA_M;
 
         // v3: each wave is its own C-group (wave_group = wave, not wave / 2).
         const int wave_group = wave;
         const int c8_pos = wave_group * TC::GROUP_SIZE_8 + lane_c8;
 
-        for(int s = 0; s < cfg.kw; s++)
-        {
-            int spatial_pos = lane_q + s;
-            base::mfma_lds_offsets[s] = spatial_pos * TC::BLOCK_C8 * 8 + c8_pos * 8;
-        }
+        static_for<cfg.kw>(
+            [&]<int S>()
+            {
+                int spatial_pos = lane_q + S;
+                base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_pos * 8;
+            });
 
         // --- Overflow load setup ---
         // The tile distribution covers TOTAL_SPATIAL spatial positions, but
@@ -516,53 +532,58 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
 
         if constexpr(cfg.direction == Direction::Dgrad)
         {
-            // Dgrad: LDS layout is [32_K, KH_KW, block_k_size_C].
-            // For v3, block_k_size = 16. Each thread reads 8 K values
-            // per filter position using strided access.
+            // Dgrad: LDS layout is [cpg_K, KH_KW, block_k_size_C].
+            // Each thread reads 8 K-reduction values per filter position.
             //
             // MFMA A operand mapping:
-            //   k_group = lane / 16 → selects which 8 of 32 K-reduction values
-            //   c_lane  = lane % 16 → C-output position within 16-channel block
-            constexpr int BLOCK_C = cfg.block_k_size();  // = 16
+            //   k_group = lane / mfma_m → selects which 8 K-reduction values
+            //   c_lane  = lane % mfma_m → C-output position
+            constexpr int BLOCK_C = cfg.block_k_size();
+            constexpr int MFMA_M = cfg.mfma_m();
 
-            const int k_group = lane / 16;
-            const int c_lane  = lane % 16;
+            const int k_group = lane / MFMA_M;
+            const int c_lane  = lane % MFMA_M;
 
-            for(int f = 0; f < KH_KW_L; f++)
-            {
-                ElementType vals[8];
-                for(int j = 0; j < 8; j++)
+            static_for<KH_KW_L>(
+                [&]<int F>()
                 {
-                    int k = k_group * 8 + j;
-                    vals[j] = lds_ptr[k * KH_KW_L * BLOCK_C + f * BLOCK_C + c_lane];
-                }
-                __builtin_memcpy(&this->weights[f], vals, sizeof(VecType));
-            }
+                    ElementType vals[8];
+                    static_for<8>(
+                        [&]<int J>()
+                        {
+                            int k = k_group * 8 + J;
+                            vals[J] = lds_ptr[k * KH_KW_L * BLOCK_C + F * BLOCK_C + c_lane];
+                        });
+                    __builtin_memcpy(&this->weights[F], vals, sizeof(VecType));
+                });
         }
         else
         {
-            // Fprop: LDS layout is [16_K, KH_KW, 32_C], C innermost.
+            // Fprop: LDS layout is [block_k_size_K, KH_KW, cpg_C], C innermost.
             //
-            // MFMA B operand mapping (mfma_f32_16x16x32_f16):
-            //   k_out = lane % 16 → K-output channel (N-dimension, 0..15)
-            //   c_grp = lane / 16 → C-reduction group (0..3, each has 8 values)
+            // MFMA A operand mapping:
+            //   k_out = lane % mfma_n → K-output channel
+            //   c_grp = lane / mfma_n → C-reduction group (each has 8 values)
             //
             // Each thread reads 8 C values per filter position:
             //   vals[j] = weight[k_out, f, c_grp*8 + j]
-            constexpr int C_SLICE = 32;
+            constexpr int C_SLICE = cfg.channels_per_group();
+            constexpr int MFMA_N = cfg.mfma_n();
 
-            const int k_out = lane % 16;
-            const int c_grp = lane / 16;
+            const int k_out = lane % MFMA_N;
+            const int c_grp = lane / MFMA_N;
 
-            for(int f = 0; f < KH_KW_L; f++)
-            {
-                ElementType vals[8];
-                for(int j = 0; j < 8; j++)
+            static_for<KH_KW_L>(
+                [&]<int F>()
                 {
-                    vals[j] = lds_ptr[k_out * KH_KW_L * C_SLICE + f * C_SLICE + c_grp * 8 + j];
-                }
-                __builtin_memcpy(&this->weights[f], vals, sizeof(VecType));
-            }
+                    ElementType vals[8];
+                    static_for<8>(
+                        [&]<int J>()
+                        {
+                            vals[J] = lds_ptr[k_out * KH_KW_L * C_SLICE + F * C_SLICE + c_grp * 8 + J];
+                        });
+                    __builtin_memcpy(&this->weights[F], vals, sizeof(VecType));
+                });
         }
     }
 };
@@ -570,22 +591,35 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
 // ===================================================================
 // OutputWriterV3 — manual offset computation for v3.
 //
-// In v3, all waves share the same 16 K-channels. Only wave 0 writes
-// the output after cross-wave LDS reduction.
+// In v3, all waves share the same block_k_size K-channels. Only wave 0
+// writes the output after cross-wave LDS reduction.
 //
-// MFMA 16x16x32 lane mapping:
-//   lane % 16 → spatial position (Q-dimension)
-//   lane / 16 → K-group (0..3, each contributes 4 fp32 values → 16 K)
+// M16N16K32: lane % 16 → spatial, lane / 16 → K-group (4 groups × 4 K).
+//   Single 8B DRAM write per thread.
+//
+// M32N32K16: lane % 32 → spatial, lane / 32 → K-block (0 or 1).
+//   16 accumulator values map to 4 groups of 4 contiguous K values:
+//     acc[0..3]   → K = g*8 + m_block*4 + {0..3} for g=0
+//     acc[4..7]   → K = g*8 + m_block*4 + {0..3} for g=1
+//     acc[8..11]  → K = g*8 + m_block*4 + {0..3} for g=2
+//     acc[12..15] → K = g*8 + m_block*4 + {0..3} for g=3
+//   where m_block = lane / 32. Four 8B DRAM writes per thread.
 // ===================================================================
 template <auto cfg>
 struct OutputWriterV3
 {
     using ElementType = ToType<cfg.data_type>;
+    using AccType = std::conditional_t<
+        cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
 
     ElementType*      output_base;
-    ck_tile::index_t  output_elem_offset;
+    ck_tile::index_t  output_spatial_offset; // q_pos * K (spatial + batch offset)
     ck_tile::index_t  row_stride_elems;
     bool              store_valid;
+
+    // For M16N16K32: single K-offset (4 contiguous K values)
+    // For M32N32K16: m_block value for computing 4 K-offsets
+    int k_offset_or_m_block;
 
     template <typename BlockCoords_>
     __device__ OutputWriterV3(const BlockCoords_& bc,
@@ -598,26 +632,59 @@ struct OutputWriterV3
         row_stride_elems = wo * bc.K;
 
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
-        const int q_pos = bc.block_q + lane % 16;
-        const int k_offset = (lane / 16) * 4;
 
-        output_elem_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K + k_offset;
-        store_valid = (q_pos < wo);
+        if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
+        {
+            const int q_pos = bc.block_q + lane % 16;
+            k_offset_or_m_block = (lane / 16) * 4;
+            output_spatial_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K + k_offset_or_m_block;
+            store_valid = (q_pos < wo);
+        }
+        else
+        {
+            const int q_pos = bc.block_q + lane % 32;
+            k_offset_or_m_block = (lane / 32) * 4; // m_block * 4
+            output_spatial_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K;
+            store_valid = (q_pos < wo);
+        }
     }
 
-    __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
+    __device__ __forceinline__ void flush(AccType acc_val, int p_out)
     {
         if(!store_valid)
             return;
 
-        uint32_t words[2];
-        words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
-        words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
+        const ck_tile::index_t row_offset =
+            static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
 
-        ck_tile::index_t store_offset = output_elem_offset
-            + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+        if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
+        {
+            // Single 8B write: 4 contiguous K values.
+            uint32_t words[2];
+            words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
+            words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
 
-        __builtin_memcpy(output_base + store_offset, words, sizeof(words));
+            ck_tile::index_t store_offset = output_spatial_offset + row_offset;
+            __builtin_memcpy(output_base + store_offset, words, sizeof(words));
+        }
+        else
+        {
+            // Four 8B writes: 4 groups of 4 contiguous K values.
+            // Group g: K-offset = g*8 + m_block*4, acc values [g*4 .. g*4+3].
+            const ck_tile::index_t base_offset = output_spatial_offset + row_offset;
+
+            static_for<4>(
+                [&]<int G>()
+                {
+                    const int k_off = G * 8 + k_offset_or_m_block;
+                    uint32_t words[2];
+                    words[0] = ConvertFp32ToVec4<ElementType>::convert(
+                        acc_val[G * 4 + 0], acc_val[G * 4 + 1]);
+                    words[1] = ConvertFp32ToVec4<ElementType>::convert(
+                        acc_val[G * 4 + 2], acc_val[G * 4 + 3]);
+                    __builtin_memcpy(output_base + base_offset + k_off, words, sizeof(words));
+                });
+        }
     }
 };
 
@@ -648,8 +715,12 @@ __device__ void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __r
 {
     using TC = TileConstants<cfg>;
     using ElementType = ToType<cfg.data_type>;
-    using MfmaFn = std::conditional_t<cfg.data_type == DataType::bf16,
-        Mfma16x16x32_bf16, Mfma16x16x32>;
+
+    // Select MFMA functor based on shape and data type.
+    using MfmaFn = std::conditional_t<
+        cfg.mfma_shape == MfmaShape::M32N32K16,
+        std::conditional_t<cfg.data_type == DataType::bf16, Mfma32x32x16_bf16, Mfma32x32x16>,
+        std::conditional_t<cfg.data_type == DataType::bf16, Mfma16x16x32_bf16, Mfma16x16x32>>;
 
     conv_compute_loop_v3<
         TC, cfg, MfmaFn,

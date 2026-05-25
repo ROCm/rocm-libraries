@@ -19,6 +19,7 @@ using bf16x8_t = bf16_t __attribute__((ext_vector_type(8)));
 
 using fp32_t = float;
 using fp32x4_t = float __attribute__((ext_vector_type(4)));
+using fp32x16_t = float __attribute__((ext_vector_type(16)));
 
 using fp8_t  = __hip_fp8_e4m3;
 using bf8_t  = __hip_fp8_e5m2;

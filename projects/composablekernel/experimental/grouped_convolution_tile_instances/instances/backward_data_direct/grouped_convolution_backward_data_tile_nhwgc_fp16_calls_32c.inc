@@ -60,8 +60,15 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<82, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<83, direct_conv::Version::v2>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
-// Non-grouped convolution v3 — cross-wave LDS reduction
+// Non-grouped convolution v3 — cross-wave LDS reduction (16x16x32)
 // Dgrad, direct DRAM epilogue — configs 0-1 (waves 4, 2)
 ////////////////////////////////////////////////////////////////////////
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<0, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<1, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — cross-wave LDS reduction (32x32x16)
+// Dgrad, direct DRAM epilogue — configs 4-5 (waves 4, 2)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<4, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<5, direct_conv::Version::v3>, SIGNATURE>);

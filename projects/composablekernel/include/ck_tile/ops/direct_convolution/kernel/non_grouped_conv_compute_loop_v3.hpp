@@ -4,16 +4,13 @@
 // Non-grouped convolution compute loop v3: Cross-wave LDS reduction.
 //
 // Splits the C-reduction across waves within the same workgroup. Each wave
-// handles a different 32-channel C-slice, all producing partial sums for
-// the same 16 K-channels. An LDS-based cross-wave reduction combines the
-// partial sums before output.
+// handles a different C-slice (channels_per_group channels), all producing
+// partial sums for the same block_k_size K-channels. An LDS-based cross-wave
+// reduction combines the partial sums before output.
 //
-// Key differences from v1 (single-WG serial C-reduction) and v2 (atomic):
-//   - Each wave is its own "C-group" (waves_per_group = 1)
-//   - block_k_size = 16 (all waves share the same 16 K-channels)
-//   - block_c = waves_per_wg * 32 (all C processed within one workgroup)
-//   - No atomics, no hipMemsetAsync, no fp16 precision loss
-//   - Cross-wave LDS reduction at each flush point
+// Supports both mfma_f32_16x16x32 (fp32x4_t accumulators) and
+// mfma_f32_32x32x16 (fp32x16_t accumulators). The accumulator type is
+// derived from the MfmaFn::acc_type typedef.
 //
 // Structure per input row:
 //   wait_vmcnt + __syncthreads
@@ -24,7 +21,7 @@
 //       acc[p_idx] = MFMA(weight[R,S], input, acc[p_idx])
 //   swap tic/toc
 //   if flush:
-//     cross_wave_reduce_fp32x4(acc[slot], reduce_lds, wave_id, num_waves)
+//     cross_wave_reduce(acc[slot], reduce_lds, wave_id, num_waves)
 //     if wave_id == 0: ow.flush(acc[slot], p_out)
 //     acc[slot] = Zero
 
@@ -38,39 +35,40 @@
 namespace ck_tile::direct_conv::conv_32c_tile::v3
 {
 
-// Cross-wave LDS reduction for fp32x4_t accumulator values.
+// Cross-wave LDS reduction for accumulator values.
 //
-// Each wave writes its 4 fp32 values to a per-wave section of reduce_lds,
+// Each wave writes its ACC_SIZE fp32 values to a per-wave section of reduce_lds,
 // then all waves read and sum across all wave sections. After the reduction,
 // only wave 0's values are meaningful for output.
 //
-// LDS layout: [num_waves][64 threads][4 floats]
-// Total: num_waves * 64 * 4 * sizeof(float) = num_waves * 1024 bytes
-template <int NumWaves>
-__device__ __forceinline__ void cross_wave_reduce_fp32x4(
-    fp32x4_t& val, float* reduce_lds, int wave_id)
+// LDS layout: [num_waves][64 threads][ACC_SIZE floats]
+// Total: num_waves * 64 * ACC_SIZE * sizeof(float)
+template <int NumWaves, typename AccType>
+__device__ __forceinline__ void cross_wave_reduce(
+    AccType& val, float* reduce_lds, int wave_id)
 {
+    constexpr int ACC_SIZE = sizeof(AccType) / sizeof(float);
     const int lane = static_cast<int>(threadIdx.x) % 64;
 
-    // Write: each thread writes 4 floats to its wave's section.
-    const int write_base = wave_id * 256 + lane * 4;
-    reduce_lds[write_base + 0] = val[0];
-    reduce_lds[write_base + 1] = val[1];
-    reduce_lds[write_base + 2] = val[2];
-    reduce_lds[write_base + 3] = val[3];
+    // Write: each thread writes ACC_SIZE floats to its wave's section.
+    const int write_base = wave_id * 64 * ACC_SIZE + lane * ACC_SIZE;
+    static_for<ACC_SIZE>(
+        [&]<int I>()
+        { reduce_lds[write_base + I] = val[I]; });
 
     __syncthreads();
 
     // Read + reduce: sum across all waves.
-    fp32x4_t sum = {0.f, 0.f, 0.f, 0.f};
-    for(int w = 0; w < NumWaves; w++)
-    {
-        const int read_base = w * 256 + lane * 4;
-        sum[0] += reduce_lds[read_base + 0];
-        sum[1] += reduce_lds[read_base + 1];
-        sum[2] += reduce_lds[read_base + 2];
-        sum[3] += reduce_lds[read_base + 3];
-    }
+    AccType sum{};
+    static_for<NumWaves>(
+        [&]<int W>()
+        {
+            constexpr int read_base_w = W * 64 * ACC_SIZE;
+            const int read_base = read_base_w + lane * ACC_SIZE;
+            static_for<ACC_SIZE>(
+                [&]<int I>()
+                { sum[I] += reduce_lds[read_base + I]; });
+        });
     val = sum;
 
     __syncthreads();
@@ -97,19 +95,22 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
                                       int py,
                                       int px)
 {
+    using AccType = typename MfmaFn::acc_type;
+    constexpr int ACC_FLOATS = sizeof(AccType) / sizeof(float);
+
     constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
     constexpr int NUM_WAVES = cfg.waves_per_wg;
 
     // --- LDS layout ---
-    // Phase 1 (weight prologue): weight LDS sized for one c_slice [16_K, 9_filter, 32_C].
+    // Phase 1 (weight prologue): weight LDS sized for one c_slice.
     // Phase 2 (compute): input double-buffer + reduction buffer (coexist).
     //
     // The reduction buffer is placed after the input double-buffer region.
     // We use a unified LDS allocation sized to the max of (weight, input+reduction).
     static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
-    // Reduction buffer: NUM_WAVES * 64 * 4 floats = NUM_WAVES * 256 floats
-    // In uint4 units: NUM_WAVES * 256 * sizeof(float) / sizeof(uint4) = NUM_WAVES * 64
-    static constexpr int REDUCE_LDS_UINT4 = NUM_WAVES * 64;
+    // Reduction buffer: NUM_WAVES * 64 * ACC_FLOATS floats
+    // In uint4 units: NUM_WAVES * 64 * ACC_FLOATS * sizeof(float) / sizeof(uint4)
+    static constexpr int REDUCE_LDS_UINT4 = NUM_WAVES * 64 * ACC_FLOATS / 4;
     static constexpr int IO_REDUCE_LDS = INPUT_TOTAL + REDUCE_LDS_UINT4;
 
     static constexpr int WEIGHT_LDS = TC::WEIGHT_LDS_SIZE_UINT4;
@@ -138,13 +139,14 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     // Load all c_local weight slices through LDS, each wave keeps only its own.
     WeightLoaderT wl;
     constexpr int C_LOCAL_COUNT = cfg.c_local_count();
+    constexpr int CPG = cfg.channels_per_group();
 
     for(int c_local = 0; c_local < C_LOCAL_COUNT; c_local++)
     {
         __syncthreads();
         if constexpr(is_dgrad)
             WeightLoaderT::load_kyxc_to_lds_dgrad(lds_buf, wei,
-                                                    c_local * 32, weight_block_k, C);
+                                                    c_local * CPG, weight_block_k, C);
         else
             WeightLoaderT::load_kyxc_to_lds(lds_buf, wei,
                                               weight_block_k, c_local, C);
@@ -167,10 +169,11 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     il.prefetch_tile_to_lds(0);
 
     // --- Circular accumulator buffer ---
-    constexpr auto Zero = fp32x4_t{0.f, 0.f, 0.f, 0.f};
-    fp32x4_t acc[cfg.kh];
-    for(int i = 0; i < cfg.kh; i++)
-        acc[i] = Zero;
+    constexpr AccType Zero{};
+    AccType acc[cfg.kh];
+    static_for<cfg.kh>(
+        [&]<int I>()
+        { acc[I] = Zero; });
 
     int tic = 1;
     int toc = 0;
@@ -178,9 +181,9 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     MfmaFn mfma_fn{};
 
     // Helper lambda: LDS reduction + wave-0 output flush.
-    auto reduce_and_flush = [&](fp32x4_t& slot, int p_out)
+    auto reduce_and_flush = [&](AccType& slot, int p_out)
     {
-        cross_wave_reduce_fp32x4<NUM_WAVES>(slot, reduce_lds, wave_id);
+        cross_wave_reduce<NUM_WAVES>(slot, reduce_lds, wave_id);
         if(wave_id == 0)
             ow.flush(slot, p_out);
         slot = Zero;
@@ -294,7 +297,7 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
     {
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
-        fp32x4_t slot;
+        AccType slot;
         dispatch<cfg.kh>(p_idx,
                          [&]<int P>()
                          {
