@@ -11,7 +11,7 @@ import pytest
 from pathlib import Path
 
 from codegen.config_loader import load_config, validate_for_mode
-from codegen.generator import DescriptorGenerator
+from codegen.generator import BACKEND_FRAGMENT_FILENAMES, DescriptorGenerator
 from generate import _preview_files
 
 
@@ -41,7 +41,7 @@ COPYRIGHT_MARKER = "Copyright"
 
 def _applicable_modes(config_name: str) -> list[str]:
     """Return the list of render modes applicable to a given config."""
-    modes = ["backend", "lift-only"]
+    modes = ["backend"]
     if config_name in FRONTEND_CAPABLE_CONFIGS:
         modes.extend(["frontend", "full"])
     return modes
@@ -103,29 +103,12 @@ class TestFullPipeline:
             content = (output_dir / rel_path).read_text()
             assert COPYRIGHT_MARKER in content, f"Missing copyright in {rel_path}"
 
-    @pytest.mark.parametrize("config_name", ALL_CONFIG_NAMES)
-    def test_lift_only_files_have_copyright(
-        self, config_name, load_test_config, generator, tmp_path
-    ):
-        """Generated C++ files in lift-only mode contain a copyright header."""
-        config = load_test_config(config_name)
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        written = generator.render(config, output_dir, "lift-only")
-
-        cpp_files = [f for f in written if f.endswith((".hpp", ".cpp"))]
-        assert len(cpp_files) > 0, "Expected at least one C++ file in lift-only output"
-
-        for rel_path in cpp_files:
-            content = (output_dir / rel_path).read_text()
-            assert COPYRIGHT_MARKER in content, f"Missing copyright in {rel_path}"
-
-    def test_convolution_fwd_all_four_modes(
+    def test_convolution_fwd_all_modes(
         self, convolution_fwd_config, generator, tmp_path
     ):
-        """convolution_fwd renders successfully in all four modes."""
+        """convolution_fwd renders successfully in all supported modes."""
         config = convolution_fwd_config
-        for mode in ["backend", "frontend", "full", "lift-only"]:
+        for mode in ["backend", "frontend", "full"]:
             output_dir = tmp_path / f"output_{mode}"
             output_dir.mkdir()
             written = generator.render(config, output_dir, mode)
@@ -180,22 +163,6 @@ class TestDryRunParity:
 
         assert expected == actual, (
             f"Dry-run parity mismatch for {config_name} backend.\n"
-            f"  Only in preview: {expected - actual}\n"
-            f"  Only in actual: {actual - expected}"
-        )
-
-    @pytest.mark.parametrize("config_name", ALL_CONFIG_NAMES)
-    def test_lift_only_parity(self, config_name, load_test_config, generator, tmp_path):
-        """Preview file list matches actual lift-only render output."""
-        config = load_test_config(config_name)
-        expected = set(_preview_files(config, "lift-only"))
-
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        actual = set(generator.render(config, output_dir, "lift-only"))
-
-        assert expected == actual, (
-            f"Dry-run parity mismatch for {config_name} lift-only.\n"
             f"  Only in preview: {expected - actual}\n"
             f"  Only in actual: {actual - expected}"
         )
@@ -475,7 +442,6 @@ class TestGeneratorErrorHandling:
         assert "backend" in error_msg
         assert "frontend" in error_msg
         assert "full" in error_msg
-        assert "lift-only" in error_msg
 
     def test_empty_string_mode_raises_value_error(
         self, convolution_fwd_config, generator, tmp_path
@@ -893,45 +859,127 @@ class TestDirectRenderMethods:
         assert isinstance(result, list)
         assert len(result) > 0
 
-    def test_render_lift_only_returns_list(self, matmul_config, generator, tmp_path):
-        """render_lift_only returns a list of file paths."""
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        result = generator.render_lift_only(matmul_config, output_dir)
-        assert isinstance(result, list)
-        assert len(result) > 0
+    # File templates emitted by render_backend (paths are relative to output_dir).
+    # Pinned by name so a future template addition/removal is forced through this
+    # list instead of a magic count drifting silently.
+    _BACKEND_FILE_TEMPLATE_BASENAMES = (
+        "descriptor.hpp",
+        "descriptor.cpp",
+        "packer.hpp",
+        "test_descriptor.cpp",
+        "test_graph_ops.cpp",
+        "test_from_node.cpp",
+        "test_integration.cpp",
+        "test_integration_lifting.cpp",
+        "unpacker.hpp",
+    )
 
-    def test_render_backend_file_count(self, matmul_config, generator, tmp_path):
-        """render_backend for matmul (no mode enums) produces exactly 19 files."""
+    # File templates emitted by render_frontend (basenames, before per-config
+    # filename interpolation).
+    _FRONTEND_FILE_TEMPLATE_BASENAMES = (
+        "attributes.hpp",
+        "node.hpp",
+        "test_attributes.cpp",
+        "test_node.cpp",
+        "test_frontend_graph.cpp",
+    )
+
+    _FRONTEND_FRAGMENT_FILENAMES = (
+        "graph_method.txt",
+        "graph_includes.txt",
+        "frontend_cmake_entries.txt",
+        "node_type_enum.txt",
+    )
+
+    def test_render_backend_file_set(self, matmul_config, generator, tmp_path):
+        """render_backend for matmul (no mode enums) produces exactly the
+        expected set of files: one per file-template, one per backend
+        fragment, and the descriptor_lifting_additions text. Compared by
+        name-set so a template add/remove fails the test descriptively."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_backend(matmul_config, output_dir)
-        # 9 file templates + 10 fragment templates = 19
-        assert len(result) == 19
 
-    def test_render_lift_only_file_count(self, matmul_config, generator, tmp_path):
-        """render_lift_only produces exactly 11 outputs (3 files + 7 fragments + 1 additions)."""
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        result = generator.render_lift_only(matmul_config, output_dir)
-        # 3 lift templates + 6 lift fragments + 1 descriptor_lifting_additions = 10
-        assert len(result) == 10
+        result_basenames = {Path(p).name for p in result}
+        expected_file_basenames = {
+            Path(getattr(matmul_config, attr)).name
+            for attr in (
+                "header_filename",
+                "source_filename",
+                "packer_filename",
+                "test_descriptor_filename",
+                "test_graph_filename",
+                "test_from_node_filename",
+                "test_integration_filename",
+                "test_integration_lifting_filename",
+                "unpacker_filename",
+            )
+        }
+        expected = expected_file_basenames | set(BACKEND_FRAGMENT_FILENAMES)
 
-    def test_render_frontend_file_count(
+        assert result_basenames == expected
+        # Sanity: file-template count matches the canonical basename list so
+        # edits to render_backend's file_templates dict can't silently drop one.
+        assert len(self._BACKEND_FILE_TEMPLATE_BASENAMES) == len(
+            expected_file_basenames
+        )
+
+    def test_render_frontend_file_set(
         self, convolution_fwd_config, generator, tmp_path
     ):
-        """render_frontend produces exactly 9 outputs (2 files + 3 tests + 4 fragments)."""
+        """render_frontend produces exactly the expected file + fragment set,
+        compared by name."""
+        config = convolution_fwd_config
         output_dir = tmp_path / "output"
         output_dir.mkdir()
-        result = generator.render_frontend(convolution_fwd_config, output_dir)
-        # 2 file templates + 3 test templates + 4 fragment templates = 9
-        assert len(result) == 9
+        result = generator.render_frontend(config, output_dir)
+
+        result_basenames = {Path(p).name for p in result}
+        expected_file_basenames = {
+            Path(getattr(config, attr)).name
+            for attr in (
+                "attributes_header_filename",
+                "node_header_filename",
+                "test_attributes_filename",
+                "test_node_filename",
+                "test_frontend_graph_filename",
+            )
+        }
+        expected = expected_file_basenames | set(self._FRONTEND_FRAGMENT_FILENAMES)
+
+        assert result_basenames == expected
+        assert len(self._FRONTEND_FILE_TEMPLATE_BASENAMES) == len(
+            expected_file_basenames
+        )
+
+    def test_render_frontend_honors_attributes_filename_override(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Setting frontend.attributes_filename routes the generated Attributes
+        header and the matching test file basenames through the override
+        instead of the attributes_class-derived default. Mirrors the model-
+        level coverage in test_models.py at the render layer so a regression
+        in the basename-plumbing wiring fails here too."""
+        config = convolution_fwd_config
+        # convolution_fwd ships with attributes_filename='ConvolutionFprop'
+        # already set; override to a sentinel value to prove plumbing.
+        config.frontend.attributes_filename = "OverrideBaseName"
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        result = generator.render_frontend(config, output_dir)
+
+        basenames = {Path(p).name for p in result}
+        assert "OverrideBaseNameAttributes.hpp" in basenames
+        assert "OverrideBaseNameNode.hpp" in basenames
+        assert "TestOverrideBaseNameAttributes.cpp" in basenames
+        assert "TestOverrideBaseNameNode.cpp" in basenames
+        assert "TestGraphOverrideBaseName.cpp" in basenames
 
     def test_render_dispatches_correctly(
         self, convolution_fwd_config, generator, tmp_path
     ):
         """render() dispatches to the correct method for each mode."""
-        for mode in ["backend", "frontend", "full", "lift-only"]:
+        for mode in ["backend", "frontend", "full"]:
             output_dir = tmp_path / f"output_{mode}"
             output_dir.mkdir()
             result = generator.render(convolution_fwd_config, output_dir, mode)
@@ -983,6 +1031,137 @@ class TestRenderTemplate:
             generator._render_mode_template(
                 "nonexistent_mode_template.j2", convolution_fwd_config, df
             )
+
+    def test_finalize_sentinel_check_uses_sdk_name(self, pointwise_config, generator):
+        """The descriptor.cpp finalize() body must compare against the SDK
+        sentinel symbol (``sdk_name``), not the bare backend ``name``.
+
+        Pointwise's PointwiseMode enum has ``NOT_SET`` (sentinel:true) with
+        ``sdk_name: UNSET``. The rendered finalize check therefore needs to
+        read ``PointwiseMode::UNSET`` so it matches what the SDK enum
+        actually exports — emitting ``::NOT_SET`` would compile against the
+        SDK header but compare a never-equal value, masking real
+        finalize() failures.
+        """
+        rendered = generator._render_template("descriptor.cpp.j2", pointwise_config)
+        assert "PointwiseMode::UNSET" in rendered
+        assert "PointwiseMode::NOT_SET" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# tensor_fields[].frontend_getter override — render-level verification
+# ---------------------------------------------------------------------------
+
+
+class TestTensorFieldFrontendGetterOverride:
+    """Verify that the per-tensor ``frontend_getter`` override resolves
+    correctly when packer/unpacker templates render, for the three
+    historically-tripping configs (batchnorm, batchnorm_backward, sdpa).
+
+    The original bug emitted ``attributes.()`` (empty getter) in the
+    packer and ``attributes.set_(`` (empty setter) in the unpacker
+    whenever a ``tensor_fields[]`` entry had no matching ``frontend.inputs``
+    or ``frontend.outputs`` name. With the override re-honored, every
+    tensor field now resolves either via name-match, abbreviation
+    fallback, or explicit ``frontend_getter``, and the rendered output
+    must never contain those broken literals.
+    """
+
+    @pytest.mark.parametrize(
+        "config_name",
+        ["batchnorm.yaml", "batchnorm_backward.yaml", "sdpa.yaml"],
+    )
+    def test_packer_has_no_empty_attribute_call(
+        self, config_name, load_test_config, generator
+    ):
+        """The packer must never render ``attributes.()`` — that literal
+        is the symptom of an unresolved tensor_field accessor.
+        """
+        config = load_test_config(config_name)
+        rendered = generator._render_template("packer.hpp.j2", config)
+        assert "attributes.()" not in rendered, (
+            f"{config_name}: packer rendered an empty attribute getter "
+            f"call — at least one tensor_field failed to resolve to a "
+            f"frontend accessor."
+        )
+
+    @pytest.mark.parametrize(
+        "config_name",
+        ["batchnorm.yaml", "batchnorm_backward.yaml", "sdpa.yaml"],
+    )
+    def test_unpacker_has_no_empty_setter_call(
+        self, config_name, load_test_config, generator
+    ):
+        """The unpacker must never render ``attributes.set_(`` — that
+        literal is the symptom of an unresolved tensor_field with a
+        getter that does not start with ``get_`` so the setter could
+        not be derived.
+        """
+        config = load_test_config(config_name)
+        rendered = generator._render_template("unpacker.hpp.j2", config)
+        assert "attributes.set_(" not in rendered, (
+            f"{config_name}: unpacker rendered an empty setter call — "
+            f"at least one tensor_field failed to derive a setter name."
+        )
+
+    def test_sdpa_unpacker_uses_set_bias_for_attn_mask(
+        self, load_test_config, generator
+    ):
+        """SDPA's ``attn_mask`` tensor_field intentionally maps to the
+        hand-written ``get_bias()``/``set_bias()`` accessors on
+        ``SdpaAttributes``. The override must produce a real
+        ``attributes.set_bias(`` call in the unpacker, not an empty
+        ``attributes.set_(`` or a ``set_attn_mask(`` call against a
+        non-existent setter.
+        """
+        config = load_test_config("sdpa.yaml")
+        rendered = generator._render_template("unpacker.hpp.j2", config)
+        assert "attributes.set_bias(" in rendered, (
+            "sdpa.yaml: unpacker should emit attributes.set_bias(...) "
+            "for the divergent attn_mask → get_bias() override."
+        )
+        assert "attributes.set_attn_mask(" not in rendered, (
+            "sdpa.yaml: unpacker must NOT call set_attn_mask — "
+            "SdpaAttributes exposes that tensor via the bias accessor."
+        )
+
+    def test_sdpa_packer_emits_max_seq_len_kv_as_int32(
+        self, load_test_config, generator
+    ):
+        """SDPA's ``max_seq_len_kv`` is ``scalar_int32``. The packer must
+        emit the field with ``HIPDNN_TYPE_INT32`` and use the attribute
+        identifier — never silently drop it because the type is unknown.
+        Regression guard: prior to scalar_int32 support, this field
+        produced no code in the generated packer.
+        """
+        config = load_test_config("sdpa.yaml")
+        rendered = generator._render_template("packer.hpp.j2", config)
+        assert (
+            "HIPDNN_ATTR_SDPA_FWD_MAX_SEQ_LEN_KV_EXT" in rendered
+        ), "sdpa.yaml: packer must emit max_seq_len_kv attribute"
+        assert "HIPDNN_TYPE_INT32" in rendered, (
+            "sdpa.yaml: packer must emit HIPDNN_TYPE_INT32 for the "
+            "scalar_int32 field"
+        )
+
+    def test_sdpa_unpacker_emits_max_seq_len_kv_as_int32(
+        self, load_test_config, generator
+    ):
+        """SDPA's ``max_seq_len_kv`` (scalar_int32, fbs-optional) must
+        unpack into a ``std::optional<int32_t>`` and write
+        ``HIPDNN_TYPE_INT32`` into the getDescriptorAttrOptionalScalar
+        call.
+        """
+        config = load_test_config("sdpa.yaml")
+        rendered = generator._render_template("unpacker.hpp.j2", config)
+        assert "std::optional<int32_t>" in rendered, (
+            "sdpa.yaml: unpacker must declare an int32_t optional local "
+            "for max_seq_len_kv"
+        )
+        assert "HIPDNN_TYPE_INT32" in rendered, (
+            "sdpa.yaml: unpacker must pass HIPDNN_TYPE_INT32 for the "
+            "scalar_int32 field"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1349,34 +1528,6 @@ class TestConstantsGeneration:
         constants_files = [f for f in written if "constants/" in f]
         assert len(constants_files) == 0
 
-    def test_constants_generated_in_lift_only_mode(
-        self, load_test_config, generator, tmp_path
-    ):
-        """Constants file IS generated in lift-only mode when not set."""
-        config = load_test_config("batchnorm_backward.yaml")
-        assert not config.test_data.constants_include
-
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        written = generator.render(config, output_dir, "lift-only")
-
-        constants_path = (
-            f"test_sdk/include/hipdnn_test_sdk/constants/"
-            f"{config.effective_constants_include}.hpp"
-        )
-        assert constants_path in written
-
-    def test_constants_not_generated_in_lift_only_when_set(
-        self, convolution_fwd_config, generator, tmp_path
-    ):
-        """Constants file is NOT generated in lift-only mode when set."""
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        written = generator.render(convolution_fwd_config, output_dir, "lift-only")
-
-        constants_files = [f for f in written if "constants/" in f]
-        assert len(constants_files) == 0
-
     def test_constants_has_tensor_uids(self, load_test_config, generator, tmp_path):
         """Generated constants include UID constants for all tensors."""
         config = load_test_config("batchnorm_inference.yaml")
@@ -1557,3 +1708,526 @@ class TestLiftingTemplateImprovements:
 
         assert "ASSERT_GE(graphT.tensors.size()" not in content
         assert "ASSERT_EQ(graphT.tensors.size()" in content
+
+
+class TestIntegrationFixtureNameHonorsAttributesFilename:
+    """Verify Integration{...}Descriptor{Lowering,Lifting} fixture and TEST_F
+    suite names use ``frontend.attributes_filename`` when set, falling back to
+    ``op.name`` otherwise. The in-tree files for conv use the
+    ``IntegrationConvFprop*`` basename rather than ``IntegrationConvolutionFwd*``,
+    so the generator must match.
+    """
+
+    def test_lowering_fixture_uses_attributes_filename(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """convolution_fwd has attributes_filename='ConvolutionFprop'; the
+        lowering fixture must be named after it, not after op.name."""
+        assert convolution_fwd_config.frontend.attributes_filename == "ConvolutionFprop"
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lowering_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_filename
+        )
+        content = lowering_path.read_text()
+
+        assert "class IntegrationConvolutionFpropDescriptorLowering" in content
+        assert "TEST_F(IntegrationConvolutionFpropDescriptorLowering," in content
+        assert "IntegrationConvolutionFwdDescriptorLowering" not in content
+
+    def test_lifting_fixture_uses_attributes_filename(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """convolution_fwd lifting fixture must be named after attributes_filename."""
+        assert convolution_fwd_config.frontend.attributes_filename == "ConvolutionFprop"
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "class IntegrationConvolutionFpropDescriptorLifting" in content
+        assert "TEST_F(IntegrationConvolutionFpropDescriptorLifting," in content
+        assert "IntegrationConvolutionFwdDescriptorLifting" not in content
+
+    def test_lowering_fixture_falls_back_to_op_name(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """pointwise has no attributes_filename; fixture must use op.name."""
+        assert pointwise_config.frontend.attributes_filename is None
+        assert pointwise_config.name == "Pointwise"
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(pointwise_config, output_dir, "backend")
+
+        lowering_path = (
+            output_dir / "tests/frontend" / pointwise_config.test_integration_filename
+        )
+        content = lowering_path.read_text()
+
+        assert "class IntegrationPointwiseDescriptorLowering" in content
+        assert "TEST_F(IntegrationPointwiseDescriptorLowering," in content
+
+    def test_lifting_fixture_falls_back_to_op_name(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """pointwise lifting fixture must use op.name when no override is set."""
+        assert pointwise_config.frontend.attributes_filename is None
+        assert pointwise_config.name == "Pointwise"
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(pointwise_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / pointwise_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "class IntegrationPointwiseDescriptorLifting" in content
+        assert "TEST_F(IntegrationPointwiseDescriptorLifting," in content
+
+
+# ---------------------------------------------------------------------------
+# Task 2.1: tensor-array unpacking emit
+# ---------------------------------------------------------------------------
+
+
+class TestUnpackerTensorArray:
+    """Verify the unpacker emits a tensor-array block for each tensor_array_field."""
+
+    def test_unpacker_calls_unpack_tensor_array_helper(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """The generated unpacker invokes unpackAndRegisterTensorArray for peer_stats."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        unpacker_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / batchnorm_config.unpacker_filename
+        )
+        content = unpacker_path.read_text()
+        assert "unpackAndRegisterTensorArray" in content
+        assert "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT" in content
+
+    def test_unpacker_calls_frontend_setter_for_tensor_array(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """The generated unpacker calls attributes.set_peer_stats(...)."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        unpacker_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / batchnorm_config.unpacker_filename
+        )
+        content = unpacker_path.read_text()
+        assert "attributes.set_peer_stats(" in content
+
+    def test_unpacker_no_tensor_array_block_when_absent(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Configs without tensor_array_fields should not emit the array block."""
+        assert convolution_fwd_config.tensor_array_fields == []
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        unpacker_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / convolution_fwd_config.unpacker_filename
+        )
+        content = unpacker_path.read_text()
+        assert "unpackAndRegisterTensorArray" not in content
+
+
+# ---------------------------------------------------------------------------
+# Task 2.2: camelCase normalization for tensor_array names in packer
+# ---------------------------------------------------------------------------
+
+
+class TestPackerTensorArrayCamelCase:
+    """Verify tensor_array_field local variables use camelCase, identifiers stay snake."""
+
+    def test_packer_uses_camel_locals_for_peer_stats(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Packer locals (Attrs/Ptrs vars) use peerStats not peer_stats."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / batchnorm_config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert "peerStatsAttrs" in content
+        assert "peerStatsPtrs" in content
+        # The snake_case local variable names must NOT appear
+        assert "peer_statsAttrs" not in content
+        assert "peer_statsPtrs" not in content
+
+    def test_packer_keeps_snake_for_attribute_identifiers(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """attr_name and frontend_getter identifiers stay in original snake form."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / batchnorm_config.packer_filename
+        )
+        content = packer_path.read_text()
+        # The attr enum and the frontend getter both keep snake_case
+        assert "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT" in content
+        assert "attributes.get_peer_stats()" in content
+        # Error label uses the snake-case taf.name
+        assert "batchnorm peer_stats" in content
+
+
+# ---------------------------------------------------------------------------
+# Task 2.3: backend C-API mode-enum header includes in packer
+# ---------------------------------------------------------------------------
+
+
+class TestPackerModeBackendHeader:
+    """Verify the packer emits #include for mode-field backend headers."""
+
+    def test_convolution_fwd_packer_includes_mode_backend_header(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """ConvFwd packer must #include HipdnnConvolutionMode.h."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / convolution_fwd_config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert '#include "HipdnnConvolutionMode.h"' in content
+
+    def test_batchnorm_packer_no_mode_header(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Batchnorm has no mode fields, so no mode backend header include."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend/include/hipdnn_frontend/detail"
+            / batchnorm_config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert "HipdnnConvolutionMode.h" not in content
+        assert "HipdnnPointwiseMode.h" not in content
+
+    def test_mode_field_backend_headers_unique(self, convolution_fwd_config):
+        """The derived list deduplicates headers across mode fields."""
+        headers = convolution_fwd_config.mode_field_backend_headers
+        assert headers == list(dict.fromkeys(headers))
+        assert "HipdnnConvolutionMode.h" in headers
+
+
+class TestTensorArrayFieldCamelCase:
+    """Verify tensor_array_field C++ identifiers use camelCase, not snake_case.
+
+    The TensorArrayField.camel_name property (added in Phase 2.2) is used by
+    packer.hpp.j2 and unpacker.hpp.j2 for local variable names. These tests
+    pin the same convention into the descriptor (.hpp/.cpp), descriptor
+    lifting fragment, test descriptor, test graph ops, and test from_node
+    templates so that all C++ identifiers derived from a tensor_array_field
+    follow the in-tree convention (e.g., `_peerStatsDescs`, not
+    `_peer_statsDescs`).
+
+    Snake-case is preserved for non-identifier surfaces: attribute enum
+    constants (HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS), error labels
+    ("peer_stats"), comments ("// Tensor array: peer_stats"), the FBS
+    underlying field (`_data.peer_stats_tensor_uid`), and the toString
+    label ("peer_stats_uids").
+    """
+
+    def test_descriptor_hpp_member_uses_camel_case(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Descriptor private member is `_peerStatsDescs`, not `_peer_statsDescs`."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        hpp_path = (
+            output_dir
+            / "backend"
+            / "src"
+            / "descriptors"
+            / batchnorm_config.header_filename
+        )
+        content = hpp_path.read_text()
+
+        assert (
+            "std::vector<std::shared_ptr<TensorDescriptor>> _peerStatsDescs;" in content
+        ), "Descriptor .hpp must declare _peerStatsDescs (camelCase) member"
+        assert (
+            "_peer_statsDescs" not in content
+        ), "Descriptor .hpp must not emit snake-case _peer_statsDescs identifier"
+
+    def test_descriptor_cpp_member_uses_camel_case(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Descriptor .cpp references _peerStatsDescs in setter, getter, fromNode, etc."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir
+            / "backend"
+            / "src"
+            / "descriptors"
+            / batchnorm_config.source_filename
+        )
+        content = cpp_path.read_text()
+
+        assert "_peerStatsDescs" in content
+        assert "_peer_statsDescs" not in content
+        # Snake-case must remain for FBS field, error label, attribute enum.
+        assert "_data.peer_stats_tensor_uid" in content
+        assert "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS" in content
+        assert '"BatchnormOperationDescriptor::fromNode: peer_stats"' in content
+
+    def test_lifting_additions_fragment_uses_camel_case(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """The descriptor_lifting_additions fragment must reference _peerStatsDescs."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        fragment_path = output_dir / "fragments" / "descriptor_lifting_additions.txt"
+        content = fragment_path.read_text()
+
+        assert (
+            "desc->_peerStatsDescs.push_back(" in content
+        ), "Lifting fragment must use camelCase _peerStatsDescs in fromNode body"
+        assert "desc->_peer_statsDescs" not in content
+
+    def test_test_graph_ops_local_var_uses_camel_case(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Graph descriptor test fixture local var is peerStatsDescs (no underscore prefix)."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        test_path = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / batchnorm_config.test_graph_filename
+        )
+        content = test_path.read_text()
+
+        # Local function param / local vec is camelCase, no leading underscore.
+        assert "peerStatsDescs" in content
+        assert "peer_statsDescs" not in content
+
+    def test_test_descriptor_fixture_member_uses_camel_case(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Per-element test fixture members are _peerStatsDesc0/1 (camelCase)."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        test_path = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / batchnorm_config.test_descriptor_filename
+        )
+        content = test_path.read_text()
+
+        assert "_peerStatsDesc0" in content
+        assert "_peer_statsDesc0" not in content
+
+    def test_test_from_node_local_var_uses_camel_case(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """fromNode test local TensorAttributesT vars use camelCase."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(batchnorm_config, output_dir, "backend")
+
+        test_path = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / batchnorm_config.test_from_node_filename
+        )
+        content = test_path.read_text()
+
+        assert "peerStatsAttrs0" in content
+        assert "peer_statsAttrs0" not in content
+
+
+# ---------------------------------------------------------------------------
+# extra_data_type_fields template branches
+# ---------------------------------------------------------------------------
+
+
+class TestExtraDataTypeFieldsUnpacker:
+    """Verify the ``extra_data_type_fields`` block in ``unpacker.hpp.j2`` emits
+    correctly-propagating error handling for both the sentinel-gated and
+    non-sentinel branches. Both branches now share the same code path: they
+    call ``unpackGraphDataType`` and assign its result directly. The backend
+    reports count=0 when storage is at the sentinel, in which case
+    ``unpackGraphDataType`` returns ``DataType::NOT_SET`` — which is the
+    frontend default the assignment preserves.
+
+    Regression guard for a reviewer-flagged bug: an earlier sentinel branch
+    swallowed *all* errors from the helper (not just "attribute absent"),
+    masking real backend failures.
+    """
+
+    def test_sentinel_branch_uses_unpack_graph_data_type(self, sdpa_config, generator):
+        """SDPA's ``mma_core_mode`` (sentinel: ``DataType::NOT_SET``) must
+        render ``unpackGraphDataType``, propagate real errors, and assign the
+        result directly to the attributes member.
+        """
+        rendered = generator._render_template("unpacker.hpp.j2", sdpa_config)
+
+        # The unified helper is invoked for the sentinel branch
+        assert (
+            "unpackGraphDataType(" in rendered
+        ), "sentinel branch must use unpackGraphDataType"
+        # The removed optional helper must not be referenced
+        assert (
+            "unpackOptionalGraphDataType(" not in rendered
+        ), "unpackOptionalGraphDataType has been removed and must not appear"
+        # Targets the correct attribute
+        assert "HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT" in rendered
+
+        # Real backend errors propagate (not swallowed)
+        assert (
+            "if(mmaCoreModeErr.is_bad())" in rendered
+        ), "sentinel branch must check the error and return on real failure"
+        assert (
+            "return mmaCoreModeErr;" in rendered
+        ), "sentinel branch must return the propagated error"
+
+        # Member-access assignment (sdpa.yaml uses bare member name)
+        assert (
+            "attributes.mma_core_mode = mmaCoreMode" in rendered
+        ), "sentinel branch must assign the unpacked value directly"
+
+        # Regression guard: the old swallowing pattern is gone
+        assert "if(!mmaCoreModeErr.is_bad())" not in rendered, (
+            "sentinel branch must not silently swallow errors via the "
+            "old `if(!Err.is_bad())` pattern"
+        )
+
+    def test_non_sentinel_branch_propagates_errors(self, generator):
+        """A synthetic config with an ``ExtraDataTypeField`` whose ``sentinel``
+        is empty must render ``unpackGraphDataType`` and the standard
+        ``if(...Err.is_bad()) { return ...Err; }`` chain.
+
+        No in-tree config exercises this branch, so the test builds the
+        OperationConfig directly.
+        """
+        from tests.helpers import make_minimal_config
+        from codegen.models import ExtraDataTypeField
+
+        config = make_minimal_config(
+            extra_data_type_fields=[
+                ExtraDataTypeField(
+                    name="extra_dt",
+                    attr_name="HIPDNN_ATTR_OP_EXTRA_DT",
+                    frontend_getter="get_extra_dt()",
+                    sentinel="",
+                    error_label="extra_dt",
+                ),
+            ],
+        )
+        rendered = generator._render_template("unpacker.hpp.j2", config)
+
+        # The unified helper is used for the non-sentinel branch
+        assert (
+            "unpackGraphDataType(" in rendered
+        ), "non-sentinel branch must use unpackGraphDataType"
+        # The removed optional helper must not be referenced
+        assert (
+            "unpackOptionalGraphDataType(" not in rendered
+        ), "unpackOptionalGraphDataType has been removed and must not appear"
+        # Targets the correct attribute
+        assert "HIPDNN_ATTR_OP_EXTRA_DT" in rendered
+
+        # Standard error propagation
+        assert (
+            "if(extraDtErr.is_bad())" in rendered
+        ), "non-sentinel branch must check the error explicitly"
+        assert (
+            "return extraDtErr;" in rendered
+        ), "non-sentinel branch must propagate the error"
+
+        # Setter-based assignment (synthetic field uses get_extra_dt() →
+        # set_extra_dt)
+        assert "attributes.set_extra_dt(extraDt)" in rendered, (
+            "non-sentinel branch must call the derived setter with the "
+            "unwrapped value"
+        )
+
+
+class TestExtraDataTypeFieldsPacker:
+    """Packer-side coverage for sentinel-gated DataType fields.
+
+    The reviewer asked for symmetric verification: the packer must omit
+    the attribute when the field equals the sentinel, and emit the
+    standard ``setDescriptorAttrDataType`` call inside the gate.
+    """
+
+    def test_sdpa_packer_emits_sentinel_gated_mma_core_mode(
+        self, sdpa_config, generator
+    ):
+        """SDPA's ``mma_core_mode`` packer block must guard
+        ``setDescriptorAttrDataType`` behind a ``DataType::NOT_SET`` check.
+        """
+        rendered = generator._render_template("packer.hpp.j2", sdpa_config)
+
+        assert "if(attributes.mma_core_mode != DataType::NOT_SET)" in rendered, (
+            "packer must gate mma_core_mode on the sentinel before calling "
+            "setDescriptorAttrDataType"
+        )
+        assert (
+            "setDescriptorAttrDataType(" in rendered
+        ), "packer must invoke setDescriptorAttrDataType for the gated value"
+        assert (
+            "HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT" in rendered
+        ), "packer must reference the correct attribute identifier"

@@ -22,8 +22,11 @@
 #
 ################################################################################
 
+import hashlib
+import json
 import os
 import shutil
+import yaml
 import sys
 import time
 import itertools
@@ -57,6 +60,82 @@ from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 from Tensile.Common.TimingInstrumentation import timing_context
+
+_CACHE_FIELDS = {
+    "ConstantParams": "constantParams",
+    "ForkParams": "forkParams",
+    "ParamGroups": "paramGroups",
+    "CustomKernels": "customKernels",
+    "InternalSupportParams": "internalSupportParams",
+    "CustomKernelWildcard": "customKernelWildcard",
+}
+
+# 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
+# in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
+# negligible. Lookup re-validates by content so a collision becomes a recompile,
+# never a wrong-cache hit.
+_CACHE_KEY_LEN = 12
+
+
+def _cacheDataMatches(cacheData, benchmarkStep):
+    """Check if cached data matches the current benchmark step parameters."""
+    return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
+
+
+def _computeCacheKey(benchmarkStep):
+    """Compute a deterministic hash from the cache-relevant parameter fields."""
+    cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    canonical = json.dumps(cacheFields, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
+
+
+def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
+    """Return CodeObjectFiles from cachePath iff its params match benchmarkStep, else None."""
+    if not os.path.isfile(cachePath):
+        return None
+    try:
+        c = LibraryIO.read(cachePath)
+    except (OSError, yaml.YAMLError) as e:
+        printWarning(f"Ignoring unreadable cache entry {cachePath}: {e}")
+        return None
+    try:
+        if _cacheDataMatches(c, benchmarkStep):
+            return c["CodeObjectFiles"]
+    except KeyError as e:
+        printWarning(f"Ignoring incompatible cache entry {cachePath} (missing field {e})")
+        return None
+    printWarning(mismatchMessage.format(path=cachePath))
+    return None
+
+
+def _loadCacheIfMatches(cacheDir, benchmarkStep):
+    """Return CodeObjectFiles from the hash-keyed cacheDir/cache.yaml iff matching, else None."""
+    cachePath = os.path.join(cacheDir, "cache.yaml")
+    # Hash matched but content didn't: collision. Loser will be overwritten on the next write.
+    return _readCacheIfValid(
+        cachePath, benchmarkStep,
+        "Cache hash collision at {path}; will overwrite on recompile",
+    )
+
+
+# TODO(2026-05-04): Remove the legacy single cache.yaml fallback after a transition
+# period of ~3 months (i.e. on/after 2026-08-04). It exists only so users with
+# pre-multi-cache output dirs from develop don't pay one extra recompile after
+# upgrading. See PR #6583.
+def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep):
+    """Return CodeObjectFiles from the pre-multi-cache stepBaseDir/cache.yaml iff matching."""
+    cachePath = os.path.join(stepBaseDir, "cache.yaml")
+    return _readCacheIfValid(
+        cachePath, benchmarkStep,
+        "Legacy cache at {path} does not match config; will recompile",
+    )
+
+
+def _resetCacheDir(cacheDir):
+    """Wipe and recreate cacheDir so a write fully replaces any prior content."""
+    if os.path.exists(cacheDir):
+        shutil.rmtree(cacheDir)
+    os.makedirs(cacheDir)
 
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
@@ -277,6 +356,7 @@ def writeBenchmarkFiles(
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
+                            removeTemporaries=not globalParameters["KeepBuildTmp"],
                         )
     # ^ this is where solutions is mutated
     with timing_context("python_kernel_bench_postprocess"):
@@ -333,12 +413,14 @@ def writeBenchmarkFiles(
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  sourceDir=str(sourcePath))
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  sourceDir=str(sourcePath))
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
@@ -412,25 +494,31 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         solutionsFileName = resultsFileBase + ".yaml"
 
         # check if a solution cache exists and if it matches our solution parameters
-        cachePath = os.path.join(stepBaseDir, "cache.yaml")
-        sourcePath = ensurePath(shortNamePath / "source")
+        cacheKey = _computeCacheKey(benchmarkStep)
+        cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
+        sourcePath = Path(cacheDir) / "source"
 
         with timing_context("python_cache_check"):
             cacheValid = False
-            if useCache and os.path.isfile(cachePath):
-                c = LibraryIO.read(cachePath)
-                if c["ConstantParams"] == benchmarkStep.constantParams and \
-                        c["ForkParams"] == benchmarkStep.forkParams and \
-                        c["ParamGroups"] == benchmarkStep.paramGroups and \
-                        c["CustomKernels"] == benchmarkStep.customKernels and \
-                        c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
-                        c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
+            if useCache:
+                matchCO = _loadCacheIfMatches(cacheDir, benchmarkStep)
+                if matchCO is None:
+                    # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
+                    matchCO = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
+                    if matchCO is not None:
+                        cacheDir = stepBaseDir
+                        sourcePath = shortNamePath / "source"
+                if matchCO is not None:
                     cacheValid = True
-                    codeObjectFiles = c["CodeObjectFiles"]
-                else:
+                    codeObjectFiles = matchCO
+                elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
+                        or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
                     printWarning("Cache data does not match config: redoing solution generation")
 
         if not cacheValid:
+            # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
+            _resetCacheDir(cacheDir)
+            ensurePath(sourcePath)
             # enumerate benchmark permutations and create resulting solution objects
             with timing_context("python_solution_generation"):
                 with timing_context("python_solgen_fork_permutations"):
@@ -482,6 +570,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
             # write cache data
             with timing_context("python_write_cache"):
+                cachePath = os.path.join(cacheDir, "cache.yaml")
                 cacheData = {
                     "CodeObjectFiles": codeObjectFiles,
                     "ConstantParams": benchmarkStep.constantParams,
@@ -529,7 +618,10 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
-            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath)
+            configPaths = [str(sourcePath / "ClientParameters.ini")]
+            if enableTileSelection:
+                configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
+            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
             if returncode:
                 benchmarkTestFails += 1

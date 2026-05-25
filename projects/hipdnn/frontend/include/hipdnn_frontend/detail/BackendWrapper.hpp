@@ -140,6 +140,25 @@ public:
         return hipdnnBackendCreateAndDeserializeJsonGraph_ext(descriptor, jsonGraph, jsonByteSize);
     }
 
+    hipdnnStatus_t backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t descriptor,
+                                                        size_t requestedByteSize,
+                                                        size_t* planByteSize,
+                                                        uint8_t* serializedPlan) override
+    {
+        return hipdnnBackendGetSerializedExecutionPlan_ext(
+            descriptor, requestedByteSize, planByteSize, serializedPlan);
+    }
+
+    hipdnnStatus_t
+        backendCreateAndDeserializeExecutionPlanExt(hipdnnHandle_t handle,
+                                                    hipdnnBackendDescriptor_t* descriptor,
+                                                    const uint8_t* serializedPlan,
+                                                    size_t planByteSize) override
+    {
+        return hipdnnBackendCreateAndDeserializeExecutionPlan_ext(
+            handle, descriptor, serializedPlan, planByteSize);
+    }
+
     void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) override
     {
         hipdnnLoggingCallback_ext(severity, msg);
