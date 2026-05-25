@@ -584,6 +584,48 @@ rocblaslt_status rocblaslt_destroy(const rocblaslt_handle handle)
 }
 
 /********************************************************************************
+ * \brief Set the handle-level SM-count-target override.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
+                                               int32_t          sm_count_target)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(sm_count_target < 0)
+    {
+        log_error(__func__, "negative sm_count_target", sm_count_target);
+        return rocblaslt_status_invalid_value;
+    }
+    log_api(__func__, "handle", handle, "sm_count_target", sm_count_target);
+    handle->sm_count_target = sm_count_target;
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Get the handle-level SM-count-target override.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
+                                               int32_t*         sm_count_target)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(sm_count_target == nullptr)
+    {
+        log_error(__func__, "sm_count_target", sm_count_target);
+        return rocblaslt_status_invalid_value;
+    }
+    *sm_count_target = handle->sm_count_target;
+    log_api(__func__, "handle", handle, "sm_count_target", *sm_count_target);
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
  * \brief rocblaslt_matrix_layout is a structure holding the rocblaslt matrix
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed

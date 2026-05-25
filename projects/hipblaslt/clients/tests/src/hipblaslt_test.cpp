@@ -429,25 +429,62 @@ bool match_test_category(const Arguments& arg, const char* category)
     return true;
 }
 
-TEST(aux_ext_test, gemm_preference_sm_count_target_default_is_zero)
+TEST(aux_handle_test, set_sm_count_target_default_is_zero)
 {
-    hipblaslt_ext::GemmPreference pref;
-    ASSERT_EQ(pref.getSmCountTarget(), 0);
-    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_NE(handle, nullptr);
+
+    int32_t value = -42;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
 
-TEST(aux_ext_test, gemm_preference_sm_count_target_round_trip)
+TEST(aux_handle_test, set_sm_count_target_round_trip)
 {
-    hipblaslt_ext::GemmPreference pref;
-    pref.setSmCountTarget(96);
-    ASSERT_EQ(pref.getSmCountTarget(), 96);
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-    // Negative is rejected silently; the prior value is preserved.
-    pref.setSmCountTarget(-1);
-    ASSERT_EQ(pref.getSmCountTarget(), 96);
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, 96), HIPBLAS_STATUS_SUCCESS);
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 96);
 
-    pref.setSmCountTarget(0);
-    ASSERT_EQ(pref.getSmCountTarget(), 0);
+    // Setting back to 0 (the default sentinel) should round-trip.
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, 0), HIPBLAS_STATUS_SUCCESS);
+    value = -1;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_sm_count_target_rejects_negative)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, 64), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, -1), HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Negative input must leave the previously stored value untouched.
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 64);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, get_sm_count_target_rejects_null_pointer)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
 
 TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_round_trip)

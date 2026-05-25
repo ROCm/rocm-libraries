@@ -97,6 +97,13 @@ struct _rocblaslt_handle
     // pointer mode ; default mode is host
     rocblaslt_pointer_mode pointer_mode = rocblaslt_pointer_mode_host;
 
+    // Handle-level SM-count-target override. Set via hipblasLtSetSmCountTarget
+    // (the analogue of cublasSetSmCountTarget). 0 (default) means "no
+    // override; use all CUs the device exposes". Negative values are rejected
+    // by the setter. A per-matmul descriptor or preference attribute, when
+    // non-zero, takes precedence over this handle-level value.
+    int32_t sm_count_target = 0;
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;

@@ -494,6 +494,56 @@ HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);
 
 /*! \ingroup library_module
+ *  \brief Set the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  The hipBLASLt analogue of cuBLAS's ``cublasSetSmCountTarget``. The value
+ *  hints how many compute units hipBLASLt should target for kernel selection
+ *  and persistent-grid sizing on subsequent matmul calls that use this handle.
+ *
+ *  ``0`` (the default) means "no override; use all CUs the device exposes".
+ *  Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. A
+ *  per-matmul-descriptor (``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET``) or
+ *  per-preference (``HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET``) attribute, when
+ *  set to a non-zero value, takes precedence over this handle-level value.
+ *
+ *  The user must ensure thread safety when modifying handle state from
+ *  multiple threads, the same as for any other handle-mutating helper.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[in]
+ *  smCountTarget    target CU/SM count; ``0`` for "use all CUs".
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is negative.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t           smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  Returns the value previously programmed via ``hipblasLtSetSmCountTarget``.
+ *  Equivalent to cuBLAS's ``cublasGetSmCountTarget``.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[out]
+ *  smCountTarget    receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t*          smCountTarget);
+
+/*! \ingroup library_module
  *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.
  *
  *  \details
