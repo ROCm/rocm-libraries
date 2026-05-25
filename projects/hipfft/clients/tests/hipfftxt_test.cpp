@@ -468,6 +468,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                                 std::cout << " ";
                             std::cout << hostdat[pos];
                         }
+                        std::cout << "\n";
                     }
                     std::cout << "\n";
                 }
