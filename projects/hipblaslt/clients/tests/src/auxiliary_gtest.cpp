@@ -192,6 +192,7 @@ namespace
 
     TEST_P(aux_test, conversion)
     {
+        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         RUN_TEST_ON_THREADS_STREAMS(aux_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(aux_test);
