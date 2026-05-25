@@ -16,7 +16,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<12, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<13, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<14, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<15, direct_conv::Version::v2>, SIGNATURE>);
-// Group 1: no swizzle, LDS-staged epilogue — Fprop indices 24-31
+// Group 1: no swizzle, LDS-staged epilogue — Fprop indices 24-33
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<24, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<25, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<26, direct_conv::Version::v2>, SIGNATURE>);
@@ -25,7 +25,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<28, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<29, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<30, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<31, direct_conv::Version::v2>, SIGNATURE>);
-// Group 2: XOR swizzle, direct DRAM epilogue — Fprop indices 40-47
+// Group 2: XOR swizzle, direct DRAM epilogue — Fprop indices 42-47
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<40, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<41, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<42, direct_conv::Version::v2>, SIGNATURE>);
@@ -55,7 +55,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<77, direct_c
 // Padded no-swizzle fallback — Fprop index 79 (vector_size = 1)
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<79, direct_conv::Version::v2>, SIGNATURE>);
 
-// Additional cyclic shift instances for 32-channel kernels.
+// Additional cyclic shift instances for 34-channel kernels.
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<80, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<81, direct_conv::Version::v2>, SIGNATURE>);
 
@@ -70,9 +70,29 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<15, dir
 
 ////////////////////////////////////////////////////////////////////////
 // Non-grouped convolution v3 — XOR swizzle
-// Fprop configs 18-19 (16x16x32), 22-23 (32x32x16)
+// Fprop configs 18-19 (16x16x32), 22-23 (32x32x16), 25 (32x32x16 8-wave)
 ////////////////////////////////////////////////////////////////////////
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<18, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<19, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<22, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<23, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<25, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — CyclicShift swizzle + LDS-staged epilogue
+// Fprop configs 28-29 (16x16x32), 32-33 (32x32x16)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<28, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<29, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<32, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<33, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — XOR swizzle + LDS-staged epilogue
+// Fprop configs 36-37 (16x16x32), 40-41 (32x32x16), 43 (32x32x16 8-wave)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<36, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<37, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<40, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<41, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<43, direct_conv::Version::v3>, SIGNATURE>);

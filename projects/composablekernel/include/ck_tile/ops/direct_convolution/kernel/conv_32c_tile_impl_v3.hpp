@@ -301,6 +301,34 @@ static constexpr Config<DT> configs[] = {
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 21
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::XOR},                                // 22
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::XOR},                                // 23
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 24
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .swizzle_type = SwizzleType::XOR},                                // 25
+
+    // --- SwizzleType::CyclicShift + LDS-staged epilogue (indices 26-33) ---
+    // 16x16x32
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 26
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 27
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 28
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 29
+    // 32x32x16
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 30
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 31
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 32
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 33
+
+    // --- SwizzleType::XOR + LDS-staged epilogue (indices 34-43) ---
+    // 16x16x32
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 34
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 35
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 36
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 37
+    // 32x32x16
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 38
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 39
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 40
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 41
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 42
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 43
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -787,9 +815,9 @@ struct OutputWriterV3
         }
     }
 
-    __device__ __forceinline__ void flush(AccType acc_val, int p_out)
+    __device__ __forceinline__ void flush(AccType acc_val, int p_out, int wave_id)
     {
-        if(!store_valid)
+        if(wave_id != 0 || !store_valid)
             return;
 
         const ck_tile::index_t row_offset =
@@ -827,6 +855,159 @@ struct OutputWriterV3
 };
 
 // ===================================================================
+// OutputWriterV3Lds — LDS-staged epilogue for 16B DRAM writes.
+//
+// After cross-wave LDS reduction, wave 0 writes the fp16-converted
+// accumulator to a staging LDS buffer. All threads then participate
+// in barriers. Active threads read 16B (uint4) from the staging
+// buffer and write 16B to DRAM — doubling throughput vs the 8B
+// writes of OutputWriterV3.
+//
+// The staging buffer reuses the cross-wave reduction LDS region
+// (reduce_lds), which is dead after cross_wave_reduce completes.
+//
+// Staging LDS layout: [BLOCK_Q, BLOCK_K] contiguous fp16.
+//   M16N16K32: 16 × 16 = 256 fp16 = 512B = 32 uint4
+//   M32N32K16: 32 × 32 = 1024 fp16 = 2048B = 128 uint4
+//
+// DRAM store: tid-based linear mapping.
+//   Each active thread reads one uint4 (8 fp16) from staging LDS
+//   and writes it to DRAM. Active threads: BLOCK_Q × BLOCK_K8.
+//     M16N16K32: 16 × 2 = 32 active threads
+//     M32N32K16: 32 × 4 = 128 active threads
+// ===================================================================
+template <auto cfg>
+struct OutputWriterV3Lds
+{
+    using ElementType = ToType<cfg.data_type>;
+    using AccType = std::conditional_t<
+        cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
+
+    static constexpr int BLOCK_K  = cfg.block_k_size();   // 16 or 32
+    static constexpr int BLOCK_Q_ = cfg.block_q();        // 16 or 32
+    static constexpr int BLOCK_K8 = BLOCK_K / 8;          // 2 or 4
+
+    // Number of 16B stores needed to flush the staging buffer.
+    static constexpr int STORE_VECS_V3 = BLOCK_Q_ * BLOCK_K8; // 32 or 128
+
+    // Verify staging buffer fits within the cross-wave reduction LDS region.
+    static constexpr int ACC_FLOATS  = sizeof(AccType) / sizeof(float);
+    static constexpr int STAGING_UINT4 = BLOCK_Q_ * BLOCK_K8;
+    static constexpr int REDUCE_UINT4  = cfg.waves_per_wg * 64 * ACC_FLOATS / 4;
+    static_assert(STAGING_UINT4 <= REDUCE_UINT4,
+        "Output staging LDS must fit within cross-wave reduction LDS");
+
+    ElementType*      output_base;
+    ElementType*      staging_lds;
+    ck_tile::index_t  row_stride_elems;
+
+    // Wave 0 LDS write state (MFMA accumulator layout).
+    int lds_q_pos;
+    int lds_k_offset_or_m_block;
+
+    // Wide store state (tid-based 16B per thread).
+    ck_tile::index_t  store_lds_elem_offset;  // element offset in staging LDS
+    ck_tile::index_t  store_dram_offset;      // element offset in DRAM (relative to output_base)
+    bool              store_valid;
+
+    template <typename BlockCoords_>
+    __device__ OutputWriterV3Lds(const BlockCoords_& bc,
+                                  uint4* staging_lds_buf,
+                                  ElementType* __restrict__ out,
+                                  int ho,
+                                  int wo)
+    {
+        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
+        staging_lds = reinterpret_cast<ElementType*>(staging_lds_buf);
+        row_stride_elems = wo * bc.K;
+
+        const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
+        const int tid  = static_cast<int>(threadIdx.x);
+
+        // --- Wave 0 LDS write state ---
+        if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
+        {
+            lds_q_pos = lane % 16;
+            lds_k_offset_or_m_block = (lane / 16) * 4;
+        }
+        else
+        {
+            lds_q_pos = lane % 32;
+            lds_k_offset_or_m_block = (lane / 32) * 4; // m_block * 4
+        }
+
+        // --- Wide store state (16B per active thread) ---
+        if(tid < STORE_VECS_V3)
+        {
+            const int store_q  = tid / BLOCK_K8;
+            const int store_k8 = tid % BLOCK_K8;
+            const int global_q = bc.block_q + store_q;
+
+            store_lds_elem_offset = store_q * BLOCK_K + store_k8 * 8;
+            store_dram_offset = static_cast<ck_tile::index_t>(global_q) * bc.K + store_k8 * 8;
+            store_valid = (global_q < wo);
+        }
+        else
+        {
+            store_lds_elem_offset = 0;
+            store_dram_offset = 0;
+            store_valid = false;
+        }
+    }
+
+    __device__ __forceinline__ void flush(AccType acc_val, int p_out, int wave_id)
+    {
+        // Step 1: Wave 0 writes fp16-converted accumulator to staging LDS.
+        if(wave_id == 0)
+        {
+            if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
+            {
+                // Single 8B LDS write: 4 contiguous K values.
+                uint32_t words[2];
+                words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
+                words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
+                __builtin_memcpy(staging_lds + lds_q_pos * BLOCK_K + lds_k_offset_or_m_block,
+                                 words, sizeof(words));
+            }
+            else
+            {
+                // Four 8B LDS writes: 4 groups of 4 contiguous K values.
+                static_for<4>(
+                    [&]<int G>()
+                    {
+                        const int k_off = G * 8 + lds_k_offset_or_m_block;
+                        uint32_t words[2];
+                        words[0] = ConvertFp32ToVec4<ElementType>::convert(
+                            acc_val[G * 4 + 0], acc_val[G * 4 + 1]);
+                        words[1] = ConvertFp32ToVec4<ElementType>::convert(
+                            acc_val[G * 4 + 2], acc_val[G * 4 + 3]);
+                        __builtin_memcpy(staging_lds + lds_q_pos * BLOCK_K + k_off,
+                                         words, sizeof(words));
+                    });
+            }
+        }
+
+        // Step 2: Barrier for LDS write visibility.
+        __syncthreads();
+
+        // Step 3: Active threads read 16B from staging LDS and write 16B to DRAM.
+        if(store_valid)
+        {
+            const uint4* lds_uint4 = reinterpret_cast<const uint4*>(staging_lds);
+            uint4 data = lds_uint4[store_lds_elem_offset / 8];
+
+            ck_tile::index_t store_offset = store_dram_offset
+                + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+            __builtin_memcpy(output_base + store_offset, &data, sizeof(data));
+        }
+
+        // Step 4: Barrier to prevent next flush from overwriting staging LDS
+        // before all threads finish reading.
+        __syncthreads();
+    }
+};
+
+// ===================================================================
 // Kernel entry points.
 // ===================================================================
 template <auto cfg>
@@ -860,10 +1041,16 @@ __device__ void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __r
         std::conditional_t<cfg.data_type == DataType::bf16, Mfma32x32x16_bf16, Mfma32x32x16>,
         std::conditional_t<cfg.data_type == DataType::bf16, Mfma16x16x32_bf16, Mfma16x16x32>>;
 
+    // Select output writer based on epilogue type.
+    using OutputWriterType = std::conditional_t<
+        cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory,
+        OutputWriterV3Lds<cfg>,
+        OutputWriterV3<cfg>>;
+
     conv_compute_loop_v3<
         TC, cfg, MfmaFn,
         ConvBlockCoordsT<cfg>, ConvInputLoader<cfg>, WeightLoader<cfg>,
-        OutputWriterV3<cfg>,
+        OutputWriterType,
         ElementType>(
         in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
 }
