@@ -25,6 +25,7 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/io.hpp"
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -1305,19 +1306,12 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                  const BElementwiseOperation& b_element_op,
                  const CDEElementwiseOperation& cde_element_op)
     {
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-            for(auto s : strides)
-                if(s > TwoGB)
-                    return true;
-            return false;
-        };
-        bool ds_stride_ovf = false;
+        bool ds_ovf = false;
         for(index_t d = 0; d < NumDTensor; d++)
-            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_k_wos_strides[d]);
-        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_c_wis_strides) ||
-                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
-                                any_stride_exceeds_2gb(e_g_n_k_wos_strides) || ds_stride_ovf;
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return Argument{p_a,
                         p_b,
                         p_ds,
@@ -1439,19 +1433,12 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                         const BElementwiseOperation& b_element_op,
                         const CDEElementwiseOperation& cde_element_op) override
     {
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-            for(auto s : strides)
-                if(s > TwoGB)
-                    return true;
-            return false;
-        };
-        bool ds_stride_ovf = false;
+        bool ds_ovf = false;
         for(index_t d = 0; d < NumDTensor; d++)
-            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_k_wos_strides[d]);
-        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_c_wis_strides) ||
-                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
-                                any_stride_exceeds_2gb(e_g_n_k_wos_strides) || ds_stride_ovf;
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return std::make_unique<Argument>(p_a,
                                           p_b,
                                           p_ds,
