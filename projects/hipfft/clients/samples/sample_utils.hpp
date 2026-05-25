@@ -19,8 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef SAMPLE_UTILS_HPPP_
-#define SAMPLE_UTILS_HPPP_
+#ifndef SAMPLE_UTILS_HPP_
+#define SAMPLE_UTILS_HPP_
 
 #include <complex>
 #include <iostream>
