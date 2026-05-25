@@ -1269,11 +1269,8 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     }
 }
 
-// Stress the hipModule refcount cache (RTCKernel::active_modules) by
-// creating M identical plans concurrently.  Length 9973 is prime, which
-// forces Bluestein decomposition -- multiple RTC kernels per plan.
-// Plans are destroyed before returning so state doesn't leak to later
-// tests.
+// Create M identical Bluestein plans concurrently to stress the
+// hipModule refcount cache.  Plans destroyed before returning.
 static void run_plan_capacity_test(size_t M)
 {
     constexpr size_t length = 9973;
