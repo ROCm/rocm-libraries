@@ -46,6 +46,7 @@ def getRequiredParametersMin() -> set:
         'DirectToVgprSparseMetadata',
         'DirectToLdsA',
         'DirectToLdsB',
+        'DirectToLdsMetadata',
         'DirectToVgprMXSA',
         'DirectToVgprMXSB',
         'ExpandPointerSwap',
@@ -103,6 +104,7 @@ def getRequiredParametersMin() -> set:
         "TDMSplit",
         "MXScaleFormat",
         "MXLoadInst",
+        'SwInstructionPrefetch',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'Use64bShadowLimitMX',
@@ -118,5 +120,6 @@ def getRequiredParametersMin() -> set:
         'DtlPlusLdsBuf',
         'MinGRIncPerMfma',
         'UsePLRPack',
-        'UseSubtileImpl'
+        'UseSubtileImpl',
+        'ClusterDim',
     })

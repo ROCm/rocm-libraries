@@ -81,8 +81,8 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
         std::istringstream stream(csv);
         std::string name;
         while (std::getline(stream, name, ',')) {
-            auto s = name.find_first_not_of(" ");
-            auto e = name.find_last_not_of(" ");
+            auto s = name.find_first_not_of(' ');
+            auto e = name.find_last_not_of(' ');
             if (s != std::string::npos) cb(name.substr(s, e - s + 1));
         }
     };
@@ -153,8 +153,8 @@ inline std::shared_ptr<DAGScheduleJsonCollector> createPassOrderSnapshotCollecto
         std::istringstream stream(opts.DebugPass);
         std::string name;
         while (std::getline(stream, name, ',')) {
-            auto s = name.find_first_not_of(" ");
-            auto e = name.find_last_not_of(" ");
+            auto s = name.find_first_not_of(' ');
+            auto e = name.find_last_not_of(' ');
             if (s != std::string::npos)
                 passFeatureCfg.passOrderSnapshot.dumpAfterPasses.push_back(
                     name.substr(s, e - s + 1));

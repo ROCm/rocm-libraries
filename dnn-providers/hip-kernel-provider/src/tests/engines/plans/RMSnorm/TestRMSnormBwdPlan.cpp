@@ -21,26 +21,26 @@ using namespace hip_kernel_provider::rmsnorm;
 TEST(TestRMSnormBwdParams, ConstructsFromSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
-    EXPECT_NO_THROW(RMSnormBwdParams params(attr, graph.getTensorMap()));
+    EXPECT_NO_THROW(const RMSnormBwdParams params(attr, graph.getTensorMap()));
 }
 
 TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
-    RMSnormBwdParams params(attr, graph.getTensorMap());
+    const RMSnormBwdParams params(attr, graph.getTensorMap());
 
     EXPECT_NE(params.dy(), nullptr);
     EXPECT_NE(params.x(), nullptr);
@@ -55,13 +55,13 @@ TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUids)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
-    RMSnormBwdParams params(attr, graph.getTensorMap());
+    const RMSnormBwdParams params(attr, graph.getTensorMap());
 
     EXPECT_EQ(params.dy()->uid(), attr.dy_tensor_uid());
     EXPECT_EQ(params.x()->uid(), attr.x_tensor_uid());
@@ -76,13 +76,13 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
-    RMSnormBwdParams params(attr, graph.getTensorMap());
+    const RMSnormBwdParams params(attr, graph.getTensorMap());
 
     EXPECT_NE(params.dy(), nullptr);
     EXPECT_NE(params.x(), nullptr);
@@ -96,14 +96,14 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvided)
 TEST(TestRMSnormBwdParams, IsMoveConstructible)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormBwdParams params(attr, graph.getTensorMap());
-    RMSnormBwdParams moved(std::move(params));
+    const RMSnormBwdParams moved(std::move(params));
 
     EXPECT_NE(moved.dy(), nullptr);
     EXPECT_NE(moved.x(), nullptr);
@@ -126,8 +126,8 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormBwdPlan>
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, hasOptionalAttributes);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
@@ -141,7 +141,7 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormBwdPlan>
 TEST(TestRMSnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    HipKernelHandle handle;
+    const HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -149,8 +149,8 @@ TEST(TestRMSnormBwdPlan, IsMoveConstructible)
 {
     auto [fbb, plan] = createPlanFromGraph();
 
-    RMSnormBwdPlan moved(std::move(plan));
-    HipKernelHandle handle;
+    const RMSnormBwdPlan moved(std::move(plan));
+    const HipKernelHandle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 

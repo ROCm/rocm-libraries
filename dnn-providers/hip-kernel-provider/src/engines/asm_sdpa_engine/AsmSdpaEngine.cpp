@@ -54,7 +54,8 @@ void AsmSdpaEngine::getDetails(
     detailsOut.ptr = detachedBuffer->data();
     detailsOut.size = detachedBuffer->size();
 
-    handle.storeEngineDetailsDetachedBuffer(detachedBuffer->data(), std::move(detachedBuffer));
+    auto* dataPtr = detachedBuffer->data();
+    handle.storeEngineDetailsDetachedBuffer(dataPtr, std::move(detachedBuffer));
 }
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(
