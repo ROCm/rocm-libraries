@@ -21,13 +21,11 @@ except ImportError:
 if rocm_sdk is not None:
     try:
         rocm_sdk.preload_libraries("hipdnn")
-    except Exception as e:
-        raise ImportError(
-            "Failed to preload libhipdnn_backend.so via rocm_sdk. "
-            "Ensure the hipDNN library package is installed "
-            "(e.g., pip install rocm[libraries]).\n"
-            f"Original error: {e}"
-        ) from e
+    except Exception:
+        # Preload is best-effort: the library may already be on LD_LIBRARY_PATH
+        # (e.g., source builds, system installs). If it's truly missing, the
+        # extension import below will fail with a clear dlopen error.
+        pass
 
 # Import everything from the compiled extension module
 try:
