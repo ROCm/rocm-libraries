@@ -566,21 +566,26 @@ int main(int argc, char** argv) {
     }
     std::ostream& out = outputFile.empty() ? std::cout : outputFileStream;
 
+    // Helper: emit a Function to the output stream.
+    auto emitFunction = [&](stinkytofu::Function& func) {
+        if (emitAsm) {
+            stinkytofu::AsmEmitterOptions opts;
+            opts.emitComments = preserveComments;
+            opts.indent = 0;
+            opts.useSymbolicNames = preserveSymbolicRegs;
+            stinkytofu::StinkyAsmEmitter emitter(opts);
+            emitter.emit(out, func);
+        } else if (printOutput) {
+            func.dump(out);
+        }
+    };
+
     // Helper: emit a ParsedFunction verbatim (no passes) to the output stream.
     auto emitVerbatim = [&](stinkytofu::MultiParseResult& mr) {
         for (auto& pf : mr.functions) {
             stinkytofu::Function func(pf->funcName);
             stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*pf, func, archID);
-            if (emitAsm) {
-                stinkytofu::AsmEmitterOptions opts;
-                opts.emitComments = preserveComments;
-                opts.indent = 0;
-                opts.useSymbolicNames = preserveSymbolicRegs;
-                stinkytofu::StinkyAsmEmitter emitter(opts);
-                emitter.emit(out, func);
-            } else if (printOutput) {
-                func.dump(out);
-            }
+            emitFunction(func);
         }
     };
 
@@ -611,16 +616,7 @@ int main(int argc, char** argv) {
             stinkytofu::Backend backend(module);
             backend.runOptimization();
 
-            if (emitAsm) {
-                stinkytofu::AsmEmitterOptions opts;
-                opts.emitComments = preserveComments;
-                opts.indent = 0;
-                opts.useSymbolicNames = preserveSymbolicRegs;
-                stinkytofu::StinkyAsmEmitter emitter(opts);
-                emitter.emit(out, func);
-            } else if (printOutput) {
-                func.dump(out);
-            }
+            emitFunction(func);
         } else {
             // Individual pass mode
             stinkytofu::PassManager passManager;
@@ -655,16 +651,7 @@ int main(int argc, char** argv) {
 
             passManager.run(func);
 
-            if (emitAsm) {
-                stinkytofu::AsmEmitterOptions opts;
-                opts.emitComments = preserveComments;
-                opts.indent = 0;
-                opts.useSymbolicNames = preserveSymbolicRegs;
-                stinkytofu::StinkyAsmEmitter emitter(opts);
-                emitter.emit(out, func);
-            } else if (printOutput) {
-                func.dump(out);
-            }
+            emitFunction(func);
         }
     }
 
