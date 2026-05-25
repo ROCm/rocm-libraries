@@ -551,7 +551,9 @@ void SetupPaths(fs::path& fdb_file_path,
 
 TEST(CPU_DBSync_NONE, KDBTargetID)
 {
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#if SKIP_KDB_TESTING
+    GTEST_SKIP();
+#elif defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
     // Skip kernel db test when AddressSanitizer is enabled as we have not built and cached
     // the kernels with AddressSanitizer enabled.
     GTEST_SKIP();
