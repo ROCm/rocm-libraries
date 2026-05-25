@@ -48,55 +48,55 @@ void cholqr_checkBadArgs(const rocblas_handle handle,
                          T dA,
                          const I lda,
                          const rocblas_stride stA,
-                         U dR,
-                         const I ldr,
-                         const rocblas_stride stR,
+                         U dW,
+                         const I ldw,
+                         const rocblas_stride stW,
                          S dSigma,
                          V dnr,
                          const I bc)
 {
     // handle
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, nullptr, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR,
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, nullptr, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW,
                                            dSigma, dnr, bc),
                           rocblas_status_invalid_handle);
 
     // values
     EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, rocsolver_cholqr_shift(0), cholnum, m, n, dA, lda,
-                                           stA, dR, ldr, stR, dSigma, dnr, bc),
+                                           stA, dW, ldw, stW, dSigma, dnr, bc),
                           rocblas_status_invalid_value);
 
     // sizes (only check batch_count if applicable)
     if(STRIDED)
-        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr,
-                                               stR, dSigma, dnr, (I)-1),
+        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw,
+                                               stW, dSigma, dnr, (I)-1),
                               rocblas_status_invalid_size);
 
     // pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T) nullptr, lda, stA, dR,
-                                           ldr, stR, dSigma, dnr, bc),
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T) nullptr, lda, stA, dW,
+                                           ldw, stW, dSigma, dnr, bc),
                           rocblas_status_invalid_pointer);
     EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, (U) nullptr,
-                                           ldr, stR, dSigma, dnr, bc),
+                                           ldw, stW, dSigma, dnr, bc),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR,
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW,
                                            (S) nullptr, dnr, bc),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR,
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW,
                                            dSigma, (V) nullptr, bc),
                           rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
     EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, (I)0, n, (T) nullptr, lda, stA,
-                                           (U) nullptr, ldr, stR, dSigma, dnr, bc),
+                                           (U) nullptr, ldw, stW, dSigma, dnr, bc),
                           rocblas_status_success);
     EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, (I)0, (T) nullptr, lda, stA,
-                                           (U) nullptr, ldr, stR, dSigma, dnr, bc),
+                                           (U) nullptr, ldw, stW, dSigma, dnr, bc),
                           rocblas_status_success);
 
     // quick return with zero batch_count if applicable
     if(STRIDED)
-        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr,
-                                               stR, (S) nullptr, (V) nullptr, (I)0),
+        EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw,
+                                               stW, (S) nullptr, (V) nullptr, (I)0),
                               rocblas_status_success);
 }
 
@@ -112,16 +112,16 @@ void testing_cholqr_bad_arg()
     I m = 1;
     I n = 1;
     I lda = 1;
-    I ldr = 1;
+    I ldw = 1;
     rocblas_stride stA = 1;
-    rocblas_stride stR = 1;
+    rocblas_stride stW = 1;
     I bc = 1;
 
     // memory allocations for any case
-    device_strided_batch_vector<T> dR(1, 1, 1, 1);
+    device_strided_batch_vector<T> dW(1, 1, 1, 1);
     device_strided_batch_vector<S> dSigma(1, 1, 1, 1);
     device_strided_batch_vector<I> dnr(1, 1, 1, 1);
-    CHECK_HIP_ERROR(dR.memcheck());
+    CHECK_HIP_ERROR(dW.memcheck());
     CHECK_HIP_ERROR(dSigma.memcheck());
     CHECK_HIP_ERROR(dnr.memcheck());
         
@@ -132,7 +132,7 @@ void testing_cholqr_bad_arg()
         CHECK_HIP_ERROR(dA.memcheck());
 
         // check bad arguments
-        cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
+        cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dW.data(), ldw, stW,
                                      dSigma.data(), dnr.data(), bc);
     }
     else
@@ -142,7 +142,7 @@ void testing_cholqr_bad_arg()
         CHECK_HIP_ERROR(dA.memcheck());
         
         // check bad arguments
-        cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
+        cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dW.data(), ldw, stW,
                                      dSigma.data(), dnr.data(), bc);
     }
 }
@@ -166,13 +166,13 @@ void cholqr_initData(const rocblas_handle handle,
                      Td& dA,
                      const I lda,
                      const rocblas_stride stA,
-                     Ud& dR,
-                     const I ldr,
-                     const rocblas_stride stR,
+                     Ud& dW,
+                     const I ldw,
+                     const rocblas_stride stW,
                      Sd& dSigma,
                      const I bc,
                      Th& hA,
-                     Uh& hR,
+                     Uh& hW,
                      Sh& hSigma,
                      S sigma,
                      const rocblas_int singular)
@@ -284,16 +284,16 @@ void cholqr_getError(const rocblas_handle handle,
                      Td& dA,
                      const I lda,
                      const rocblas_stride stA,
-                     Ud& dR,
-                     const I ldr,
-                     const rocblas_stride stR,
+                     Ud& dW,
+                     const I ldw,
+                     const rocblas_stride stW,
                      Sd& dSigma,
                      Id& dnr,
                      const I bc,
                      Th& hA,
                      Th& hARes,
-                     Uh& hR,
-                     Uh& hRRes,
+                     Uh& hW,
+                     Uh& hWRes,
                      Sh& hSigma,
                      Ih& hnr,
                      S sigma,
@@ -309,8 +309,8 @@ void cholqr_getError(const rocblas_handle handle,
     I MN = std::max(m, n);
     
     // input data initialization
-    cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
-                                   hR, hSigma, sigma, singular);
+    cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma, bc, hA,
+                                   hW, hSigma, sigma, singular);
 
     // -------------------------------------------
     // compute orthogonality error:
@@ -326,12 +326,12 @@ void cholqr_getError(const rocblas_handle handle,
     
     for(auto cnum = start; cnum <= cholnum; ++cnum)
     {
-        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
-                                        hR, hSigma, sigma, singular);
+        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma, bc, hA,
+                                        hW, hSigma, sigma, singular);
 
         // execute GPU cholqr
         CHECK_ROCBLAS_ERROR(rocsolver_cholqr(STRIDED, handle, cholshift, cnum, m, n, dA.data(), lda, stA,
-                                         dR.data(), ldr, stR, dSigma.data(), dnr.data(), bc));
+                                         dW.data(), ldw, stW, dSigma.data(), dnr.data(), bc));
         CHECK_HIP_ERROR(hARes.transfer_from(dA)); 
         CHECK_HIP_ERROR(hnr.transfer_from(dnr));
 
@@ -367,7 +367,7 @@ void cholqr_getError(const rocblas_handle handle,
     // --------------------------------------------
     // compute reconstruction error
     // --------------------------------------------
-    CHECK_HIP_ERROR(hRRes.transfer_from(dR));
+    CHECK_HIP_ERROR(hWRes.transfer_from(dW));
     std::vector<T> Ac(size_t(lda) * n, T(0));
     
     for(I b = 0; b < bc; ++b)
@@ -377,13 +377,13 @@ void cholqr_getError(const rocblas_handle handle,
         {
             // case m >= n
             cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hARes[b],
-                     lda, hRRes[b], ldr, T(0), Ac.data(), lda);
+                     lda, hWRes[b], ldw, T(0), Ac.data(), lda);
         }
         else
         {
             // case m < n
-            cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hRRes[b],
-                     ldr, hARes[b], lda, T(0), Ac.data(), lda);
+            cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hWRes[b],
+                     ldw, hARes[b], lda, T(0), Ac.data(), lda);
         }
         err2[b] = norm_error('F', m, n, lda, hA[b], Ac.data());
     }
@@ -411,14 +411,14 @@ void cholqr_getPerfData(const rocblas_handle handle,
                         Td& dA,
                         const I lda,
                         const rocblas_stride stA,
-                        Ud& dR,
-                        const I ldr,
-                        const rocblas_stride stR,
+                        Ud& dW,
+                        const I ldw,
+                        const rocblas_stride stW,
                         Sd& dSigma,
                         Id& dnr,
                         const I bc,
                         Th& hA,
-                        Uh& hR,
+                        Uh& hW,
                         Sh& hSigma,
                         Ih& hnr,
                         S sigma,
@@ -431,13 +431,13 @@ void cholqr_getPerfData(const rocblas_handle handle,
                         const rocblas_int singular)
 {
     I mn = std::min(m, n);
-    std::vector<T> hW(mn);
+    std::vector<T> hWrk(mn);
     std::vector<T> hTau(mn);
 
     if(!perf)
     {
-        cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
-                                        hA, hR, hSigma, sigma, singular);
+        cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma, bc,
+                                        hA, hW, hSigma, sigma, singular);
 
         // cpu-lapack performance (using GEQRF or GELQF as reference, only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -446,28 +446,28 @@ void cholqr_getPerfData(const rocblas_handle handle,
             if(mn == n)
             {
                 // case m >= n
-                cpu_geqrf(m, n, hA[b], lda, hTau.data(), hW.data(), mn);
+                cpu_geqrf(m, n, hA[b], lda, hTau.data(), hWrk.data(), mn);
             }
             else
             {
                 // case m < n
-                cpu_gelqf(m, n, hA[b], lda, hTau.data(), hW.data(), mn);
+                cpu_gelqf(m, n, hA[b], lda, hTau.data(), hWrk.data(), mn);
             }
         }
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc, hA,
-                                    hR, hSigma, sigma, singular);
+    cholqr_initData<true, false, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma, bc, hA,
+                                    hW, hSigma, sigma, singular);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
-                                        hA, hR, hSigma, sigma, singular);
+        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma, bc,
+                                        hA, hW, hSigma, sigma, singular);
 
         CHECK_ROCBLAS_ERROR(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
-                                             dR.data(), ldr, stR, dSigma.data(), dnr.data(), bc));
+                                             dW.data(), ldw, stW, dSigma.data(), dnr.data(), bc));
     }
 
     // gpu-lapack performance
@@ -487,11 +487,11 @@ void cholqr_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma, bc,
-                                        hA, hR, hSigma, sigma, singular);
+        cholqr_initData<false, true, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma, bc,
+                                        hA, hW, hSigma, sigma, singular);
 
         timer.start(stream);
-        rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dR.data(), ldr, stR,
+        rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA, dW.data(), ldw, stW,
                          dSigma.data(), dnr.data(), bc);
         timer.end(stream);
     }
@@ -510,9 +510,9 @@ void testing_cholqr(Arguments& argus)
     I n = argus.get<I>("n", m);
     I mn = std::min(m,n);
     I lda = argus.get<I>("lda", m);
-    I ldr = argus.get<I>("ldw", mn);
+    I ldw = argus.get<I>("ldw", mn);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stR = argus.get<rocblas_stride>("strideR", ldr * mn);
+    rocblas_stride stW = argus.get<rocblas_stride>("strideW", ldw * mn);
     char cholshift_char = argus.get<char>("cholshift");
     rocsolver_cholqr_shift cholshift = char2rocsolver_cholqr_shift(cholshift_char);
     rocblas_int cholnum = argus.get<rocblas_int>("cholnum");
@@ -520,32 +520,32 @@ void testing_cholqr(Arguments& argus)
     S sigma = S(argus.get<double>("sigma", 0));
     rocblas_int hot_calls = argus.iters;
     rocblas_stride stARes = (argus.unit_check || argus.norm_check) ? stA : 0;
-    rocblas_stride stRRes = (argus.unit_check || argus.norm_check) ? stR : 0;
+    rocblas_stride stWRes = (argus.unit_check || argus.norm_check) ? stW : 0;
 
     // check non-supported values
     // N/A
 
     // determine sizes
     size_t size_A = size_t(lda) * n;
-    size_t size_R = size_t(ldr) * mn;
+    size_t size_W = size_t(ldw) * mn;
     double err1 = 0, err2 = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
-    size_t size_RRes = (argus.unit_check || argus.norm_check) ? size_R : 0;
+    size_t size_WRes = (argus.unit_check || argus.norm_check) ? size_W : 0;
 
     // check invalid sizes
-    bool invalid_size = (m < 0 || n < 0 || lda < m || ldr < mn || bc < 0 || cholnum < 1 || 
+    bool invalid_size = (m < 0 || n < 0 || lda < m || ldw < mn || bc < 0 || cholnum < 1 || 
                         (cholshift != rocsolver_cholqr_shift_none && cholnum < 2));
     if(invalid_size)
     {
         if(BATCHED)
             EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T* const*)nullptr,
-                                                   lda, stA, (T*)nullptr, ldr, stR, (S*)nullptr,
+                                                   lda, stA, (T*)nullptr, ldw, stW, (S*)nullptr,
                                                    (I*)nullptr, bc),
                                   rocblas_status_invalid_size);
         else
             EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T*)nullptr, lda,
-                                                   stA, (T*)nullptr, ldr, stR, (S*)nullptr,
+                                                   stA, (T*)nullptr, ldw, stW, (S*)nullptr,
                                                    (I*)nullptr, bc),
                                   rocblas_status_invalid_size);
 
@@ -561,11 +561,11 @@ void testing_cholqr(Arguments& argus)
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
         if(BATCHED)
             CHECK_ALLOC_QUERY(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T* const*)nullptr, lda,
-                                               stA, (T*)nullptr, ldr, stR, (S*)nullptr, (I*)nullptr,
+                                               stA, (T*)nullptr, ldw, stW, (S*)nullptr, (I*)nullptr,
                                                bc));
         else
             CHECK_ALLOC_QUERY(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, (T*)nullptr, lda, stA,
-                                               (T*)nullptr, ldr, stR, (S*)nullptr, (I*)nullptr, bc));
+                                               (T*)nullptr, ldw, stW, (S*)nullptr, (I*)nullptr, bc));
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -575,15 +575,15 @@ void testing_cholqr(Arguments& argus)
     }
 
     // memory allocations for any case
-    host_strided_batch_vector<T> hR(size_R, 1, stR, bc);
-    host_strided_batch_vector<T> hRRes(size_RRes, 1, stR, bc);
+    host_strided_batch_vector<T> hW(size_W, 1, stW, bc);
+    host_strided_batch_vector<T> hWRes(size_WRes, 1, stWRes, bc);
     host_strided_batch_vector<S> hSigma(1, 1, 1, bc);
     host_strided_batch_vector<I> hnr(1, 1, 1, bc);
-    device_strided_batch_vector<T> dR(size_R, 1, stR, bc);
+    device_strided_batch_vector<T> dW(size_W, 1, stW, bc);
     device_strided_batch_vector<S> dSigma(1, 1, 1, bc);
     device_strided_batch_vector<I> dnr(1, 1, 1, bc);
-    if(size_R)
-        CHECK_HIP_ERROR(dR.memcheck());
+    if(size_W)
+        CHECK_HIP_ERROR(dW.memcheck());
     CHECK_HIP_ERROR(dSigma.memcheck());
     CHECK_HIP_ERROR(dnr.memcheck());
 
@@ -600,7 +600,7 @@ void testing_cholqr(Arguments& argus)
         if(m == 0 || n == 0 || bc == 0)
         {
             EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
-                                                   dR.data(), ldr, stR, dSigma.data(), dnr.data(),
+                                                   dW.data(), ldw, stW, dSigma.data(), dnr.data(),
                                                    bc),
                                   rocblas_status_success);
             if(argus.timing)
@@ -611,14 +611,14 @@ void testing_cholqr(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            cholqr_getError<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                        dnr, bc, hA, hARes, hR, hRRes, hSigma, hnr, sigma, &err1, &err2,
+            cholqr_getError<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma,
+                                        dnr, bc, hA, hARes, hW, hWRes, hSigma, hnr, sigma, &err1, &err2,
                                         argus.singular, argus.unit_check);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
-            cholqr_getPerfData<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                           dnr, bc, hA, hR, hSigma, hnr, sigma, &gpu_time_used,
+            cholqr_getPerfData<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma,
+                                           dnr, bc, hA, hW, hSigma, hnr, sigma, &gpu_time_used,
                                            &cpu_time_used, hot_calls, argus.profile,
                                            argus.profile_kernels, argus.perf, argus.singular);
     }
@@ -636,7 +636,7 @@ void testing_cholqr(Arguments& argus)
         if(m == 0 || n == 0 || bc == 0)
         {
             EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
-                                                   dR.data(), ldr, stR, dSigma.data(), dnr.data(),
+                                                   dW.data(), ldw, stW, dSigma.data(), dnr.data(),
                                                    bc),
                                   rocblas_status_success);
             if(argus.timing)
@@ -647,14 +647,14 @@ void testing_cholqr(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            cholqr_getError<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                        dnr, bc, hA, hARes, hR, hRRes, hSigma, hnr, sigma, &err1, &err2,
+            cholqr_getError<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma,
+                                        dnr, bc, hA, hARes, hW, hWRes, hSigma, hnr, sigma, &err1, &err2,
                                         argus.singular, argus.unit_check);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
-            cholqr_getPerfData<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dR, ldr, stR, dSigma,
-                                           dnr, bc, hA, hR, hSigma, hnr, sigma, &gpu_time_used,
+            cholqr_getPerfData<STRIDED, T>(handle, cholshift, cholnum, m, n, dA, lda, stA, dW, ldw, stW, dSigma,
+                                           dnr, bc, hA, hW, hSigma, hnr, sigma, &gpu_time_used,
                                            &cpu_time_used, hot_calls, argus.profile,
                                            argus.profile_kernels, argus.perf, argus.singular);
     }
@@ -675,18 +675,18 @@ void testing_cholqr(Arguments& argus)
             if(BATCHED)
             {
                 rocsolver_bench_output("m", "n", "lda", "ldw", "strideW", "cholshift", "batch_c");
-                rocsolver_bench_output(m, n, lda, ldr, stR, cholshift_char, bc);
+                rocsolver_bench_output(m, n, lda, ldw, stW, cholshift_char, bc);
             }
             else if(STRIDED)
             {
                 rocsolver_bench_output("m", "n", "lda", "strideA", "ldw", "strideW", "cholshift",
                                        "batch_c");
-                rocsolver_bench_output(m, n, lda, stA, ldr, stR, cholshift_char, bc);
+                rocsolver_bench_output(m, n, lda, stA, ldw, stW, cholshift_char, bc);
             }
             else
             {
                 rocsolver_bench_output("m", "n", "lda", "ldw", "cholshift");
-                rocsolver_bench_output(m, n, lda, ldr, cholshift_char);
+                rocsolver_bench_output(m, n, lda, ldw, cholshift_char);
             }
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
