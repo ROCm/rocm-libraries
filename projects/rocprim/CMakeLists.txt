@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-cmake_policy(VERSION 3.16...3.25)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_policy(VERSION 3.18...3.25)
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
@@ -216,6 +216,9 @@ if(BUILD_TEST)
       message(WARNING "The installed rocprim version, ${rocprim_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
     endif()
   endif()
+
+  # Used by tests to define their RESOURCE_GROUPS
+  set(DEFAULT_GPU_RESOURCE "gpus")
 
   if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
     rocm_package_setup_client_component(tests)

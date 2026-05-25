@@ -502,7 +502,11 @@ class LocalReadMFMA(LocalRead):
             packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vgpr(vTBase,4), a=idMat, b=vgpr(vHiBase,2), acc2=vgpr(vTBase,4),
             comment="Calculate low bits for TF32 emulation%s"%commentStr))
         else:
-            tmp = writer.vgprPool.checkOut(1, "x32f tmp mod 4")
+            # Use per-tensor dedicated temp VGPR if available (avoids shared-temp corruption when SIA3 interleaves A and B pack code).
+            # Fall back to pool allocation for architectures that don't set it.
+            abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
+            useDedicatedTmp = abmatrixinfo.tmpVgprCvtSub >= 0
+            tmp = abmatrixinfo.tmpVgprCvtSub if useDedicatedTmp else writer.vgprPool.checkOut(1, "x32f tmp mod 4")
             # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
             if kernel["UseDot2F32XEmulation"]:
                 packCodeT.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
@@ -521,7 +525,8 @@ class LocalReadMFMA(LocalRead):
                 packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
                 packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
                 packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
-            writer.vgprPool.checkIn(tmp)
+            if not useDedicatedTmp:
+                writer.vgprPool.checkIn(tmp)
 
     def pack4LowBitsFinal(self, kernel, writer, tc, valuiIdx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation, noComment=False):
         baseValuiIdx = valuiIdx - valuiIdx % 8
@@ -598,6 +603,33 @@ class LocalReadMFMA(LocalRead):
         if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             tileStride   = kernel["_DepthU%s"%tc] + LdsPad
             UnrollStride = 1
+
+        if "MXS" in tc:
+            subTc = tc[3]
+            mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            # MX scale LDS strides, gated by MXScaleFormat:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
+            #       tileStride   = mxUnit
+            #       UnrollStride = MT * mxUnit  (M-blocks interleaved on K)
+            #   - NoSwizzle (canonical): LDS layout follows UnrollMajorLDS<tc>,
+            #     which is mirrored from UnrollMajorLDS<A/B> = not TLU<A/B>:
+            #       UMLDS=1 (K-major LDS):  addr(m,k) = k + m*(_DepthU_MXS + LdsPad)
+            #         tileStride   = _DepthU_MXS + LdsPad
+            #         UnrollStride = mxUnit
+            #       UMLDS=0 (M-major LDS):  addr(m,k) = m + k*(MT + LdsPad)
+            #         tileStride   = 1
+            #         UnrollStride = MT + LdsPad
+            mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzled:
+                tileStride = mxUnit
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                tileStride = kernel["_DepthU%s" % tc] + LdsPad
+                UnrollStride = mxUnit
+            else:
+                tileStride = 1
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad
 
         enableLDSTr = tP["enableLDSTr"]
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
@@ -837,8 +869,8 @@ class LocalReadMFMA(LocalRead):
                         if blocksPerTGroupSMFMA > 1 and oIdx % blocksPerTGroupSMFMA == 0:
                             offset_val += (kernel["MacroTile%s"%tc] * blockOffsetSMFMA) * tP["bpeDS"] * (oIdx // blocksPerTGroupSMFMA)
 
-                        offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
-                        offset = int(applyPad(offset))
+                        offset = int(applyPad(offset_val))
+                        offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset)
                         ds = DSModifiers(na=1, offset=offset)
                         destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, 4*tIdx*blocksPerTGroupSMFMA, oIdx * 2), 2)
                         localReadCode = Module("LocalRead%s Valu%u"%(tc,valuiIdx))
@@ -960,7 +992,9 @@ class LocalReadMFMA(LocalRead):
                                         # we need to keep both original values and transpose values
                                         # do "Compute low bits" for 0-3 and 4-7 + final pack here
                                         # do all at (valuiIdx % 8) == 4
-                                        tmp = writer.vgprPool.checkOut(1, "x32f tmp")
+                                        abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
+                                        useDedicatedTmp = abmatrixinfo.tmpVgprCvtSub >= 0
+                                        tmp = abmatrixinfo.tmpVgprCvtSub if useDedicatedTmp else writer.vgprPool.checkOut(1, "x32f tmp")
                                         valuiIdx0 = valuiIdx - 4 # for 0-3
                                         valuiIdx1 = valuiIdx     # for 4-7
                                         # src (original value)
@@ -1002,7 +1036,8 @@ class LocalReadMFMA(LocalRead):
                                         # final 7
                                         commentStr = "__TF32_2_" + tc + "_%d pack final end"%(baseValuiIdx//8)
                                         packCodeT.add(VCvtPkF32toBF16(dst=v7t, src0=v7t, src1=vgpr(tmp), comment=commentStr))
-                                        writer.vgprPool.checkIn(tmp)
+                                        if not useDedicatedTmp:
+                                            writer.vgprPool.checkIn(tmp)
                                     elif valuiIdx % 4 == 0 and (not do8PackAtOnce) and (not allPack4LoDone):
                                         noComment = valuiIdx % 8 == 0
                                         commentForPack = "" if noComment else commentForSchedule1
@@ -1023,8 +1058,12 @@ class LocalReadMFMA(LocalRead):
                                             swapIdx2 = outerBaseValuiIdx + halfGroup * 2 + i
                                             swapVgpr1 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx1))
                                             swapVgpr2 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx2))
-                                            packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2,
-                                                comment="XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)))
+                                            commentStr = "XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)
+                                            # Tag the last swap with __TF32_2 so _packItemsConditional treats the swap block as a proper boundary,
+                                            # preventing _interleavePackAB from displacing swaps into the next group.
+                                            if i == halfGroup - 1:
+                                                commentStr += " __TF32_2_%s_%d_swap"%(tc, outerBaseValuiIdx // (halfGroup * 2))
+                                            packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
 
                                 if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                     if tP["bpe"] == 2 and tP["bpeDS"] == 4:
@@ -1413,7 +1452,14 @@ class LocalReadMFMA(LocalRead):
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
-                                if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                                if "MXS" in tc:
+                                    # rIdx walks the K-scales packed into one MFMA-K sub-iter.
+                                    # Step is UnrollStride, which equals mxUnit for K-major LDS
+                                    # (UMLDS=1) and MT+LdsPad for M-major LDS (UMLDS=0). For
+                                    # UMLDS=1, numReadsPerUnroll is typically 1 so this loop
+                                    # degenerates to the pre-existing incOffset=0 behavior.
+                                    incOffset = rIdx * numElementPerRead * UnrollStride
+                                elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
                                     incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
                                 else:

@@ -27,7 +27,6 @@
 #pragma once
 
 #include <hip/hip_fp16.h>          // __half_raw
-#include <hip/hip_bf16.h>          // bf16
 
 #include <Tensile/Macros.hpp>
 

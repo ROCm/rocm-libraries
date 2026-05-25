@@ -204,6 +204,7 @@ class TestMXFlatmmBase : public ::testing::Test
             // suppress the -Wundefined-func-template warning that fires when the
             // compiler sees only the forward declaration in mx_flatmm.hpp.
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-func-template"
         BaseFlatmmPipeline::template TailHandler<true>(
             [&](auto has_hot_loop_, auto tail_num_) {
@@ -240,8 +241,9 @@ class TestMXFlatmmBase : public ::testing::Test
             ck_tile::host_tensor_descriptor(M, N, stride_C, ck_tile::bool_constant<c_row_major>{}));
         c_ref.SetZero();
 
-        ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, AccDataType, CDataType>(
-            a_host, b_origin_host, c_ref, scale_a, scale_b);
+        ck_tile::
+            reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
+                a_host, b_origin_host, c_ref, scale_a, scale_b);
 
         const float rtol = 1e-2f;
         const float atol = 1e-2f;

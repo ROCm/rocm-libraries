@@ -77,6 +77,7 @@ class DataInitName(Enum):
   TrigIndCos = 24
   TrigIndAbsSin = 25
   TrigIndAbsCos = 26
+  UniformLowPrecision = 27
 
 class ClientLogLevel(Enum):
   Error = 0
@@ -735,10 +736,12 @@ def writeClientConfig(
       gfxName: str,
       configBase = "ClientParameters",
       libraryFile = None,
-      probSolMap = {}
+      probSolMap = {},
+      sourceDir = None
     ):
 
-    sourceDir = os.path.join(stepBaseDir, "source")
+    if sourceDir is None:
+        sourceDir = os.path.join(stepBaseDir, "source")
 
     if tileAwareSelection:
       filename = os.path.join(sourceDir, "%s_Granularity.ini"%configBase)

@@ -34,7 +34,7 @@ namespace stinkytofu {
 class DAGScheduleJsonCollector;
 class Function;
 class PassContext;
-class StinkyInstruction;
+struct StinkyInstruction;
 
 /// True if \p passName is in the configured allow-list and a non-empty snapshot path is set.
 bool shouldEmitPassOrderSnapshotAfterPass(const PassFeatureConfig& cfg,

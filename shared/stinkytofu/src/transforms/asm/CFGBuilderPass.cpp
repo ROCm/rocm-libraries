@@ -119,7 +119,8 @@ class CFGBuilderPassImpl : public Pass {
                 labelName = labelData ? labelData->label : "";
                 count = 0;
             } else {
-                labelName = labelName + "_" + std::to_string(++count);
+                labelName += "_";
+                labelName += std::to_string(++count);
             }
 
             // Create a new BasicBlock for this label
