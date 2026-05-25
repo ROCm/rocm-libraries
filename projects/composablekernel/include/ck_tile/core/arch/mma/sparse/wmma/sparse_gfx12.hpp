@@ -577,9 +577,9 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 128u, CtrlFlags, CompilerTa
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         return {__builtin_amdgcn_swmmac_i32_16x16x128_iu8(true, // A signedness
-                                                          aVec,
+                                                          bit_cast<int32x8_t>(aVec),
                                                           true, // B signedness
-                                                          bVec,
+                                                          bit_cast<int32x16_t>(bVec),
                                                           cVec,
                                                           idx,
                                                           CtrlFlags::Clamp,

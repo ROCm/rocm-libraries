@@ -84,6 +84,7 @@ static constexpr BuiltinParams getBuiltinParams()
 struct DefaultSparseMfmaCtrlFlags
 {
     static constexpr SparseCompressionIndex CompressionIndex = SparseCompressionIndex::FIRST;
+    static constexpr bool Clamp = false;
 };
 
 CK_TILE_HOST_DEVICE void print_flags(DefaultSparseMfmaCtrlFlags const& ctrlFlags)
