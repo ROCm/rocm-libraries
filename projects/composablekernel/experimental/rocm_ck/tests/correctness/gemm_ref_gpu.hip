@@ -101,6 +101,88 @@ __global__ void accumulate_4(float* __restrict__ out,
     out[i] = static_cast<float>(sum);
 }
 
+/// Knuth TwoSum: exact error-free transformation of a + b.
+/// Returns (s, e) such that a + b = s + e exactly, with s = fl(a + b).
+/// No ordering requirement on a, b.
+__device__ __forceinline__ void twoSum(float a, float b, float& s, float& e)
+{
+    s       = a + b;
+    float v = s - a;
+    e       = (a - (s - v)) + (b - v);
+}
+
+/// Ozaki-k2 accumulation: sum 4 partial products using FP32 compensated
+/// summation (TwoSum). No FP64 arithmetic. Achieves near-FP64 accuracy
+/// when the partial products come from a Veltkamp-split GEMM.
+__global__ void accumulate_4_ozaki(float* __restrict__ out,
+                                   const float* __restrict__ p0,
+                                   const float* __restrict__ p1,
+                                   const float* __restrict__ p2,
+                                   const float* __restrict__ p3,
+                                   int count)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= count)
+        return;
+
+    float s, e, e2;
+
+    // Accumulate P0 + P1
+    twoSum(p0[i], p1[i], s, e);
+
+    // Accumulate P2
+    twoSum(s, p2[i], s, e2);
+    e += e2;
+
+    // Accumulate P3
+    twoSum(s, p3[i], s, e2);
+    e += e2;
+
+    // Final corrected result
+    out[i] = s + e;
+}
+
+/// Merge one K-tile's 4 partial products into running compensated accumulators.
+/// TwoSum-chains p0+p1+p2+p3, then TwoSum-merges into (sum_buf, err_buf).
+__global__ void accumulate_tile_ozaki(float* __restrict__ sum_buf,
+                                      float* __restrict__ err_buf,
+                                      const float* __restrict__ p0,
+                                      const float* __restrict__ p1,
+                                      const float* __restrict__ p2,
+                                      const float* __restrict__ p3,
+                                      int count)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= count)
+        return;
+
+    // TwoSum-chain the 4 tile partials
+    float s, e, e2;
+    twoSum(p0[i], p1[i], s, e);
+    twoSum(s, p2[i], s, e2);
+    e += e2;
+    twoSum(s, p3[i], s, e2);
+    e += e2;
+
+    // Merge into running accumulators
+    float new_s, merge_e;
+    twoSum(sum_buf[i], s, new_s, merge_e);
+    sum_buf[i] = new_s;
+    err_buf[i] += merge_e + e;
+}
+
+/// Finalize compensated sum: out = sum_buf + err_buf.
+__global__ void finalize_ozaki(float* __restrict__ out,
+                               const float* __restrict__ sum_buf,
+                               const float* __restrict__ err_buf,
+                               int count)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= count)
+        return;
+    out[i] = sum_buf[i] + err_buf[i];
+}
+
 /// Convert float array to double (for FP64 reference path).
 __global__ void float_to_double(const float* __restrict__ in,
                                 double* __restrict__ out,
@@ -204,6 +286,181 @@ void gpuGemmMultiword(const Spec& spec,
 }
 
 // ============================================================================
+// Ozaki-k2 reference: 4x sgemm + FP32 compensated accumulation
+// ============================================================================
+
+/// GPU reference GEMM using Ozaki-k2 scheme.
+/// Same Veltkamp split and 4 sgemm calls as gpuGemmMultiword, but accumulates
+/// the partial products using FP32 compensated summation (TwoSum) instead of
+/// FP64.  Near-FP64 accuracy without any FP64 arithmetic.
+///
+/// Inputs a, b and output c are float arrays on device.
+/// Strides come from args.tensors[spec.lhs/rhs/output().args_slot].
+template <typename Spec>
+void gpuGEMMFP64Ozakik2(const Spec& spec,
+                         float* c,
+                         const float* a,
+                         const float* b,
+                         int M,
+                         int N,
+                         int K,
+                         const rocm_ck::Args& args,
+                         GemmBackend& backend)
+{
+    int64_t a_s0 = args.tensors[spec.lhs().args_slot].strides[0];
+    int64_t a_s1 = args.tensors[spec.lhs().args_slot].strides[1];
+    int64_t b_s0 = args.tensors[spec.rhs().args_slot].strides[0];
+    int64_t b_s1 = args.tensors[spec.rhs().args_slot].strides[1];
+    int64_t c_s0 = args.tensors[spec.output().args_slot].strides[0];
+    int64_t c_s1 = args.tensors[spec.output().args_slot].strides[1];
+
+    int countA = M * K;
+    int countB = K * N;
+    int countC = M * N;
+
+    // --- Allocate temporaries ---
+    float *a_hi, *a_lo, *b_hi, *b_lo;
+    float *p0, *p1, *p2, *p3;
+    HIP_CHECK(hipMalloc(&a_hi, countA * sizeof(float)));
+    HIP_CHECK(hipMalloc(&a_lo, countA * sizeof(float)));
+    HIP_CHECK(hipMalloc(&b_hi, countB * sizeof(float)));
+    HIP_CHECK(hipMalloc(&b_lo, countB * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p0, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p1, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p2, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p3, countC * sizeof(float)));
+
+    // --- Split A and B (element-wise, layout-agnostic) ---
+    detail::launchElementwise1D(countA, detail::veltkamp_split, a, a_hi, a_lo);
+    detail::launchElementwise1D(countB, detail::veltkamp_split, b, b_hi, b_lo);
+
+    // --- 4 sgemm calls (backend handles layout translation) ---
+    float alpha = 1.0f;
+    float beta  = 0.0f;
+    backend.sgemm(M, N, K, alpha, a_hi, a_s0, a_s1, b_hi, b_s0, b_s1, beta, p0, c_s0, c_s1);
+    backend.sgemm(M, N, K, alpha, a_hi, a_s0, a_s1, b_lo, b_s0, b_s1, beta, p1, c_s0, c_s1);
+    backend.sgemm(M, N, K, alpha, a_lo, a_s0, a_s1, b_hi, b_s0, b_s1, beta, p2, c_s0, c_s1);
+    backend.sgemm(M, N, K, alpha, a_lo, a_s0, a_s1, b_lo, b_s0, b_s1, beta, p3, c_s0, c_s1);
+
+    // --- Accumulate 4 partial products via FP32 compensated summation ---
+    detail::launchElementwise1D(countC, detail::accumulate_4_ozaki, c, p0, p1, p2, p3);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // --- Cleanup ---
+    HIP_CHECK(hipFree(a_hi));
+    HIP_CHECK(hipFree(a_lo));
+    HIP_CHECK(hipFree(b_hi));
+    HIP_CHECK(hipFree(b_lo));
+    HIP_CHECK(hipFree(p0));
+    HIP_CHECK(hipFree(p1));
+    HIP_CHECK(hipFree(p2));
+    HIP_CHECK(hipFree(p3));
+}
+
+// ============================================================================
+// Ozaki-k2 tiled reference: K-tiled 4x sgemm + FP32 compensated accumulation
+// ============================================================================
+
+/// GPU reference GEMM using K-tiled Ozaki-k2 scheme.
+/// Same Veltkamp split as gpuGEMMFP64Ozakik2, but tiles along K so that each
+/// sgemm only accumulates kTile products internally.  Cross-tile accumulation
+/// uses TwoSum, keeping inner-sum rounding error proportional to kTile rather
+/// than K.  No FP64 arithmetic.
+///
+/// Inputs a, b and output c are float arrays on device.
+/// Strides come from args.tensors[spec.lhs/rhs/output().args_slot].
+template <typename Spec>
+void gpuGEMMFP64Ozakik2Tiled(const Spec& spec,
+                              float* c,
+                              const float* a,
+                              const float* b,
+                              int M,
+                              int N,
+                              int K,
+                              const rocm_ck::Args& args,
+                              GemmBackend& backend)
+{
+    int64_t a_s0 = args.tensors[spec.lhs().args_slot].strides[0];
+    int64_t a_s1 = args.tensors[spec.lhs().args_slot].strides[1];
+    int64_t b_s0 = args.tensors[spec.rhs().args_slot].strides[0];
+    int64_t b_s1 = args.tensors[spec.rhs().args_slot].strides[1];
+    int64_t c_s0 = args.tensors[spec.output().args_slot].strides[0];
+    int64_t c_s1 = args.tensors[spec.output().args_slot].strides[1];
+
+    int countA = M * K;
+    int countB = K * N;
+    int countC = M * N;
+
+    constexpr int kTile = 256;
+
+    // --- Allocate temporaries ---
+    float *a_hi, *a_lo, *b_hi, *b_lo;
+    float *p0, *p1, *p2, *p3;
+    float *sum_buf, *err_buf;
+    HIP_CHECK(hipMalloc(&a_hi, countA * sizeof(float)));
+    HIP_CHECK(hipMalloc(&a_lo, countA * sizeof(float)));
+    HIP_CHECK(hipMalloc(&b_hi, countB * sizeof(float)));
+    HIP_CHECK(hipMalloc(&b_lo, countB * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p0, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p1, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p2, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&p3, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&sum_buf, countC * sizeof(float)));
+    HIP_CHECK(hipMalloc(&err_buf, countC * sizeof(float)));
+    HIP_CHECK(hipMemset(sum_buf, 0, countC * sizeof(float)));
+    HIP_CHECK(hipMemset(err_buf, 0, countC * sizeof(float)));
+
+    // --- Split A and B (element-wise, layout-agnostic) ---
+    detail::launchElementwise1D(countA, detail::veltkamp_split, a, a_hi, a_lo);
+    detail::launchElementwise1D(countB, detail::veltkamp_split, b, b_hi, b_lo);
+
+    // --- K-tiled accumulation ---
+    float alpha = 1.0f;
+    float beta  = 0.0f;
+
+    for(int k = 0; k < K; k += kTile)
+    {
+        int k_len = (k + kTile <= K) ? kTile : (K - k);
+
+        // Submatrix pointers: a_s1 strides along K in A, b_s0 strides along K in B
+        const float* a_hi_tile = a_hi + k * a_s1;
+        const float* a_lo_tile = a_lo + k * a_s1;
+        const float* b_hi_tile = b_hi + k * b_s0;
+        const float* b_lo_tile = b_lo + k * b_s0;
+
+        // 4 sgemm calls for this tile
+        backend.sgemm(
+            M, N, k_len, alpha, a_hi_tile, a_s0, a_s1, b_hi_tile, b_s0, b_s1, beta, p0, c_s0, c_s1);
+        backend.sgemm(
+            M, N, k_len, alpha, a_hi_tile, a_s0, a_s1, b_lo_tile, b_s0, b_s1, beta, p1, c_s0, c_s1);
+        backend.sgemm(
+            M, N, k_len, alpha, a_lo_tile, a_s0, a_s1, b_hi_tile, b_s0, b_s1, beta, p2, c_s0, c_s1);
+        backend.sgemm(
+            M, N, k_len, alpha, a_lo_tile, a_s0, a_s1, b_lo_tile, b_s0, b_s1, beta, p3, c_s0, c_s1);
+
+        // Merge tile partials into running compensated sum
+        detail::launchElementwise1D(
+            countC, detail::accumulate_tile_ozaki, sum_buf, err_buf, p0, p1, p2, p3);
+    }
+
+    // --- Finalize: out = sum_buf + err_buf ---
+    detail::launchElementwise1D(countC, detail::finalize_ozaki, c, sum_buf, err_buf);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // --- Cleanup ---
+    HIP_CHECK(hipFree(a_hi));
+    HIP_CHECK(hipFree(a_lo));
+    HIP_CHECK(hipFree(b_hi));
+    HIP_CHECK(hipFree(b_lo));
+    HIP_CHECK(hipFree(p0));
+    HIP_CHECK(hipFree(p1));
+    HIP_CHECK(hipFree(p2));
+    HIP_CHECK(hipFree(p3));
+    HIP_CHECK(hipFree(sum_buf));
+    HIP_CHECK(hipFree(err_buf));
+}
+
+// ============================================================================
 // FP64 reference: single dgemm
 // ============================================================================
 
@@ -267,8 +524,10 @@ void gpuGemmFP64(const Spec& spec,
 /// Use as a gtest parameter to run the same test with both references.
 enum class GpuRefMethod
 {
-    Multiword, // 4× sgemm + Veltkamp split, works on any GPU
-    FP64       // single dgemm, requires FP64-capable hardware
+    Multiword, // 4× sgemm + Veltkamp split, FP64 accumulation
+    FP64,      // single dgemm, requires FP64-capable hardware
+    Ozakik2,     // 4× sgemm + Veltkamp split, FP32 compensated accumulation
+    Ozakik2Tiled // K-tiled 4× sgemm + Veltkamp split, FP32 compensated accumulation
 };
 
 inline const char* gpuRefMethodName(GpuRefMethod m)
@@ -277,6 +536,8 @@ inline const char* gpuRefMethodName(GpuRefMethod m)
     {
     case GpuRefMethod::Multiword: return "Multiword";
     case GpuRefMethod::FP64: return "FP64";
+    case GpuRefMethod::Ozakik2: return "Ozakik2";
+    case GpuRefMethod::Ozakik2Tiled: return "Ozakik2Tiled";
     }
     return "???";
 }
@@ -301,6 +562,12 @@ void gpuGemm(GpuRefMethod method,
         break;
     case GpuRefMethod::FP64:
         gpuGemmFP64(spec, c, a, b, M, N, K, args, backend);
+        break;
+    case GpuRefMethod::Ozakik2:
+        gpuGEMMFP64Ozakik2(spec, c, a, b, M, N, K, args, backend);
+        break;
+    case GpuRefMethod::Ozakik2Tiled:
+        gpuGEMMFP64Ozakik2Tiled(spec, c, a, b, M, N, K, args, backend);
         break;
     }
 }
