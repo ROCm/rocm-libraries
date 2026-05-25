@@ -409,14 +409,6 @@ if( WIN32 )
   target_sources(rocfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
 endif()
 
-# rocFFT contains default implementations of callback functions that
-# need to be built as relocatable device code (causes failure at link
-# stage on Windows)
-if (NOT WIN32)
-  target_compile_options( rocfft PRIVATE -fgpu-rdc )
-  target_link_options( rocfft PRIVATE -fgpu-rdc )
-endif()
-
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
