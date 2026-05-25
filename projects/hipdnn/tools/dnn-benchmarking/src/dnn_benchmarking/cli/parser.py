@@ -264,6 +264,30 @@ Tarball Input:
         ),
     )
     metrics_group.add_argument(
+        "--pmc",
+        type=str,
+        choices=["basic", "memory", "flops", "all"],
+        default=None,
+        metavar="SET",
+        help=(
+            "Re-run benchmark under rocprofv3 with the named PMC counter "
+            "set. Per-kernel aggregates land in extra_metrics['pmc']. "
+            "'all' requires --pmc-allow-multipass. Adds ~1 extra workload "
+            "run (~30%% wallclock overhead)."
+        ),
+    )
+    metrics_group.add_argument(
+        "--pmc-allow-multipass",
+        action="store_true",
+        default=False,
+        help=(
+            "Required to use --pmc all. The unioned counter set exceeds "
+            "the single-pass replay budget on most arches and rocprofv3 "
+            "falls back to multi-pass replay, which has been observed to "
+            "hang for minutes on sub-second workloads."
+        ),
+    )
+    metrics_group.add_argument(
         "--perf",
         action="store_true",
         default=False,
@@ -275,13 +299,47 @@ Tarball Input:
         ),
     )
     metrics_group.add_argument(
+        "--roofline",
+        action="store_true",
+        default=False,
+        help=(
+            "Re-run under 'rocprof-compute profile --roof-only' to "
+            "capture HBM/compute ceilings. The CSV artefacts "
+            "(roofline.csv, sysinfo.csv) and the workload directory "
+            "path land in extra_metrics['roofline'] — render the PDF "
+            "post-hoc via 'rocprof-compute analyze --path <workload>'. "
+            "Adds ~3 extra workload runs."
+        ),
+    )
+    # --roofline-data-type intentionally absent: rocprof-compute only
+    # accepts it under `analyze`, not `profile`. The profile run captures
+    # ceilings at the tool's default datatype (FP32); rendering FP16/
+    # BF16/etc. PDFs is a post-processing step the user runs themselves
+    # against extra_metrics["roofline"]["workload_path"]:
+    #   rocprof-compute analyze --path <workload_path> --roofline-data-type FP16
+    metrics_group.add_argument(
         "--profiling-output-dir",
         type=Path,
         default=None,
         metavar="DIR",
         help=(
-            "Root directory for profiling artefacts (pftraces, perf "
-            "CSVs). Default: ./profiling-output/<utc-timestamp>/."
+            "Root directory for profiling artefacts (rocpd dbs, "
+            "pftraces, perf CSVs, roofline CSVs). Default: "
+            "./profiling-output/<utc-timestamp>/."
+        ),
+    )
+    metrics_group.add_argument(
+        "--profiling-timeout",
+        type=int,
+        default=600,
+        metavar="SECONDS",
+        help=(
+            "Wall-clock budget for each external profiler subprocess "
+            "(rocprofv3, perf, rocprof-compute, rocpd convert). Default "
+            "600 s. A wedged child surfaces as 'timed out after Ns' in "
+            "extra_metrics['<source>']['skipped'] instead of hanging the "
+            "suite. Bump for known-long workloads (heavy graph under "
+            "multi-pass PMC replay). Pass 0 to disable the timeout."
         ),
     )
 

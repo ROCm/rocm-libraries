@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Role: types — GpuTarget enum. No runtime, no CK deps.
+// Role: types - GpuTarget enum. No runtime, no CK deps.
 
 #pragma once
 
@@ -19,6 +19,7 @@ enum class GpuTarget : uint8_t
     gfx1102, // RDNA 3
     gfx1150, // RDNA 3.5
     gfx1151, // RDNA 3.5
+    _count   // must be last — new targets go above this line
 };
 
 } // namespace rocm_ck
