@@ -61,14 +61,7 @@ struct context_t {
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
 
-  /// Per-CU prologue/epilogue amortization factor.
-  ///
-  /// `real_occupancy` counts the number of wave-passes through the GPU
-  /// for this problem+kernel pair (`ceil((grid_m * grid_n * batch *
-  /// splitting_factor) / N_CU)`).  `occupancy_factor` =
-  /// `pow(occupancy_decay_base, real_occupancy)`: when many WG-passes
-  /// share each CU, the per-tile prologue and epilogue costs are
-  /// amortized across them and shrink toward zero.
+  /// Occupancy-derived decay factor.
   size_t real_occupancy   = 0;
   double occupancy_factor = 1.0;
 
