@@ -583,7 +583,7 @@ def is_tile_config_valid(
         kernel_name_prefix == "grouped_gemm_rowcolquant"
         or kernel_name_prefix == "grouped_gemm_tensorquant"
     ):
-        rowcolquant_valid, rowcolquant_valid_error = (
+        rowcol_tensor_quant_valid, rowcol_tensor_quant_valid_error = (
             validate_gemm_rowcolquant_tensorquant(
                 tile_m,
                 tile_n,
@@ -603,7 +603,7 @@ def is_tile_config_valid(
             )
 >>>>>>> 1525d40915 (add tensorquant to the tile engine)
         )
-        if not rowcolquant_valid:
+        if not rowcol_tensor_quant_valid:
             logging.debug(
                 f"GEMM RowColQuant/TensorQuant validation failed: {rowcol_tensor_quant_valid_error}"
             )
