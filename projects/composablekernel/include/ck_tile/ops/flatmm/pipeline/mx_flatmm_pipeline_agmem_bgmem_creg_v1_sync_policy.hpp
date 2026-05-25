@@ -93,8 +93,8 @@ struct MXFlatmmPipelineAgBgCrPolicySync : UniversalFlatmmPipelineAgBgCrPolicy
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ABytesDramTileDistribution()
     {
-        // Single dwordx4 per load, K0=3 repeats (strided pattern).
-        constexpr index_t K2 = DWORDx4; // 16 bytes
+        // 3×contiguous dwordx4 per load (48 bytes), K0=1 (no repeat).
+        constexpr index_t K2 = 3 * DWORDx4; // 48 bytes
         constexpr index_t K1 = std::is_same_v<ADataType, pk_fp6x16_t>
                                    ? kDramLoadPackBytes / DWORDx4 / 2  // 4 for fp6
                                    : kDramLoadPackBytes / DWORDx4;     // 8 for others
