@@ -118,7 +118,7 @@ void testing_syev_heev_bad_arg()
         device_batch_vector<T> dA(1, 1, 1);
         device_strided_batch_vector<S> dD(1, 1, 1, 1);
         device_strided_batch_vector<S> dE(1, 1, 1, 1);
-        device_strided_batch_vector<rocblas_int> dinfo(1, 1, 1, 1);
+        device_strided_batch_vector<I> dinfo(1, 1, 1, 1);
         CHECK_HIP_ERROR(dA.memcheck());
         CHECK_HIP_ERROR(dD.memcheck());
         CHECK_HIP_ERROR(dE.memcheck());
@@ -134,7 +134,7 @@ void testing_syev_heev_bad_arg()
         device_strided_batch_vector<T> dA(1, 1, 1, 1);
         device_strided_batch_vector<S> dD(1, 1, 1, 1);
         device_strided_batch_vector<S> dE(1, 1, 1, 1);
-        device_strided_batch_vector<rocblas_int> dinfo(1, 1, 1, 1);
+        device_strided_batch_vector<I> dinfo(1, 1, 1, 1);
         CHECK_HIP_ERROR(dA.memcheck());
         CHECK_HIP_ERROR(dD.memcheck());
         CHECK_HIP_ERROR(dE.memcheck());
@@ -241,7 +241,7 @@ void syev_heev_getError(const rocblas_handle handle,
     // CPU lapack
     for(I b = 0; b < bc; ++b)
         cpu_syev_heev(evect, uplo, n, hA[b], lda, hD[b], work.data(), lwork, hE.data(), sizeE,
-                      hinfo[b]);
+                      (rocblas_int*)hinfo[b]);
 
     // Check info for non-convergence
     *max_err = 0;
@@ -337,7 +337,7 @@ void syev_heev_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync();
         for(I b = 0; b < bc; ++b)
             cpu_syev_heev(evect, uplo, n, hA[b], lda, hD[b], work.data(), lwork, hE.data(), sizeE,
-                          hinfo[b]);
+                          (rocblas_int*)hinfo[b]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
@@ -420,13 +420,13 @@ void testing_syev_heev(Arguments& argus)
     {
         if(BATCHED)
             EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n,
-                                                      (T* const*)nullptr, lda, stA, (S*)nullptr, stD,
-                                                      (S*)nullptr, stE, (rocblas_int*)nullptr, bc),
+                                                      (T* const*)nullptr, lda, stA, (S*)nullptr,
+                                                      stD, (S*)nullptr, stE, (I*)nullptr, bc),
                                   rocblas_status_invalid_value);
         else
             EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n, (T*)nullptr,
                                                       lda, stA, (S*)nullptr, stD, (S*)nullptr, stE,
-                                                      (rocblas_int*)nullptr, bc),
+                                                      (I*)nullptr, bc),
                                   rocblas_status_invalid_value);
 
         if(argus.timing)
@@ -450,13 +450,13 @@ void testing_syev_heev(Arguments& argus)
     {
         if(BATCHED)
             EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n,
-                                                      (T* const*)nullptr, lda, stA, (S*)nullptr, stD,
-                                                      (S*)nullptr, stE, (rocblas_int*)nullptr, bc),
+                                                      (T* const*)nullptr, lda, stA, (S*)nullptr,
+                                                      stD, (S*)nullptr, stE, (I*)nullptr, bc),
                                   rocblas_status_invalid_size);
         else
             EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n, (T*)nullptr,
                                                       lda, stA, (S*)nullptr, stD, (S*)nullptr, stE,
-                                                      (rocblas_int*)nullptr, bc),
+                                                      (I*)nullptr, bc),
                                   rocblas_status_invalid_size);
 
         if(argus.timing)
@@ -472,11 +472,11 @@ void testing_syev_heev(Arguments& argus)
         if(BATCHED)
             CHECK_ALLOC_QUERY(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n,
                                                   (T* const*)nullptr, lda, stA, (S*)nullptr, stD,
-                                                  (S*)nullptr, stE, (rocblas_int*)nullptr, bc));
+                                                  (S*)nullptr, stE, (I*)nullptr, bc));
         else
             CHECK_ALLOC_QUERY(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n, (T*)nullptr, lda,
                                                   stA, (S*)nullptr, stD, (S*)nullptr, stE,
-                                                  (rocblas_int*)nullptr, bc));
+                                                  (I*)nullptr, bc));
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -488,13 +488,13 @@ void testing_syev_heev(Arguments& argus)
     // memory allocations (all cases)
     // host
     host_strided_batch_vector<S> hD(size_D, 1, stD, bc);
-    host_strided_batch_vector<rocblas_int> hinfo(1, 1, 1, bc);
-    host_strided_batch_vector<rocblas_int> hinfoRes(1, 1, 1, bc);
+    host_strided_batch_vector<I> hinfo(1, 1, 1, bc);
+    host_strided_batch_vector<I> hinfoRes(1, 1, 1, bc);
     host_strided_batch_vector<S> hDres(size_Dres, 1, stD, bc);
     // device
     device_strided_batch_vector<S> dE(size_E, 1, stE, bc);
     device_strided_batch_vector<S> dD(size_D, 1, stD, bc);
-    device_strided_batch_vector<rocblas_int> dinfo(1, 1, 1, bc);
+    device_strided_batch_vector<I> dinfo(1, 1, 1, bc);
     if(size_E)
         CHECK_HIP_ERROR(dE.memcheck());
     if(size_D)

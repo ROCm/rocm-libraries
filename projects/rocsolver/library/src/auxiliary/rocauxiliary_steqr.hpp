@@ -631,7 +631,10 @@ __device__ void run_steqr(const I tid,
     // Check for convergence
     for(I i = tid; i < n - 1; i += tid_inc)
         if(E[i] != 0)
-            atomicAdd(reinterpret_cast<unsigned long*>(info), 1);
+            atomicAdd(
+                reinterpret_cast<std::conditional_t<sizeof(I) == 4, unsigned int, unsigned long long>*>(
+                    info),
+                1u);
 
     // Sort eigenvalues and eigenvectors by selection sort
     if(ordered)

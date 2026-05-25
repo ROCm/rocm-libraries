@@ -341,8 +341,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {
         // only in hybrid mode, compute eigenvalues using sterf
-        rocsolver_sterf_template<S>(handle, n, D, 0, strideD, E, 0, strideE, info, batch_count,
-                                    (I*)work1);
+        rocsolver_sterf_template<S>(handle, n, D, (I)0, strideD, E, (I)0, strideE, info,
+                                    batch_count, (I*)work1);
     }
     else
     {

@@ -282,7 +282,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_divide_kernel(const I 
         msz[0] = n;
         for(I i = 0; i < levs; ++i)
         {
-            for(I j = (1 << i); j > 0; --j)
+            for(I j = (I(1) << i); j > 0; --j)
             {
                 I t = msz[j - 1];
                 msz[j * 2 - 1] = t / 2 + (t & 1);
@@ -382,8 +382,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I* map = ptr_map(n, splits);
     I* dcount = ptr_dcount(n, splits);
 
-    I n_blocks = 1 << levs;
-    I n_merges = 1 << (levs - k - 1);
+    I n_blocks = I(1) << levs;
+    I n_merges = I(1) << (levs - k - 1);
 
     // init em array
     if(k == 0)
@@ -716,8 +716,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     S* md = ptr_md(n, tmpz);
     S* tolsD = ptr_tolsD(n, tmpz);
 
-    constexpr I F_BCAND = 1 << L_F_BCAND_BIT;
-    constexpr I F_TCAND = 1 << L_F_TCAND_BIT;
+    constexpr I F_BCAND = I(1) << L_F_BCAND_BIT;
+    constexpr I F_TCAND = I(1) << L_F_TCAND_BIT;
 
     // find deflate candidates
     I i = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
@@ -780,8 +780,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     constexpr I max_len = 4096;
     __shared__ S ldsD[max_len];
     __shared__ I lcand[max_len];
-    constexpr I F_BCAND = 1 << L_F_BCAND_BIT;
-    constexpr I F_TCAND = 1 << L_F_TCAND_BIT;
+    constexpr I F_BCAND = I(1) << L_F_BCAND_BIT;
+    constexpr I F_TCAND = I(1) << L_F_TCAND_BIT;
 
     I start = hipBlockDim_x * hipBlockIdx_x;
     I base = start + hipThreadIdx_x;
@@ -2116,7 +2116,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                         ns[0] = n;
                         for(I i = 0; i < lvl; ++i)
                         {
-                            for(I j = (1 << i); j > 0; --j)
+                            for(I j = (I(1) << i); j > 0; --j)
                             {
                                 auto t = ns[j - 1];
                                 ns[j * 2 - 1] = t / 2 + (t & 1);

@@ -10286,7 +10286,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           float* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return STRIDED ? rocsolver_ssyev_strided_batched_64(handle, evect, uplo, n, A, lda, stA, D, stD,
@@ -10306,7 +10306,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           double* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return STRIDED ? rocsolver_dsyev_strided_batched_64(handle, evect, uplo, n, A, lda, stA, D, stD,
@@ -10326,7 +10326,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           float* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return STRIDED ? rocsolver_cheev_strided_batched_64(handle, evect, uplo, n, A, lda, stA, D, stD,
@@ -10346,7 +10346,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           double* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return STRIDED ? rocsolver_zheev_strided_batched_64(handle, evect, uplo, n, A, lda, stA, D, stD,
@@ -10367,7 +10367,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           float* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return rocsolver_ssyev_batched_64(handle, evect, uplo, n, A, lda, D, stD, E, stE, info, bc);
@@ -10385,7 +10385,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           double* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return rocsolver_dsyev_batched_64(handle, evect, uplo, n, A, lda, D, stD, E, stE, info, bc);
@@ -10403,7 +10403,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           float* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return rocsolver_cheev_batched_64(handle, evect, uplo, n, A, lda, D, stD, E, stE, info, bc);
@@ -10421,7 +10421,7 @@ inline rocblas_status rocsolver_syev_heev(bool STRIDED,
                                           rocblas_stride stD,
                                           double* E,
                                           rocblas_stride stE,
-                                          rocblas_int* info,
+                                          int64_t* info,
                                           int64_t bc)
 {
     return rocsolver_zheev_batched_64(handle, evect, uplo, n, A, lda, D, stD, E, stE, info, bc);
