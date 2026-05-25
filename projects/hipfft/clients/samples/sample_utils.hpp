@@ -158,7 +158,7 @@ inline void hsymmetrize(std::vector<std::complex<Tfloat>>& cinput, const int Nx,
 {
     const size_t Nyp = Ny / 2 + 1;
     if(cinput.size() < Nx * Nyp)
-        throw std::runtime_error("hsyemmetrize has insufficient dimensions");
+        throw std::runtime_error("hsymmetrize has insufficient dimensions");
 
     hipError_t hip_rt;
     using fftctype
@@ -168,10 +168,6 @@ inline void hsymmetrize(std::vector<std::complex<Tfloat>>& cinput, const int Nx,
     using ArrayType      = typename std::remove_reference<decltype(cinput)>::type;
     using ValueType      = typename std::remove_extent<ArrayType>::type;
     size_t complex_bytes = sizeof(ValueType) * Nx * Nyp;
-
-    hip_rt = hipMalloc(&cbuf, complex_bytes);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipMalloc failed");
 
     hip_rt = hipMalloc(&cbuf, complex_bytes);
     if(hip_rt != hipSuccess)
@@ -321,12 +317,12 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t
 {
     const size_t Nyp = Ny / 2 + 1;
 
-    std::vector<std::complex<double>> cinput(Nx * Nyp);
+    std::vector<std::complex<Tfloat>> cinput(Nx * Nyp);
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
         for(size_t yidx = 0; yidx < Nyp; ++yidx)
         {
-            cinput[xidx * Nyp + yidx] = std::complex<double>(xidx, yidx);
+            cinput[xidx * Nyp + yidx] = std::complex<Tfloat>(xidx, yidx);
         }
     }
 
@@ -340,7 +336,7 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t
 
     Tfloat* cbuf;
     size_t  complex_bytes = sizeof(std::complex<Tfloat>) * Nx * (Ny / 2 + 1);
-    hip_rt                = hipMalloc(&rbuf, real_bytes);
+    hip_rt                = hipMalloc(&cbuf, real_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -374,9 +370,6 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t
         throw std::runtime_error("hipFree failed");
 
     hipfftDestroy(planc2r);
-    hip_rt = hipFree(cbuf);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipFree failed");
 }
 
 // Make the output of a r2c linear.
@@ -541,10 +534,7 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
     hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftCreate failed");
-
+    auto hipfft_rt = HIPFFT_SUCCESS;
     hipfft_rt = hipfftPlan2d(&plan, // plan handle
                              Nx, // transform length
                              Ny, // transform length
