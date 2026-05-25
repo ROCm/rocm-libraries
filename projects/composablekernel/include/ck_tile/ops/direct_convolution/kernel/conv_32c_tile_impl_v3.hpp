@@ -189,22 +189,36 @@ struct Config
     constexpr int c_local_count() const { return block_groups(); }
 
     Direction direction = Direction::Fprop;
+
+    // TODO: Fix the swizzle, non-trivial swizzle is not working.
     SwizzleType swizzle_type = SwizzleType::None;
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
     int vector_size = 8;
 
     std::string GetName() const
     {
+        std::string swizzle_type_str = "_no_swizzle";
+        if (swizzle_type == SwizzleType::CyclicShift)
+        {
+            swizzle_type_str = "_cyclic_shift_swizzle";
+        }
+        else if (swizzle_type == SwizzleType::XOR)
+        {
+            swizzle_type_str = "_xor_swizzle";
+        }
+
+        std::string base = "32c_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
+
         if (epilogue == EpilogueType::RegistersToGlobalMemory)
         {
-            return "32c_waves_per_wg_" + std::to_string(waves_per_wg) + "_cross_wave_lds_reduce_direct_dram_epilogue";
+            return base + "_direct_dram_epilogue";
         }
         else if (epilogue == EpilogueType::RegistersToLdsToGlobalMemory)
         {
-            return "32c_waves_per_wg_" + std::to_string(waves_per_wg) + "_cross_wave_lds_reduce_lds_staged_epilogue";
+            return base + "_lds_staged_epilogue";
         }
 
-        return "32c_waves_per_wg_" + std::to_string(waves_per_wg) + "_cross_wave_lds_reduce";
+        return base;
     }
 };
 
