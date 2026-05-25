@@ -164,7 +164,8 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     // --- Construct InputLoader and OutputWriter ---
     InputLoaderT il(bc, lds_buf, in, hi, wi, px, y_padding,
                     dilation, dilation, stride, stride);
-    OutputWriterT ow(bc, nullptr, out, ho, wo);
+    uint4* output_staging_lds = lds_buf + INPUT_TOTAL;
+    OutputWriterT ow(bc, output_staging_lds, out, ho, wo);
 
     // --- Prefetch first input row ---
     il.prefetch_tile_to_lds(0);
@@ -181,12 +182,14 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
 
     MfmaFn mfma_fn{};
 
-    // Helper lambda: LDS reduction + wave-0 output flush.
+    // Helper lambda: LDS reduction + output flush.
+    // Both OutputWriterV3 and OutputWriterV3Lds accept wave_id in flush().
+    // OutputWriterV3::flush guards on wave_id == 0 internally.
+    // OutputWriterV3Lds::flush has all threads participate in barriers.
     auto reduce_and_flush = [&](AccType& slot, int p_out)
     {
         cross_wave_reduce<NUM_WAVES>(slot, reduce_lds, wave_id);
-        if(wave_id == 0)
-            ow.flush(slot, p_out);
+        ow.flush(slot, p_out, wave_id);
         slot = Zero;
     };
 

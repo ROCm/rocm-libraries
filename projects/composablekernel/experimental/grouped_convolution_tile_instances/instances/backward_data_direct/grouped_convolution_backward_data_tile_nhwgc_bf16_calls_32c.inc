@@ -17,7 +17,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<20, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<21, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<22, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<23, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-// Group 2: XOR swizzle, direct DRAM epilogue — Dgrad indices 32-39
+// Group 2: XOR swizzle, direct DRAM epilogue — Dgrad indices 34-41
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<32, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<33, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<34, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
@@ -47,7 +47,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<72, direct_c
 // Padded no-swizzle fallback — Dgrad index 78 (vector_size = 1)
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<78, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 
-// Additional cyclic shift instances for 32-channel kernels.
+// Additional cyclic shift instances for 34-channel kernels.
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<82, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<83, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 
@@ -62,9 +62,29 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<13, dir
 
 ////////////////////////////////////////////////////////////////////////
 // Non-grouped convolution v3 — XOR swizzle
-// Dgrad configs 16-17 (16x16x32), 20-21 (32x32x16)
+// Dgrad configs 16-17 (16x16x32), 20-21 (32x32x16), 24 (32x32x16 8-wave)
 ////////////////////////////////////////////////////////////////////////
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<16, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<17, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<20, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<21, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<24, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — CyclicShift swizzle + LDS-staged epilogue
+// Dgrad configs 26-27 (16x16x32), 30-31 (32x32x16)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<26, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<27, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<30, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<31, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — XOR swizzle + LDS-staged epilogue
+// Dgrad configs 34-35 (16x16x32), 38-39 (32x32x16), 42 (32x32x16 8-wave)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<34, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<35, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<38, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<39, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<42, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);

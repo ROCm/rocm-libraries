@@ -510,12 +510,13 @@ TEST_F(DirectConvNonGrouped32cFp16V3CyclicShiftMfma32x32DgradTest, Dgrad_Config1
 }
 
 // =============================================================================
-// v3 tests — XOR swizzle (configs 16-23)
+// v3 tests — XOR swizzle (configs 16-25)
 //
 //   Config 16: 16x16x32 Dgrad 4-wave  Config 17: 16x16x32 Dgrad 2-wave
 //   Config 18: 16x16x32 Fprop 4-wave  Config 19: 16x16x32 Fprop 2-wave
 //   Config 20: 32x32x16 Dgrad 4-wave  Config 21: 32x32x16 Dgrad 2-wave
 //   Config 22: 32x32x16 Fprop 4-wave  Config 23: 32x32x16 Fprop 2-wave
+//   Config 24: 32x32x16 Dgrad 8-wave  Config 25: 32x32x16 Fprop 8-wave
 // =============================================================================
 
 // --- XOR Fprop 16x16x32 ---
@@ -685,3 +686,357 @@ TEST_F(DirectConvNonGrouped32cFp16V3XorMfma32x32DgradTest, Dgrad_Config20_C64_K6
 {
     ASSERT_TRUE((RunDgrad<20>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
 }
+
+// =============================================================================
+// v3 tests — LDS-staged epilogue (16B DRAM writes)
+//
+// CyclicShift + LDS epilogue (configs 26-33):
+//   Config 26: 16x16x32 Dgrad 4-wave  Config 27: 16x16x32 Dgrad 2-wave
+//   Config 28: 16x16x32 Fprop 4-wave  Config 29: 16x16x32 Fprop 2-wave
+//   Config 30: 32x32x16 Dgrad 4-wave  Config 31: 32x32x16 Dgrad 2-wave
+//   Config 32: 32x32x16 Fprop 4-wave  Config 33: 32x32x16 Fprop 2-wave
+//
+// XOR + LDS epilogue (configs 34-43):
+//   Config 34: 16x16x32 Dgrad 4-wave  Config 35: 16x16x32 Dgrad 2-wave
+//   Config 36: 16x16x32 Fprop 4-wave  Config 37: 16x16x32 Fprop 2-wave
+//   Config 38: 32x32x16 Dgrad 4-wave  Config 39: 32x32x16 Dgrad 2-wave
+//   Config 40: 32x32x16 Fprop 4-wave  Config 41: 32x32x16 Fprop 2-wave
+//   Config 42: 32x32x16 Dgrad 8-wave  Config 43: 32x32x16 Fprop 8-wave
+// =============================================================================
+
+// --- CyclicShift + LDS epilogue, Fprop 16x16x32 ---
+
+class DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config29_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunFprop<29>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config29_C64_K64_NoPad)
+{
+    ASSERT_TRUE((RunFprop<29>(1, 8, 8, 1, 64, 64, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config29_C64_K128)
+{
+    ASSERT_TRUE((RunFprop<29>(1, 8, 8, 1, 64, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config29_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<29>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config29_C64_K64_Ho100)
+{
+    ASSERT_TRUE((RunFprop<29>(1, 100, 100, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config28_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<28>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftFpropTest, Fprop_Config28_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<28>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// --- CyclicShift + LDS epilogue, Dgrad 16x16x32 ---
+
+class DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config27_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<27>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config27_C64_K64_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<27>(1, 8, 8, 1, 64, 64, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config27_C128_K64)
+{
+    ASSERT_TRUE((RunDgrad<27>(1, 8, 8, 1, 128, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config27_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<27>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config27_C64_K64_Ho100)
+{
+    ASSERT_TRUE((RunDgrad<27>(1, 100, 100, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config26_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<26>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftDgradTest, Dgrad_Config26_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<26>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// --- CyclicShift + LDS epilogue, Fprop 32x32x16 ---
+
+class DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config33_C32_K32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<33>(1, 8, 8, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config33_C32_K32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<33>(1, 8, 8, 1, 32, 32, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config33_C32_K64)
+{
+    ASSERT_TRUE((RunFprop<33>(1, 8, 8, 1, 32, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config33_C32_K32_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<33>(2, 16, 16, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config33_C32_K32_Ho100)
+{
+    ASSERT_TRUE((RunFprop<33>(1, 100, 100, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config32_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunFprop<32>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32FpropTest, Fprop_Config32_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<32>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+// --- CyclicShift + LDS epilogue, Dgrad 32x32x16 ---
+
+class DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config31_C32_K32_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<31>(1, 8, 8, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config31_C32_K32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<31>(1, 8, 8, 1, 32, 32, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config31_C64_K32)
+{
+    ASSERT_TRUE((RunDgrad<31>(1, 8, 8, 1, 64, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config31_C32_K32_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<31>(2, 16, 16, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config31_C32_K32_Ho100)
+{
+    ASSERT_TRUE((RunDgrad<31>(1, 100, 100, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config30_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<30>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsCyclicShiftMfma32x32DgradTest, Dgrad_Config30_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<30>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+// --- XOR + LDS epilogue, Fprop 16x16x32 ---
+
+class DirectConvNonGrouped32cFp16V3LdsXorFpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config37_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunFprop<37>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config37_C64_K64_NoPad)
+{
+    ASSERT_TRUE((RunFprop<37>(1, 8, 8, 1, 64, 64, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config37_C64_K128)
+{
+    ASSERT_TRUE((RunFprop<37>(1, 8, 8, 1, 64, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config37_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<37>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config37_C64_K64_Ho100)
+{
+    ASSERT_TRUE((RunFprop<37>(1, 100, 100, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config36_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<36>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorFpropTest, Fprop_Config36_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<36>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// --- XOR + LDS epilogue, Dgrad 16x16x32 ---
+
+class DirectConvNonGrouped32cFp16V3LdsXorDgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config35_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<35>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config35_C64_K64_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<35>(1, 8, 8, 1, 64, 64, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config35_C128_K64)
+{
+    ASSERT_TRUE((RunDgrad<35>(1, 8, 8, 1, 128, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config35_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<35>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config35_C64_K64_Ho100)
+{
+    ASSERT_TRUE((RunDgrad<35>(1, 100, 100, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config34_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<34>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorDgradTest, Dgrad_Config34_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<34>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// --- XOR + LDS epilogue, Fprop 32x32x16 ---
+
+class DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config41_C32_K32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<41>(1, 8, 8, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config41_C32_K32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<41>(1, 8, 8, 1, 32, 32, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config41_C32_K64)
+{
+    ASSERT_TRUE((RunFprop<41>(1, 8, 8, 1, 32, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config41_C32_K32_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<41>(2, 16, 16, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config41_C32_K32_Ho100)
+{
+    ASSERT_TRUE((RunFprop<41>(1, 100, 100, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config40_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunFprop<40>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32FpropTest, Fprop_Config40_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<40>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+// --- XOR + LDS epilogue, Dgrad 32x32x16 ---
+
+class DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config39_C32_K32_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<39>(1, 8, 8, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config39_C32_K32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<39>(1, 8, 8, 1, 32, 32, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config39_C64_K32)
+{
+    ASSERT_TRUE((RunDgrad<39>(1, 8, 8, 1, 64, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config39_C32_K32_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<39>(2, 16, 16, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config39_C32_K32_Ho100)
+{
+    ASSERT_TRUE((RunDgrad<39>(1, 100, 100, 1, 32, 32, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config38_C64_K64_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<38>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3LdsXorMfma32x32DgradTest, Dgrad_Config38_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<38>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
