@@ -45,6 +45,7 @@ String getGitHubCommitHash(def build)
 def show_node_info() {
     sh """
         echo "NODE_NAME = \$NODE_NAME"
+        hostname
         lsb_release -sd
         uname -r
         cat /sys/module/amdgpu/version
@@ -352,13 +353,7 @@ def getBaseDockerImageName(){
         img = "${params.USE_CUSTOM_DOCKER}"
     }
     else{
-        def ROCM_numeric = parseVersion("${params.ROCMVERSION}")
-        if ( ROCM_numeric.major <= 7 && ROCM_numeric.minor < 2 ){
-            img = "${env.CK_DOCKERHUB}:ck_ub24.04_rocm${params.ROCMVERSION}"
-            }
-        else{
-            img = "${env.CK_DOCKERHUB_PRIVATE}:ck_ub24.04_rocm${params.ROCMVERSION}"
-            }
+        img = "${env.CK_DOCKERHUB}:ck_ub24.04_rocm${params.ROCMVERSION}"
         }
     return img
 }
@@ -611,11 +606,11 @@ def cmake_build(Map conf=[:]){
     }
 
     //cmake_env can overwrite default CXX variables.
-    // gfx1250 requires the default ROCm compiler regardless of BUILD_COMPILER param
     def cmake_envs
-    if (!setup_args.contains("gfx1250")) {
+    if(!setup_args.contains("gfx1250")){
         cmake_envs = "CXX=${params.BUILD_COMPILER} CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
-    } else {
+    }
+    else{ //use default compiler for gfx1250
         cmake_envs = "CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
     }
 
@@ -723,6 +718,9 @@ def cmake_build(Map conf=[:]){
         if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
             setup_args = " -D CK_EXPERIMENTAL_BUILDER=ON "  + setup_args
         }
+        if (params.RUN_ROCM_CK_TESTS) {
+            setup_args = " -D CK_ENABLE_ROCM_CK=ON " + setup_args
+        }
         setup_cmd = conf.get(
             "setup_cmd",
             """${cmake_envs} cmake -G Ninja ${setup_args} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS=" -O3 " .. """
@@ -771,6 +769,28 @@ def cmake_build(Map conf=[:]){
         try {
             //build CK
             sh cmd
+            if (runAllUnitTests){
+                // Archive artifacts if they were generated
+                if (fileExists("ck_build_trace_${arch_name}.json")) {
+                    archiveArtifacts "ck_build_trace_${arch_name}.json"
+                }
+                if (fileExists("clang_build_analysis_${arch_name}.log")) {
+                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                }
+                // Process ninja build trace after full build
+                if(fileExists(".ninja_log")) {
+                    sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                    archiveArtifacts "ck_build_trace_${arch_name}.json"
+                    sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+                }
+
+                if (params.NINJA_FTIME_TRACE) {
+                    echo "running ClangBuildAnalyzer"
+                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
+                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
+                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                }
+            }
         } catch (Exception buildError) {
             echo "Build failed: ${buildError.getMessage()}"
             throw buildError
@@ -795,49 +815,35 @@ def cmake_build(Map conf=[:]){
             }
         }
 
-        //run tests except when NO_CK_BUILD is set
+        //run tests except when NO_CK_BUILD is set and except on gfx1250
         if(!setup_args.contains("NO_CK_BUILD")){
-            if (params.NINJA_BUILD_TRACE || params.BUILD_INSTANCES_ONLY){
-                // do not run unit tests when building instances only
-                if(!params.BUILD_INSTANCES_ONLY){
-                    if (!runAllUnitTests){
-                        // Smart Build: Run smart_build_and_test.sh
-                        sh """
-                            export WORKSPACE_ROOT=${env.WORKSPACE}
-                            export PARALLEL=32
-                            export NINJA_JOBS=${nt}
-                            export ARCH_NAME=${arch_name}
-                            export PROCESS_NINJA_TRACE=true
-                            export NINJA_FTIME_TRACE=${params.NINJA_FTIME_TRACE ? 'true' : 'false'}
-                            bash ../script/dependency-parser/smart_build_and_test.sh
-                        """
-
-                        // Archive artifacts if they were generated
-                        if (fileExists("ck_build_trace_${arch_name}.json")) {
-                            archiveArtifacts "ck_build_trace_${arch_name}.json"
-                        }
-                        if (fileExists("clang_build_analysis_${arch_name}.log")) {
-                            archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                        }
-                    }
-                    else{
+            // run unit tests unless building library for all targets
+            // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
+            // So no ninja trace processing needed here
+            if (!params.BUILD_INSTANCES_ONLY){
+                if (!runAllUnitTests && !setup_args.contains("gfx1250") ){
+                    // Smart Build: Run smart_build_and_test.sh
+                    sh """
+                        export WORKSPACE_ROOT=${env.WORKSPACE}
+                        export PARALLEL=32
+                        export NINJA_JOBS=${nt}
+                        export ARCH_NAME=${arch_name}
+                        export PROCESS_NINJA_TRACE=false
+                        export NINJA_FTIME_TRACE=false
+                        bash ../script/dependency-parser/smart_build_and_test.sh
+                    """
+                }
+                else{ //run all tests
+                    if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} check"
-
-                        // Process ninja build trace after full build
-                        sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
-                        archiveArtifacts "ck_build_trace_${arch_name}.json"
-                        sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
-
-                        if (params.NINJA_FTIME_TRACE) {
-                            echo "running ClangBuildAnalyzer"
-                            sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
-                            sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
-                            archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                        }
                     }
-                    if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
-                        sh 'ninja check-builder'
+                    else{ //do not run tests on gfx1250, just build everything
+                        echo "Building for gfx1250"
+                        sh "ninja -j${nt}"
+                    }
+                    if (params.RUN_ROCM_CK_TESTS) {
+                        sh 'ninja check-rocm-ck'
                     }
                     if(params.BUILD_PACKAGES){
                         echo "Build ckProfiler packages"
@@ -846,44 +852,8 @@ def cmake_build(Map conf=[:]){
                         stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
                     }
                 }
-                if(params.BUILD_INSTANCES_ONLY){
-                    // build deb packages
-                    echo "Build library package"
-                    sh 'ninja -j64 package'
-                    sh 'mv composablekernel-dev_*.deb composablekernel-dev_all_targets_1.2.0_amd64.deb'
-                    stash includes: "composablekernel-dev**.deb", name: "lib_package"
-                }
-            }
-            else{
-                // run unit tests unless building library for all targets
-                // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
-                // So no ninja trace processing needed here
-                if (!params.BUILD_INSTANCES_ONLY){
-                    if (!runAllUnitTests){
-                        // Smart Build: Run smart_build_and_test.sh
-                        sh """
-                            export WORKSPACE_ROOT=${env.WORKSPACE}
-                            export PARALLEL=32
-                            export NINJA_JOBS=${nt}
-                            export ARCH_NAME=${arch_name}
-                            export PROCESS_NINJA_TRACE=false
-                            export NINJA_FTIME_TRACE=false
-                            bash ../script/dependency-parser/smart_build_and_test.sh
-                        """
-                    }
-                    else{
-                        echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
-                        sh "ninja -j${nt} check"
-                    }
-                    if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
-                        sh 'ninja check-builder'
-                    }
-                    if(params.BUILD_PACKAGES){
-                        echo "Build ckProfiler packages"
-                        sh 'ninja -j64 package'
-                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.2.0_amd64_${arch_name}.deb"
-                        stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
-                    }
+                if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
+                    sh 'ninja check-builder'
                 }
             }
         }
@@ -1240,8 +1210,11 @@ def run_downstream_tests(Map conf=[:]){
 
 def getPytorchTestsCmds() {
     return [
-        "python3 /tmp/pytorch/tools/amd_build/build_amd.py",
-        "USE_ROCM_CK_SDPA=1 PYTORCH_ROCM_ARCH=gfx942 python /tmp/pytorch/setup.py develop"
+        "mkdir pytorch",
+        "cp -r /var/jenkins/workspace/pytorch/* pytorch/",
+        "ls -ltr pytorch",
+        "python3 pytorch/tools/amd_build/build_amd.py",
+        "cd pytorch && USE_ROCM_CK_SDPA=1 PYTORCH_ROCM_ARCH=gfx942 python3 setup.py develop"
     ]
 }
 def getAiterTestsCmds() {
