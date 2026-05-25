@@ -79,7 +79,7 @@ def _expand_directions(F: int) -> List[ConvDirection]:
     """Expand an MIOpen -F bitmask into individual direction values.
 
     F=0 means all directions.  Otherwise each set bit selects
-    a direction: 1=fwd, 2=dgrad, 4=wgrad.  E.g. F=3 → [FORWARD, BACKWARD_DATA].
+    a direction: 1=fwd, 2=dgrad, 4=wgrad.  E.g. F=3 -> [FORWARD, BACKWARD_DATA].
     """
     if F == 0:
         return list(ConvDirection)
@@ -264,7 +264,7 @@ def main() -> int:
         outdir = Path(ns.outdir) if ns.outdir else input_path.parent
         outdir.mkdir(parents=True, exist_ok=True)
 
-        print(f"Processing {input_path} → {outdir}/")
+        print(f"Processing {input_path} -> {outdir}/")
         written, skipped, warns = _process_file(input_path, outdir)
         print(f"  Written: {written}  Skipped: {skipped}  Warnings: {warns}")
         total_written += written

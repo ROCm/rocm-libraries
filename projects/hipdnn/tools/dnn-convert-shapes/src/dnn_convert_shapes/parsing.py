@@ -64,7 +64,7 @@ def normalize_args(args: Dict[str, str], aliases: Dict[str, str]) -> Dict[str, s
 # ConvParams.from_args() / build_bnorm_json() so that either style works.
 
 CONV_FLAG_ALIASES: Dict[str, str] = {
-    # Long → short (2D parameters)
+    # Long -> short (2D parameters)
     "--batchsize": "-n",
     "--in_channels": "-c",
     "--in_h": "-H",
@@ -81,7 +81,7 @@ CONV_FLAG_ALIASES: Dict[str, str] = {
     "--group_count": "-g",
     "--forw": "-F",
     "--mode": "-m",
-    # Short → long (3D / layout parameters)
+    # Short -> long (3D / layout parameters)
     "-_": "--spatial_dim",
     "-!": "--in_d",
     "-@": "--fil_d",
@@ -105,7 +105,7 @@ CONV_FLAG_ALIASES: Dict[str, str] = {
 }
 
 BNORM_FLAG_ALIASES: Dict[str, str] = {
-    # Long → short
+    # Long -> short
     "--batchsize": "-n",
     "--in_channels": "-c",
     "--in_h": "-H",
@@ -116,7 +116,7 @@ BNORM_FLAG_ALIASES: Dict[str, str] = {
     "--alpha": "-A",
     "--beta": "-B",
     "--activ_mode": "-f",
-    # Short → long
+    # Short -> long
     "-F": "--forw",
     "-b": "--back",
     "--run": "-r",

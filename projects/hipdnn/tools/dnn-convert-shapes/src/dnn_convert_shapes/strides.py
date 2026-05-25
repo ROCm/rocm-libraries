@@ -79,8 +79,8 @@ def _weight_strides(
 ) -> List[int]:
     """Weight strides for dims [K, Cg, R, S] (or [K, Cg, D, R, S] for 3D).
 
-    NCHW/NCDHW → row-major KCRS / KCDRS (Cg innermost after spatial).
-    NHWC/NDHWC → KRSC / KDRSC (Cg is the fastest-moving dimension).
+    NCHW/NCDHW -> row-major KCRS / KCDRS (Cg innermost after spatial).
+    NHWC/NDHWC -> KRSC / KDRSC (Cg is the fastest-moving dimension).
     """
     if D > 0:
         if layout not in _VALID_3D_LAYOUTS:

@@ -265,7 +265,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
 
     # Wire up inputs/outputs differently per direction
     match p.direction:
-        case ConvDirection.FORWARD:  # x, w → y
+        case ConvDirection.FORWARD:  # x, w -> y
             tensors = [
                 _make_tensor(0, "output_y", y_dims, y_strides, data_type=io_type),
                 _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
@@ -273,7 +273,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
             ]
             node_inputs = {"x_tensor_uid": 1, "w_tensor_uid": 2}
             node_outputs = {"y_tensor_uid": 0}
-        case ConvDirection.BACKWARD_DATA:  # dy, w → dx
+        case ConvDirection.BACKWARD_DATA:  # dy, w -> dx
             tensors = [
                 _make_tensor(0, "output_dx", x_dims, x_strides, data_type=io_type),
                 _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
@@ -281,7 +281,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
             ]
             node_inputs = {"dy_tensor_uid": 1, "w_tensor_uid": 2}
             node_outputs = {"dx_tensor_uid": 0}
-        case ConvDirection.BACKWARD_WEIGHTS:  # dy, x → dw
+        case ConvDirection.BACKWARD_WEIGHTS:  # dy, x -> dw
             tensors = [
                 _make_tensor(0, "output_dw", w_dims, w_strides, data_type=io_type),
                 _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),

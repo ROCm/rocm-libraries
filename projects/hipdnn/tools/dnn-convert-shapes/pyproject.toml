@@ -1,0 +1,24 @@
+[project]
+name = "dnn-convert-shapes"
+version = "0.1.0"
+description = "Convert MIOpen shape strings to hipDNN graph JSON"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."},
+]
+dependencies = []
+
+[project.scripts]
+dnn-convert-shapes = "dnn_convert_shapes.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

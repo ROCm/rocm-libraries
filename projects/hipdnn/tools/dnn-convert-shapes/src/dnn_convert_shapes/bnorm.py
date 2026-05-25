@@ -174,9 +174,9 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
     """Build a hipDNN JSON graph dict from parsed bnorm* driver args.
 
     MIOpen --forw / --back semantics (from bn_driver.hpp):
-      --forw 1 (default) → forward training
-      --forw 2           → forward inference
-      --back 1           → backward (requires --forw 0)
+      --forw 1 (default) -> forward training
+      --forw 2           -> forward inference
+      --back 1           -> backward (requires --forw 0)
     """
     p = BnormParams.from_args(args)
     io_type = _BNORM_IO_TYPE[operation]
@@ -190,7 +190,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
 
     match p.direction:
         case BnormDirection.FORWARD_INFERENCE:
-            # Inference: x, mean, inv_variance, scale, bias → y
+            # Inference: x, mean, inv_variance, scale, bias -> y
             tensors = [
                 _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
                 _stat(2, "mean"),
@@ -215,8 +215,8 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
                 }
             ]
         case BnormDirection.FORWARD_TRAINING:
-            # Forward training: x, scale, bias, epsilon → y, mean, inv_variance
-            # Optional: prev_running_mean/variance + momentum → next_running_mean/variance
+            # Forward training: x, scale, bias, epsilon -> y, mean, inv_variance
+            # Optional: prev_running_mean/variance + momentum -> next_running_mean/variance
             # peer_stats_tensor_uid is required by the schema (empty list = no peers).
             tensors = [
                 _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
@@ -252,7 +252,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
                 }
             ]
         case BnormDirection.BACKWARD_TRAINING:
-            # Backward: dy, x, mean, inv_variance, scale → dx, dscale, dbias
+            # Backward: dy, x, mean, inv_variance, scale -> dx, dscale, dbias
             # mean and inv_variance are optional (null if not available).
             # peer_stats_tensor_uid is required by the schema (empty list = no peers).
             # scale/bias type matches TScaleBias; dscale/dbias are TAcc (always float)
