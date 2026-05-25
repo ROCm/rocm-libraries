@@ -23,6 +23,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -33,12 +34,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
+#include "fusilli_serialized_plan_payload.h"
 #include "graph_import.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "hipdnn_engine_plugin_handle.h"
@@ -49,6 +50,43 @@ using namespace hipdnn_plugin_sdk;
 using namespace fusilli_plugin;
 
 static const char *fusilliPluginVersion = FUSILLI_PROVIDER_VERSION_STRING;
+
+namespace {
+
+hipdnnPluginStatus_t
+getSerializedOpGraphPayload(const hipdnnPluginConstData_t *serializedContext,
+                            hipdnnPluginConstData_t *opGraph) {
+  serialized_plan_payload::DecodedPayload decoded;
+  const auto decodeStatus =
+      serialized_plan_payload::unwrapPayload(*serializedContext, decoded);
+  switch (decodeStatus) {
+  case serialized_plan_payload::DecodeStatus::Success:
+    *opGraph = decoded.bytes;
+    return HIPDNN_PLUGIN_STATUS_SUCCESS;
+  case serialized_plan_payload::DecodeStatus::InvalidHeader:
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "serialized fusilli execution context has an invalid payload header");
+  case serialized_plan_payload::DecodeStatus::UnsupportedVersion:
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "serialized fusilli execution context format is not supported");
+  case serialized_plan_payload::DecodeStatus::UnsupportedPayloadKind:
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "serialized fusilli execution context payload kind is not supported");
+  case serialized_plan_payload::DecodeStatus::MalformedPayload:
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "serialized fusilli execution context payload is empty or malformed");
+  default:
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "serialized fusilli execution context decode failed unexpectedly");
+  }
+}
+
+} // namespace
 
 // s_lastError is thread_local static so can't be initialized in the header file
 // as the header file is included in many context. Clear the string here.
@@ -301,12 +339,17 @@ hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
         HIPDNN_PLUGIN_STATUS_BAD_PARAM, "unexpected engine id");
   }
 
-  // Build engine details object, we're only storing the engine id for the time
-  // being.
+  // Build engine details object with advisory metadata for the fusilli engine.
   flatbuffers::FlatBufferBuilder builder;
+  const std::vector<int32_t> behaviorNotes = {
+      static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+      static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+      static_cast<int32_t>(
+          HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
+  auto behaviorNotesVector = builder.CreateVector(behaviorNotes);
   auto engineDetailsObj =
-      hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder,
-                                                                engineId);
+      hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+          builder, engineId, 0, behaviorNotesVector);
   builder.Finish(engineDetailsObj);
 
   // Populate out parameter.
@@ -413,6 +456,9 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContext(
 
   FUSILLI_PLUGIN_ASSIGN_OR_RETURN(auto importedGraph,
                                   importAndCompile(opGraph));
+  auto *graphBytes = static_cast<const uint8_t *>(opGraph->ptr);
+  importedGraph.serializedOpGraph.assign(graphBytes,
+                                         graphBytes + opGraph->size);
   *executionContext =
       new HipdnnEnginePluginExecutionContext(std::move(importedGraph));
 
@@ -433,6 +479,99 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroyExecutionContext(
   delete executionContext;
 
   LOG_API_SUCCESS_AUTO("destroyed executionContext");
+  return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    hipdnnPluginConstData_t *serializedContext) {
+  LOG_API_ENTRY("handle=" << static_cast<void *>(handle)
+                          << ", executionContext="
+                          << static_cast<void *>(executionContext)
+                          << ", serializedContext="
+                          << static_cast<void *>(serializedContext));
+  FUSILLI_PLUGIN_CHECK_NULL(handle);
+  FUSILLI_PLUGIN_CHECK_NULL(executionContext);
+  FUSILLI_PLUGIN_CHECK_NULL(serializedContext);
+
+  if (executionContext->serializedOpGraph.empty()) {
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "execution context does not contain serializable fusilli payload");
+  }
+
+  auto payload = serialized_plan_payload::wrapHipdnnGraphPayload(
+      executionContext->serializedOpGraph);
+  serializedContext->ptr = payload->data();
+  serializedContext->size = payload->size();
+  handle->storeSerializedExecutionContextBuffer(serializedContext->ptr,
+                                                std::move(payload));
+
+  LOG_API_SUCCESS_AUTO("serializedContext->size=" << serializedContext->size);
+  return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnPluginConstData_t *serializedContext) {
+  LOG_API_ENTRY("handle=" << static_cast<void *>(handle)
+                          << ", serializedContext="
+                          << static_cast<void *>(serializedContext));
+  FUSILLI_PLUGIN_CHECK_NULL(handle);
+  FUSILLI_PLUGIN_CHECK_NULL(serializedContext);
+  FUSILLI_PLUGIN_CHECK_NULL(serializedContext->ptr);
+
+  handle->eraseSerializedExecutionContextBuffer(serializedContext->ptr);
+  serializedContext->ptr = nullptr;
+  serializedContext->size = 0;
+
+  LOG_API_SUCCESS_AUTO("");
+  return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(
+    hipdnnEnginePluginHandle_t handle,
+    const hipdnnPluginConstData_t *serializedContext,
+    hipdnnEnginePluginExecutionContext_t *executionContext) {
+  LOG_API_ENTRY("handle=" << static_cast<void *>(handle)
+                          << ", serializedContext="
+                          << static_cast<const void *>(serializedContext)
+                          << ", executionContext="
+                          << static_cast<void *>(executionContext));
+  FUSILLI_PLUGIN_CHECK_NULL(handle);
+  FUSILLI_PLUGIN_CHECK_NULL(serializedContext);
+  FUSILLI_PLUGIN_CHECK_NULL(serializedContext->ptr);
+  FUSILLI_PLUGIN_CHECK_NULL(executionContext);
+
+  hipdnnPluginConstData_t serializedOpGraph{nullptr, 0};
+  auto payloadStatus =
+      getSerializedOpGraphPayload(serializedContext, &serializedOpGraph);
+  if (payloadStatus != HIPDNN_PLUGIN_STATUS_SUCCESS) {
+    return payloadStatus;
+  }
+
+  auto importAndCompile = [&handle](const hipdnnPluginConstData_t *opGraph)
+      -> fusilli::ErrorOr<HipdnnEnginePluginExecutionContext> {
+    FUSILLI_ASSIGN_OR_RETURN(HipdnnEnginePluginExecutionContext graphImport,
+                             importGraph(opGraph));
+
+    FUSILLI_ASSIGN_OR_RETURN(auto fusilliHandle, handle->getFusilliHandle());
+    FUSILLI_CHECK_ERROR(graphImport.graph.compile(fusilliHandle));
+
+    return fusilli::ok(std::move(graphImport));
+  };
+
+  FUSILLI_PLUGIN_ASSIGN_OR_RETURN(auto importedGraph,
+                                  importAndCompile(&serializedOpGraph));
+  auto *graphBytes = static_cast<const uint8_t *>(serializedOpGraph.ptr);
+  importedGraph.serializedOpGraph.assign(graphBytes,
+                                         graphBytes + serializedOpGraph.size);
+  *executionContext =
+      new HipdnnEnginePluginExecutionContext(std::move(importedGraph));
+
+  LOG_API_SUCCESS_AUTO(
+      "created_execution_context=" << static_cast<void *>(*executionContext));
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 

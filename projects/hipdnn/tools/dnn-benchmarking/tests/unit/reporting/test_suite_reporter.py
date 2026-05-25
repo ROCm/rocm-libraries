@@ -83,26 +83,6 @@ class TestSuiteReporter:
         result = output.getvalue()
         assert "[3/3] matmul_fp16..." in result
 
-    def test_print_suite_graph_result(self) -> None:
-        """print_suite_graph_result prints '-> N passed, ...' format."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        reporter.print_suite_graph_result(passed=2, failed=1, skipped=0, errored=0)
-
-        result = output.getvalue()
-        assert "  -> 2 passed, 1 failed, 0 skipped, 0 errored" in result
-
-    def test_print_suite_graph_result_all_zeros(self) -> None:
-        """print_suite_graph_result with all zeros."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        reporter.print_suite_graph_result(passed=0, failed=0, skipped=0, errored=0)
-
-        result = output.getvalue()
-        assert "  -> 0 passed, 0 failed, 0 skipped, 0 errored" in result
-
     def test_print_suite_graph_error(self) -> None:
         """print_suite_graph_error prints inline error for a failed graph."""
         output = io.StringIO()
@@ -113,7 +93,7 @@ class TestSuiteReporter:
         )
 
         result = output.getvalue()
-        assert "  ERROR: Graph file not found: /path/to/missing.json" in result
+        assert " ERROR: Graph file not found: /path/to/missing.json" in result
 
     def test_print_suite_summary(self) -> None:
         """print_suite_summary prints totals from SuiteMetadata."""
@@ -159,7 +139,6 @@ class TestSuiteReporter:
         # Call all suite methods
         reporter.print_suite_header(2)
         reporter.print_suite_graph_start(1, 2, "test_graph")
-        reporter.print_suite_graph_result(1, 0, 0, 0)
         reporter.print_suite_graph_error("bad_graph", "Load failed")
         reporter.print_suite_summary(
             SuiteMetadata(
@@ -382,6 +361,94 @@ class TestVerboseReporter:
         assert "Engine ID:  2 (HIPBLASLT_ENGINE)" in out
         # The legacy literal must not appear anywhere in suite-mode verbose output.
         assert "(MIOpen)" not in out
+
+    def test_verbose_profiling_renders_when_always_on_metrics_absent(self) -> None:
+        """``--metrics-tier off --pmc basic`` leaves every always-on metric
+        field unset but still populates ``extra_metrics``. The profiling
+        block must render regardless of the always-on suppression — users
+        who opted into profiling need to see where their artefacts landed.
+        """
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            cpu_build_time_ms=12.3,
+            e2e_stats=BenchmarkStats(
+                mean_ms=1.0,
+                std_ms=0.1,
+                min_ms=0.9,
+                max_ms=1.1,
+                p95_ms=1.05,
+                p99_ms=1.09,
+            ),
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+            extra_metrics={
+                "pmc": {
+                    "set": "basic",
+                    "arch": "gfx942",
+                    "counters": {
+                        "GRBM_GUI_ACTIVE": {"sum": 999, "mean_per_kernel": 1.0}
+                    },
+                }
+            },
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        # Always-on block must be suppressed (no Derived Metrics header)…
+        assert "Derived Metrics:" not in out
+        # …but the profiling block still renders.
+        assert "Profiling:" in out
+        assert "PMC (basic, gfx942)" in out
+
+    def test_verbose_profiling_surfaces_error_tail_for_each_source(self) -> None:
+        """Tool failures in trace/perf/roofline must show in verbose
+        output, not only in JSON. Without -o, a silent profiler failure
+        is invisible."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            cpu_build_time_ms=12.3,
+            e2e_stats=BenchmarkStats(
+                mean_ms=1.0,
+                std_ms=0.1,
+                min_ms=0.9,
+                max_ms=1.1,
+                p95_ms=1.05,
+                p99_ms=1.09,
+            ),
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+            extra_metrics={
+                "trace": {"format": "pftrace", "error_tail": "boom", "returncode": 3},
+                "perf": {"error_tail": "perf: bad event", "returncode": 2},
+                "roofline": {"error_tail": "workload failed", "returncode": 1},
+            },
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Trace (pftrace):" in out and "rc=3" in out
+        assert "CPU (perf):" in out and "rc=2" in out
+        assert "Roofline:" in out and "rc=1" in out
 
 
 class TestPrintHeader:

@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y \
     libopenblas-dev \
     libgtest-dev \
     libzstd-dev \
+    doxygen \
     clang-format-18 \
     clang-tidy-20 \
     llvm-20 \
@@ -61,10 +62,10 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # Build from source stage - clones and builds TheRock
 #
 # Example build command for default source build (default branch, gfx94X):
-# docker build -f Dockerfile.ubuntu24 -t rocblas:fullbuild .
+# docker build -f Dockerfile.ubuntu24.fullbuild -t rocblas:fullbuild .
 #
 # Example build command for overriding ASIC and git hash:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t rocblas:custom_source_build .
+# docker build -f Dockerfile.ubuntu24.fullbuild --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t rocblas:custom_source_build .
 #
 # Build mode options:
 # - THEROCK_BUILD_MODE can be: Preset, Debug, or Release (default)
@@ -79,10 +80,10 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # - Default is 0, which means use all available CPU cores
 #
 # Example build command for Debug build with 4 cores:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_BUILD_MODE=Debug --build-arg BUILD_JOBS=4 -t rocblas:debug .
+# docker build -f Dockerfile.ubuntu24.fullbuild --build-arg THEROCK_BUILD_MODE=Debug --build-arg BUILD_JOBS=4 -t rocblas:debug .
 #
 # Example build command with custom TheRock preset:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t rocblas:custom-preset .
+# docker build -f Dockerfile.ubuntu24.fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t rocblas:custom-preset .
 # ============================================================================
 FROM base AS install_therock_fullbuild
 
@@ -147,7 +148,7 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
 # rocblas development environment with ROCm built from source
 #
 # Build with:
-#   docker build -f Dockerfile.ubuntu24 -t rocblas:fullbuild .
+#   docker build -f Dockerfile.ubuntu24.fullbuild -t rocblas:fullbuild .
 # ============================================================================
 FROM base AS fullbuild
 
@@ -155,6 +156,6 @@ COPY --from=install_therock_fullbuild /opt/rocm /opt/rocm
 
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
 ENV CMAKE_GENERATOR="Ninja"
-ENV LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib"
 
 WORKDIR /workspace

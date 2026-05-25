@@ -40,7 +40,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}HipdnnBackendDescriptor* {{ tf.local_desc_name }}{% if not loop.last %},
                           {% endif %}{% endfor %}{% if op.has_tensor_array_fields %},
 {% for taf in op.tensor_array_fields %}
-                          std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {}{% if not loop.last %},{% endif %}
+                          std::vector<HipdnnBackendDescriptor*> {{ taf.camel_name }}Descs = {}{% if not loop.last %},{% endif %}
 {% endfor %}{% endif %},
                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
                           const std::string& name = "")
@@ -74,12 +74,12 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 {% endif %}
 {% for taf in op.tensor_array_fields %}
 
-    if(!{{ taf.name }}Descs.empty())
+    if(!{{ taf.camel_name }}Descs.empty())
     {
         desc->setAttribute(
             {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-            static_cast<int64_t>({{ taf.name }}Descs.size()),
-            static_cast<const void*>({{ taf.name }}Descs.data()));
+            static_cast<int64_t>({{ taf.camel_name }}Descs.size()),
+            static_cast<const void*>({{ taf.camel_name }}Descs.data()));
     }
 {% endfor %}
 
@@ -353,11 +353,11 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 {% endif %}
 {% endfor %}
 {% for uid in taf.test_uids %}
-    auto {{ taf.name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
+    auto {{ taf.camel_name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
 {% endfor %}
 
-    std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {{ '{' }}{% for uid in taf.test_uids %}{{ taf.name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
-    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, {{ taf.name }}Descs);
+    std::vector<HipdnnBackendDescriptor*> {{ taf.camel_name }}Descs = {{ '{' }}{% for uid in taf.test_uids %}{{ taf.camel_name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, {{ taf.camel_name }}Descs);
 
     auto desc = getDescriptor();
     setHandle();

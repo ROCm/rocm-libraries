@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -719,15 +719,35 @@ namespace TensileLite
         }
 
         args.append("alpha", inputs.alpha, problem.alphaType());
+
         if(problem.alphaType() == rocisa::DataType::Half)
             args.append("alpha_2", inputs.alpha, problem.alphaType());
 
         if(problemType.useBeta)
         {
             args.append("beta", inputs.beta, problem.betaType());
+            
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
+
+        if(sizeMapping.expertSchedulingMode > 0)
+        {
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+            if(hipAMDGPU
+               && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                   || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+            {
+                int32_t esmRuntimeSupported = 0;
+#if HIP_VERSION >= 70353390
+                HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                    hipDeviceAttributeExpertSchedMode,
+                                                    hipAMDGPU->deviceId));
+#endif
+                args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+            }
+        }
+
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
@@ -744,7 +764,7 @@ namespace TensileLite
 
             // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-            auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+            auto     itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
             auto     totalIters   = tiles * itersPerTile;
 
             uint32_t magicNumberItersPerTile;
@@ -763,7 +783,7 @@ namespace TensileLite
 
             if(sizeMapping.streamK == 1) // Basic SK
             {
-                uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
+                uint32_t itersPerWave = CeilDivide(static_cast<uint32_t>(totalIters), static_cast<uint32_t>(numWorkGroups.x));
                 args.template append<uint32_t>("SKItersPerWG", itersPerWave);
             }
             else if(sizeMapping.streamK >= 2) // Two-tile SK
@@ -798,7 +818,7 @@ namespace TensileLite
                         // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
                         skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
                         // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                        skTiles = min(skTiles, tiles);
+                        skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                     }
 
                     uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
@@ -826,7 +846,9 @@ namespace TensileLite
                                           autoStaggerUStrideShift,
                                           autoGsuVal);
 
-        if(!problemType.useScaleAB.empty()) //kernel input data
+	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
+	//       Mixing is not supported.
+        if(!problemType.useScaleAB.empty())
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
             args.template append<void const*>("scaleB", inputs.scaleB);
@@ -1179,12 +1201,12 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Mapping should be in this range: [0, 1, 2, 3]
-        assert(defaultStaggerUMapping < 4);
+        // Mapping should be in this range: [0, 1, 2, 3, 4]
+        assert(defaultStaggerUMapping < 5);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
-        // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
-        assert(defaultStaggerUStrideShift <= 5);
+        // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]
+        assert(defaultStaggerUStrideShift <= 31);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
@@ -1215,20 +1237,20 @@ namespace TensileLite
         uint32_t N         = problem.freeSizeB(0);
         uint32_t B         = problem.batchSize(0);
         uint32_t K         = problem.boundSize(0);
-        uint32_t GSULimit1 = max(1, (uint32_t)std::floor(numCUs / numWGs));
-        uint32_t GSULimit2 = max(1, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
-        uint32_t gsuVal    = min(GSULimit2, max(1, GSULimit1));
+        uint32_t GSULimit1 = std::max(1u, (uint32_t)std::floor(numCUs / numWGs));
+        uint32_t GSULimit2 = std::max(1u, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
+        uint32_t gsuVal    = std::min(GSULimit2, std::max(1u, GSULimit1));
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
         if(gsuVal > 1)
-            gsuVal = min(gsuVal,
-                         MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
-                             / std::ceil(static_cast<float>(N) / MT1) / B);
+            gsuVal = std::min(gsuVal,
+                         static_cast<uint32_t>(MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
+                             / std::ceil(static_cast<float>(N) / MT1) / B));
 
         // GlobalSplitUCheckMinK
         if(gsuVal > 1)
-            gsuVal = min(gsuVal, std::ceil(static_cast<float>(K) / MT2));
+            gsuVal = std::min(gsuVal, static_cast<uint32_t>(std::ceil(static_cast<float>(K) / MT2)));
 
         // SynchronizerSizeCheck
         if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
@@ -1251,10 +1273,10 @@ namespace TensileLite
         uint32_t workGroupSize = sizeMapping.workGroupSize.x * sizeMapping.workGroupSize.y
                                  * sizeMapping.workGroupSize.z;
         uint32_t maxGsuValue = (std::numeric_limits<uint32_t>::max() / workGroupSize) / tiles;
-        gsuVal               = min(gsuVal, maxGsuValue);
+        gsuVal               = std::min(gsuVal, maxGsuValue);
 
         // avoid gsu < 1
-        gsuVal = max(gsuVal, 1);
+        gsuVal = std::max(gsuVal, 1u);
 
         static const char* envStr = std::getenv("TENSILE_AUTO_GSU_ALGO");
         if(envStr != NULL)
@@ -1453,22 +1475,18 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
-        auto removePrefix = [](const std::string& s) {
-            size_t pos = s.find("gfx");
-            if(pos != std::string::npos)
-            {
-                return s.substr(pos + 3);
-            }
-            return s;
-        };
-        auto gpu_arch_no_prefix = removePrefix(hardware.archName());
-        if(internalArgsSupport.version >= 1)
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster)
         {
-            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(internalArgsSupport.version >= 1)
+            {
+                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
         }
+
+        rv.clusterDim = sizeMapping.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
@@ -2117,7 +2135,9 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu        = sk.grid / tiles;
+            // Avoid 0 division when tiles is 0 (e.g. zero-sized dimension in grouped gemm)
+            if(tiles > 0)
+                gsu = sk.grid / tiles;
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
@@ -2480,7 +2500,7 @@ namespace TensileLite
         }
 
         int factorDim
-            = max(problemType.useGradient ? 0 : problemType.useBias, problemType.useScaleAlphaVec);
+            = std::max(problemType.useGradient ? 0 : problemType.useBias, problemType.useScaleAlphaVec);
         if(factorDim)
         {
             if(factorDim == 2)
@@ -3469,11 +3489,13 @@ namespace TensileLite
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             origami::problem_t origami_problem = {
-                .size     = {x, y, z},
-                .batch    = batch,
-                .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
-                .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                .size        = {x, y, z},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3502,7 +3524,7 @@ namespace TensileLite
         // whichever is minimum.
         else if(pAMDGPU->skMaxCUs > 0)
         {
-            skGrid = min(cuCount, pAMDGPU->skMaxCUs);
+            skGrid = std::min(cuCount, static_cast<size_t>(pAMDGPU->skMaxCUs));
         }
 
         // Multiply the cuCount with a constant factor (c), and launch
