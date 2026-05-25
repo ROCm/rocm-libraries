@@ -1269,14 +1269,11 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     }
 }
 
-// ROCM-24502: stress test for the refcounted hipModule cache
-// (RTCKernel::active_modules).  Creates M identical plans concurrently
-// via rocfft_concurrency() worker threads, then destroys them.  Length
-// 9973 is prime so the tree decomposes via Bluestein (multiple
-// RTC-compiled kernels per plan, exercising the cache).
-//
-// Plans are destroyed before returning so the test does not leak into
-// subsequent test cases.
+// Stress the hipModule refcount cache (RTCKernel::active_modules) by
+// creating M identical plans concurrently.  Length 9973 is prime, which
+// forces Bluestein decomposition -- multiple RTC kernels per plan.
+// Plans are destroyed before returning so state doesn't leak to later
+// tests.
 static void run_plan_capacity_test(size_t M)
 {
     constexpr size_t length = 9973;
@@ -1331,26 +1328,22 @@ static void run_plan_capacity_test(size_t M)
     }
 }
 
-// Regression test for the active_modules refcount cache.
+// Regression test for the active_modules refcount cache: pre-fix
+// rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
     run_plan_capacity_test(100'000);
 }
 
 #ifdef ROCFFT_HAS_INTERNAL_FUNCTION_POOL
-// Cover function_pool's runtime-extension paths.  The plan_capacity
-// tests above stress the hot read path via rocfft_plan_create; this
-// exercises the rarer write/miss paths (add_new_kernel emplace,
-// missing-key throws, partial-pass overload) so the thread-safety
-// changes are fully covered.  Only built when rocfft-function-pool
-// is available as a CMake target (full-tree build, not clients-only).
+// Cover function_pool write/miss paths that plan_capacity_100k does
+// not hit (add_new_kernel emplace, missing-key throws, PPFMKey overload).
+// Only built in full-tree builds where rocfft-function-pool is linkable.
 TEST(rocfft_UnitTest, function_pool_runtime_paths)
 {
     function_pool pool(get_curr_device_prop());
 
-    // FMKey miss + runtime add.  Use a large prime length that AOT is
-    // not expected to pre-populate.  If something already populated it,
-    // the test is meaningless -- skip cleanly.
+    // Pick a prime length AOT shouldn't have populated; skip if it did.
     FMKey runtime_key(99991, rocfft_precision_single, CS_KERNEL_STOCKHAM);
     if(pool.has_function(runtime_key))
         GTEST_SKIP() << "runtime_key unexpectedly pre-populated";
@@ -1360,9 +1353,7 @@ TEST(rocfft_UnitTest, function_pool_runtime_paths)
     EXPECT_TRUE(pool.has_function(runtime_key));
     EXPECT_NO_THROW(pool.get_kernel(runtime_key));
 
-    // PPFMKey overloads -- partial-pass is not used by the plan_capacity
-    // tests, so its has_function / get_kernel paths (and the new
-    // shared_lock acquisitions therein) only get coverage here.
+    // PPFMKey overload: not exercised by plan_capacity_100k.
     PPFMKey pp_key(
         99991, 1, 1, rocfft_precision_single, rocfft_transform_type_complex_forward, CS_3D_PP);
     EXPECT_FALSE(pool.has_function(pp_key));
@@ -1370,9 +1361,8 @@ TEST(rocfft_UnitTest, function_pool_runtime_paths)
 }
 #endif // ROCFFT_HAS_INTERNAL_FUNCTION_POOL
 
-// Capacity test documenting support for 1M concurrent identical plans.
-// DISABLED_ by default so the long runtime stays out of routine CI;
-// run with --gtest_also_run_disabled_tests when validating hardware.
+// 1M-plan capacity test.  DISABLED_ because of runtime cost;
+// run manually with --gtest_also_run_disabled_tests.
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
     run_plan_capacity_test(1'000'000);

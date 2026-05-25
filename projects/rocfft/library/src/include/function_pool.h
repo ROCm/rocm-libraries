@@ -188,12 +188,9 @@ struct function_pool_data
         return data;
     }
 
-    // Protects the maps against concurrent access from parallel
-    // rocfft_plan_create calls.  Read methods (has_function /
-    // get_kernel / get_lengths) take std::shared_lock; the runtime
-    // write path (add_new_kernel) takes std::unique_lock.  Mirrors the
-    // pattern used by RTCKernel::active_modules_mutex and the
-    // host_memory singleton.
+    // Guards the maps against concurrent rocfft_plan_create calls.
+    // Readers (has_function / get_kernel / get_lengths) take shared_lock;
+    // the runtime writer (add_new_kernel) takes unique_lock.
     static std::shared_mutex& get_function_pool_mutex()
     {
         static std::shared_mutex mutex;
@@ -294,10 +291,8 @@ public:
     // add a new kernel in runtime
     void add_new_kernel(const FMKey& new_key)
     {
-        // Check-then-insert under the write lock so the dedup check and
-        // the emplace are atomic.  We can't call has_function() here:
-        // std::shared_mutex is not recursive, so reacquiring as shared
-        // while holding unique would be UB -- inline the lookup instead.
+        // Inline the dedup check under the write lock; can't call
+        // has_function() here because shared_mutex is not recursive.
         std::unique_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
 
         auto real_key = get_actual_key(new_key, def_key_pool);
