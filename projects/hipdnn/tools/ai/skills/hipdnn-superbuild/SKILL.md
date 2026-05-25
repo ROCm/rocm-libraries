@@ -1,6 +1,8 @@
 ---
 name: hipdnn-superbuild
 description: Build hipDNN with providers via the repository superbuild. Faster than standalone since providers build alongside hipDNN in a single CMake invocation. On Windows, auto-runs the wheel-based ROCm setup if not already prepared.
+argument-hint: "[preset] [clean] [ROCM_PATH=<path>] [CLANG_PATH=<path>] [GPU_TARGETS=<arch>] [SHA=<commit>]"
+allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # hipDNN Superbuild

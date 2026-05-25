@@ -1,6 +1,8 @@
 ---
 name: hipdnn-review
-description: Review a hipDNN pull request or local diff for correctness, API compatibility, provider behavior, resource management, code reuse, and testing coverage/quality. Uses local source/worktrees for cross-reference by default. Use when asked to review hipDNN code, review a PR, or assess whether a change is ready to merge.
+description: Review a hipDNN pull request, branch, or local diff for correctness, API compatibility, provider behavior, resource management, code reuse, and testing coverage/quality. Uses local source/worktrees for cross-reference by default. Use when asked to review hipDNN code, review a PR, or assess whether a change is ready to merge.
+argument-hint: "[PR URL | branch:<name> | local] [base:<branch>] [focus:<area>] [diff-only]"
+allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
 ---
 
 # hipDNN Review

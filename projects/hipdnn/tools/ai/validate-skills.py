@@ -20,16 +20,12 @@ REQUIRED_OPENAI_FIELDS = (
 
 FORBIDDEN_SKILL_TEXT = (
     "$ARGUMENTS",
-    "allowed-tools:",
-    "argument-hint:",
     "$HELPERS",
     "HELPERS =",
     "skills/helpers",
 )
 
 FORBIDDEN_SKILL_PATTERNS = (
-    re.compile(r"\bTask\b"),
-    re.compile(r"\bWebFetch\b"),
     re.compile(r"\bAskUserQuestion\b"),
 )
 
@@ -44,12 +40,7 @@ EXPECTED_SCRIPTS = {
     ),
 }
 
-EXPECTED_CLAUDE_COMMANDS = {
-    "hipdnn-review": "hipdnn-review.md",
-    "hipdnn-superbuild": "hipdnn-superbuild.md",
-    "hipdnn-superbuild-test": "hipdnn-superbuild-test.md",
-    "pr-summary": "pr-summary.md",
-}
+REQUIRED_CLAUDE_COMMAND_FIELDS = ("argument-hint", "allowed-tools")
 
 DUPLICATE_SCRIPT_PAIRS = (
     (
@@ -138,18 +129,12 @@ def validate_skill(skill: Path) -> list[str]:
         if not script_path.exists():
             errors.append(f"{skill}: missing scripts/{script}")
 
-    command = EXPECTED_CLAUDE_COMMANDS.get(skill.name)
-    if command:
-        command_path = skill / ".claude" / "commands" / command
-        if not command_path.exists():
-            errors.append(f"{skill}: missing .claude/commands/{command}")
-        else:
-            if is_ignored(command_path):
-                errors.append(f"{command_path}: file is ignored by git")
-            command_text = command_path.read_text(encoding="utf-8")
-            for token in ("description:", "argument-hint:", "allowed-tools:"):
-                if token not in command_text:
-                    errors.append(f"{command_path}: missing {token}")
+    # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
+    claude_commands = {"hipdnn-review", "hipdnn-superbuild", "hipdnn-superbuild-test", "pr-summary"}
+    if skill.name in claude_commands:
+        for field in REQUIRED_CLAUDE_COMMAND_FIELDS:
+            if f"{field}:" not in text:
+                errors.append(f"{skill_md}: missing {field} in frontmatter")
 
     return errors
 
@@ -169,6 +154,9 @@ def main() -> int:
         errors.extend(validate_skill(skill))
 
     for left, right in DUPLICATE_SCRIPT_PAIRS:
+        # Skip validation if either file is a symlink (symlinks auto-stay in sync)
+        if left.is_symlink() or right.is_symlink():
+            continue
         if left.exists() and right.exists() and left.read_bytes() != right.read_bytes():
             errors.append(f"{left} and {right} must stay byte-identical")
 

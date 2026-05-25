@@ -3,31 +3,30 @@
 # SPDX-License-Identifier: MIT
 """Install hipDNN AI skills into Codex, Claude, or an explicit target directory.
 
-By default this script creates links so installed skills auto-update when the
-source checkout updates. Use --copy for a snapshot install.
+This script copies skills as snapshots and automatically detects when installed
+skills differ from the source. If a skill has changed, it is reinstalled.
 
 Examples:
     # See available skills
     python3 link-skills.py --list
 
-    # Link skills into Codex global scope
+    # Copy skills into Codex global scope
     python3 link-skills.py --codex hipdnn-superbuild hipdnn-superbuild-test
 
-    # Link skills into Claude global scope
+    # Copy skills into Claude global scope
     python3 link-skills.py --claude hipdnn-review pr-summary
 
     # Copy skills into an explicit target directory
-    python3 link-skills.py --target /path/to/skills --copy hipdnn-superbuild
+    python3 link-skills.py --target /path/to/skills hipdnn-superbuild
 
     # Backward-compatible positional target form
     python3 link-skills.py /path/to/skills hipdnn-review
 """
 
 import argparse
+import hashlib
 import os
-import platform
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -43,54 +42,44 @@ def available_skills(skills_dir: Path) -> dict[str, Path]:
     return {p.name: p for p in sorted(skills_dir.iterdir()) if is_skill_dir(p)}
 
 
-def resolve_link_target(link: Path) -> Path | None:
-    try:
-        return link.resolve()
-    except OSError:
-        return None
-
-
-def create_junction_windows(source: Path, target: Path) -> None:
-    result = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(target), str(source)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise OSError(
-            f"mklink /J failed: {result.stderr.strip() or result.stdout.strip()}"
-        )
-
-
 def copy_ignore(_directory: str, names: list[str]) -> set[str]:
     return {name for name in names if name in IGNORED_COPY_NAMES}
 
 
-def install_copy(source: Path, target: Path) -> str:
-    if target.exists() or target.is_symlink():
-        existing_target = resolve_link_target(target)
-        if target.is_symlink():
-            return f"skipped (exists, points to {existing_target})"
-        return f"skipped (exists at {target})"
+def calculate_skill_sha(source: Path) -> str:
+    """Calculate SHA256 of all files in a skill directory for change detection."""
+    hasher = hashlib.sha256()
+    for fpath in sorted(source.rglob("*")):
+        if fpath.is_file():
+            try:
+                with open(fpath, "rb") as f:
+                    hasher.update(f.read())
+            except (OSError, IOError):
+                pass
+    return hasher.hexdigest()
 
+
+def install_or_update_copy(source: Path, target: Path) -> str:
+    """Install skill or update if source has changed."""
+    source_sha = calculate_skill_sha(source)
+    
+    if not target.exists():
+        # First install
+        shutil.copytree(source, target, ignore=copy_ignore)
+        return "installed"
+    
+    if target.is_symlink():
+        return f"skipped (symlink exists at {target})"
+    
+    # Check if installed version differs from source
+    target_sha = calculate_skill_sha(target)
+    if source_sha == target_sha:
+        return "up to date"
+    
+    # Source changed, reinstall
+    shutil.rmtree(target)
     shutil.copytree(source, target, ignore=copy_ignore)
-    return "copied"
-
-
-def install_link(source: Path, target: Path) -> str:
-    if target.exists() or target.is_symlink():
-        existing_target = resolve_link_target(target)
-        if existing_target == source.resolve():
-            return "skipped (already linked)"
-        return f"skipped (exists, points to {existing_target})"
-
-    if platform.system() == "Windows":
-        create_junction_windows(source, target)
-        return "junction created"
-
-    target.symlink_to(source, target_is_directory=True)
-    return "symlink created"
+    return "updated"
 
 
 def codex_target() -> Path:
@@ -107,15 +96,16 @@ def claude_target() -> Path:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Install named hipDNN skills. Default mode links skills so they "
-            "auto-update with the source checkout; --copy installs snapshots."
+            "Install named hipDNN skills as snapshots. Changes in the source are "
+            "detected and installed automatically."
         )
     )
     host = parser.add_mutually_exclusive_group()
     host.add_argument("--codex", action="store_true", help="Install into Codex skills")
-    host.add_argument("--claude", action="store_true", help="Install into Claude skills")
+    host.add_argument(
+        "--claude", action="store_true", help="Install into Claude skills"
+    )
     parser.add_argument("--target", help="Explicit skills target directory")
-    parser.add_argument("--copy", action="store_true", help="Copy instead of linking")
     parser.add_argument("--list", action="store_true", help="List available skills")
     parser.add_argument(
         "items",
@@ -194,25 +184,17 @@ def main(argv: list[str] | None = None) -> int:
 
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    method = (
-        "copy"
-        if args.copy
-        else "junction"
-        if platform.system() == "Windows"
-        else "symlink"
-    )
+    # Install mode: install or update based on SHA
     print(f"Source:  {skills_dir}")
     print(f"Target:  {target_dir}")
-    print(f"Method:  {method}")
     print()
 
     errors = 0
-    installer = install_copy if args.copy else install_link
     for name in requested:
         skill = skills[name]
         target = target_dir / skill.name
         try:
-            status = installer(skill, target)
+            status = install_or_update_copy(skill, target)
             print(f"  {skill.name:30s} {status}")
         except OSError as error:
             print(f"  {skill.name:30s} FAILED: {error}")

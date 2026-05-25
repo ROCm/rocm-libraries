@@ -1,6 +1,8 @@
 ---
 name: hipdnn-superbuild-test
 description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration scope, and gtest filtering. Handles Windows DLL PATH automatically.
+argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
+allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # hipDNN Superbuild Test Runner
