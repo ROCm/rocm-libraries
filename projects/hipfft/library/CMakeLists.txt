@@ -91,6 +91,19 @@ else()
   target_compile_definitions( hipfftw PRIVATE hipfft_EXPORTS )
 endif()
 
+if( WIN32 )
+  # configure an input file twice to produce separate rc files for hipFFT and hipFFTW
+  set( HIPFFT_RC_NAME "hipFFT" )
+  set( HIPFFT_RC_FILE "hipfft.dll" )
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/hipfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/hipfft.rc )
+  target_sources( hipfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipfft.rc )
+
+  set( HIPFFT_RC_NAME "hipFFTW" )
+  set( HIPFFT_RC_FILE "hipfftw.dll" )
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/hipfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/hipfftw.rc )
+  target_sources( hipfftw PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipfftw.rc )
+endif()
+
 set(static_depends)
 
 # Target compile definitions

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/config.h>
 #include <miopen/convolution.hpp>
@@ -77,9 +54,7 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvAsm5x10u2v2f1,
                                            miopen::solver::conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1,
                                            miopen::solver::conv::ConvAsm5x10u2v2b1,
-                                           miopen::solver::conv::ConvOclDirectFwd11x11,
-                                           miopen::solver::conv::ConvOclDirectFwdGen,
-                                           miopen::solver::conv::ConvOclDirectFwd1x1,
+                                           miopen::solver::conv::ConvHipDirectFwd11x11,
                                            miopen::solver::conv::ConvOclDirectFwd,
                                            miopen::solver::conv::ConvHipConv,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
@@ -229,14 +204,7 @@ static auto GetBwdWrW2DSolvers()
 {
     return miopen::solver::SolverContainer<miopen::solver::conv::ConvAsmBwdWrW1x1,
                                            miopen::solver::conv::ConvAsmBwdWrW3x3,
-                                           miopen::solver::conv::ConvOclBwdWrW2<1>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<2>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<4>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<8>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<16>,
-                                           miopen::solver::conv::ConvOclBwdWrW2NonTunable,
                                            miopen::solver::conv::ConvOclBwdWrW53,
-                                           miopen::solver::conv::ConvOclBwdWrW1x1,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,

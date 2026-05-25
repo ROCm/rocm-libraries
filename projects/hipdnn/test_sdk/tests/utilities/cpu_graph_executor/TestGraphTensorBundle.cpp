@@ -4,16 +4,17 @@
 #include <gtest/gtest.h>
 
 #include "BatchnormGraphUtils.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -183,6 +184,8 @@ TEST_F(TestGraphTensorBundle, TensorsHaveCorrectDimensions)
 
 TEST_F(TestGraphTensorBundle, ToDeviceVariantPackReturnsCorrectMapping)
 {
+    // Only this test in the suite touches device memory: rawDeviceData() lazily hipMallocs.
+    SKIP_IF_NO_DEVICES();
     auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 

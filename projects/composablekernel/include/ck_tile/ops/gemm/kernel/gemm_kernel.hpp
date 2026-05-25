@@ -15,6 +15,10 @@
 #include "ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 /// @brief The GEMM kernel host arguments.
@@ -120,6 +124,8 @@ struct GemmKernel
         return UniversalGemmKernel::GetName();
     }
 
+    CK_TILE_HOST static constexpr auto ClusterSize() { return UniversalGemmKernel::ClusterSize(); }
+
     CK_TILE_HOST static constexpr auto GridSize(index_t M, index_t N, index_t KBatch) -> dim3
     {
         return UniversalGemmKernel::GridSize(M, N, KBatch);
@@ -168,3 +174,5 @@ struct GemmKernel
     }
 };
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

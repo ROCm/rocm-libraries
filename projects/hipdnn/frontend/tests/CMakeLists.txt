@@ -44,7 +44,6 @@ add_executable(
     TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
-    TestGraphGenerated.cpp
     TestHandle.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
@@ -66,6 +65,8 @@ add_executable(
     TestReductionNode.cpp
     TestRMSNormAttributes.cpp
     TestRMSNormNode.cpp
+    TestRMSNormBackwardAttributes.cpp
+    TestRMSNormBackwardNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
     TestSetEnginePluginPaths.cpp
     TestTensorAttributes.cpp

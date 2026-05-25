@@ -75,6 +75,16 @@ TEST(RocprimConfigDispatchTests, StrEqualN)
     ASSERT_FALSE(prefix_equals("hasprefix", "hasp", 4));
 }
 
+TEST(RocprimConfigDispatchTests, GetTargetArch)
+{
+    using rocprim::detail::get_target_arch_from_name;
+
+    static_assert(get_target_arch_from_name("gfx_nonexisting", 7) == target_arch::unknown);
+    ASSERT_TRUE(get_target_arch_from_name("gfx_nonexisting", 7) == target_arch::unknown);
+    static_assert(get_target_arch_from_name("gfx803", 6) == target_arch::gfx803);
+    ASSERT_TRUE(get_target_arch_from_name("gfx803", 6) == target_arch::gfx803);
+}
+
 #if !defined(ROCPRIM_EXPERIMENTAL_SPIRV) // This macro disables the config_dispatching
 
 TEST(RocprimConfigDispatchTests, HostMatchesDevice)
@@ -85,7 +95,7 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 
     // Test with both the default stream (0) and in hipStreamLegacy,
     // since they take different code paths through rocprim::detail::get_device_from_stream.
-    for (const hipStream_t stream : {static_cast<hipStream_t>(hipStreamDefault), hipStreamLegacy})
+    for(const hipStream_t stream : {static_cast<hipStream_t>(hipStreamDefault), hipStreamLegacy})
     {
         target_arch host_arch;
         HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
@@ -157,10 +167,10 @@ TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
     ASSERT_EQ(result, device_id);
 
     // hipStreamLegacy support was added in ROCm 6.2.0
-#if (HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
+    #if(HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
     HIP_CHECK(get_device_from_stream(hipStreamLegacy, result));
     ASSERT_EQ(result, device_id);
-#endif
+    #endif
 
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -454,4 +464,7 @@ TEST(RocprimConfigDispatchTests, ExecuteLaunchPlan)
     HIP_CHECK(hipMemcpy(&h_output, d_output, sizeof(target), hipMemcpyDeviceToHost));
     // Should have the same targets as most_common_config.
     ASSERT_EQ(most_common_config<Targets>(current_target), h_output);
+
+	// Clean up
+	HIP_CHECK(hipFree(d_output));
 }

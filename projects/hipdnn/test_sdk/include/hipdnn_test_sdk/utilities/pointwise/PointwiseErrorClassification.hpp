@@ -5,7 +5,7 @@
 
 #include <stdexcept>
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 
 namespace hipdnn_test_sdk::utilities::pointwise
@@ -23,9 +23,10 @@ namespace hipdnn_test_sdk::utilities::pointwise
 /// - COMPOSITE_FWD (E fwd): compound nonlinear — gelu, gelu_approx_tanh, softplus, swish
 /// - COMPOSITE_BWD (E bwd): compound backward — gelu_bwd, gelu_approx_tanh_bwd, softplus_bwd,
 ///   swish_bwd
-inline PointwiseErrorClass classifyPointwiseOp(hipdnn_data_sdk::data_objects::PointwiseMode mode)
+inline PointwiseErrorClass
+    classifyPointwiseOp(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     switch(mode)
     {
@@ -108,9 +109,9 @@ inline PointwiseErrorClass classifyPointwiseOp(hipdnn_data_sdk::data_objects::Po
 /// - SIGMOID_FWD: output in [0, 1]
 /// - TANH_FWD: output in [-1, 1]
 /// - ERF: output in [-1, 1]
-inline bool isBoundedOutput(hipdnn_data_sdk::data_objects::PointwiseMode mode)
+inline bool isBoundedOutput(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     switch(mode)
     {

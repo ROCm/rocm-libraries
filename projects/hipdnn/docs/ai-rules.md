@@ -4,6 +4,32 @@ alwaysApply: true
 
 # AI Rules for hipDNN Project
 
+## Project AI Skills
+
+Reusable AI skills for hipDNN live under `tools/ai/skills/`. The skills below describe what each one does and when to suggest it.
+
+**To use a skill, follow this sequence — do not read `SKILL.md` and execute its steps directly.** That bypasses the install path the skill is meant to be invoked through, and misses the entire point of having skills.
+
+1. **Check whether the skill is loaded in this session.** Look at the available-skills list in the session's system reminder. The skill being present under `tools/ai/skills/` is *not* enough — it's only invocable once linked into either `<workspace>/.claude/skills/` or `~/.claude/skills/` and surfaced in the session's skill list.
+2. **If not loaded, ask the user which skill(s) to link and which scope** (`<workspace>/.claude/skills` for workspace-only, `~/.claude/skills` for user-global). Then run:
+   ```
+   python tools/ai/link-skills.py <target-skills-dir> <skill-name> [<skill-name> ...]
+   ```
+   Use `--list` in place of skill names to see what's available. The user must name each skill explicitly — there is no "link everything" mode, so a skill is never installed without consent. The linker uses symlinks on Linux/macOS, junctions on Windows, and is idempotent (existing entries pointing at the same source are skipped).
+3. **Invoke via the Skill tool** (e.g. `/hipdnn-superbuild`). The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
+
+When a user asks for a workflow covered by a project skill, tell them the project has a matching skill and offer to install and invoke it.
+
+- `tools/ai/skills/pr-summary/SKILL.md`
+  - Drafts or revises new or existing pull request titles and bodies with hipDNN's preferred summary, risk, testing, and technical-change format.
+  - Suggest this skill when the user asks for PR creation, PR body updates, PR summaries, risk summaries, testing sections, or review-ready PR descriptions.
+- `tools/ai/skills/hipdnn-superbuild/SKILL.md`
+  - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
+  - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
+- `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
+  - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
+  - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `/hipdnn-superbuild` first.
+
 ## Project Overview & Architecture
 
 hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.
@@ -13,7 +39,8 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 |-----------|------|----------|---------|
 | **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
 | **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers) |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
+| **Data SDK** (`data_sdk/`) | Header-only | (none) | Shared data types, logging |
+| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
 | **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
 | **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
 
@@ -168,19 +195,19 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 **Composition (left → right):**
 
-1. Optional `Integration` prefix (only for integration tests, always first)
-2. Optional `Gpu` (immediately after `Integration` if both apply, otherwise first)
+1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
+2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
 3. Core Feature / Subject under test (PascalCase, no underscores)
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
-Omit any position that does not apply.
+Omit any optional position that does not apply.
 
-**Unit tests**: Mirror the class under test — `TestMyClass` or `GpuTestMyClass` if GPU is required.
+**Unit tests**: Mirror the class under test — `TestMyClass` or `TestGpuMyClass` if GPU is required.
 
 **Valid examples:**
 ```
-IntegrationGpuConvolutionPlannerNchwFp32   GpuTestActivationKernelNchwFp32
-GpuTestExecutionPlanBuilderFp32            IntegrationGraphFusion
+IntegrationGpuConvolutionPlannerNchwFp32   TestGpuActivationKernelNchwFp32
+TestGpuExecutionPlanBuilderFp32            IntegrationGraphFusion
 TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 ```
 

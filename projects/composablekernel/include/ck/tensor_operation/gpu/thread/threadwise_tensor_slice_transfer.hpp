@@ -12,6 +12,10 @@
 
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 // Assume:
 //   1. src:
@@ -1245,6 +1249,8 @@ struct ThreadwiseTensorSliceTransfer_v3
 //     3. DstOriginIdx is known at compile-time
 //     4. use direct address calculation
 //   3. vector access on src
+//     Note:
+//     SrcScalarStrideInVector is not used in this implementation
 template <typename SrcData,
           typename DstData,
           typename SrcDesc,
@@ -2093,3 +2099,5 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_IntraRow
 };
 
 } // namespace ck
+
+#pragma clang diagnostic pop
