@@ -3355,7 +3355,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
 {
     rocblas_int tid = hipThreadIdx_x;
 
-    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ S sval[MaxWarpCount<LACN2_BLOCKSIZE>];
 
     // sum absolute values
     S sum = 0;
@@ -3396,16 +3396,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     sum += shift_left(sum, 4);
     sum += shift_left(sum, 8);
     sum += shift_left(sum, 16);
-    if(WarpSize > 32)
+    if(warpSize > 32)
         sum += shift_left(sum, 32);
 
-    if(tid % WarpSize == 0)
-        sval[tid / WarpSize] = sum;
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = sum;
     __syncthreads();
 
     if(tid == 0)
     {
-        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+        for(I k = 1; k < std::min(num_warps<I>(LACN2_BLOCKSIZE, warpSize), num_warps(n, warpSize));
+            k++)
             sum += sval[k];
         *norm = sum;
     }
@@ -3463,8 +3464,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
 {
     rocblas_int tid = hipThreadIdx_x;
 
-    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
-    __shared__ bool sval_repeated[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ S sval[MaxWarpCount<LACN2_BLOCKSIZE>];
+    __shared__ bool sval_repeated[MaxWarpCount<LACN2_BLOCKSIZE>];
     __shared__ S sval_estold; // for broadcasting est_old to all warps
 
     // Sum absolute values
@@ -3500,22 +3501,23 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     repeated = repeated & __shfl_down(repeated, 8);
     sum += shift_left(sum, 16);
     repeated = repeated & __shfl_down(repeated, 16);
-    if(WarpSize > 32)
+    if(warpSize > 32)
     {
         sum += shift_left(sum, 32);
         repeated = repeated & __shfl_down(repeated, 32);
     }
 
-    if(tid % WarpSize == 0)
+    if(tid % warpSize == 0)
     {
-        sval[tid / WarpSize] = sum;
-        sval_repeated[tid / WarpSize] = repeated;
+        sval[tid / warpSize] = sum;
+        sval_repeated[tid / warpSize] = repeated;
     }
     __syncthreads();
 
     if(tid == 0)
     {
-        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+        for(I k = 1; k < std::min(num_warps<I>(LACN2_BLOCKSIZE, warpSize), num_warps(n, warpSize));
+            k++)
         {
             sum += sval[k];
             repeated = repeated && sval_repeated[k];
@@ -3671,7 +3673,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump5(const I n, 
 {
     rocblas_int tid = hipThreadIdx_x;
 
-    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ S sval[MaxWarpCount<LACN2_BLOCKSIZE>];
 
     // sum absolute values
     S sum = 0;
@@ -3684,16 +3686,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump5(const I n, 
     sum += shift_left(sum, 4);
     sum += shift_left(sum, 8);
     sum += shift_left(sum, 16);
-    if(WarpSize > 32)
+    if(warpSize > 32)
         sum += shift_left(sum, 32);
 
-    if(tid % WarpSize == 0)
-        sval[tid / WarpSize] = sum;
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = sum;
     __syncthreads();
 
     if(tid == 0)
     {
-        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+        for(I k = 1; k < std::min(num_warps<I>(LACN2_BLOCKSIZE, warpSize), num_warps(n, warpSize));
+            k++)
             sum += sval[k];
         sum = 2 * (sum / (3 * n));
         if(sum > *norm)
