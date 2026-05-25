@@ -100,7 +100,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 8
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
@@ -113,7 +113,7 @@
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 1
@@ -232,7 +232,7 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
-    PrefetchLocalRead: false
+    PrefetchLocalRead: 0
     PreloadKernArgs: true
     SFCWGM:
     - [1, 1]
@@ -261,27 +261,27 @@
     SubGroupA: 8
     SubGroupB: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     ThreadTile: [1, 1]
     ThreadTile0: 8
     ThreadTile1: 2
     ThreadTileA: 8
     ThreadTileB: 2
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -339,7 +339,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 8
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
@@ -352,7 +352,7 @@
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -471,7 +471,7 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
-    PrefetchLocalRead: false
+    PrefetchLocalRead: 0
     PreloadKernArgs: true
     SFCWGM:
     - [1, 1]
@@ -500,27 +500,27 @@
     SubGroupA: 8
     SubGroupB: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     ThreadTile: [1, 1]
     ThreadTile0: 4
     ThreadTile1: 1
     ThreadTileA: 4
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
