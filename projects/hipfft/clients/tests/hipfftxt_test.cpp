@@ -25,7 +25,7 @@
 #include <gtest/gtest.h>
 
 // For test parameters (eg verbose)
-#include "../../shared/accuracy_test.h"
+#include "../../shared/test_params.h"
 #include "../hipfft_params.h"
 
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -143,9 +143,9 @@ static auto getdevcount()
 }
 
 #ifdef __HIP_PLATFORM_AMD__
-static const bool rocfft_backend = true;
+static constexpr bool rocfft_backend = true;
 #else
-static const bool rocfft_backend = false;
+static constexpr bool rocfft_backend = false;
 #endif
 
 // Params are direction and real/complex, is-single-batch
@@ -161,6 +161,8 @@ TEST_P(hipfftxtunit, plancreation)
     if(ngpus < 2)
         GTEST_SKIP();
 
+    // FIXME: 3D, single-precision
+    
     const int Nx = 32;
     const int Ny = 32;
 
@@ -174,7 +176,7 @@ TEST_P(hipfftxtunit, plancreation)
     if(verbose > 0)
     {
         std::cout << "hipfftxt plan creation test: " << directionname(direction)
-                  << (realcomplex ? " real/complex" : "complex/complex") << "\n";
+                  << (realcomplex ? " real/complex" : " complex/complex") << "\n";
     }
 
     auto hipfft_rt = HIPFFT_SUCCESS;
@@ -200,6 +202,7 @@ TEST_P(hipfftxtunit, plancreation)
     {
         std::vector<int> lengths = {Nx, Ny};
         const int        nbatch  = ngpus;
+        // Note: implicit default strides and distances enforced if {i,o}nembed are nullptr
         hipfft_rt                = hipfftMakePlanMany(plan,
                                        lengths.size(),
                                        lengths.data(),
@@ -212,7 +215,7 @@ TEST_P(hipfftxtunit, plancreation)
                                        transform_type,
                                        nbatch,
                                        workSize.data());
-        if(rocfft_backend)
+        if constexpr(rocfft_backend)
             ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
                 << "multi-batch multi-gpu transforms should return not implemented";
         else
@@ -228,7 +231,7 @@ TEST_P(hipfftxtunit, plancreation)
 INSTANTIATE_TEST_SUITE_P(hipfftxttest,
                          hipfftxtunit,
                          ::testing::Combine(::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
-                                            ::testing::Values(true, false),
+                                            ::testing::Bool(),
                                             ::testing::Bool()),
                          [](const testing::TestParamInfo<hipfftxtunit::ParamType>& info) {
                              const int   direction   = std::get<0>(info.param);
@@ -241,11 +244,11 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest,
                              return name;
                          });
 
-// Data holder struct for combining allowable direction/format combinations.
+// Data holder struct for combining allowable direction / input format combinations.
 struct directionformat_t
 {
     int               direction;
-    hipfftXtSubFormat format;
+    hipfftXtSubFormat informat;
 };
 
 // Real/complex hipfftxt multi-gpu transforms use HIPFFT_XT_FORMAT_INPLACE for the space format, and
@@ -309,7 +312,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     if(verbose > 0)
     {
         std::cout << "hipfftxt plan creation test: " << directionname(direction)
-                  << (realcomplex ? " real/complex" : "complex/complex") << " dimension "
+                  << (realcomplex ? " real/complex" : " complex/complex") << " dimension "
                   << dimension << "\n";
         std::cout << "Nx: " << Nx << " Ny: " << Ny;
         if(dimension == 3)
@@ -330,8 +333,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
     // Some facts about the test case:
     const bool   forward  = (direction == HIPFFT_FORWARD);
-    const bool   isreal   = realcomplex ? (format == HIPFFT_XT_FORMAT_INPLACE) : false;
-    const bool   isherm   = realcomplex ? (format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED) : false;
+    const bool   isreal   = realcomplex && (format == HIPFFT_XT_FORMAT_INPLACE);
+    const bool   isherm   = realcomplex && (format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
     const size_t lastdim  = batchlengths.size() - 1;
     const bool   inspace  = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
     const size_t splitdim = inspace ? 1 : 2;
@@ -351,10 +354,6 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         = (format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
               ? fft_placement_inplace
               : fft_placement_notinplace;
-    const fft_io io
-        = (forward != (format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE))
-              ? fft_io_out
-              : fft_io_in;
 
     // hipfftxt configuratin:
     const hipfftType transform_type
@@ -374,16 +373,15 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     };
 
     // Host data configuration:
-    const auto host_distances       = default_distances(dft_type, placement, io, lengths, batches);
+    const auto host_distances       = default_distances(dft_type, placement, fft_io_in, lengths, batches);
     auto       hostdiststrides      = host_distances;
     const auto hostdatabatchlengths = computedatabatchlengths(isherm, batchlengths);
-    const auto host_strides         = default_strides(dft_type, placement, io, lengths);
+    const auto host_strides         = default_strides(dft_type, placement, fft_io_in, lengths);
     hostdiststrides.insert(hostdiststrides.end(), host_strides.begin(), host_strides.end());
     if(verbose > 1)
     {
         std::cout << "dft_type: " << transform_type_name(dft_type) << "\n";
         std::cout << "placement: " << fft_result_placement_name(placement) << "\n";
-        std::cout << "io: " << fft_io_name(io) << "\n";
         std::cout << "transform batch/length:";
         for(auto val : batchlengths)
             std::cout << " " << val;
@@ -714,15 +712,15 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         if(isherm)
         {
             brick_distances = default_distances(
-                fft_transform_type_complex_forward, placement, io, brick_lengths, brick_batches);
+                fft_transform_type_complex_forward, placement, fft_io_in, brick_lengths, brick_batches);
             brick_strides
-                = default_strides(fft_transform_type_complex_forward, placement, io, brick_lengths);
+                = default_strides(fft_transform_type_complex_forward, placement, fft_io_in, brick_lengths);
         }
         else
         {
             brick_distances
-                = default_distances(dft_type, placement, io, brick_lengths, brick_batches);
-            brick_strides = default_strides(dft_type, placement, io, brick_lengths);
+                = default_distances(dft_type, placement, fft_io_in, brick_lengths, brick_batches);
+            brick_strides = default_strides(dft_type, placement, fft_io_in, brick_lengths);
         }
 
         brick_diststrides[igpu] = brick_distances;
@@ -891,7 +889,7 @@ INSTANTIATE_TEST_SUITE_P(
             auto         df          = std::get<1>(rdf);
             const size_t dim         = std::get<1>(t);
             const int    ngpus       = std::get<2>(t);
-            auto         ret = std::make_tuple(realcomplex, df.direction, df.format, dim, ngpus);
+            auto         ret = std::make_tuple(realcomplex, df.direction, df.informat, dim, ngpus);
             return ret;
         }),
     [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
@@ -951,7 +949,7 @@ TEST_P(hipfftxtformats, supportlistsinglebatch)
     for(const auto& val : good_rdfs)
     {
         if(realcomplex == std::get<0>(val) && std::get<1>(val).direction == direction
-           && std::get<1>(val).format == format)
+           && std::get<1>(val).informat == format)
         {
             goodcase = true;
             break;
@@ -974,7 +972,7 @@ TEST_P(hipfftxtformats, supportlistsinglebatch)
     {
         const int batchsize = 1;
         hipfft_rt           = hipfftMakePlan1d(plan, Nx, ffttype, batchsize, workSize.data());
-        if(realcomplex || rocfft_backend)
+        if(rocfft_backend || realcomplex)
         {
             ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
                 << "hipfftMakePlan1d should have failed for real/complex multi-gpu";
