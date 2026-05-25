@@ -52,8 +52,19 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<82, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<83, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
-// Non-grouped convolution v3 — cross-wave LDS reduction
-// Dgrad, direct DRAM epilogue — configs 0-1 (waves 4, 2)
+// Non-grouped convolution v3 — CyclicShift swizzle
+// Dgrad configs 8-9 (16x16x32), 12-13 (32x32x16)
 ////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<0, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<1, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<8, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<9, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<12, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<13, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — XOR swizzle
+// Dgrad configs 16-17 (16x16x32), 20-21 (32x32x16)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<16, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<17, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<20, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<21, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
