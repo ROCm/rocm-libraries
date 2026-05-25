@@ -77,11 +77,9 @@ struct StreamKReductionOps
     {
         auto* sk_flags_ptr                = static_cast<index_t*>(kargs.workspace_ptr);
         index_t offset                    = cta_idx * sizeof(index_t);
-        __amdgpu_buffer_rsrc_t buffer_rsc = __builtin_amdgcn_make_buffer_rsrc(
-            sk_flags_ptr,
-            0,
-            sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas(),
-            CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
+        __amdgpu_buffer_rsrc_t buffer_rsc = make_builtin_buffer_resource(
+            sk_flags_ptr, sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas());
+
         if(threadIdx.x == 0)
         {
             __builtin_amdgcn_raw_buffer_store_b32(
