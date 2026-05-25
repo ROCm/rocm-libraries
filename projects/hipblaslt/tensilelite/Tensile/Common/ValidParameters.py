@@ -412,6 +412,10 @@ validParameters = { # we need to make sure this matches develop
     #  2: DirectToLds A only (no DTLB)
     #  3: DirectToLds B only (no DTLA)
     "DirectToLds": [0, 1, 2, 3],
+    # DirectToLds for sparse metadata.
+    # Requires DirectToLds on the dense side (B if Sparse==2 else A),
+    # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
+    "DirectToLdsMetadata": [0, 1],
     # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
@@ -960,8 +964,8 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
-    # 0  : MB and MBSK generate different assembly code
-    # 1  : MB and MBSK generate same assembly code
+    # 0  : disable
+    # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
