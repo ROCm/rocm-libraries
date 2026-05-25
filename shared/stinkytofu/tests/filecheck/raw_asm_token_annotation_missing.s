@@ -1,13 +1,13 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --emit-asm --from-label token_start --to-label token_end 2>&1
+# RUN: %stinkytofu-opt --arch gfx1250 %s --MemTokenConsistencyCheckPass --emit-asm --from-label token_start --to-label token_end 2>&1
 # XFAIL
 #
 # Error case: one ds_load has a "// st.token:0" annotation but the other does
-# not.  StinkyBuildImplicitDependencyPass requires all ds_load/ds_store/
+# not.  MemTokenConsistencyCheckPass requires all ds_load/ds_store/
 # tensor_load instructions in a block to be consistently annotated — either all
 # have MemTokenData or none do.  The pass prints an error to stderr (captured
 # via 2>&1) and aborts.  XFAIL marks the non-zero exit as expected.
 #
-# CHECK: [BuildImplicitDep] ERROR: BB "entry" has inconsistent memory tokens
+# CHECK: [MemTokenConsistencyCheck] ERROR: BB "entry" has inconsistent memory tokens
 # CHECK: [has token]
 # CHECK: [NO TOKEN]
 
