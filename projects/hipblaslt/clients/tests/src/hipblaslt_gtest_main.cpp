@@ -106,6 +106,14 @@ public:
                 hipblaslt_cout << "Skipped test due to too few GPUs." << std::endl;
             ++skipped_tests;
         }
+        // GTEST_SKIP() messages may include trailing detail (e.g. matched
+        // platforms), so use substring match instead of strcmp.
+        else if(strstr(result.message(), KNOWN_BUG_STRING_GTEST))
+        {
+            if(showInlineSkips)
+                hipblaslt_cout << "Skipped known bug for current platform." << std::endl;
+            ++skipped_tests;
+        }
         eventListener->OnTestPartResult(result);
     }
 
