@@ -703,3 +703,32 @@ TEST_F(AsmEmitterTest, MUBUFLoadB32_OffVAddr) {
     std::string expected = "buffer_load_b32 v0, off, s[4:7], s3\n";
     EXPECT_EQ(assembly, expected);
 }
+
+TEST_F(AsmEmitterTest, MUBUFScopeModifier) {
+    StinkyInstruction* inst = createInstruction("buffer_store_b32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->addSrcReg(StinkyRegister("v", 12, 1));
+    inst->addSrcReg(StinkyRegister("v", 32, 1));
+    inst->addSrcReg(StinkyRegister("s", 60, 4));
+    inst->addSrcReg(StinkyRegister("s", 46, 1));
+
+    MUBUFModifiers mubufMod(/*offen=*/true, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
+                            /*nt=*/false, /*lds=*/false, /*isStore=*/true,
+                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
+                            /*hasSC0Modifier=*/false, /*scope=*/MUBUFScope::SCOPE_DEV);
+    inst->addModifier(mubufMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected =
+        "buffer_store_b32 v12, v32, s[60:63], s46 offen offset:0 scope:SCOPE_DEV\n";
+    EXPECT_EQ(assembly, expected);
+}

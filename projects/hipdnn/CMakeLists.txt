@@ -7,7 +7,6 @@ cmake_minimum_required(VERSION 3.25.2)
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
-set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
 option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
@@ -102,6 +101,23 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     "${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
     CACHE STRING "Relative install directory for official hipDNN engine plugins"
 )
+set(HIPDNN_PLUGIN_HEURISTIC_SUBDIR "hipdnn_plugins/heuristics"
+    CACHE STRING "Subdirectory for official hipDNN heuristic plugins"
+)
+set(HIPDNN_BUILD_PLUGIN_HEURISTIC_DIR
+    "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE PATH "Build directory for official hipDNN heuristic plugins"
+)
+set(HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR
+    "${HIPDNN_PLUGIN_FULL_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE
+        STRING
+        "Full install directory for official hipDNN heuristic plugins. Uses the CMAKE_INSTALL_PREFIX set at configure time (defaults to /opt/rocm/)."
+)
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR
+    "${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE STRING "Relative install directory for official hipDNN heuristic plugins"
+)
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Build directory for test plugins"
 )
@@ -183,6 +199,7 @@ include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
 
 # Add global compile options
@@ -285,7 +302,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
+        ".*deps.*|.*tests.*|.*data_objects.*|.*HipErrorHandler.*"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -298,6 +315,8 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_flatbuffers_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
         -object

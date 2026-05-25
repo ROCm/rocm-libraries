@@ -13,8 +13,8 @@ using namespace hip_kernel_provider;
 TEST(TestBatchnormValidator, ValidInference)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
@@ -25,8 +25,8 @@ TEST(TestBatchnormValidator, ValidInference)
 TEST(TestBatchnormValidator, ValidInferenceActiv)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -41,8 +41,8 @@ TEST(TestBatchnormValidator, ValidInferenceActiv)
 TEST(TestBatchnormValidator, ValidVarianceExtInference)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
@@ -54,8 +54,8 @@ TEST(TestBatchnormValidator, ValidVarianceExtInferenceActiv)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
@@ -71,8 +71,8 @@ TEST(TestBatchnormValidator, ValidVarianceExtInferenceActiv)
 TEST(TestBatchnormValidator, ValidFwdTraining)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormAttributes();
@@ -81,11 +81,43 @@ TEST(TestBatchnormValidator, ValidFwdTraining)
     EXPECT_NO_THROW(validator.checkFwdTrainingTensorConfigSupported(attr));
 }
 
+TEST(TestBatchnormValidator, ValidBwd)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkBwdTensorConfigSupported(attr));
+}
+
+TEST(TestBatchnormValidator, ValidInferenceActivationBackward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnInfNode = graph.getNode(0);
+    const auto& actNode = graph.getNode(1);
+    const auto& bnBwdNode = graph.getNode(2);
+
+    const auto& bnInfAttr = *bnInfNode.attributes_as_BatchnormInferenceAttributes();
+    const auto& actAttr = *actNode.attributes_as_PointwiseAttributes();
+    const auto& bnBwdAttr = *bnBwdNode.attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(
+        validator.checkBwdActivationTensorConfigSupported(bnInfAttr, actAttr, bnBwdAttr));
+}
+
 TEST(TestBatchnormValidator, MismatchShapes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
@@ -112,8 +144,8 @@ flatbuffers::FlatBufferBuilder createInvalidTypeBatchnormActivGraph(
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides{150528, 50176, 224, 1};
-    std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{1, 3, 224, 224};
 
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
@@ -207,8 +239,8 @@ TEST(TestBatchnormValidator, MismatchIOTypes)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -234,8 +266,8 @@ TEST(TestBatchnormValidator, MismatchAffineTypes)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -261,8 +293,8 @@ TEST(TestBatchnormValidator, MismatchStatTypes)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -288,8 +320,8 @@ TEST(TestBatchnormValidator, MismatchIntermediateTypes)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -316,8 +348,8 @@ TEST(TestBatchnormValidator, InvalidActivation)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -464,11 +496,11 @@ flatbuffers::FlatBufferBuilder
 
 TEST(TestBatchnormValidator, MismatchIOShapes)
 {
-    std::vector<int64_t> xDims{1, 3, 4, 4};
-    std::vector<int64_t> xStrides{48, 16, 4, 1};
+    const std::vector<int64_t> xDims{1, 3, 4, 4};
+    const std::vector<int64_t> xStrides{48, 16, 4, 1};
 
-    std::vector<int64_t> dims{1, 3, 224, 224};
-    std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
 
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
@@ -489,8 +521,8 @@ TEST(TestBatchnormValidator, MismatchIOShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -506,11 +538,11 @@ TEST(TestBatchnormValidator, MismatchIOShapes)
 
 TEST(TestBatchnormValidator, MismatchAffineShapes)
 {
-    std::vector<int64_t> dims{1, 3, 224, 224};
-    std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
 
-    std::vector<int64_t> scaleDims{1, 3, 4, 4};
-    std::vector<int64_t> scaleStrides{48, 16, 4, 1};
+    const std::vector<int64_t> scaleDims{1, 3, 4, 4};
+    const std::vector<int64_t> scaleStrides{48, 16, 4, 1};
 
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
@@ -531,8 +563,8 @@ TEST(TestBatchnormValidator, MismatchAffineShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -548,11 +580,11 @@ TEST(TestBatchnormValidator, MismatchAffineShapes)
 
 TEST(TestBatchnormValidator, MismatchStatShapes)
 {
-    std::vector<int64_t> meanDims{1, 3, 4, 4};
-    std::vector<int64_t> meanStrides{48, 16, 4, 1};
+    const std::vector<int64_t> meanDims{1, 3, 4, 4};
+    const std::vector<int64_t> meanStrides{48, 16, 4, 1};
 
-    std::vector<int64_t> dims{1, 3, 224, 224};
-    std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
 
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
@@ -573,8 +605,8 @@ TEST(TestBatchnormValidator, MismatchStatShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();

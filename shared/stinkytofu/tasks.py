@@ -156,9 +156,11 @@ def _rmtree(path: Path):
         "build_dir": "Override the build directory (default: build/).",
         "build_type": "CMake build type: Release, Debug, RelWithDebInfo (default: Release).",
         "tests": "Build unit tests (default: ON when building standalone).",
-        "python": "Build Python bindings.",
+        "no-python": "Disable Python bindings (enabled by default).",
+        "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -167,9 +169,11 @@ def build(
     build_dir=None,
     build_type="Release",
     tests=True,
-    python=False,
+    no_python=False,
+    static=False,
     jobs=None,
     clean=False,
+    gcc=False,
     rocm_path=None,
 ):
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
@@ -186,14 +190,54 @@ def build(
 
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
+        "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
+
+    if not no_python:
+        cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
+
+    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    _rocm_sdk = shutil.which("rocm-sdk")
+    if _rocm_sdk:
+        try:
+            _sdk_root = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_root:
+                _rocm_cmake_dir = Path(_sdk_root) / "share/rocmcmakebuildtools/cmake"
+                if _rocm_cmake_dir.is_dir():
+                    cmake_opts.append(
+                        f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
+                    )
+        except subprocess.CalledProcessError:
+            pass
 
     compiler_opts = []
 
     if sys.platform == "win32":
         _setup_msvc_env()
+
+        _vcpkg_toolchain_path = None
+        _vcpkg = shutil.which("vcpkg")
+        if _vcpkg:
+            _vcpkg_root = Path(_vcpkg).resolve().parent
+            _vcpkg_tc = _vcpkg_root / "scripts/buildsystems/vcpkg.cmake"
+            if _vcpkg_tc.exists():
+                _vcpkg_toolchain_path = _vcpkg_tc.as_posix()
+
+        sep = os.pathsep
+        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
+        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
+        os.environ["ROCM_PATH"] = rocm_s
+        os.environ["HIP_PATH"] = rocm_s
 
         _cxx = shutil.which("amdclang++") or shutil.which("amdclang++.exe")
         _cc = shutil.which("amdclang") or shutil.which("amdclang.exe")
@@ -218,12 +262,6 @@ def build(
         if rc:
             compiler_opts.append(f'"-DCMAKE_RC_COMPILER={_normalized(rc)}"')
 
-        sep = os.pathsep
-        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
-        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
-        os.environ["ROCM_PATH"] = rocm_s
-        os.environ["HIP_PATH"] = rocm_s
-
         # CMake's default ar-style archiver syntax (qc flags) is incompatible
         # with lib.exe. Generate a toolchain file that overrides the archive
         # command to use lib.exe's /OUT: syntax.
@@ -231,12 +269,18 @@ def build(
         if lib_exe:
             lib_posix = Path(lib_exe).as_posix()
             toolchain_file = bld / "windows_toolchain.cmake"
-            toolchain_file.write_text(
+            tc_content = ""
+            if _vcpkg_toolchain_path:
+                tc_content += f'include("{_vcpkg_toolchain_path}")\n'
+            tc_content += (
                 f'set(CMAKE_AR "{lib_posix}" CACHE FILEPATH "" FORCE)\n'
                 'set(CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
                 'set(CMAKE_C_CREATE_STATIC_LIBRARY   "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
             )
+            toolchain_file.write_text(tc_content)
             cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file.as_posix()}")
+        elif _vcpkg_toolchain_path:
+            cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={_vcpkg_toolchain_path}")
         else:
             print("Warning: lib.exe not found. Static library archiving will fail.")
 
@@ -253,8 +297,15 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
-        _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-        _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+        if shutil.which("ninja"):
+            cmake_opts.append("-G Ninja")
+
+        if gcc:
+            _cxx = shutil.which("g++") or "g++"
+            _cc = shutil.which("gcc") or "gcc"
+        else:
+            _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+            _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
         compiler_opts += [
             f"-DCMAKE_CXX_COMPILER={_cxx}",
             f"-DCMAKE_C_COMPILER={_cc}",
@@ -265,3 +316,16 @@ def build(
     print(f"cmake command: {cmake_cmd}")
     c.run(cmake_cmd)
     c.run(f'cmake --build "{bld.as_posix()}" -j {jobs}')
+
+
+@task
+def tidy(c, build_dir=None):
+    """Run clang-tidy on all source files. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not (bld / "compile_commands.json").exists():
+        print("No compile_commands.json found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(
+        f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
+    )
+    c.run(f'cmake --build "{bld.as_posix()}" --target tidy')

@@ -154,11 +154,11 @@ struct F16xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr int Repeat = TileShape::BlockWarps::at(number<1>{});
         constexpr int M0     = TileShape::WarpTile::at(I0);
 
-        constexpr int K_Lane = 64 / TileShape::WarpTile::at(I1); // 4
+        constexpr int K_Lane = get_warp_size() / TileShape::WarpTile::at(I1);
 
-        constexpr int K2             = TileShape::WarpTile::at(I2) / K_Lane; // 128 / 4 = 32
-        constexpr int XDL_PerThreadK = KBPerLoad / K2;                       // 4
-        constexpr int K0             = K_Lane;                               // 4
+        constexpr int K2             = TileShape::WarpTile::at(I2) / K_Lane;
+        constexpr int XDL_PerThreadK = KBPerLoad / K2;
+        constexpr int K0             = K_Lane;
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<Repeat>,
@@ -215,7 +215,7 @@ struct F16xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
         [[maybe_unused]] constexpr index_t XDLPerBlock =
             TileShape::kK / TileShape::WarpTile::at(I2);
-        constexpr index_t K_Lane = 64 / TileShape::WarpTile::at(I1);
+        constexpr index_t K_Lane = WaveSize / TileShape::WarpTile::at(I1);
         constexpr index_t N_Lane = TileShape::WarpTile::at(I1);
 
         constexpr index_t NWavePerBlk = N_Warp;
@@ -542,7 +542,7 @@ struct F8xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr int N_warps = TileShape::BlockWarps::at(number<1>{});
         constexpr int M_Lane  = TileShape::WarpTile::at(I0); // 16
 
-        constexpr int K_Lane = 64 / M_Lane; // 4
+        constexpr int K_Lane = get_warp_size() / M_Lane;
 
         constexpr int K_Thread = TileShape::WarpTile::at(I2) / K_Lane; // 32
 
@@ -630,7 +630,7 @@ struct F8xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         static_assert(WaveNum == M_Warps * N_Warps, "Block warps do not match block size");
 
         constexpr index_t M_Lanes = TileShape::WarpTile::at(I0);
-        constexpr index_t K_Lanes = 64 / M_Lanes;
+        constexpr index_t K_Lanes = get_warp_size() / M_Lanes;
 
         // Y dimension (M) decomposition
         constexpr index_t Y2 = M_Lanes;
@@ -667,7 +667,7 @@ struct F8xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         static_assert(WaveNum == M_Warps * N_Warps, "Block warps do not match block size");
 
         constexpr index_t N_Lanes = TileShape::WarpTile::at(I1);
-        constexpr index_t K_Lanes = 64 / N_Lanes;
+        constexpr index_t K_Lanes = get_warp_size() / N_Lanes;
 
         // Y dimension (M) decomposition
         constexpr index_t Y2 = N_Lanes;
@@ -693,7 +693,7 @@ struct F8xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         using TileShape = typename Problem::BlockGemmShape;
 
         constexpr index_t M_Warp      = TileShape::BlockWarps::at(number<0>{});
-        constexpr index_t K_Lane      = 64 / TileShape::WarpTile::at(I0);
+        constexpr index_t K_Lane      = get_warp_size() / TileShape::WarpTile::at(I0);
         constexpr index_t M_Lane      = TileShape::WarpTile::at(I0);
         constexpr index_t N_Wrap      = TileShape::BlockWarps::at(number<1>{});
         constexpr index_t MWavePerBlk = M_Warp;
@@ -715,7 +715,7 @@ struct F8xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         using TileShape = typename Problem::BlockGemmShape;
 
         constexpr index_t N_Warp      = TileShape::BlockWarps::at(number<1>{});
-        constexpr index_t K_Lane      = 64 / TileShape::WarpTile::at(I1);
+        constexpr index_t K_Lane      = get_warp_size() / TileShape::WarpTile::at(I1);
         constexpr index_t N_Lane      = TileShape::WarpTile::at(I1);
         constexpr index_t M_Wrap      = TileShape::BlockWarps::at(number<0>{});
         constexpr index_t NWavePerBlk = N_Warp;

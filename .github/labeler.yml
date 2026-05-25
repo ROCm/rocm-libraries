@@ -61,6 +61,7 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
   - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "ci:hipsparselt-fast":
 - changed-files:

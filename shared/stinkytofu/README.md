@@ -53,6 +53,15 @@ rocm-sdk init
 
 ### Standalone (Linux)
 
+The quickest way is `invoke`, which wraps the CMake steps:
+
+```bash
+pip install invoke
+invoke build
+```
+
+Or manually with CMake:
+
 ```bash
 cmake -S . -B build -GNinja \
   -DCMAKE_CXX_COMPILER=amdclang++ \
@@ -72,6 +81,24 @@ invoke build
 ### As part of hipBLASLt
 
 StinkyTofu is automatically built when hipBLASLt includes it via `add_subdirectory`. Tests and Python bindings are disabled in sub-project mode.
+
+### Rebuilding Python bindings after C++ changes
+
+If you modify C++ sources, the installed `.so` becomes stale. Importing `stinkytofu` will raise an `ImportError` listing the modified files.
+
+**Standalone** — rebuild with invoke or CMake directly:
+
+```bash
+invoke build
+# or:
+cmake --build build --target stinkytofu_python
+```
+
+**As part of hipBLASLt** — rebuild the Python bindings target in your hipBLASLt build directory:
+
+```bash
+cmake --build <build_dir> --target stinkytofu_python
+```
 
 ## Test
 

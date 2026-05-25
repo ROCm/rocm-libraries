@@ -137,7 +137,7 @@ inline T gen_subnorm()
 {
     T denorm_val = static_cast<T>(0);
     if constexpr(!std::is_integral_v<T> && !std::is_same_v<T, double> &&
-                 details::has_digits<T>::value)
+                 std::is_trivially_copyable<T>::value && details::has_digits<T>::value)
     {
         using BitType = std::conditional_t<sizeof(T) == 1,
                                            uint8_t,

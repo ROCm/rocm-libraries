@@ -6,7 +6,7 @@
 import json
 from typing import Any, Dict, List, Literal, Optional
 
-from ..common.exceptions import ExecutionError
+from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from .timing import GpuTimerInterface, Timer, create_gpu_timer
@@ -78,6 +78,7 @@ class Executor:
         self._graph: Any = None
         self._workspace: Any = None
         self._workspace_ptr: int = 0
+        self._workspace_size: int = 0
         self._init_time_ms: float = 0.0
 
     def _build_through_operation_graph(
@@ -184,7 +185,10 @@ class Executor:
             ExecutionError: If any graph-build step fails.
         """
         self._build_through_operation_graph(handle)
-        return [int(eid) for eid in self._graph.get_ranked_engine_ids()]
+        try:
+            return [int(eid) for eid in self._graph.get_ranked_engine_ids()]
+        except RuntimeError as e:
+            raise UnsupportedGraphError(str(e)) from e
 
     def prepare(self, handle: Any, engine_id: Optional[int] = None) -> None:
         """Build the operation graph and prepare for execution.
@@ -208,7 +212,7 @@ class Executor:
 
             result = self._graph.check_support()
             if result.is_bad():
-                raise ExecutionError(
+                raise UnsupportedGraphError(
                     f"Backend support check failed: {result.get_message()}"
                 )
 
@@ -217,6 +221,7 @@ class Executor:
                 raise ExecutionError(f"Failed to build plans: {result.get_message()}")
 
             workspace_size = self._graph.get_workspace_size()
+            self._workspace_size = int(workspace_size)
             if workspace_size > 0:
                 self._workspace = hipdnn.DeviceBuffer(workspace_size)
                 self._workspace_ptr = self._workspace.ptr()
@@ -331,6 +336,16 @@ class Executor:
     def init_time_ms(self) -> float:
         """Get graph initialization time in milliseconds."""
         return self._init_time_ms
+
+    @property
+    def workspace_size(self) -> int:
+        """Bytes hipDNN reserved for the operation graph workspace.
+
+        Zero before :meth:`prepare` runs. Surfaced so the suite runner
+        can record it as an always-on metric without re-querying the
+        graph object.
+        """
+        return self._workspace_size
 
     @property
     def graph(self) -> Any:

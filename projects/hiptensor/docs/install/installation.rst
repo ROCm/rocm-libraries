@@ -73,7 +73,7 @@ including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as g
 
 Additionally, hipTensor is supported on AMD RDNA GPUs:
  - gfx11-generic: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153.
- - gfx12-generic; gfx1200 and gfx1201.
+ - gfx12-generic: gfx1200, gfx1201 and gfx1250.
 
 .. note::
 
@@ -180,7 +180,7 @@ Here are the available options to build the hipTensor library, with or without c
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build the code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1200``; ``gfx1201``; ``gfx12-generic``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx12-generic``
     *   -   ``HIPTENSOR_BUILD_TESTS``
         -   Build the tests
         -   ``ON``

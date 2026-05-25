@@ -14,6 +14,10 @@ set(SOURCES
 )
 
 add_executable(tablegen "${SOURCES}")
+target_link_libraries(tablegen PRIVATE stinkytofu-warnings)
+# tablegen compiles IRLexer/PatternParser directly (not via libstinkytofu),
+# so it needs stinkytofu_EXPORTS to get dllexport instead of dllimport.
+target_compile_definitions(tablegen PRIVATE stinkytofu_EXPORTS)
 
 target_link_libraries(tablegen PRIVATE gfxisa)
 
@@ -23,6 +27,7 @@ add_executable(tablegen_inst_gen
     GenInstructions.cpp
     GenInstructionsMain.cpp
 )
+target_link_libraries(tablegen_inst_gen PRIVATE stinkytofu-warnings)
 # No link to gfxisa - this executable only parses .def files and writes .inc
 
 target_include_directories(tablegen PRIVATE
@@ -62,7 +67,7 @@ list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_gene
 
 # Instruction metadata and ISA .inc from .def files (tablegen_inst_gen, no gfxisa).
 # .def files live in hardware/src/gfx/Gfx***/ (per-arch folders).
-# Single run produces: hardware/generated/*_costs.inc, *_init.inc, *_operands.inc and
+# Single run produces: hardware/generated/*_costs.inc, *_init.inc, *_operands.inc, *_block.inc and
 # hardware/*Isa.inc, hardware/gfxIsa.inc so the full tablegen does not need gfxisa for ISA.
 get_filename_component(INSTRUCTION_DEF_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx" ABSOLUTE)
 set(INSTRUCTION_GEN_DIR "${TABLEGEN_OUTPUT_DIR}/hardware/generated")
@@ -88,6 +93,11 @@ foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
     )
 endforeach()
 
+# Depend on generator sources so .inc files regenerate when GenInstructions.cpp etc. change.
+set(INSTRUCTION_GEN_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/GenInstructions.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/GenInstructionsMain.cpp"
+)
 # One tablegen_inst_gen run: all archs + ISA .inc (single build, no two-phase).
 add_custom_command(
     OUTPUT ${INSTRUCTION_GEN_FILES}
@@ -95,7 +105,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware/arch_headers"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
     COMMAND $<TARGET_FILE:tablegen_inst_gen> --input-dir="${INSTRUCTION_DEF_BASE_DIR}" --output-dir="${TABLEGEN_OUTPUT_DIR}"
-    DEPENDS tablegen_inst_gen ${INSTRUCTION_DEF_FILES}
+    DEPENDS tablegen_inst_gen ${INSTRUCTION_DEF_FILES} ${INSTRUCTION_GEN_SOURCES}
     COMMENT "Generating instruction metadata and ISA from .def files..."
     VERBATIM
 )

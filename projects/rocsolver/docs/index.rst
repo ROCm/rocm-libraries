@@ -21,7 +21,8 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./installation/installlinux>`
+    * :doc:`Install rocSOLVER <./installation/installlinux>`
+    * :doc:`Build from source <./installation/build>`
 
 .. grid:: 2
   :gutter: 3
