@@ -142,7 +142,7 @@ class GSU(Component):
         return module
 
     @abc.abstractmethod
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre, remainPgr=0, nta=0, ntb=0):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         pass
 
     @abc.abstractmethod
@@ -269,7 +269,7 @@ class GSUOff(GSU):
         module = Module("GSU Off computeStoreSrdStart")
         return module
 
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre, remainPgr=0, nta=0, ntb=0):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         module = Module("GSU Off noLoadLoop")
         return module
 
@@ -592,7 +592,7 @@ class GSUOn(GSU):
         module.add(self.computeStoreSrdStartCommon(writer, kernel))
         return module
 
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre, remainPgr=0, nta=0, ntb=0):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         module = Module("GSU On noLoadLoop")
 
         isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -634,7 +634,7 @@ class GSUOn(GSU):
                 # deepCopy packCode for OptNLL noLoadLoop
                 deepCopyPack = deepcopy(pack)
                 deepCopyPackPre = deepcopy(packPre)
-              noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum, remainPgr=remainPgr, nta=nta, ntb=ntb))
+              noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
               writer.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
             acclen = countInstruction(noLoadLoopModules)
