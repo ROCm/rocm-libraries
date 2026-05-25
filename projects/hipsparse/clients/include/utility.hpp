@@ -7536,13 +7536,13 @@ void host_hybmv(int                  m,
         int i = 0;
         while(i < coo_nnz)
         {
-            const int row = coo_row_ind[i] - idx_base;
+            const int row     = coo_row_ind[i] - idx_base;
             T         row_sum = zero;
 
             while(i < coo_nnz && (coo_row_ind[i] - idx_base) == row)
             {
                 const int col = coo_col_ind[i] - idx_base;
-                row_sum = row_sum + testing_mult(coo_val[i], x[col]);
+                row_sum       = row_sum + testing_mult(coo_val[i], x[col]);
                 ++i;
             }
 
