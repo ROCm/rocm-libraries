@@ -1162,9 +1162,9 @@ struct pk_f6_legacy_t
     element_type data_[vector_size]; // packed data
     using type = pk_f6_legacy_t<packed_size, kind>;
 
-    CK_TILE_HOST_DEVICE constexpr pk_fp6_legacy_t() : data_{element_type{}} {}
+    CK_TILE_HOST_DEVICE constexpr pk_f6_legacy_t() : data_{element_type{}} {}
 
-    CK_TILE_HOST_DEVICE constexpr explicit pk_fp6_legacy_t(int value)
+    CK_TILE_HOST_DEVICE constexpr explicit pk_f6_legacy_t(int value)
     {
         for(size_t i = 0; i < vector_size; ++i)
         {
