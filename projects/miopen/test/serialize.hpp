@@ -62,27 +62,6 @@ auto serialize(std::ostream& os, const T& x)
         serialize(os, y);
 }
 
-template <class T>
-void serialize(std::istream& s, tensor<T>& x)
-{
-    std::vector<std::size_t> lens;
-    serialize(s, lens);
-    std::vector<std::size_t> strides;
-    serialize(s, strides);
-    x.desc = miopen::TensorDescriptor{miopen_type<T>{}, lens, strides};
-    serialize(s, x.data);
-}
-
-template <class T>
-void serialize(std::ostream& os, const tensor<T>& x)
-{
-    const auto& lens = x.desc.GetLengths();
-    serialize(os, lens);
-    const auto& strides = x.desc.GetStrides();
-    serialize(os, strides);
-    serialize(os, x.data);
-}
-
 template <class... Ts>
 std::enable_if_t<not is_trivial_serializable<std::tuple<Ts...>>{}>
 serialize(std::ostream& os, const std::tuple<Ts...>& t)
@@ -132,6 +111,27 @@ serialize(std::istream& is,
 {
     miopen::unpack(
         [&](auto&&... xs) { miopen::each_args([&](auto&& x) { serialize(is, x); }, xs...); }, t);
+}
+
+template <class T>
+void serialize(std::istream& is, tensor<T>& x)
+{
+    std::vector<std::size_t> lens;
+    serialize(is, lens);
+    std::vector<std::size_t> strides;
+    serialize(is, strides);
+    x.desc = miopen::TensorDescriptor{miopen_type<T>{}, lens, strides};
+    serialize(is, x.data);
+}
+
+template <class T>
+void serialize(std::ostream& os, const tensor<T>& x)
+{
+    const auto& lens = x.desc.GetLengths();
+    serialize(os, lens);
+    const auto& strides = x.desc.GetStrides();
+    serialize(os, strides);
+    serialize(os, x.data);
 }
 
 #endif
