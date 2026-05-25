@@ -5468,7 +5468,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        if kernel["_ScheduleIterAlg"] != 0:
+        # StreamK tail workgroups may start from a partial tile slice, so SIA0
+        # also needs the LRO reset before tail MACs.
+        if kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"]:
           module.addComment1("Tail: local read reset offsets a")
           module.add(self.localReadResetOffsets(kernel, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
