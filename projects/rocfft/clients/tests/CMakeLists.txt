@@ -32,8 +32,6 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
-
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
 # specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -66,6 +64,22 @@ endif()
 
 include( ROCMInstallTargets )
 
+# embed rocfft_complex.h so it can be used in hiprtc for callbacks
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
+set( callback_embed_command ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/embed-to-header-rtc.py )
+# generated source file
+set( callback_embed_cpp ${CMAKE_CURRENT_BINARY_DIR}/callback-embed.cpp )
+# files that need to be embedded into the test, to be able to generate callback code
+set( callback_embed_files
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocfft_complex.h
+)
+add_custom_command(
+  OUTPUT ${callback_embed_cpp}
+  COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
+  --embed ${callback_embed_files} --output ${callback_embed_cpp}
+  DEPENDS ${callback_embed_command} ${callback_embed_files}
+)
+
 set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
@@ -91,6 +105,7 @@ set( rocfft-test_source
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
+  ${callback_embed_cpp}
   )
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
@@ -294,9 +309,11 @@ if( NOT ROCFFT_BUILD_SCOPE )
   set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
 endif()
 
+find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
 target_link_libraries( rocfft-test
   PRIVATE
   hip::device
+  hiprtc::hiprtc
   roc::rocfft
   ${ROCFFT_SQLITE_LIB}
   ${rocfft-test_link_libs}
@@ -443,7 +460,13 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp)
+    add_executable(
+      ${worker}
+      rocfft_mpi_worker.cpp
+      ../../shared/test_callbacks.cpp
+      ../../shared/data_gen_device.cpp
+      ${callback_embed_cpp}
+      )
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES
@@ -470,6 +493,7 @@ if( ROCFFT_MPI_ENABLE )
         ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
+        hiprtc::hiprtc
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
         "mpi_gtl_hsa"
@@ -483,6 +507,7 @@ if( ROCFFT_MPI_ENABLE )
         ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
+        hiprtc::hiprtc
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
       )    

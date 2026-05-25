@@ -424,8 +424,9 @@ int main(int argc, char* argv[])
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
     non_token
-        ->add_flag(
-            "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+        ->add_flag("--callback",
+                   manual_params.run_callbacks,
+                   "Inject load/store callbacks: none, funcptr, jit")
         ->default_val("none");
     non_token
         ->add_option("--auto_allocation",

@@ -559,9 +559,9 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
 
     // use first params to know things like precision, type that
     // won't change between libraries
-    const auto& params        = all_params.front();
-    const auto  in_elem_size  = var_size<size_t>(params.precision, params.itype);
-    const auto  out_elem_size = var_size<size_t>(params.precision, params.otype);
+    auto&      params        = all_params.front();
+    const auto in_elem_size  = var_size<size_t>(params.precision, params.itype);
+    const auto out_elem_size = var_size<size_t>(params.precision, params.otype);
 
     // allocate and initialize input buffers
     alloc_local_bricks(mpi_rank,
@@ -610,6 +610,18 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
 
     // execute FFTs
     std::chrono::time_point<std::chrono::steady_clock> start, stop;
+
+    // initialize JIT callbacks prior to plan create
+    std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+    if(params.run_callbacks == fft_callback_type_jit)
+    {
+        params.load_cb_symbol = "load_callback";
+        get_rank_load_callback_jit(
+            params, params.load_cb_func, params.load_cb_data, false, all_cb_data);
+        params.store_cb_symbol = "store_callback";
+        get_rank_store_callback_jit(
+            params, params.store_cb_func, params.store_cb_data, false, all_cb_data);
+    }
 
     // call rocfft_plan_create
     for(auto& p : all_params)

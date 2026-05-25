@@ -38,6 +38,22 @@ find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
 include(ROCMInstallTargets)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
 
+# embed rocfft_complex.h so it can be used in hiprtc for callbacks
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
+set( callback_embed_command ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/embed-to-header-rtc.py )
+# generated source file
+set( callback_embed_cpp ${CMAKE_CURRENT_BINARY_DIR}/callback-embed.cpp )
+# files that need to be embedded into the test, to be able to generate callback code
+set( callback_embed_files
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocfft_complex.h
+)
+add_custom_command(
+  OUTPUT ${callback_embed_cpp}
+  COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
+  --embed ${callback_embed_files} --output ${callback_embed_cpp}
+  DEPENDS ${callback_embed_command} ${callback_embed_files}
+)
+
 set( hipfft-test_source
   gtest_main.cpp
   hipfft_accuracy_test.cpp
@@ -52,9 +68,13 @@ set( hipfft-test_source
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
+  ${callback_embed_cpp}
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
+
+find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
+target_link_libraries( hipfft-test PRIVATE hiprtc::hiprtc )
 
 set( TEST_TARGETS hipfft-test )
 
@@ -134,12 +154,18 @@ find_package( Threads REQUIRED )
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
-  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
+  add_executable( hipfft_mpi_worker
+    hipfft_mpi_worker.cpp
+    ../../shared/test_callbacks.cpp
+    ../../shared/data_gen_device.cpp
+    ${callback_embed_cpp}
+    )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )
   target_include_directories( hipfft_mpi_worker
     PRIVATE
     ${MPI_C_INCLUDE_PATH}
   )
+  target_link_libraries( hipfft_mpi_worker PRIVATE hiprtc::hiprtc )
   add_compile_definitions( HIPFFT_MPI_ENABLE )
 endif()
 

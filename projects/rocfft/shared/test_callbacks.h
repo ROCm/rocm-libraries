@@ -23,6 +23,7 @@
 
 #include "fft_params.h"
 #include <functional>
+#include <vector>
 
 // Helpers to work with device functions passed as callbacks, to be
 // used by unit tests
@@ -33,6 +34,14 @@ struct callback_test_data
     // scalar to modify the input/output with
     double scalar;
 };
+
+static const char* callback_test_data_jit = R"(
+struct callback_test_data
+{
+    // scalar to modify the input/output with
+    double scalar;
+};
+)";
 
 // Get a function pointer (on the host) to a load callback device
 // function on the current device
@@ -45,6 +54,16 @@ void* get_load_callback_funcptr(fft_array_type itype,
 void* get_store_callback_funcptr(fft_array_type otype,
                                  fft_precision  precision,
                                  bool           round_trip_inverse = false);
+
+// Get compiled SPIR-V for a load JIT callback device function
+std::vector<char> get_load_callback_jit(fft_array_type itype,
+                                        fft_precision  precision,
+                                        bool           round_trip_inverse = false);
+
+// Get compiled SPIR-V for a store JIT callback device function
+std::vector<char> get_store_callback_jit(fft_array_type otype,
+                                         fft_precision  precision,
+                                         bool           round_trip_inverse = false);
 
 // Collect load callback function pointers and data pointers for the
 // given params.  We'd expect N pointers for N input bricks on the
@@ -73,11 +92,36 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
 // current multi-processing rank.
 //
 // Data structs are allocated on the device in all_cb_data.
+void get_rank_load_callback_jit(const fft_params&                          params,
+                                std::vector<char>&                         load_cb_func,
+                                std::vector<void*>&                        load_cb_data,
+                                bool                                       round_trip_inverse,
+                                std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
+
+// Collect JIT store callback function and data pointers for the given
+// params.  We'd expect N data pointers for N output bricks on the
+// current multi-processing rank.
+//
+// Data structs are allocated on the device in all_cb_data.
+void get_rank_store_callback_jit(const fft_params&                          params,
+                                 std::vector<char>&                         store_cb_func,
+                                 std::vector<void*>&                        store_cb_data,
+                                 bool                                       round_trip_inverse,
+                                 std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 
 // Execute the load/store callback function on a host buffer, to
 // ensure that the reference host FFT is comparable to a device FFT
 // that would run the same callbacks.
 void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input);
 void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output);
+
+// Compile a string of source code to SPIR-V bitcode.
+//
+// NOTE: when errors are returned by hiprtc API functions, this
+// function will throw std::runtime_error rather than
+// hip_runtime_error - normally we'd skip test cases when we hit HIP
+// runtime errors, but hiprtc errors more often indicate programmer
+// error and need to be more noticeable.
+std::vector<char> compile_to_spirv(const std::string& src);
 
 #endif

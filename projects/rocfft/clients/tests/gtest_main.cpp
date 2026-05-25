@@ -451,8 +451,9 @@ int main(int argc, char* argv[])
             n_random_tests = 10;
         });
 
-    app.add_flag(
-           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+    app.add_flag("--callback",
+                 manual_params.run_callbacks,
+                 "Inject load/store callbacks: none, funcptr, jit")
         ->default_val("none");
 
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")

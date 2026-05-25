@@ -19,7 +19,9 @@
 // THE SOFTWARE.
 
 #include "test_callbacks.h"
+#include "hip/hiprtc.h"
 #include "rocfft_complex.h"
+#include <string>
 
 #ifdef ROCFFT_MPI_ENABLE
 #include <mpi.h>
@@ -34,6 +36,16 @@ __host__ __device__ Tdata load_callback(Tdata* input, size_t offset, void* cbdat
     // multiply each element by scalar
     return input[offset] * static_cast<decltype(std::real(input[offset]))>(testdata->scalar);
 }
+
+static const char* load_callback_jit = R"(
+extern "C"
+__device__ Tdata load_callback(Tdata* input, size_t offset, void* cbdata, void* sharedMem)
+{
+    auto testdata = static_cast<const callback_test_data*>(cbdata);
+    // multiply each element by scalar
+    return input[offset] * static_cast<Treal>(testdata->scalar);
+}
+)";
 
 __device__ auto load_callback_dev_half           = load_callback<rocfft_fp16>;
 __device__ auto load_callback_dev_complex_half   = load_callback<rocfft_complex<rocfft_fp16>>;
@@ -52,6 +64,17 @@ __host__ __device__ Tdata
     // subtract each element by scalar
     return input[offset] - static_cast<decltype(std::real(input[offset]))>(testdata->scalar);
 }
+
+static const char* load_callback_round_trip_inverse_jit = R"(
+extern "C"
+__device__ Tdata
+    load_callback_round_trip_inverse(Tdata* input, size_t offset, void* cbdata, void* sharedMem)
+{
+    auto testdata = static_cast<const callback_test_data*>(cbdata);
+    // subtract each element by scalar
+    return input[offset] - static_cast<Treal>(testdata->scalar);
+}
+)";
 
 __device__ auto load_callback_round_trip_inverse_dev_half
     = load_callback_round_trip_inverse<rocfft_fp16>;
@@ -204,6 +227,105 @@ void* get_load_callback_funcptr(fft_array_type itype,
     }
 }
 
+static const char* get_jit_callback_typedef(fft_array_type itype, fft_precision precision)
+{
+    switch(itype)
+    {
+    case fft_array_type_complex_interleaved:
+    case fft_array_type_hermitian_interleaved:
+    {
+        switch(precision)
+        {
+        case fft_precision_half:
+            return "typedef rocfft_complex<rocfft_fp16> Tdata; typedef rocfft_fp16 Treal;";
+        case fft_precision_single:
+            return "typedef rocfft_complex<float> Tdata; typedef float Treal;";
+        case fft_precision_double:
+            return "typedef rocfft_complex<double> Tdata; typedef double Treal;";
+        }
+    }
+    case fft_array_type_real:
+    {
+        switch(precision)
+        {
+        case fft_precision_half:
+            return "typedef rocfft_fp16 Tdata; typedef rocfft_fp16 Treal;";
+        case fft_precision_single:
+            return "typedef float Tdata; typedef float Treal;";
+        case fft_precision_double:
+            return "typedef double Tdata; typedef double Treal;";
+        }
+    default:
+        // planar is unsupported for now
+        throw std::runtime_error("planar callbacks are unsupported");
+    }
+    }
+}
+
+std::vector<char> compile_to_spirv(const std::string& src)
+{
+    struct RaiiState
+    {
+        hiprtcProgram prog = nullptr;
+        ~RaiiState()
+        {
+            if(prog)
+            {
+                hiprtcDestroyProgram(&prog);
+            }
+        }
+    };
+    RaiiState state;
+    if(hiprtcCreateProgram(&state.prog, src.c_str(), "rocfft_callback.hip", 0, nullptr, nullptr)
+       != HIPRTC_SUCCESS)
+    {
+        throw std::runtime_error{"unable to create program"};
+    }
+
+    std::vector<const char*> options;
+    options.push_back("-O3");
+    options.push_back("--offload-arch=amdgcnspirv");
+
+    auto compileResult = hiprtcCompileProgram(state.prog, options.size(), options.data());
+    if(compileResult != HIPRTC_SUCCESS)
+    {
+        size_t logSize = 0;
+        hiprtcGetProgramLogSize(state.prog, &logSize);
+
+        if(logSize)
+        {
+            std::vector<char> log(logSize, '\0');
+            if(hiprtcGetProgramLog(state.prog, log.data()) == HIPRTC_SUCCESS)
+                throw std::runtime_error{std::string(log.begin(), log.end())};
+        }
+        throw std::runtime_error{"compile failed without log"};
+    }
+
+    size_t            codeSize;
+    std::vector<char> code;
+    if(hiprtcGetBitcodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
+        throw std::runtime_error{"failed to get bitcode size"};
+
+    code.resize(codeSize);
+    if(hiprtcGetBitcode(state.prog, code.data()) != HIPRTC_SUCCESS)
+        throw std::runtime_error{"failed to get bitcode"};
+    return code;
+}
+
+extern const char* rocfft_complex_h;
+std::vector<char>
+    get_load_callback_jit(fft_array_type itype, fft_precision precision, bool round_trip_inverse)
+{
+    std::string src = rocfft_complex_h;
+    src += get_jit_callback_typedef(itype, precision);
+    src += callback_test_data_jit;
+
+    src += round_trip_inverse ? load_callback_round_trip_inverse_jit : load_callback_jit;
+
+    // compile to spirv
+    return compile_to_spirv(src);
+}
+
 template <typename Tdata>
 __host__ __device__ static void
     store_callback(Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
@@ -212,6 +334,18 @@ __host__ __device__ static void
     // add scalar to each element
     output[offset] = element + static_cast<decltype(std::real(output[offset]))>(testdata->scalar);
 }
+
+static const char* store_callback_jit = R"(
+extern "C"
+__device__ void
+    store_callback(Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
+{
+    auto testdata = static_cast<callback_test_data*>(cbdata);
+    // add scalar to each element
+    output[offset] = element + static_cast<Treal>(testdata->scalar);
+}
+)";
+
 __device__ auto store_callback_dev_half           = store_callback<rocfft_fp16>;
 __device__ auto store_callback_dev_complex_half   = store_callback<rocfft_complex<rocfft_fp16>>;
 __device__ auto store_callback_dev_float          = store_callback<float>;
@@ -239,6 +373,17 @@ __device__ auto store_callback_round_trip_inverse_dev_double
     = store_callback_round_trip_inverse<double>;
 __device__ auto store_callback_round_trip_inverse_dev_complex_double
     = store_callback_round_trip_inverse<rocfft_complex<double>>;
+
+static const char* store_callback_round_trip_inverse_jit = R"(
+extern "C"
+__device__ void store_callback_round_trip_inverse(
+    Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
+{
+    auto testdata = static_cast<callback_test_data*>(cbdata);
+    // divide each element by scalar
+    output[offset] = element / static_cast<Treal>(testdata->scalar);
+}
+)";
 
 void* get_store_callback_funcptr(fft_array_type otype,
                                  fft_precision  precision,
@@ -376,6 +521,19 @@ void* get_store_callback_funcptr(fft_array_type otype,
         // planar is unsupported for now
         return store_callback_host;
     }
+}
+
+std::vector<char>
+    get_store_callback_jit(fft_array_type otype, fft_precision precision, bool round_trip_inverse)
+{
+    std::string src = rocfft_complex_h;
+    src += get_jit_callback_typedef(otype, precision);
+    src += callback_test_data_jit;
+
+    src += round_trip_inverse ? store_callback_round_trip_inverse_jit : store_callback_jit;
+
+    // compile to spirv
+    return compile_to_spirv(src);
 }
 
 // Apply store callback if necessary
@@ -689,6 +847,91 @@ void get_rank_load_callbacks_funcptr(const fft_params&                          
     }
 }
 
+// For the current rank, get a vector of load callback function +
+// data pointers.  The pointers need to be in the order that
+// fields+bricks were specified to the FFT plan.  Pointers need to be
+// copied to the host from the device specified by the respective
+// brick.
+void get_rank_load_callback_jit(const fft_params&                          params,
+                                std::vector<char>&                         load_cb_func,
+                                std::vector<void*>&                        load_cb_data,
+                                bool                                       round_trip_inverse,
+                                std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
+{
+    int mpi_rank = 0;
+#ifdef ROCFFT_MPI_ENABLE
+    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
+    {
+        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
+    }
+#endif
+
+    load_cb_func = get_load_callback_jit(params.itype, params.precision, round_trip_inverse);
+    // Alloc callback data pointer on current device and add to output vec
+    auto add_load_cb_data = [&]() {
+        callback_test_data load_cb_data_host;
+
+        if(round_trip_inverse)
+        {
+            load_cb_data_host.scalar = params.store_cb_scalar;
+        }
+        else
+        {
+            load_cb_data_host.scalar = params.load_cb_scalar;
+        }
+
+        auto& load_cb_data_dev = all_cb_data.emplace_back();
+        auto  hip_status       = load_cb_data_dev.alloc(sizeof(callback_test_data));
+        if(hip_status != hipSuccess)
+        {
+            throw hip_runtime_error(
+                "Error occurred when allocating device memory for loading callback", hip_status);
+        }
+        hip_status = hipMemcpy(load_cb_data_dev.data(),
+                               &load_cb_data_host,
+                               sizeof(callback_test_data),
+                               hipMemcpyHostToDevice);
+        if(hip_status != hipSuccess)
+        {
+            throw hip_runtime_error(
+                "Error occurred when copying device memory for loading callback", hip_status);
+        }
+        load_cb_data.push_back(load_cb_data_dev.data());
+    };
+
+    if(params.ifields.empty())
+    {
+        // for library-decomposed multi-GPU, one cb for each device
+        if(params.multiGPU > 1)
+        {
+            for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
+            {
+                rocfft_scoped_device dev(i);
+                add_load_cb_data();
+            }
+        }
+        else
+        {
+            // load cb data for current HIP device
+            add_load_cb_data();
+        }
+    }
+    else
+    {
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
+        for(size_t i = 0; i < params.ifields.front().bricks.size(); ++i)
+        {
+            if(params.ifields.front().bricks[i].rank != mpi_rank)
+                continue;
+
+            // load cb data for this brick's device
+            rocfft_scoped_device dev(params.ifields.front().bricks[i].device);
+            add_load_cb_data();
+        }
+    }
+}
+
 // For the current rank, get a vector of store callback function +
 // data pointers.  The pointers need to be in the order that
 // fields+bricks were specified to the FFT plan.  Pointers need to be
@@ -775,6 +1018,93 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
             // store cb for this brick's device
             rocfft_scoped_device dev(params.ofields.front().bricks[i].device);
             add_store_cb();
+        }
+    }
+}
+
+// For the current rank, get a vector of store callback function +
+// data pointers.  The pointers need to be in the order that
+// fields+bricks were specified to the FFT plan.  Pointers need to be
+// copied to the host from the device specified by the respective
+// brick.
+void get_rank_store_callback_jit(const fft_params&                          params,
+                                 std::vector<char>&                         store_cb_func,
+                                 std::vector<void*>&                        store_cb_data,
+                                 bool                                       round_trip_inverse,
+                                 std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
+{
+    int mpi_rank = 0;
+#ifdef ROCFFT_MPI_ENABLE
+    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
+    {
+        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
+    }
+#endif
+
+    store_cb_func = get_store_callback_jit(params.otype, params.precision, round_trip_inverse);
+    // Alloc callback data pointer on current device and add to output vec
+    auto add_store_cb_data = [&]() {
+        callback_test_data store_cb_data_host;
+
+        if(round_trip_inverse)
+        {
+            store_cb_data_host.scalar = params.load_cb_scalar;
+        }
+        else
+        {
+            store_cb_data_host.scalar = params.store_cb_scalar;
+        }
+
+        auto& store_cb_data_dev = all_cb_data.emplace_back();
+        auto  hip_status        = store_cb_data_dev.alloc(sizeof(callback_test_data));
+        if(hip_status != hipSuccess)
+        {
+            throw hip_runtime_error(
+                "Error occurred when allocating device memory for storing callback", hip_status);
+        }
+
+        hip_status = hipMemcpy(store_cb_data_dev.data(),
+                               &store_cb_data_host,
+                               sizeof(callback_test_data),
+                               hipMemcpyHostToDevice);
+        if(hip_status != hipSuccess)
+        {
+            throw hip_runtime_error(
+                "Error occurred when copying device memory for storing callback", hip_status);
+        }
+
+        store_cb_data.push_back(store_cb_data_dev.data());
+    };
+
+    if(params.ofields.empty())
+    {
+        // for library-decomposed multi-GPU, one cb for each device
+        if(params.multiGPU > 1)
+        {
+            for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
+            {
+                rocfft_scoped_device dev(i);
+                add_store_cb_data();
+            }
+        }
+        else
+        {
+            // store cb data for current HIP device
+            add_store_cb_data();
+        }
+    }
+    else
+    {
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
+        for(size_t i = 0; i < params.ofields.front().bricks.size(); ++i)
+        {
+            if(params.ofields.front().bricks[i].rank != mpi_rank)
+                continue;
+
+            // store cb data for this brick's device
+            rocfft_scoped_device dev(params.ofields.front().bricks[i].device);
+            add_store_cb_data();
         }
     }
 }

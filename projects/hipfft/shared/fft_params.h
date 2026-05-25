@@ -492,6 +492,18 @@ public:
 
     fft_auto_allocation auto_allocate = fft_auto_allocation_default;
 
+    // JIT callback parameters are specified at plan creation time, so
+    // they need to be known and remembered before create_plan() is
+    // called
+    const char*        load_cb_symbol = nullptr;
+    std::vector<char>  load_cb_func;
+    std::vector<void*> load_cb_data;
+    size_t             load_cb_shared_mem_bytes = 0;
+    const char*        store_cb_symbol          = nullptr;
+    std::vector<char>  store_cb_func;
+    std::vector<void*> store_cb_data;
+    size_t             store_cb_shared_mem_bytes = 0;
+
     enum fft_mp_lib
     {
         fft_mp_lib_none,
@@ -1075,6 +1087,9 @@ public:
         case fft_callback_type_funcptr:
             ret += "_CB";
             break;
+        case fft_callback_type_jit:
+            ret += "_JITCB";
+            break;
         case fft_callback_type_none:
             break;
         }
@@ -1238,6 +1253,12 @@ public:
         if(pos < vals.size() && vals[pos] == "CB")
         {
             run_callbacks = fft_callback_type_funcptr;
+            ++pos;
+        }
+
+        if(pos < vals.size() && vals[pos] == "JITCB")
+        {
+            run_callbacks = fft_callback_type_jit;
             ++pos;
         }
 
@@ -2832,6 +2853,8 @@ static bool lexical_cast(const std::string& word, fft_callback_type& cbtype)
         cbtype = fft_callback_type_none;
     else if(word == "funcptr")
         cbtype = fft_callback_type_funcptr;
+    else if(word == "jit")
+        cbtype = fft_callback_type_jit;
     else
         throw std::runtime_error("Invalid callback type specified");
     return true;
