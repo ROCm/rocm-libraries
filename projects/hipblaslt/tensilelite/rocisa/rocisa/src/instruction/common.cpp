@@ -529,6 +529,18 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SFf1B32& self, nb::dict&) { return new rocisa::SFf1B32(self); });
 
+    nb::class_<rocisa::SBfeU32, rocisa::CommonInstruction>(m_common, "SBfeU32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SBfeU32& self, nb::dict&) { return new rocisa::SBfeU32(self); });
+
     nb::class_<rocisa::SBfmB32, rocisa::CommonInstruction>(m_common, "SBfmB32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -644,6 +656,26 @@ void common_inst(nb::module_ m_common)
         .def("__str__", &rocisa::SDcacheWb::toString)
         .def("__deepcopy__",
              [](const rocisa::SDcacheWb& self, nb::dict&) { return new rocisa::SDcacheWb(self); });
+
+    nb::class_<rocisa::GlobalWb, rocisa::Instruction>(m_common, "GlobalWb")
+        .def(nb::init<rocisa::CacheScope, const std::string&>(),
+             nb::arg("scope")   = rocisa::CacheScope::SCOPE_DEV,
+             nb::arg("comment") = "")
+        .def_rw("scope", &rocisa::GlobalWb::scope)
+        .def("getParams", &rocisa::GlobalWb::getParams)
+        .def("__str__", &rocisa::GlobalWb::toString)
+        .def("__deepcopy__",
+             [](const rocisa::GlobalWb& self, nb::dict&) { return new rocisa::GlobalWb(self); });
+
+    nb::class_<rocisa::GlobalInv, rocisa::Instruction>(m_common, "GlobalInv")
+        .def(nb::init<rocisa::CacheScope, const std::string&>(),
+             nb::arg("scope")   = rocisa::CacheScope::SCOPE_DEV,
+             nb::arg("comment") = "")
+        .def_rw("scope", &rocisa::GlobalInv::scope)
+        .def("getParams", &rocisa::GlobalInv::getParams)
+        .def("__str__", &rocisa::GlobalInv::toString)
+        .def("__deepcopy__",
+             [](const rocisa::GlobalInv& self, nb::dict&) { return new rocisa::GlobalInv(self); });
 
     nb::class_<rocisa::SNop, rocisa::Instruction>(m_common, "SNop")
         .def(nb::init<int, const std::string&>(), nb::arg("waitState"), nb::arg("comment") = "")
@@ -764,6 +796,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__", [](const rocisa::_SWaitDscnt& self, nb::dict&) {
             return new rocisa::_SWaitDscnt(self);
         });
+
+    nb::class_<rocisa::SWaitXCnt, rocisa::Instruction>(m_common, "SWaitXCnt")
+        .def(nb::init<int, const std::string&>(), nb::arg("xcnt") = 0, nb::arg("comment") = "")
+        .def("getParams", &rocisa::SWaitXCnt::getParams)
+        .def("__str__", &rocisa::SWaitXCnt::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SWaitXCnt& self, nb::dict&) { return new rocisa::SWaitXCnt(self); });
 
     nb::class_<rocisa::SWaitCnt, rocisa::CompositeInstruction>(m_common, "SWaitCnt")
         .def(nb::init<int, int, int, int, const std::string&, bool>(),

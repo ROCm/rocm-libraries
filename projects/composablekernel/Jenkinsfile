@@ -42,8 +42,8 @@ pipeline {
             description: 'If you want to use a custom docker image, please specify it here (default: leave blank).')
         string(
             name: 'ROCMVERSION',
-            defaultValue: '7.1.1',
-            description: 'Specify which ROCM version to use: 7.1.1 (default).')
+            defaultValue: '7.13',
+            description: 'Specify which ROCM version to use: 7.13 (default).')
         string(
             name: 'COMPILER_VERSION',
             defaultValue: '',
@@ -149,6 +149,10 @@ pipeline {
             defaultValue: true,
             description: "Build CK and run tests on gfx12 (default: ON)")
         booleanParam(
+            name: "BUILD_GFX1250",
+            defaultValue: true,
+            description: "Build CK for gfx1250 (default: ON)")
+        booleanParam(
             name: "NINJA_BUILD_TRACE",
             defaultValue: true,
             description: "Generate a ninja build trace (default: ON)")
@@ -168,6 +172,10 @@ pipeline {
             name: "RUN_BUILDER_TESTS",
             defaultValue: false,
             description: "Run CK_BUILDER tests (default: OFF)")
+        booleanParam(
+            name: "RUN_ROCM_CK_TESTS",
+            defaultValue: true,
+            description: "Run rocm_ck tests (default: ON)")
         booleanParam(
             name: "RUN_ALL_UNIT_TESTS",
             defaultValue: false,
@@ -658,6 +666,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+                /*
                 stage("Build CK and run Tests on gfx1010")
                 {
                     when {
@@ -670,6 +679,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+                */
                 stage("Build CK and run Tests on gfx1030")
                 {
                     when {
@@ -703,6 +713,18 @@ pipeline {
                     agent{ label rocmnode("gfx1201") }
                     steps{
                         script { ck.runBuildCKAndTests("gfx12-generic") }
+                        cleanWs()
+                    }
+                }
+                stage("Build CK for gfx1250")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.BUILD_GFX1250.toBoolean() && !params.RUN_FULL_QA.toBoolean() && !params.BUILD_INSTANCES_ONLY.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx90a") }
+                    steps{
+                        script { ck.runBuildCKForGfx1250() }
                         cleanWs()
                     }
                 }
@@ -786,3 +808,4 @@ pipeline {
         }
     }
 }
+

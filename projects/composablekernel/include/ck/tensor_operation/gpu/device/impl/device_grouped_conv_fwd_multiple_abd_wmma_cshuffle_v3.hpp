@@ -21,6 +21,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_fwd_multiple_abd.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
@@ -35,6 +36,7 @@
 #endif
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 namespace ck {
 namespace tensor_operation {
@@ -89,17 +91,17 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                     std::is_same_v<e_data_type, ck::bhalf_t>)))
     {
 #endif
-        using EpilogueType =
-            typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
-                                          GridwiseGemm::UseDirectStore,
-                                      typename GridwiseGemm::EpilogueDirectStore,
-                                      typename GridwiseGemm::EpilogueCShuffle>::type;
+        constexpr auto epilogue_type =
+            GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
+                ? EpilogueType::DirectStore
+                : EpilogueType::CShuffle;
+        using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
 
         constexpr index_t LDS_size =
-            GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
         __shared__ char p_shared[LDS_size];
 
-        auto epilogue_args = EpilogueType{};
+        auto epilogue_args = SelectedEpilogue{};
 
         const auto a_grid_desc_ak0_m_ak1 =
             GridwiseGemm::MakeAGridDescriptor_AK0_M_AK1(a_grid_desc_m_k);
@@ -1583,6 +1585,10 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             return false;
         }
 
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
         // check ConvolutionForwardSpecialization
         if constexpr(ConvForwardSpecialization ==
                      ConvolutionForwardSpecialization::Filter1x1Stride1Pad0)

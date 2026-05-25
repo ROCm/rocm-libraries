@@ -16,6 +16,8 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 
+#include <stdexcept>
+
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
 
@@ -56,6 +58,29 @@ void graph_bindings(nb::module_& m)
             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
             "Get ranked engine IDs for the built operation graph. Requires "
             "build_operation_graph() to have been called first.")
+        .def(
+            "get_behavior_notes_for_engine",
+            [](graph::Graph& g, int64_t engineId) {
+                std::vector<BehaviorNote> notes;
+                auto err = g.get_behavior_notes_for_engine(engineId, notes);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get behavior notes for engine: "
+                                             + err.get_message());
+                }
+                std::vector<BehaviorNote> knownNotes;
+                knownNotes.reserve(notes.size());
+                for(auto note : notes)
+                {
+                    if(isKnownBehaviorNote(note))
+                    {
+                        knownNotes.push_back(note);
+                    }
+                }
+                return knownNotes;
+            },
+            nb::arg("engine_id"),
+            "Get behavior notes for an engine applicable to the built operation graph.")
         .def("check_support", &graph::Graph::check_support)
         .def("build_plans", &graph::Graph::build_plans)
         .def(

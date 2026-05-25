@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu PRIVATE
+    InstructionSizeCosting.cpp
+    AccumulateInstructionSizePass.cpp
+    SwPrefetchInsertionPass.cpp
     PassOrderSnapshotJson.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
@@ -17,6 +20,7 @@ target_sources(stinkytofu PRIVATE
     StinkyWaitCntInsertionPass.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
+    MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     InsertDelayAluPass.cpp

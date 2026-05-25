@@ -611,7 +611,13 @@ def cmake_build(Map conf=[:]){
     }
 
     //cmake_env can overwrite default CXX variables.
-    def cmake_envs = "CXX=${params.BUILD_COMPILER} CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
+    // gfx1250 requires the default ROCm compiler regardless of BUILD_COMPILER param
+    def cmake_envs
+    if (!setup_args.contains("gfx1250")) {
+        cmake_envs = "CXX=${params.BUILD_COMPILER} CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
+    } else {
+        cmake_envs = "CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
+    }
 
     if(conf.get("build_install","") == "true")
     {
@@ -1450,6 +1456,17 @@ def runBuildCKAndTests(String arch) {
 
     def setup_args = """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="${gpuTarget}"${extraSetupArgs} """
     Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_cmd, prefixpath: '/usr/local')
+}
+
+def runBuildCKForGfx1250() {
+    Build_CK_and_Reboot(
+        setup_args: """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="gfx1250" -DDISABLE_DL_KERNELS="ON" """,
+        docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest",
+        config_targets: "install",
+        no_reboot: true,
+        build_type: 'Release',
+        prefixpath: '/usr/local'
+    )
 }
 
 def runBuildInstancesOnly(String compiler) {

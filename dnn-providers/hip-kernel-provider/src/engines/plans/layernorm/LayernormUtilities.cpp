@@ -168,18 +168,18 @@ size_t guessNormalizedDim(
     const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> affineAttr,
     const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr)
 {
-    size_t affineNormalizedDimMin
+    const size_t affineNormalizedDimMin
         = affineAttr.has_value() ? getMinNormalizedDimFromAffine(ioAttr, affineAttr.value()) : 0;
-    size_t statNormalizedDimMin
+    const size_t statNormalizedDimMin
         = statAttr.has_value() ? getMinNormalizedDimFromStat(ioAttr, statAttr.value()) : 0;
 
-    size_t affineNormalizedDimMax
+    const size_t affineNormalizedDimMax
         = affineAttr.has_value() ? getMaxNormalizedDimFromAffine(ioAttr, affineAttr.value()) : 0;
-    size_t statNormalizedDimMax
+    const size_t statNormalizedDimMax
         = statAttr.has_value() ? getMaxNormalizedDimFromStat(ioAttr, statAttr.value()) : 0;
 
-    size_t normalizedDimMin = std::max(affineNormalizedDimMin, statNormalizedDimMin);
-    size_t normalizedDimMax = std::min(affineNormalizedDimMax, statNormalizedDimMax);
+    const size_t normalizedDimMin = std::max(affineNormalizedDimMin, statNormalizedDimMin);
+    const size_t normalizedDimMax = std::min(affineNormalizedDimMax, statNormalizedDimMax);
 
     return normalizedDimMin > 0 ? normalizedDimMin : normalizedDimMax;
 }
