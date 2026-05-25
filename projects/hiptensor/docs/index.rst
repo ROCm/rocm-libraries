@@ -5,7 +5,7 @@
 .. _index:
 
 ===========================
-hipTensor documentation
+hipTensor documentation (preview)
 ===========================
 
 hipTensor is a high-performance HIP C++ library for accelerating tensor primitives.
