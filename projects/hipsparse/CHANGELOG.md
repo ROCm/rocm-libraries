@@ -11,6 +11,9 @@ Documentation for hipSPARSE is available at
 * Add BSR format support to `hipsparseSpMV`.
 * Add BSR format support to `hipsparseSpMM`.
 
+### Upcoming changes
+* The routines `hipsparseXcsrgeamNnz`, `hipsparseScsrgeam`, `hipsparseDcsrgeam`, `hipsparseCcsrgeam`, and `hipsparseZcsrgeam` have been deprecated and will be removed in a future release. Users should use the generic SpGEAM routines instead.
+
 ## hipSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
