@@ -154,6 +154,7 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
         "MIWaveGroup": MIWaveGroup,
         "WavefrontSize": WAVESIZE,
         "UseSubtileImpl": True,
+        "ISA": (9, 5, 0),
         "NonTemporalA": 0,
         "NonTemporalB": 0,
         "ProblemType": {
