@@ -591,7 +591,6 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
   module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group"))
-  # LDS bank conflict rotation + permlane swizzle
   if kernel["ISA"] == (9, 5, 0):
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
@@ -651,9 +650,8 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
       ds=DSModifiers(offset=offset),
       comment="Subtile%s[%u, %u] subIterK=%u" % (tileInfo.tc, sId0, sId1, subIterK))
 
-  # K-split tiles (e.g. WMMA V3 wave32): v0-v3 hold K=0..instK/2-1,
-  # v4-v7 hold K=instK/2..instK-1.  The two halves are separated
-  # by instK*bpe/2 bytes in the K-contiguous LDS layout.
+  # K-split tiles (e.g. WMMA V3 wave32): v0-v3 hold the lo K-half,
+  # v4-v7 hold the hi K-half, separated by instK*bpe/2 bytes in LDS.
   instK = tileInfo.mmaTileShape[1]
   hiDelta = int(instK * tileInfo.bpe / 2)
   module = Module()
