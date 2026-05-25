@@ -586,8 +586,6 @@ def emitTailLoopScaffoldSubtile(kw, kernel, tensorParametersA, tensorParametersB
         # increment closeLoop emits is for the legacy LRO-damage
         # recovery block, which is bypassed for `UseSubtileImpl=1`
         # kernels (see `closeLoop`'s `needTailEndCode`/subtile branch).
-        # Per nakajee review: closeLoop is not necessary in the subtile
-        # tail scaffold.
         kw.vgprPool.checkIn(kPosBaseVgpr)
         kw.states.inTailLoop = False
     # Always emit SkipTailLoopL so the early-exit branch resolves
