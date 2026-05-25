@@ -386,6 +386,11 @@ std::string SignatureKernelDescriptor::toString() const {
     std::string kStr;
 
     kStr += SignatureBase::block3Line("Begin Kernel");
+    // Same value as AccumulateInstructionSizePass -> setTotalInstructionBytes (for lightweight
+    // verification: grep STINKY_TOTAL_INST_BYTES in .s vs readelf .text on .o).
+    if (totalInstructionBytes >= 0) {
+        kStr += "/* STINKY_TOTAL_INST_BYTES: " + std::to_string(totalInstructionBytes) + " */\n";
+    }
     kStr += ".amdgcn_target \"amdgcn-amd-amdhsa--" + isaVersionToGfx(isaVersion) + "\"\n";
     kStr += ".text\n";
     kStr += ".protected " + kernelName + "\n";
@@ -447,7 +452,7 @@ std::string SignatureKernelDescriptor::toString() const {
     // trailing newline.
     for (const auto& d : extraKernelDirectives) {
         kStr += d;
-        if (d.empty() || d.back() != '\n') kStr += "\n";
+        if (d.empty() || d.back() != '\n') kStr += '\n';
     }
 
     kStr += ".end_amdhsa_kernel\n";
