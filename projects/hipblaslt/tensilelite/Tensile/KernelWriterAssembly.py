@@ -1883,16 +1883,18 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
           module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr("AddressD",2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
 
-      endCheckLabel = Label(self.labels.getName(f"label_skip_c_buffer_deref_{Batch}"), "")
-      module.add(BranchIfZero("Beta", kernel["ProblemType"]["ComputeDataType"].toEnum(), tmpSgpr, laneSC, endCheckLabel, \
-                     kernel['WavefrontSize']))
+      # Only load C buffer address if Beta is used and potentially non-zero
+      if kernel["ProblemType"]["UseBeta"]:
+        endCheckLabel = Label(self.labels.getName(f"label_skip_c_buffer_deref_{Batch}"), "")
+        module.add(BranchIfZero("Beta", kernel["ProblemType"]["ComputeDataType"].toEnum(), tmpSgpr, laneSC, endCheckLabel, \
+                       kernel['WavefrontSize']))
 
-      for idx in kernel["ProblemType"]["IndicesBatch"]:
-        if not isPackedIndex(kernel,idx):
-          module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
-          module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
+        for idx in kernel["ProblemType"]["IndicesBatch"]:
+          if not isPackedIndex(kernel,idx):
+            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
+            module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
 
-      module.add(endCheckLabel)
+        module.add(endCheckLabel)
 
     #handle Batch A/B
     endCheckLabel = Label(self.labels.getName(f"label_skip_ab_buffer_deref_{Batch}"), "")
@@ -2701,9 +2703,13 @@ class KernelWriterAssembly(KernelWriter):
           moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
           offset = self.externalArgLoader.getOffset() + self.states.bpr * (self.states.userArgsInfo.alphaMaxRegisterSize - self.states.numSgprAlpha)
           self.externalArgLoader.setOffset(offset)
-          moduleExternalArgs.addComment("Read Beta")
-          moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(self.sgprs["Beta"], "KernArgAddress", self.states.numSgprBeta))
-          offset = self.externalArgLoader.getOffset() + self.states.bpr * (self.states.userArgsInfo.betaMaxRegisterSize - self.states.numSgprBeta)
+          if kernel["ProblemType"]["UseBeta"]:
+            moduleExternalArgs.addComment("Read Beta")
+            moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(self.sgprs["Beta"], "KernArgAddress", self.states.numSgprBeta))
+            offset = self.externalArgLoader.getOffset() + self.states.bpr * (self.states.userArgsInfo.betaMaxRegisterSize - self.states.numSgprBeta)
+          else:
+            # Even when not using Beta, we need to skip over the Beta argument space
+            offset = self.externalArgLoader.getOffset() + self.states.bpr * self.states.userArgsInfo.betaMaxRegisterSize
           if kernel["ProblemType"]["UseScaleAB"] == "Scalar":
             sgprOffset = self.externalArgLoader.getOffset()
             for preloadScale, name in zip([self.states.preloadScaleA, self.states.preloadScaleB], ['A','B']):
@@ -11963,12 +11969,9 @@ class KernelWriterAssembly(KernelWriter):
               lrvw = kernel["LocalReadVectorWidth%s"%tc]
               wlr = max(lrvw//kernel["MIInputPerThreadA"], 1)
               if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadA"]:
-                if not sparseA:
-                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
-                else:
-                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"])
-                  if kernel["WavefrontSize"] == 32:
-                    offsetInc *= 2
+                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                if sparseA:
+                  offsetInc //= 2
               elif (self.states.localReadDoCntA)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadA"]
               else:
@@ -11981,9 +11984,7 @@ class KernelWriterAssembly(KernelWriter):
               lrvw = kernel["LocalReadVectorWidth%s"%tc] // 4
               wlr = max(lrvw//kernel["MIInputPerThreadMetadata"], 1)
               if lrvw < kernel["MIInputPerThreadMetadata"]:
-                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadMetadata"]) // 4
-                if kernel["WavefrontSize"] == 32:
-                  offsetInc *= 2
+                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MatrixInstK"] // 8
               elif (self.states.localReadDoCntMetadata)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadMetadata"]
               else:
@@ -11994,12 +11995,9 @@ class KernelWriterAssembly(KernelWriter):
               lrvw = kernel["LocalReadVectorWidth%s"%tc]
               wlr = max(lrvw//kernel["MIInputPerThreadB"], 1)
               if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadB"]:
-                if not sparseB:
-                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
-                else:
-                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadB"])
-                  if kernel["WavefrontSize"] == 32:
-                    offsetInc *= 2
+                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                if sparseB:
+                  offsetInc //= 2
               elif (self.states.localReadDoCntB)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadB"]
               else:
@@ -12331,7 +12329,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def SrdTDInit(self, kernel):
     module = Module("SrdTDInit")
-    tmpspgr0 = self.sgprPool.checkOut(1)
+    tmpspgr0 = self.sgprPool.checkOut(1, preventOverflow=False)
     tmpspgr1 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
     tmpspgr2 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
     module.addComment0("calculate SrdTD address")
@@ -13505,7 +13503,8 @@ class KernelWriterAssembly(KernelWriter):
 
     if not isSize1:
       divisor   = kernel["MacroTile0"]
-      alignSize  = kernel["MatrixInstM"]
+      destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
+      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -13517,8 +13516,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCmpGeU32(src0=sgpr(wgSgpr), src1=sgpr(tmpS1), comment="wg0 >= nwg0-1 ?"))
     else:
       divisor   = kernel["MacroTile1"]
-      # N-dimension: use 16-row alignment (one MIWaveTile row = 16 cols for bf16)
-      alignSize  = 16
+      alignSize  = 1 if self.states.storeAlign8 else kernel["MatrixInstN"]
       wgSgpr    = "WorkGroup1"
       nwgSgpr   = "NumWorkGroups1"
       # tmpS0 = SizeJ % MT1
@@ -13614,8 +13612,8 @@ class KernelWriterAssembly(KernelWriter):
     # Use pre-allocated permanent guard SGPRs (allocated at start of post-loop).
     assert self.states.subtileM32ValidBlocksSgpr is not None, \
       "SubtileMGuard must be pre-allocated before _emitSubtileGuards"
-    tmpM       = self.sgprPool.checkOut(1, "subtileWaveIdM")
-    tmpN       = self.sgprPool.checkOut(1, "subtileWaveIdN")
+    tmpM       = self.sgprPool.checkOut(1, "subtileWaveIdM", preventOverflow=False)
+    tmpN       = self.sgprPool.checkOut(1, "subtileWaveIdN", preventOverflow=False)
 
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
@@ -13641,14 +13639,17 @@ class KernelWriterAssembly(KernelWriter):
     edgeModule.addComment0("M-guard: numValidD1Steps = min(ceil(max(validM-waveBase,0)/%d), MIWaveTile[0]=%d)" % (miM, kernel["MIWaveTile"][0]))
     edgeModule.add(SMulI32(dst=sgpr("SubtileMGuard"), src0=sgpr("WorkGroup0"), src1=mt0,
                            comment="WG0 * MT0"))
-    edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SizeI"), src1=sgpr("SubtileMGuard"),
-                           comment="validM = SizeI - WG0*MT0"))
     edgeModule.add(SMulI32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=waveGroupM,
                            comment="waveBase = waveIdM * waveGroupM(%d)" % waveGroupM))
-    edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SubtileMGuard"), src1=sgpr(tmpM),
-                           comment="validM - waveBase; SCC=1 if OOB"))
+    edgeModule.add(SAddU32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=sgpr("SubtileMGuard"),
+                           comment="totalMOffset = waveBase + WG0*MT0"))
+    edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SizeI"), src1=sgpr(tmpM),
+                           comment="validM_wave = SizeI - totalMOffset; SCC=1 if OOB"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileMGuard"), src0=0, src1=sgpr("SubtileMGuard"),
                                comment="remainder = 0 if OOB"))
+    # Precompute clamped validM_wave for per-store exec mask (avoids recomputing per store)
+    edgeModule.add(SMinU32(dst=sgpr(tmpM), src0=sgpr("SubtileMGuard"), src1=waveGroupM,
+                           comment="validM_wave = min(remainder, waveGroupM=%d) (precomputed for exec mask)" % waveGroupM))
     edgeModule.add(SAddU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SubtileMGuard"), src1=miM - 1,
                            comment="ceil: remainder + (%d-1)" % miM))
     edgeModule.add(SLShiftRightB32(dst=sgpr("SubtileMGuard"), src=sgpr("SubtileMGuard"), shiftHex=miMShift,
@@ -13656,7 +13657,8 @@ class KernelWriterAssembly(KernelWriter):
     # Clamp: guard comparison is (numValidD1Steps > d1); d1 < MIWaveTile[0] always.
     edgeModule.add(SMinU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SubtileMGuard"), src1=kernel["MIWaveTile"][0],
                            comment="clamp to MIWaveTile[0]=%d" % kernel["MIWaveTile"][0]))
-    self.sgprPool.checkIn(tmpM)
+    # Keep tmpM alive — it holds clamped validM_wave for use in per-store exec mask.
+    self.states.subtileTotalMOffsetSgpr = tmpM
 
     # --- N guard ---
     edgeModule.addComment0("N-guard: numValid16NBlocks = min(max(validN-waveBaseN,0), waveGroupN=%d) >> 4" % waveGroupN)
@@ -13678,8 +13680,13 @@ class KernelWriterAssembly(KernelWriter):
                            comment="validN_wave - waveGroupN; SCC=1 if validN_wave < waveGroupN"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileNGuard"), src0=sgpr("SubtileNGuard"), src1=waveGroupN,
                                comment="min(validN_wave, waveGroupN)"))
-    edgeModule.add(SLShiftRightB32(dst=sgpr("SubtileNGuard"), src=sgpr("SubtileNGuard"), shiftHex=4,
-                                   comment="numValid16NBlocks = clamped >> 4"))
+    if self.states.storeAlign8:
+      # Keep SubtileNGuard = clamped (not shifted). At use sites:
+      #   numBlocks = SubtileNGuard >> 4, partialN = SubtileNGuard & 0xF
+      edgeModule.addComment0("SubtileStoreAlign8: SubtileNGuard stores clamped (not >>4) for arbitrary N mask")
+    else:
+      edgeModule.add(SLShiftRightB32(dst=sgpr("SubtileNGuard"), src=sgpr("SubtileNGuard"), shiftHex=4,
+                                     comment="numValid16NBlocks = clamped >> 4"))
     self.sgprPool.checkIn(tmpN)
 
     self.states.subtileMBlockSize = mBlockSize
@@ -14238,15 +14245,15 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VMulF32(dst=vgpr(newAlphaVgpr), src0=vgpr(newAlphaVgpr), src1=sgpr(sgprScaleB)))
         module.add(SNop(waitState=0, comment="1 wait states"))
         if kernel["StreamK"] > 0:
-          oldAlpha = self.sgprPool.checkOut(1)
+          oldAlpha = self.sgprPool.checkOut(1, preventOverflow=False)
           module.add(SMovB32(dst=sgpr(oldAlpha), src=sgpr("Alpha"), comment="Save alpha value"))
         module.add(VReadfirstlaneB32(dst=sgpr("Alpha"), src=vgpr(newAlphaVgpr), comment="Update Alpha"))
         self.vgprPool.checkIn(newAlphaVgpr)
         self.sgprPool.checkIn(sgprScaleA)
         self.sgprPool.checkIn(sgprScaleB)
 
-      # Update beta
-      if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+      # Update beta with ScaleC (only when Beta is actually used)
+      if kernel["ProblemType"]["UseBeta"] and kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
         newBetaVgpr = self.vgprPool.checkOut(1)
         module.add(VMovB32(dst=vgpr(newBetaVgpr), src=sgpr("Beta")))
@@ -14901,6 +14908,7 @@ class KernelWriterAssembly(KernelWriter):
       if "SubtileMGuard" not in self.sgprs:
         self.states.subtileM32ValidBlocksSgpr = None
         self.states.subtileN16ValidBlocksSgpr = None
+        self.states.subtileTotalMOffsetSgpr = None
         self.states.subtileMBlockSize = 0
 
     # Activation
@@ -14965,6 +14973,9 @@ class KernelWriterAssembly(KernelWriter):
     #################
     # Free after final vgpr calculation
     # Only free locally-allocated guard SGPRs, not permanent ones (SubtileMGuard).
+    if self.states.subtileTotalMOffsetSgpr is not None:
+      self.sgprPool.checkIn(self.states.subtileTotalMOffsetSgpr)
+      self.states.subtileTotalMOffsetSgpr = None
     if self.states.subtileM32ValidBlocksSgpr is not None and "SubtileMGuard" not in self.sgprs:
       self.sgprPool.checkIn(self.states.subtileM32ValidBlocksSgpr)
       self.sgprPool.checkIn(self.states.subtileN16ValidBlocksSgpr)
