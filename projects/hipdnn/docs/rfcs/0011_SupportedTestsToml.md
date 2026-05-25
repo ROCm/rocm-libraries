@@ -153,8 +153,8 @@ The asymmetry is intentional: `[[test_skips]]` reasons are high-signal (every en
                                                           unclaimed-gain entry
 
    `hipdnn_integration_tests --write-support-claims` (offline):
-       runs suite → JSON sidecar → Python helper merges into TOML
-                                                  → engineer reviews `git diff`
+       runs suite → rewrites only the machine-managed region below the
+                    TOML sentinel comment → engineer reviews `git diff`
 ```
 
 ## 5. TOML Schema
@@ -346,7 +346,7 @@ Symmetric detection isn't aesthetic — it's the property that keeps the TOML ho
 
 ## 7. Auto-Generation Tool
 
-The TOML is hand-edited, but writing 50 classified test groups from scratch is tedious and error-prone. `--write-support-claims` produces a complete starter classification from observed runtime support; the engineer reviews via `git diff`.
+The TOML is hand-edited in the small, but writing 50 classified test groups from scratch is tedious and error-prone. `--write-support-claims` is a single C++ command that observes runtime support and writes the `[[supported]]` / `[[unsupported]]` blocks for the current `(arch, platform)` directly into the engine's TOML. The engineer reviews via `git diff`.
 
 ### 7.1 CLI
 
@@ -358,41 +358,95 @@ The TOML is hand-edited, but writing 50 classified test groups from scratch is t
 
 Errors out if `--gtest_filter` is set — partial-run output would write a bogus baseline.
 
-### 7.2 Two-stage internals
+### 7.2 Sentinel-delimited machine-managed region
 
-Stage 1 (C++): runs the full suite, observes per-test support via `SupportMatrixCollector`, dumps a `suggested_claims.json` sidecar next to the TOML:
+The tool divides the TOML into two regions using a sentinel comment line:
 
-```json
-{
-  "engine": "MIOPEN_ENGINE",
-  "arch": "gfx942:sramecc+:xnack-",
-  "archKey": "gfx942",
-  "platform": "linux",
-  "fixtures": [
-    {
-      "name": "IntegrationGpuConvFwd2dFp32",
-      "supported_tests": ["Smoke/.../NCHW_1x16...", ...],
-      "unsupported_tests": []
-    },
-    {
-      "name": "IntegrationGpuConvFwdBiasActiv",
-      "supported_tests": ["Smoke/.../NCHW_1x16..."],
-      "unsupported_tests": ["Smoke/.../NCHW_special_case_1...", ...]
-    },
-    ...
-  ]
-}
+```toml
+[meta]
+version = 1
+
+# Hand-edited content (tolerance overrides, test skips, hand-curated
+# [[supported]]/[[unsupported]] blocks with their own explanatory comments)
+# lives above the sentinel.
+
+[[test_skips]]
+archs   = ["gfx90a"]
+filters = ["*ConvFwdBiasActiv*"]
+reason  = "Engine returns wrong results — ROCm/rocm-libraries#6979"
+
+# ─── auto-generated: do not edit below this line ─────────────────────
+# Regenerate with: ninja miopen-provider-write-support-claims
+# ─────────────────────────────────────────────────────────────────────
+
+[[supported]]
+archs    = ["gfx942"]
+patterns = ["*ConvFwd*", "*ConvBwd*", "*Batchnorm*", "*Matmul*"]
+
+[[unsupported]]
+archs    = ["gfx942"]
+patterns = ["*Sdpa*", "*Attention*"]
+
+# ... more auto-generated blocks per arch ...
 ```
 
-Stage 2 (Python, `scripts/apply_support_claims.py`, using `tomlkit` for comment-preserving round-trip):
+**Above sentinel**: hand-edited. May contain any of the four section kinds (`[[tolerance_overrides]]`, `[[test_skips]]`, `[[supported]]`, `[[unsupported]]`) in any order with arbitrary comments. **Never modified by the tool.**
 
-1. Loads the JSON.
-2. Applies the heuristic (§7.3) to produce `[[supported]]` and `[[unsupported]]` blocks for the current `(arch, platform)`.
-3. **Wholesale replaces** all existing `[[supported]]` and `[[unsupported]]` blocks whose `archs`/`platforms` exactly match the current run. Blocks for other arches are left untouched.
-4. Leaves `[[test_skips]]`, `[[tolerance_overrides]]`, comments, and formatting alone.
-5. Prints mixed-support fixtures and any orphaned existing patterns to stderr as human-decision items.
+**Below sentinel**: machine-managed. Contains only auto-generated `[[supported]]` and `[[unsupported]]` blocks. Engineer edits here will be overwritten on next tool run.
 
-C++ shells out to the Python helper automatically so the engineer runs one command. The change is then visible to `git diff` for review.
+**At load time**: `TestSettings` reads the whole file as one document; both regions contribute patterns and they're unioned per `(arch, platform)`. The verifier doesn't know or care about the sentinel.
+
+### 7.3 Single-stage C++ rewrite
+
+The tool flow is text-level on the head, TOML-level on the tail:
+
+1. Run the full suite via the existing harness; observe per-test support via `SupportMatrixCollector`.
+2. Read the TOML file as text. Locate the sentinel line.
+3. **Sentinel absent** → append sentinel + freshly-generated blocks for the current `(arch, platform)`. Write file. Done.
+4. **Sentinel present** →
+   - Take everything from start-of-file through the sentinel block as **head text**, untouched.
+   - Parse the below-sentinel region with `tomlplusplus`. Drop every `[[supported]]` / `[[unsupported]]` block whose `archs`/`platforms` exactly match the current run. Keep all other-arch blocks verbatim.
+   - Generate new blocks for the current `(arch, platform)` from observed support (§7.4).
+   - Serialise the combined below-sentinel content via `tomlplusplus` in its canonical style.
+   - Write `head_text` + `\n` + `serialised_tail`.
+
+The above-sentinel section is preserved byte-for-byte: every multi-paragraph comment, every blank-line choice, every section ordering decision the engineer made is intact because the tool never round-trips it. The below-sentinel section gets whatever `tomlplusplus` emits (expanded tables, deterministic key order) — that's fine because the sentinel explicitly says "do not edit."
+
+Only dependency: `tomlplusplus`, which the project already uses on the read path. No Python, no JSON sidecar, no cross-language data passing.
+
+### 7.4 Per-fixture heuristic
+
+For each fixture (the `<Fixture>` part between `<Instantiation>/` and `.` in GTest names):
+
+| Fixture state | Tool action |
+|---------------|-------------|
+| All observed tests **supported** | Add `*<Fixture>*` to `[[supported]]` patterns |
+| All observed tests **unsupported** | Add `*<Fixture>*` to `[[unsupported]]` patterns (no `reason` — engineer adds one during review if the gap has a specific story) |
+| **Mixed** | Write nothing for this fixture; emit to stderr as human-decision item |
+
+Generated `[[unsupported]]` entries deliberately omit `reason`. Most gaps are routine ("engine doesn't implement this op") and don't need annotation; the engineer adds a `reason` during `git diff` review for the meaningful cases. Auto-writing `reason = "TODO"` placeholders was considered and rejected — TODO markers would proliferate across every generated entry and lose meaning quickly.
+
+**Mixed-support stderr output:**
+
+```
+Fixture IntegrationGpuConvFwdBiasActiv has mixed support (3 supported / 5 unsupported):
+  supported:
+    - Smoke/.../NCHW_1x16x16x16_1x16x3x3
+    - Smoke/.../NHWC_1x16x16x16_1x16x3x3
+    - Standard/.../NCHW_2x32x14x14_1x32x1x1
+  unsupported:
+    - Smoke/.../NCHW_special_case_1
+    - Smoke/.../NCHW_special_case_2
+    ...
+  Decide:
+    - Narrow [[supported]] pattern to the supported subset (above sentinel), OR
+    - Add narrower [[unsupported]] patterns for the unsupported subset (above sentinel, reason optional), OR
+    - Add [[test_skips]] entries with a reason if the unsupported tests are actually engine-supported-but-broken
+```
+
+The "above sentinel" parentheticals matter: hand-curated narrow patterns belong in the hand-edited region so the tool doesn't overwrite them on the next run.
+
+No coalescing in v1 (e.g. `*Conv*` covering `*ConvFwd*` + `*ConvBwd*` + …). The output is one pattern per fixture; the engineer coalesces in the hand-edited region above the sentinel if desired. Coalescing inside the machine-managed region is a future enhancement.
 
 ### 7.3 Heuristic
 
@@ -426,18 +480,26 @@ Fixture IntegrationGpuConvFwdBiasActiv has mixed support (3 supported / 5 unsupp
 
 No coalescing in v1 (e.g. `*Conv*` covering `*ConvFwd*` + `*ConvBwd*` + …). The output is one pattern per fixture; the engineer coalesces during diff review if desired. Coalescing is a future enhancement once the basic flow is in production.
 
-### 7.4 Wholesale replace, not merge
+### 7.5 Wholesale replace within the machine region
 
-V1 replaces matching `[[supported]]`/`[[unsupported]]` blocks rather than merging into existing patterns. This means a previously hand-coalesced `*Conv*` becomes `*ConvFwd*`, `*ConvBwd*`, `*ConvWgrad*` on re-run, and the engineer must re-coalesce in the same PR. Annoying but transparent — `git diff` shows everything.
+V1 wholesale-replaces matching `[[supported]]`/`[[unsupported]]` blocks in the below-sentinel region rather than merging into existing patterns. A previously machine-coalesced `*Conv*` (if a future coalescing pass produced it) becomes `*ConvFwd*`, `*ConvBwd*`, `*ConvWgrad*` on re-run. Annoying but transparent — `git diff` shows everything.
 
-Merge-preserving behaviour (keep existing patterns that still validly cover all-supported fixtures and no unsupported ones; only add new patterns for gaps) is straightforward to add when re-run friction becomes a felt cost.
+The hand-edited region above the sentinel is the persistence layer for engineer-coalesced or narrowed patterns: anything the engineer wants to survive across tool runs goes there. Merge-preserving behaviour inside the machine region is a v2 enhancement if it becomes a felt cost.
 
-### 7.5 Build integration
+### 7.6 Failure modes the tool detects up front
 
-Both surfaces:
+The tool refuses to run (clear error, no file write) if:
+
+- `--gtest_filter` is set — partial-run baseline would be wrong.
+- The sentinel line is present but malformed (e.g. truncated, duplicated). Operator intervention required.
+- The below-sentinel region contains anything other than `[[supported]]` / `[[unsupported]]` blocks. Catches the case where someone hand-edited the machine region and the tool would otherwise silently delete their work.
+
+### 7.7 Build integration
+
+Two surfaces:
 
 - **CLI flag** on the integration test binary (`--write-support-claims`) — fits the existing flag family (`--test-config`, `--generate-support-matrix`).
-- **CMake/ctest target** per provider (e.g. `ninja miopen-provider-write-support-claims`) — discoverable, idiomatic, runs the binary + Python under the hood with the right `--test-config` baked in.
+- **CMake/ctest target** per provider (e.g. `ninja miopen-provider-write-support-claims`) — discoverable, idiomatic, runs the binary with the right `--test-config` baked in.
 
 ## 8. Workflow
 
@@ -457,7 +519,7 @@ Both surfaces:
 
 1. Engineer runs `ninja <provider>-write-support-claims` on the target hardware.
 2. Tool generates `[[supported]]` and `[[unsupported]]` blocks for the current `(arch, platform)`, with mixed-support fixtures listed on stderr.
-3. Engineer reviews the `git diff`. Adds `reason` strings to `[[unsupported]]` entries that deserve documentation (most won't). Coalesces patterns if desired. Adds `[[test_skips]]` for mixed-fixture tests that are bugs to track.
+3. Engineer reviews the `git diff` of the machine-managed region. Adds `reason` strings to `[[unsupported]]` entries that deserve documentation (most won't) — these go in the hand-edited region *above* the sentinel so they survive the next tool run. Coalesces patterns above the sentinel if desired. Adds `[[test_skips]]` for mixed-fixture tests that are bugs to track.
 4. Commits the TOML; first CI run on that arch goes green.
 
 ### 8.3 Refresh (existing engine, large code change)
@@ -564,7 +626,8 @@ Replace claims with: every unsupported test must have a matching `[[test_skips]]
 | First run on a new arch fails (no block yet). | Verifier treats "no matching `[[supported]]`/`[[unsupported]]` for this `(arch, platform)`" as **not enforced**. Bring-up is unblocked; engineer runs `--write-support-claims` once and commits. |
 | `[[supported]]` and `[[unsupported]]` patterns overlap for a real test → config conflict failure. | Verifier reports the test name and both matched patterns; engineer narrows one side. Possible to detect statically at TOML load for known-overlap globs; deferred. |
 | `[[unsupported]]` block accumulates as a wall of patterns with no documentation. | Most entries don't need reasons (the absence of the op is its own documentation). For the cases that *do* need reasons, code review is the gate — reviewers ask "why is this an explicit gap?" when the pattern looks non-obvious. A future verifier check could flag patterns that hide complex truth (e.g. a pattern that matches what `[[supported]]` *almost* covers). |
-| Auto-gen wholesale-replace blows away hand-coalesced patterns on re-run. | Documented in §7.4; mitigated by `git diff` review. Merge-preserving behaviour is the v2 enhancement when this friction is felt. |
+| Auto-gen wholesale-replace blows away patterns on re-run. | The sentinel split (§7.2) is the mitigation: hand-coalesced or hand-curated patterns belong *above* the sentinel and survive every tool run. Only the machine-managed region below the sentinel is overwritten, and that region's contents are documented as ephemeral. |
+| Engineer hand-edits the machine-managed region below the sentinel; tool silently wipes it. | Tool refuses to run (§7.6) if the below-sentinel region contains anything other than `[[supported]]` / `[[unsupported]]` blocks, or if the sentinel is malformed. Forces operator intervention. |
 | Glob patterns depend on test-naming convention. | Project already enforces `byTag()` and naming rules (see hipDNN CLAUDE.md); reuses existing `globMatch` from `[[test_skips]]` / `[[tolerance_overrides]]`. |
 
 ## 12. Open Questions and Future Work
