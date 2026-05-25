@@ -453,7 +453,7 @@ std::size_t ReduceTensorDescriptor::GetWorkspaceSize(const Handle& handle,
     if(inDescLengths.size() != outDescLengths.size())
         MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
 
-    for(auto i = 0ULL; i < inDescLengths.size(); i++)
+    for(size_t i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
         {
@@ -501,7 +501,7 @@ std::size_t ReduceTensorDescriptor::GetIndicesSize(const TensorDescriptor& inDes
     if(inDescLengths.size() != outDescLengths.size())
         MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
 
-    for(auto i = 0ULL; i < inDescLengths.size(); i++)
+    for(size_t i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
         {
@@ -567,7 +567,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
     if(inDescLengths.size() != outDescLengths.size())
         MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
 
-    for(auto i = 0ULL; i < inDescLengths.size(); i++)
+    for(size_t i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
         {
@@ -610,7 +610,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
     std::vector<int> toReduceDims;
     std::vector<int> invariantDims;
 
-    for(auto i = 0ULL; i < inDescLengths.size(); i++)
+    for(size_t i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] == 1)
             toReduceDims.push_back(i);
@@ -642,7 +642,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
         int p_outStrides[6] = {0};
 
         int pos = 0;
-        for(auto i = 0ULL; i < outDescLengths.size(); i++)
+        for(size_t i = 0ULL; i < outDescLengths.size(); i++)
         {
             // invariant dimensions
             if(outDescLengths[i] > 1)
@@ -655,7 +655,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
             };
         };
 
-        for(auto i = 0ULL; i < outDescLengths.size(); i++)
+        for(size_t i = 0ULL; i < outDescLengths.size(); i++)
         {
             // toReduce dimensions
             if(outDescLengths[i] == 1)

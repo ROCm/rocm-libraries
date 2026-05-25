@@ -51,7 +51,7 @@ static void LogCmdRoPE(const miopenTensorDescriptor_t xDesc, bool is_fwd)
 
         std::string input_sz;
         auto input = miopen::deref(xDesc).GetLengths();
-        for(auto i = 0U; i < input.size(); ++i)
+        for(size_t i = 0ULL; i < input.size(); ++i)
         {
             input_sz += std::to_string(input[i]);
             if(i != input.size() - 1)

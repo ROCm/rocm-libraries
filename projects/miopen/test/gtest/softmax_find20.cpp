@@ -143,7 +143,7 @@ public:
             void* buffers[numTensors]                        = {in_gpu.get(), out_gpu.get()};
             miopenTensorDescriptor_t descriptors[numTensors] = {x_desc, y_desc};
 
-            for(auto i = 0u; i < numTensors; ++i)
+            for(unsigned i = 0u; i < numTensors; ++i)
             {
                 arguments[i].id         = names[i];
                 arguments[i].descriptor = &descriptors[i];
@@ -220,7 +220,7 @@ public:
             void* buffers[numTensors] = {in1_gpu.get(), in2_gpu.get(), out_gpu.get()};
             miopenTensorDescriptor_t descriptors[numTensors] = {y_desc, dy_desc, dx_desc};
 
-            for(auto i = 0u; i < numTensors; ++i)
+            for(unsigned i = 0u; i < numTensors; ++i)
             {
                 arguments[i].id         = names[i];
                 arguments[i].descriptor = &descriptors[i];
@@ -315,13 +315,13 @@ private:
             dyTensor = tensor<T>{test_n, test_c, test_h, test_w};
 
             const T Data_scale = static_cast<T>(0.1);
-            for(auto i = 0ULL; i < dyTensor.data.size(); i++)
+            for(size_t i = 0ULL; i < dyTensor.data.size(); i++)
             {
                 dyTensor.data[i] =
                     Data_scale * prng::gen_A_to_B(static_cast<T>(-0.5), static_cast<T>(0.5));
             }
 
-            for(auto i = 0ULL; i < yTensor.data.size(); i++)
+            for(size_t i = 0ULL; i < yTensor.data.size(); i++)
             {
                 yTensor.data[i] = prng::gen_A_to_B(static_cast<T>(-0.6), static_cast<T>(0.6));
             }

@@ -63,7 +63,7 @@ int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
 
     miopen::par_for(outer_size, min_grain, [&](int32_t o) {
         Tcheck pvar = static_cast<Tcheck>(0);
-        for(auto i = 0ULL; i < inner_size; i++)
+        for(size_t i = 0ULL; i < inner_size; i++)
         {
             Tcheck tmp = static_cast<Tcheck>(x[o * inner_size + i]);
             pvar += tmp * tmp;
@@ -74,7 +74,7 @@ int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
 
         rstdhost[o] = prstd;
 
-        for(auto i = 0ULL; i < inner_size; i++)
+        for(size_t i = 0ULL; i < inner_size; i++)
         {
             Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
                                  ? static_cast<Tcheck>(1)
@@ -125,7 +125,7 @@ int32_t mloT5LayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
         Tcheck prstd = rstdhost[o];
         Tcheck a     = ds * prstd * prstd * prstd * s;
 
-        for(auto i = 0ULL; i < inner_size; i++)
+        for(size_t i = 0ULL; i < inner_size; i++)
         {
             Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
                                  ? static_cast<Tcheck>(1)
@@ -390,7 +390,7 @@ int T5LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dxhost   = std::vector<Tref>(dx_sz, Tref0ref);
     dwhost   = std::vector<Tref>(dw_sz, Tref0ref);
 
-    for(auto i = 0ULL; i < x_sz; i++)
+    for(size_t i = 0ULL; i < x_sz; i++)
     {
         x[i]  = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);
         dy[i] = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);
@@ -401,7 +401,7 @@ int T5LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(dy_dev->ToGPU(GetStream(), dy.data()) != 0)
         std::cerr << "Error copying (dy) to GPU, size: " << dy_dev->GetSize() << std::endl;
 
-    for(auto i = 0ULL; i < weight_sz; i++)
+    for(size_t i = 0ULL; i < weight_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
             weight[i] = Tgpu1val;

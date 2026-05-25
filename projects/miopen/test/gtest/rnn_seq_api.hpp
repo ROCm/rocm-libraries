@@ -258,7 +258,7 @@ struct verify_rnn_api_base
 
         auto& samplesLen = input.desc.GetSequenceLengthsVector();
         ss << " --seq_len_array ";
-        for(auto i = 0ULL; i < inLens[0]; i++)
+        for(size_t i = 0ULL; i < inLens[0]; i++)
         {
             if(i < inLens[0] - 1ULL)
             {
@@ -1823,7 +1823,7 @@ protected:
         seqTensor<T> dy(output);
 
         const auto num_hidden_layers = numLayers * ((dirMode != 0) ? 2 : 1);
-        tensor<T> hx                 = [=, this]() {
+        tensor<T> hx                 = [=]() {
             if(pytorchTensorDescriptorFormat)
                 return tensor<T>(std::vector{num_hidden_layers, batchSize, hiddenSize, 1, 1});
             else
