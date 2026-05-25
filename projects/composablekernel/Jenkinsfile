@@ -260,6 +260,7 @@ pipeline {
                 stage('Docker /opt/rocm'){
                     agent{ label rocmnode("nogpu") }
                     steps{
+                        deleteDir()
                         script {
                             ck.buildDocker('/opt/rocm')
                         }
@@ -281,6 +282,7 @@ pipeline {
                     }
                     agent{ label rocmnode("nogpu") }
                     steps{
+                        deleteDir()
                         script { ck.runClangFormatAndCppcheck() }
                         archiveArtifacts "build/ck_cppcheck.log"
                         cleanWs()
@@ -293,6 +295,7 @@ pipeline {
                     }
                     agent{ label rocmnode("nogpu") }
                     steps{
+                        deleteDir()
                         script { ck.runClangFormat() }
                         cleanWs()
                     }
@@ -395,6 +398,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a")}
                     steps{
+                        deleteDir()
                         script { ck.runFullGroupedConvTileTests() }
                         cleanWs()
                     }
@@ -417,6 +421,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a")}
                     steps{
+                        deleteDir()
                         script { ck.runGroupedConvLargeCaseTests() }
                         cleanWs()
                     }
@@ -439,6 +444,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a")}
                     steps{
+                        deleteDir()
                         script { ck.runComprehensiveConvDatasetTests() }
                         cleanWs()
                     }
@@ -465,6 +471,7 @@ pipeline {
                         execute_args = ck.build_and_run_fmha("gfx90a")
                     }
                     steps{
+                        deleteDir()
                         script {
                         ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
@@ -483,6 +490,7 @@ pipeline {
                         execute_args = ck.build_and_run_fmha("gfx942")
                     }
                     steps{
+                        deleteDir()
                         script {
                         ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
@@ -501,6 +509,7 @@ pipeline {
                         execute_args = ck.build_and_run_fmha("gfx950")
                     }
                     steps{
+                        deleteDir()
                         script {
                         ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
@@ -519,6 +528,7 @@ pipeline {
                         execute_args = ck.build_and_run_fmha("gfx1201")
                     }
                     steps{
+                        deleteDir()
                         script {
                         ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
@@ -543,6 +553,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
+                        deleteDir()
                         script { ck.runTileEngineBasicTests(params.BUILD_COMPILER) }
                         cleanWs()
                     }
@@ -565,6 +576,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
+                        deleteDir()
                         script { ck.runTileEngineGemmTests("gfx942", params.BUILD_COMPILER) }
                         cleanWs()
                     }
@@ -577,6 +589,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx950") }
                     steps{
+                        deleteDir()
                         script { ck.runTileEngineGemmTests("gfx950", params.BUILD_COMPILER) }
                         cleanWs()
                     }
@@ -589,6 +602,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx1201") }
                     steps{
+                        deleteDir()
                         script { ck.runTileEngineGemmTests("gfx1201", params.BUILD_COMPILER) }
                         cleanWs()
                     }
@@ -612,6 +626,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx942") }
                         cleanWs()
                     }
@@ -624,6 +639,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx950") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx950") }
                         cleanWs()
                     }
@@ -637,6 +653,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx908") }
                         cleanWs()
                     }
@@ -650,6 +667,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx90a") }
                         cleanWs()
                     }
@@ -662,6 +680,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildInstancesOnly(params.BUILD_COMPILER) }
                         cleanWs()
                     }
@@ -675,6 +694,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx1010") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx10-1-generic") }
                         cleanWs()
                     }
@@ -688,6 +708,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx1030") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx10-3-generic") }
                         cleanWs()
                     }
@@ -700,6 +721,7 @@ pipeline {
                     }
                     agent{ label 'miopen && (gfx1101 || gfx1100)' }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx11-generic") }
                         cleanWs()
                     }
@@ -712,6 +734,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx1201") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx12-generic") }
                         cleanWs()
                     }
@@ -724,6 +747,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        deleteDir()
                         script { ck.runBuildCKAndTests("gfx1250") }
                         cleanWs()
                     }
@@ -765,6 +789,7 @@ pipeline {
                     }
                     agent { label 'mici' }
                     steps{
+                        deleteDir()
                         script {
                         ck.process_results()
                         }
