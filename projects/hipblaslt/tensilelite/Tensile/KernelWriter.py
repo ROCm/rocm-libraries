@@ -5527,23 +5527,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, -1, None))
 
-      # Tighten Srd<tc>+2 (NumRecords) for A/B against out-of-array
-      # reads on the last m-row when K_remain < DepthU; see
-      # `_emitTailSrdTightenSubtile` for the formula and gating
-      # (bf16/fp16/int8 anyk paths). MX A/B data and swizzled A/B
-      # (DTV path) remain deferred.
+      # Tighten Srd<tc>+2 (NumRecords) at tail entry against
+      # last-m-row OOR reads: bf16/fp16/int8 A/B, then MX scales,
+      # then MX data. Each helper has its own gating (DTV-swizzled
+      # operands are deferred). See `_emitTailSrdTightenSubtile*`
+      # docstrings for the formulas.
       module.add(self._emitTailSrdTightenSubtile(kernel))
-      # MX scale SRD tightening (MXSA / MXSB) when DepthU > 256;
-      # see `_emitTailSrdTightenSubtileMX` for formula and gating
-      # (statically no-op for DepthU <= 256, the host MX-pad unit).
       module.add(self._emitTailSrdTightenSubtileMX(kernel))
-      # MX data SRD tightening (SrdA / SrdB on MX kernels) when
-      # DepthU > 256: data-side SRD needs the same K=256-padded clip
-      # as the scale side (the per-lane mask + 0-scale absorb keeps
-      # results correct under garbage data, but garbage reads can
-      # still page fault past the data buffer). See
-      # `_emitTailSrdTightenSubtileMXData` for formula and gating
-      # (statically no-op for DepthU <= 256).
       module.add(self._emitTailSrdTightenSubtileMXData(kernel))
 
       # No SRD rewind here. For PGR=0 the mainloop's per-iter GR_INC
@@ -5556,30 +5546,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # LoopCounterL = K mod DU; BufferLoad bounds-clips any DU-shaped
       # over-read.
 
-      # Allocate tail-local vgprTiles for A/B (+ MXSA/MXSB if scaled).
-      # Mainloop GR/LR goes through LogicalScheduler / InstructionEmitter
-      # using scheduler-owned vgprs; the tail reuses the legacy
-      # globalReadDoSubtile / localReadDoSubtile helpers which read
-      # tileInfo.vgprTiles directly. D-tile vgprs are shared.
-      #
-      # VGPR pressure split: the historic bulk alloc kept every mmak's
-      # A/B vgprTiles live across the per-mmak MFMA loop (e.g. at
-      # MT 320x288x64 BF16, 10 A tiles + 36 B tiles * 4 vgprs each
-      # = 184 vgprs concurrent across mmak), which on top of the
-      # D-tile vgpr-overflow blew the wave-64 256-VGPR occupancy
-      # budget. The mmak-th K-slice of `vgprTiles` is the only thing
-      # the MFMA grid for `mmak` consumes, so A/B vgprTiles are now
-      # allocated / freed per-mmak inside the loop below (see
-      # `allocVgprTileRegistersForMmak`). Only one slice's worth of
-      # A+B vgprs is live at a time -- 92 instead of 184 for the
-      # MT 320x288 case, dropping the high-water to ~210 (4 setup +
-      # 112 D overflow + 92 slice + 2 scratch).
-      #
-      # MX scale tiles keep the bulk alloc: their LR subtile shape
-      # `(2, 2)` packs `_mma0` into the tile id which the slice
-      # formula does not unroll, and the cross-mmak VGPR sharing
-      # means a per-mmak slice would re-emit the same ds_read into
-      # the same VGPR.
+      # Allocate tail-local vgprTiles. A/B use per-mmak slice alloc
+      # (`allocVgprTileRegistersForMmak` inside the loop below) so
+      # only one mmak's A+B is live at a time -- the bulk alloc kept
+      # every mmak's slice live and pushed large MTs (e.g. 320x288)
+      # past the 256-VGPR wave-64 occupancy budget on top of the
+      # D-tile overflow. MX scale tiles keep the bulk alloc: their
+      # LR subtile shape `(2, 2)` packs `_mma0` into the tile id and
+      # cross-mmak VGPR sharing means a per-mmak slice would re-emit
+      # the same ds_read into the same VGPR.
       self.states.a.tileInfo.initVgprTileSlots(self, kernel)
       self.states.b.tileInfo.initVgprTileSlots(self, kernel)
       mxAllocTiles = []
@@ -5590,18 +5565,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       for mxTile in mxAllocTiles:
         mxTile.allocVgprTileRegisters_legacy(self, kernel)
 
-      # Re-issue one DepthU-shaped GR + LR. Byte-layout identical to a
-      # mainloop iter; lane mask below zeros lanes past K_tail.
-      #
-      # A/B Srd+2 was tightened just above by
-      # `_emitTailSrdTightenSubtile` to clip the last m-row's K reads
-      # past `roundUp(K_remain*bpe, 4)` (returns 0 via buffer-OOB).
-      # MX scale SRDs (MXSA/MXSB) are tightened by
-      # `_emitTailSrdTightenSubtileMX` when DepthU > 256; for DepthU
-      # <= 256 the host re-scatter padding
-      # (`DataInitialization.rearrangePaddedMXScaleLayout`) alone
-      # already covers any K_remain. Swizzled A/B (DTV path) live on
-      # a separate emit path and are not tightened here.
+      # Re-issue one DepthU-shaped GR + LR. Byte-layout matches a
+      # mainloop iter; the tightener above clips the last m-row's K
+      # reads to in-bounds bytes (buffer-OOB returns 0 for the rest)
+      # and the per-lane mask below zeros bytes past K_tail.
       module.add(globalReadDoSubtile('A', self, kernel))
       module.add(globalReadDoSubtile('B', self, kernel))
 
@@ -5611,10 +5578,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # LDS and leaves OOB bytes stale; `_emitTailSubLaneMaskRefineSubtile`
       # zeros those stale bytes in VGPR after the local read.
 
-      # MX scale tail GR. On gfx950 the host pads MXSA/MXSB with zeros
-      # and pre-swizzles them (ContractionProblemGemm::setMXScale{A,B}
-      # with padScaleTensor=true), so over-read bytes past K_tail/mxBlock
-      # are zero and contribute 0 to the MFMA. No LDS pre-zero needed.
+      # MX scale tail GR. Host pads MXSA/MXSB with zeros and
+      # pre-swizzles them (`ContractionProblemGemm::setMXScale{A,B}`
+      # with padScaleTensor=true), so over-read scale bytes past
+      # K_tail/mxBlock contribute 0 to the MFMA -- no LDS pre-zero.
       if kernel["ProblemType"].get("MXBlockA", 0) > 0:
         module.add(globalReadDoScaleSubtile('MXSA', self, kernel))
       if kernel["ProblemType"].get("MXBlockB", 0) > 0:
@@ -5687,12 +5654,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                           comment="tail GR: wait for DTL writes to LDS"))
       module.add(SBarrier(comment="tail GR: LDS sync before LR"))
 
-      # MX scale LR fires once up front: each scale VGPR holds
-      # mmak-shared bytes (LR subtile shape `(2, 2)` packs `mmak //
-      # subtileKShape` into the scale group), so a per-mmak re-issue
-      # would just rewrite the same VGPR. A/B LR is emitted inside
-      # the per-mmak loop below so the destination vgprTiles can be
-      # checked out / released per iteration.
+      # MX scale LR fires once up front: scale VGPRs are mmak-shared
+      # (LR subtile shape `(2, 2)` packs mmak//subtileKShape into the
+      # scale group), so per-mmak re-issue would re-write the same
+      # VGPR. A/B LR runs inside the per-mmak loop below for the
+      # per-slice checkOut/release.
       if kernel["ProblemType"].get("MXBlockA", 0) > 0:
         module.add(localReadDoScaleSubtile('MXSA', self, kernel))
       if kernel["ProblemType"].get("MXBlockB", 0) > 0:
@@ -5751,24 +5717,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       laneSGPRCount = self.states.laneSGPRCount
       for mmak in range(tiA.localMMATileGrid[1]):
-        # Per-mmak slice alloc + LR: pull only the current mmak's
-        # A/B vgprTiles into the pool, emit ds_reads for the
-        # corresponding K-slice (data lives in LDS after the bulk
-        # GR above), wait for the ds_reads to retire, then run the
-        # masking + MFMA grid. The slice is freed at the bottom of
-        # the iteration so peak VGPR pressure tracks one slice
-        # instead of the full A/B vgprTiles range.
+        # Per-mmak: alloc this mmak's A/B slice, ds_read its K-slice
+        # from LDS, wait, mask + MFMA, then free the slice. Peak VGPR
+        # pressure tracks one slice instead of the full vgprTiles
+        # range.
         aMmakSlice = tiA.allocVgprTileRegistersForMmak(self, kernel, mmak)
         bMmakSlice = tiB.allocVgprTileRegistersForMmak(self, kernel, mmak)
-        # Per-mmak ds_read slice (mmak -> (sId1, du)):
-        #   sId1   = mmak // subtileShape[1]
-        #   du     = mmak %  subtileShape[1]
-        #   mfmaId = getSubtileShapeLinearId(du, 0)
-        # Loops sId0 over the operand's M-axis local subtile grid and
-        # emits one DS load per (sId0, sId1, du). Inlined here (vs a
-        # separate `emitSubtileDsReadForMmak` helper) because the
-        # iteration shape is tail-scaffold-specific and this is the
-        # only call site.
+        # ds_read slice (mmak -> (sId1, du)):
+        #   sId1, du = divmod(mmak, subtileShape[1])
+        #   mfmaId   = getSubtileShapeLinearId(du, 0)
+        # Inlined here (no shared helper) because this iteration shape
+        # is tail-scaffold-specific.
         for tc, ti in (('A', tiA), ('B', tiB)):
           subKShape = ti.subtileShape[1]
           sId1     = mmak // subKShape
@@ -5792,13 +5751,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         #   - Coarse path (default): per-mmak cmp + per-VGPR
         #     cndmask, including MXSA/MXSB when scales are present.
         if byteRefineApplies:
-          # Group A/B operand VGPRs by their ir slot within each
-          # (mma0, mmak) / (mma1, mmak) tile; the byte refine emits
-          # one mask chain per (ir, operand) so the dedup is keyed
-          # by `vIdx` and asserts one ir per vIdx (sub-lane refine
-          # assumes the same VGPR holds the same K-slot across
-          # different mma{0,1} tiles, mirroring the legacy hoisted
-          # cndmask layout).
+          # Group A/B operand VGPRs by ir slot within each
+          # (mma0|1, mmak) tile -- one mask chain per (ir, operand).
+          # Sub-lane refine assumes the same VGPR holds the same
+          # K-slot across mma{0,1} tiles (matches the legacy hoisted
+          # cndmask layout); the assert below pins that invariant.
           aIndicesByIr = {}
           bIndicesByIr = {}
           seenAByteVgpr = {}
@@ -5824,15 +5781,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
               seenBByteVgpr[vIdx] = ir
               bIndicesByIr.setdefault(ir, []).append(vIdx)
           if useMaskPrecompute:
-            # Hot path: every cmp/cndmask was emitted up front into
-            # `precomputedMaskMap`; this per-mmak step is just
-            # `v_and_b32` against the precomputed VGPR.
+            # Hot path: per-mmak step is just `v_and_b32` against
+            # the precomputed VGPR (chain emitted up front).
             module.add(self._emitTailSubLaneMaskApplySubtile(
               mmak, precomputedMaskMap, aIndicesByIr, bIndicesByIr))
           else:
-            # Legacy fallback (config-gated): emit the full chain
-            # inline per mmak. Kept so the precompute can be flipped
-            # off without reverting code.
+            # `SubtileTailMaskPrecompute=False` reversibility path.
             module.add(self._emitTailSubLaneMaskRefineSubtile(
                 kernel, kPosBaseVgpr, mmak, miK, numMIInUnroll,
                 aIndicesByIr, bIndicesByIr))
@@ -5893,32 +5847,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 comment="tail MFMA C[%u,%u] += A[%u,%u] * B[%u,%u] (mmak=%u)" %
                         (mma0, mma1, mma0, mmak, mmak, mma1, mmak)))
 
-        # Release this mmak's A/B slice before the next mmak's
-        # alloc (or the early-exit branch). The dealloc only affects
-        # emit-time pool accounting -- it doesn't emit instructions
-        # -- so a runtime early-exit branch out is balanced too: the
-        # slice for the current mmak is fully released here, and the
-        # branch target downstream of the loop sees a clean pool.
+        # Release this mmak's A/B slice. The dealloc is emit-time
+        # pool accounting only (no instruction), so a runtime
+        # early-exit branch out below stays balanced: the branch
+        # target downstream of the loop sees a clean pool either
+        # way.
         tiA.freeVgprTileRegistersForMmak(self, kernel, aMmakSlice)
         tiB.freeVgprTileRegistersForMmak(self, kernel, bMmakSlice)
 
-        # Per-mmak early exit: when LoopCounterL (= K mod DU = K_tail)
-        # is fully consumed by the mmaks we've already issued
-        # (K_tail <= MIK * (mmak + 1)), all subsequent (mmak+1, ...)
-        # MFMAs would feed lanes that the cndmask + sub-lane refine
-        # have already zeroed. Skip them by branching to the tail-end
-        # label. Omit after the final mmak: closeLoop's natural exit
-        # covers it.
+        # Per-mmak early exit: when K_tail (=LoopCounterL=K mod DU)
+        # is fully consumed by the mmaks already issued
+        # (K_tail <= MIK * (mmak+1)), every subsequent MFMA would
+        # feed already-zeroed lanes. Skip them. Omit after the
+        # final mmak: closeLoop's natural exit covers that case.
         if mmak + 1 < tiA.localMMATileGrid[1]:
           consumedK = miK * (mmak + 1)
-          # gfx950 scalar/vector cmp src1 has a -16..64 inline-constant
-          # range; values past that need a 32-bit literal slot which the
-          # assembler can reject (or silently mis-encode) for some VOPC
-          # / SOPC opcodes. Stage out-of-range literals through a
-          # scratch sgpr so the cmp always sees an inline-or-sgpr src1.
-          # For the per-mmak early exit specifically, MIK*(subIterK+1)
-          # exceeds 64 for typical bf16 (MIK=32) once subIterK>=2 and
-          # for FP4 (MIK=128) at every mmak>=0.
+          # `consumedK` exceeds the gfx950 VOPC/SOPC inline range
+          # (-16..64) for bf16 (MIK=32) once subIterK>=2 and for fp4
+          # (MIK=128) at every mmak; stage non-inline literals
+          # through a scratch sgpr so the cmp always has inline-or-
+          # sgpr src1.
           module.add(self._emitSubtileScalarCmpLitOrStaged(
               SCmpLeU32, sgpr("LoopCounterL"), consumedK,
               "LoopCounterL <= MIK*(subIterK+1)?"))
@@ -5926,18 +5874,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
               labelName=Label.getFormatting("SkipTailLoop%s" % loopChar),
               comment="early-exit tail after subIterK=%u (no valid K left)" % mmak))
 
-      # Release the precomputed K-tail mask VGPRs (allocated once
-      # before the per-mmak loop; lived across every iter). The
-      # runtime per-mmak early-exit branches to `SkipTailLoopL` which
-      # sits past this cleanup, so emit-time pool accounting balances
-      # regardless of which branch fires at runtime.
+      # Release the precomputed K-tail mask VGPRs (held across every
+      # mmak iter). `SkipTailLoopL` sits past this cleanup, so the
+      # emit-time pool stays balanced under either runtime exit.
       for vMask in precomputedMaskVgprs:
         self.vgprPool.checkIn(vMask)
       precomputedMaskVgprs = []
       precomputedMaskMap = None
 
-      # Empty the now-unused A/B slot lists; the per-mmak alloc/free
-      # pattern above already released every VGPR back to the pool.
+      # The per-mmak alloc/free above already returned every A/B
+      # vgprTile to the pool; clear the slot lists.
       self.states.a.tileInfo.vgprTiles = []
       self.states.b.tileInfo.vgprTiles = []
       for mxTile in mxAllocTiles:
