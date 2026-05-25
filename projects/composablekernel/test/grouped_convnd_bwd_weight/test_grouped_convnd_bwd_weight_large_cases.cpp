@@ -2,53 +2,102 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdlib>
-#include <initializer_list>
 #include <iostream>
+#include <initializer_list>
+#include <tuple>
 #include <vector>
+
 #include <gtest/gtest.h>
 
-#include "profiler/profile_grouped_conv_fwd_impl.hpp"
+#include "ck/utility/common_header.hpp"
+#include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
+#include "ck/host_utility/device_prop.hpp"
+
+#include "profiler/profile_grouped_conv_bwd_weight_impl.hpp"
+
+static ck::index_t param_mask     = 0xffff;
+static ck::index_t instance_index = -1;
+
+using namespace ck::tensor_layout::convolution;
 
 template <typename Tuple>
-class TestGroupedConvndFwd : public ::testing::Test
+class TestGroupedConvndBwdWeight : public ::testing::Test
 {
     protected:
     using DataType  = std::tuple_element_t<0, Tuple>;
     using InLayout  = std::tuple_element_t<1, Tuple>;
     using WeiLayout = std::tuple_element_t<2, Tuple>;
     using OutLayout = std::tuple_element_t<3, Tuple>;
-    using IndexType = ck::long_index_t;
 
     std::vector<ck::utils::conv::ConvParam> conv_params;
+    std::vector<ck::index_t> split_ks{-1, 1, 2};
+
+    bool skip_case(const ck::index_t split_k)
+    {
+        // 1d NWGC is only supported by DL kernel
+        // DL kernel is only supported for split_k=1
+        if constexpr(std::is_same_v<InLayout, NWGC> && std::is_same_v<OutLayout, NWGK>)
+        {
+            if(split_k != 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     template <ck::index_t NDimSpatial>
     void Run()
     {
         EXPECT_FALSE(conv_params.empty());
         bool pass = true;
-        for(auto& param : conv_params)
+
+        for(auto split_k : split_ks)
         {
-            pass = pass && ck::profiler::profile_grouped_conv_fwd_impl<NDimSpatial,
-                                                                       InLayout,
-                                                                       WeiLayout,
-                                                                       OutLayout,
-                                                                       DataType,
-                                                                       DataType,
-                                                                       DataType,
-                                                                       DataType,
-                                                                       DataType,
-                                                                       IndexType>(
-                               true,  // do_verification
-                               1,     // init_method: integer value
-                               false, // do_log
-                               false, // time_kernel
-                               param);
+            for(size_t i = 0; i < conv_params.size(); i++)
+            {
+                if((param_mask & (1 << i)) == 0)
+                {
+                    continue;
+                }
+                auto& param = conv_params[i];
+                if(!skip_case(split_k))
+                {
+                    const bool success =
+                        ck::profiler::profile_grouped_conv_bwd_weight_impl<NDimSpatial,
+                                                                           InLayout,
+                                                                           WeiLayout,
+                                                                           OutLayout,
+                                                                           DataType,
+                                                                           DataType,
+                                                                           DataType>(
+                            2,     // do_verification
+                            1,     // init_method: integer value
+                            false, // do_log
+                            false, // time_kernel
+                            param,
+                            std::to_string(split_k),
+                            instance_index);
+                    pass = pass && success;
+                    if(!success)
+                        std::cout << "Case " << param << " failed!" << std::endl;
+                }
+            }
         }
         EXPECT_TRUE(pass);
     }
 };
 
-using namespace ck::tensor_layout::convolution;
+template <typename Tuple>
+class TestGroupedConvndBwdWeight2d : public TestGroupedConvndBwdWeight<Tuple>
+{
+};
+
+template <typename Tuple>
+class TestGroupedConvndBwdWeight3d : public TestGroupedConvndBwdWeight<Tuple>
+{
+};
 
 using KernelTypes2d = ::testing::Types<std::tuple<float, NHWGC, GKYXC, NHWGK>,
                                        std::tuple<ck::half_t, NHWGC, GKYXC, NHWGK>,
@@ -58,21 +107,12 @@ using KernelTypes3d = ::testing::Types<std::tuple<float, NDHWGC, GKZYXC, NDHWGK>
                                        std::tuple<ck::half_t, NDHWGC, GKZYXC, NDHWGK>,
                                        std::tuple<ck::bhalf_t, NDHWGC, GKZYXC, NDHWGK>>;
 
-template <typename Tuple>
-class TestGroupedConvndFwd2d : public TestGroupedConvndFwd<Tuple>
-{
-};
+TYPED_TEST_SUITE(TestGroupedConvndBwdWeight2d, KernelTypes2d);
+TYPED_TEST_SUITE(TestGroupedConvndBwdWeight3d, KernelTypes3d);
 
-template <typename Tuple>
-class TestGroupedConvndFwd3d : public TestGroupedConvndFwd<Tuple>
+TYPED_TEST(TestGroupedConvndBwdWeight2d, Test2D)
 {
-};
-
-TYPED_TEST_SUITE(TestGroupedConvndFwd2d, KernelTypes2d);
-TYPED_TEST_SUITE(TestGroupedConvndFwd3d, KernelTypes3d);
-
-TYPED_TEST(TestGroupedConvndFwd2d, Test2D)
-{
+    this->conv_params.clear();
     // Case larger than 2GB
     this->conv_params.push_back(
         {2, 1, 128, 4, 192, {2, 2}, {224, 224}, {224, 224}, {1, 1}, {0, 0}, {0, 0}});
@@ -88,8 +128,9 @@ TYPED_TEST(TestGroupedConvndFwd2d, Test2D)
     this->template Run<2>();
 }
 
-TYPED_TEST(TestGroupedConvndFwd3d, Test3D)
+TYPED_TEST(TestGroupedConvndBwdWeight3d, Test3D)
 {
+    this->conv_params.clear();
     // Case larger than 2GB
     this->conv_params.push_back({3,
                                  1,
@@ -127,4 +168,21 @@ TYPED_TEST(TestGroupedConvndFwd3d, Test3D)
                                  {1, 1, 1},
                                  {1, 1, 1}});
     this->template Run<3>();
+}
+
+int main(int argc, char** argv)
+{
+    testing::InitGoogleTest(&argc, argv);
+    if(argc == 1) {}
+    else if(argc == 3)
+    {
+        param_mask     = strtol(argv[1], nullptr, 0);
+        instance_index = atoi(argv[2]);
+    }
+    else
+    {
+        std::cout << "Usage of " << argv[0] << std::endl;
+        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
+    }
+    return RUN_ALL_TESTS();
 }
