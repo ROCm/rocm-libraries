@@ -50,7 +50,7 @@ void doProbe(GfxArchID archID, ArchCapsEntry& entry) {
 
 AsmCapsConfig ToolchainCaps::probe(GfxArchID archID) {
     auto idx = static_cast<size_t>(archID);
-    assert(idx < kMaxArchs && "GfxArchID exceeds ToolchainCaps cache size");
+    if (idx >= kMaxArchs) return {};
     auto& entry = g_cache[idx];
     std::call_once(entry.flag, doProbe, archID, std::ref(entry));
     return entry.caps;

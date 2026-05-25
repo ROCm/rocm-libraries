@@ -13,6 +13,7 @@
 #include <Windows.h>
 #include <delayimp.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -44,6 +45,19 @@ FARPROC WINAPI delayLoadHook(unsigned dliNotify, PDelayLoadInfo pdli) {
 }  // namespace
 
 extern "C" const PfnDliHook __pfnDliNotifyHook2 = delayLoadHook;
+
+bool isRocmPathSet() {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    std::string binDir = getRocmBinDir();
+    if (binDir.empty()) {
+        fprintf(stderr, "stinkytofu: ROCM_PATH not set, comgr probing disabled\n");
+        cached = 0;
+        return false;
+    }
+    cached = 1;
+    return true;
+}
 #endif  // _WIN32
 
 #endif  // STINKYTOFU_HAS_COMGR
@@ -110,6 +124,9 @@ struct ComgrActionInfo {
 
 bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaName,
                           uint32_t wavefrontSize) {
+#ifdef _WIN32
+    if (!isRocmPathSet()) return false;
+#endif
     ComgrData data;
     if (!data.create()) return false;
 
@@ -148,7 +165,11 @@ bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaNa
 }
 
 bool hasComgrSupport() {
+#ifdef _WIN32
+    return isRocmPathSet();
+#else
     return true;
+#endif
 }
 
 #else  // !STINKYTOFU_HAS_COMGR

@@ -62,7 +62,9 @@ void Backend::configurePassManager(PassManager& pm) {
     pm.setGemmTileConfig(gemmTileConfig);
 
     AsmCapsConfig asmCapsConfig;
-    asmCapsConfig.vgprMsbMode = static_cast<VgprMsbMode>(opts.VgprMsbMode);
+    auto msbVal = opts.VgprMsbMode;
+    if (msbVal < 0 || msbVal > static_cast<int>(VgprMsbMode::Msb16)) msbVal = 0;
+    asmCapsConfig.vgprMsbMode = static_cast<VgprMsbMode>(msbVal);
 
     // When VgprMsbMode was not set explicitly (standalone path without rocisa),
     // auto-probe using comgr if available.

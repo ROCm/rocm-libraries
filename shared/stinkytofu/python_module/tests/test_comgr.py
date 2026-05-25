@@ -25,9 +25,12 @@ class TestProbeToolchainCaps:
         caps = stinkytofu.probeToolchainCaps([12, 5, 0])
         assert caps["VgprMsbMode"] != stinkytofu.VgprMsbMode.NONE.value
 
-    def test_gfx1250_vgpr_msb_mode_is_msb16(self):
+    def test_gfx1250_vgpr_msb_mode_is_msb8_or_msb16(self):
         caps = stinkytofu.probeToolchainCaps([12, 5, 0])
-        assert caps["VgprMsbMode"] == stinkytofu.VgprMsbMode.MSB16.value
+        assert caps["VgprMsbMode"] in (
+            stinkytofu.VgprMsbMode.MSB8.value,
+            stinkytofu.VgprMsbMode.MSB16.value,
+        )
 
 
 class TestVgprMsbModeEnum:

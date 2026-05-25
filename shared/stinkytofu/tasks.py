@@ -187,9 +187,6 @@ def build(
             p = bld / name
             if p.exists():
                 p.unlink()
-        cmake_files = bld / "CMakeFiles"
-        if cmake_files.exists():
-            _rmtree(cmake_files)
 
     bld.mkdir(parents=True, exist_ok=True)
 

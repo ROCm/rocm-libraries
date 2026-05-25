@@ -210,6 +210,11 @@ NB_MODULE(_stinkytofu, m) {
     m.def(
         "probeToolchainCaps",
         [](std::array<int, 3> arch) {
+            auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info)
+                throw nb::value_error(("Unsupported architecture: gfx" + std::to_string(arch[0]) +
+                                       std::to_string(arch[1]) + std::to_string(arch[2]))
+                                          .c_str());
             GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
             AsmCapsConfig caps = ToolchainCaps::probe(archId);
             nb::dict result;
