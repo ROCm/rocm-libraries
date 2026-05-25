@@ -31,6 +31,7 @@ struct hipsparse_test_numeric_types_enum
         real_only,
         complex_only,
         scatter,
+        gather,
         spmv
     } value_type;
 };

@@ -34,6 +34,8 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {256, 256},
     {256, 1},
     {1, 256},
+    {256, 225},
+    {256, 256, 225},
     {256, 256, 256},
     {256, 256, 1},
     {256, 1, 256},
@@ -187,8 +189,6 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                 // unbatched 1D cases are irrelevant at the moment
                 if(p.length.size() < 2 && p.nbatch <= 1)
                     continue;
-                if(p.nbatch == 1 && p.placement != fft_placement_inplace)
-                    continue; // only in-place is relevant for unbatched cases
                 if(p.nbatch > 1)
                 {
                     // only the batch dimension is split
