@@ -12,6 +12,7 @@ set(GEMM_MULTI_ABD_CONFIG_FILE "" CACHE STRING "Custom config file name (without
 set(GEMM_MULTI_ABD_A_ELEMENTWISE "AddScale" CACHE STRING "A elementwise function for gemm_multi_abd")
 set(GEMM_MULTI_ABD_B_ELEMENTWISE "AddScale" CACHE STRING "B elementwise function for gemm_multi_abd")
 set(GEMM_MULTI_ABD_CDE_ELEMENTWISE "MultiDAdd" CACHE STRING "CDE elementwise function for gemm_multi_abd")
+set(GEMM_MULTI_ABD_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 
 option(ENABLE_CCACHE_GEMM_MULTI_ABD "Enable ccache for GEMM Multi ABD ops compilation" OFF)
 
@@ -24,27 +25,6 @@ function(create_individual_gemm_multi_abd_target datatype layout trait tile_conf
         message(WARNING "Skipping individual GEMM Multi ABD target ${datatype}_${layout}_${trait}_${tile_config}: No supported GPU targets")
         return()
     endif()
-
-    # Parse tile configuration: format is tile_mxtile_nxtile_k_warp_mxwarp_nxwarp_k_warp_tile_mxwarp_tile_nxwarp_tile_k
-    string(REPLACE "_" ";" config_groups ${tile_config})
-    list(GET config_groups 0 tile_dims)
-    list(GET config_groups 1 warp_dims)
-    list(GET config_groups 2 warp_tile_dims)
-
-    string(REPLACE "x" ";" tile_parts ${tile_dims})
-    list(GET tile_parts 0 tile_m)
-    list(GET tile_parts 1 tile_n)
-    list(GET tile_parts 2 tile_k)
-
-    string(REPLACE "x" ";" warp_parts ${warp_dims})
-    list(GET warp_parts 0 warp_m)
-    list(GET warp_parts 1 warp_n)
-    list(GET warp_parts 2 warp_k)
-
-    string(REPLACE "x" ";" warp_tile_parts ${warp_tile_dims})
-    list(GET warp_tile_parts 0 warp_tile_m)
-    list(GET warp_tile_parts 1 warp_tile_n)
-    list(GET warp_tile_parts 2 warp_tile_k)
 
     set(target_name "benchmark_gemm_multi_abd_${datatype}_${layout}_${trait}_${tile_config}")
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
@@ -163,6 +143,18 @@ function(build_individual_gemm_multi_abd_targets datatype layout)
     message(VERBOSE "  Python executable: ${Python3_EXECUTABLE}")
     message(VERBOSE "  Script path: ${CMAKE_CURRENT_LIST_DIR}/gemm_multi_abd_instance_builder.py")
 
+    set(extra_list_args "")
+    if(NOT "${GEMM_MULTI_ABD_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_MULTI_ABD_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # List kernels (fast configure-time operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -179,6 +171,7 @@ function(build_individual_gemm_multi_abd_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${GEMM_MULTI_ABD_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -296,6 +289,19 @@ else()
     foreach(scheduler IN LISTS GEMM_MULTI_ABD_SCHEDULERS)
         add_custom_target(benchmark_gemm_multi_abd_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all ative (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larget than any combo's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GEMM_MULTI_ABD_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_MULTI_ABD_DATATYPE num_datatypes)
+        list(LENGTH GEMM_MULTI_ABD_LAYOUT num_layouts)
+        math(EXPR num_combos "${num_datatypes} * ${num_layouts}")
+        if(num_combos GREATER 0)
+            math(EXPR GEMM_MULTI_ABD_MAX_INSTANCES "${GEMM_MULTI_ABD_MAX_INSTANCES} / ${num_combos}")
+            message(STATUS "    gemm_multi_abd: per-combo budget = ${GEMM_MULTI_ABD_MAX_INSTANCES} (${num_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_MULTI_ABD_DATATYPE)
