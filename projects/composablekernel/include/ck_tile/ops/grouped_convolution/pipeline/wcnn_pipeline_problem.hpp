@@ -84,6 +84,7 @@ struct BlockWcnnFwdShape
 ///
 /// Captures data types, tile sizes, and warp conv configuration for the pipeline.
 ///
+/// @tparam ConvTraits_      Convolution traits (vector sizes, etc.)
 /// @tparam ADataType_       A data type (fp16_t, bf16_t) - forward: image/input tensor
 /// @tparam BDataType_       B data type (fp16_t, bf16_t) - forward: weight tensor
 /// @tparam AccDataType_     Accumulator data type (float)
@@ -91,20 +92,21 @@ struct BlockWcnnFwdShape
 /// @tparam BlockWcnnShape_  Block WCNN shape type (e.g. BlockWcnnFwdShape)
 /// @tparam FilterY_         Filter height
 /// @tparam FilterX_         Filter width
-template <typename ADataType_,
+/// @tparam DilationY_       Dilation along height dimension (default 1)
+/// @tparam DilationX_       Dilation along width dimension (default 1)
+template <typename ConvTraits_,
+          typename ADataType_,
           typename BDataType_,
           typename AccDataType_,
           typename OutDataType_,
           typename BlockWcnnShape_,
           index_t FilterY_,
           index_t FilterX_,
-          index_t DilationY_    = 1,
-          index_t DilationX_    = 1,
-          bool FixedVectorSize_ = false,
-          index_t VectorSizeA_  = 1,
-          index_t VectorSizeB_  = 1>
+          index_t DilationY_ = 1,
+          index_t DilationX_ = 1>
 struct WcnnFwdPipelineProblem
 {
+    using ConvTraits     = remove_cvref_t<ConvTraits_>;
     using ADataType      = remove_cvref_t<ADataType_>;
     using BDataType      = remove_cvref_t<BDataType_>;
     using AccDataType    = remove_cvref_t<AccDataType_>;
@@ -116,9 +118,10 @@ struct WcnnFwdPipelineProblem
     static constexpr index_t DilationY = DilationY_;
     static constexpr index_t DilationX = DilationX_;
 
-    static constexpr bool FixedVectorSize = FixedVectorSize_;
-    static constexpr index_t VectorSizeA  = VectorSizeA_;
-    static constexpr index_t VectorSizeB  = VectorSizeB_;
+    static constexpr bool FixedVectorSize =
+        (ConvTraits::VectorSizeA > 0) && (ConvTraits::VectorSizeB > 0);
+    static constexpr index_t VectorSizeA = ConvTraits::VectorSizeA;
+    static constexpr index_t VectorSizeB = ConvTraits::VectorSizeB;
 
     static constexpr index_t BlockSize = BlockWcnnShape::NumWarps * get_warp_size();
 };

@@ -54,33 +54,6 @@ class TestCkTileWcnnForward : public ::testing::Test
     using WeiLayout = ck_tile::tensor_layout::convolution::GKYXC;
     using OutLayout = ck_tile::tensor_layout::convolution::NHWGK;
 
-    using TestBlockShape = ck_tile::BlockWcnnFwdShape<
-        ck_tile::WcnnBlockTile<HPerBlock, WPerBlock, CPerBlock, KPerBlock>,
-        ck_tile::WcnnWarpTile<HPerWcnn, WPerWcnn>,
-        ck_tile::WcnnWarpCount<WarpsInH, WarpsInW, WarpsInK>>;
-
-    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TestBlockShape, 8, 4>;
-
-    using PipelineProblem = ck_tile::WcnnFwdPipelineProblem<InDataType,
-                                                            WeiDataType,
-                                                            AccDataType,
-                                                            OutDataType,
-                                                            TestBlockShape,
-                                                            1,     // FilterY
-                                                            1,     // FilterX
-                                                            1,     // DilationY
-                                                            1,     // DilationX
-                                                            false, // FixedVectorSize
-                                                            8,     // VectorSizeA
-                                                            8>;    // VectorSizeB
-
-    using Pipeline = ck_tile::WcnnFwdPipeline<PipelineProblem>;
-
-    using EpilogueProblem =
-        ck_tile::Default2DEpilogueProblem<AccDataType, OutDataType, false, false>;
-
-    using Epilogue = ck_tile::Default2DEpilogue<EpilogueProblem>;
-
     using Traits =
         ck_tile::GroupedConvTraits<2,
                                    ck_tile::ConvolutionSpecialization::Filter1x1Stride1Pad0,
@@ -88,13 +61,39 @@ class TestCkTileWcnnForward : public ::testing::Test
                                    WeiLayout,
                                    ck_tile::tuple<>,
                                    OutLayout,
-                                   1,
-                                   1,
-                                   1,
+                                   8,
+                                   8,
+                                   8,
                                    1,
                                    false,
                                    false,
                                    true>;
+
+    using TestBlockShape = ck_tile::BlockWcnnFwdShape<
+        ck_tile::WcnnBlockTile<HPerBlock, WPerBlock, CPerBlock, KPerBlock>,
+        ck_tile::WcnnWarpTile<HPerWcnn, WPerWcnn>,
+        ck_tile::WcnnWarpCount<WarpsInH, WarpsInW, WarpsInK>>;
+
+    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TestBlockShape, 8, 4>;
+
+    using PipelineProblem = ck_tile::WcnnFwdPipelineProblem<Traits,
+                                                            InDataType,
+                                                            WeiDataType,
+                                                            AccDataType,
+                                                            OutDataType,
+                                                            TestBlockShape,
+                                                            1, // FilterY
+                                                            1, // FilterX
+                                                            1, // DilationY
+                                                            1  // DilationX
+                                                            >;
+
+    using Pipeline = ck_tile::WcnnFwdPipeline<PipelineProblem>;
+
+    using EpilogueProblem =
+        ck_tile::Default2DEpilogueProblem<AccDataType, OutDataType, false, false>;
+
+    using Epilogue = ck_tile::Default2DEpilogue<EpilogueProblem>;
 
     using Kernel =
         ck_tile::GroupedConvolutionForwardKernel<Traits, TilePartitioner, Pipeline, Epilogue>;
