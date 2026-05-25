@@ -114,6 +114,7 @@ Tests:
   part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_USER]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   filename: [shipsec1,
+             bmwcra_1,
              mc2depi,
              ASIC_320k,
              bibd_22_8]
@@ -134,4 +135,3 @@ Tests:
   filename: [nos7,
              bmwcra_1]
   graph_test: [true]
-  
