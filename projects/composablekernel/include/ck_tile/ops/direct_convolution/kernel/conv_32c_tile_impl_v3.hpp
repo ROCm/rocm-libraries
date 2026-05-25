@@ -148,6 +148,38 @@ __device__ void weight_load_to_lds_kyxc_dgrad(
 }
 
 // ===================================================================
+// swizzle_c8_forward / swizzle_c8_inverse — tile-local LDS swizzle.
+//
+// Forward: maps logical c8 to permuted c8 for DRAM reads.
+// Inverse: maps permuted c8 back to logical c8 for LDS reads.
+// ===================================================================
+template <auto cfg>
+__device__ __forceinline__ int swizzle_c8_forward(int spatial, int c8)
+{
+    using TC = TileConstantsBase<cfg>;
+    constexpr int BLOCK_C8 = TC::BLOCK_C8;
+    if constexpr(cfg.swizzle_type == SwizzleType::CyclicShift)
+        return (c8 + spatial) % BLOCK_C8;
+    else if constexpr(cfg.swizzle_type == SwizzleType::XOR)
+        return c8 ^ (spatial % BLOCK_C8);
+    else
+        return c8;
+}
+
+template <auto cfg>
+__device__ __forceinline__ int swizzle_c8_inverse(int spatial, int c8)
+{
+    using TC = TileConstantsBase<cfg>;
+    constexpr int BLOCK_C8 = TC::BLOCK_C8;
+    if constexpr(cfg.swizzle_type == SwizzleType::CyclicShift)
+        return (c8 - spatial % BLOCK_C8 + BLOCK_C8) % BLOCK_C8;
+    else if constexpr(cfg.swizzle_type == SwizzleType::XOR)
+        return c8 ^ (spatial % BLOCK_C8);  // self-inverse
+    else
+        return c8;
+}
+
+// ===================================================================
 // Config — kernel configuration for v3 cross-wave LDS reduction.
 //
 // Parameters:
@@ -193,7 +225,6 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // TODO: Fix the swizzle, non-trivial swizzle is not working.
     SwizzleType swizzle_type = SwizzleType::None;
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
     int vector_size = 8;
@@ -235,21 +266,41 @@ template <DataType DT = DataType::fp16>
 struct KernelConfigurations
 {
 static constexpr Config<DT> configs[] = {
+    // --- SwizzleType::None (indices 0-7) ---
     // 16x16x32 configs (channels_per_group=32, block_k_size=16, block_q=16)
-    // Dgrad, direct DRAM epilogue
     {.waves_per_wg = 4, .direction = Direction::Dgrad},   // 0
     {.waves_per_wg = 2, .direction = Direction::Dgrad},   // 1
-    // Fprop, direct DRAM epilogue
     {.waves_per_wg = 4},                                  // 2
     {.waves_per_wg = 2},                                  // 3
-
     // 32x32x16 configs (channels_per_group=16, block_k_size=32, block_q=32)
-    // Dgrad, direct DRAM epilogue
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad}, // 4
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad}, // 5
-    // Fprop, direct DRAM epilogue
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4},                                // 6
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2},                                // 7
+
+    // --- SwizzleType::CyclicShift (indices 8-15) ---
+    // 16x16x32
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 8
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 9
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift},                                  // 10
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift},                                  // 11
+    // 32x32x16
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift}, // 12
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift}, // 13
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift},                                // 14
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift},                                // 15
+
+    // --- SwizzleType::XOR (indices 16-23) ---
+    // 16x16x32
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 16
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 17
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::XOR},                                  // 18
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::XOR},                                  // 19
+    // 32x32x16
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 20
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 21
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::XOR},                                // 22
+    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::XOR},                                // 23
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -269,6 +320,8 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     // K_out must be divisible by block_k_size.
     const int K_out = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
     if(K_out % cfg.block_k_size() != 0)
+        return false;
+    if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
         return false;
     return true;
 }
@@ -298,6 +351,8 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     static constexpr int WEIGHT_LDS_ELEMENTS =
         cfg.block_k_size() * cfg.kh * cfg.kw * cfg.channels_per_group();
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_ELEMENTS / 8;
+    // Per-wave parallel loading: each wave owns its own LDS region.
+    static constexpr int WEIGHT_LDS_ALL_WAVES = WEIGHT_LDS_SIZE_UINT4 * cfg.waves_per_wg;
 
     // Mfma distribution — needed by InputLoader's static type declarations.
     // Not used at runtime (ConvInputLoader passes init_mfma_offsets=false).
@@ -396,7 +451,8 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             [&]<int S>()
             {
                 int spatial_pos = lane_q + S;
-                base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_pos * 8;
+                int c8_lds = swizzle_c8_inverse<cfg>(spatial_pos, c8_pos);
+                base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_lds * 8;
             });
 
         // --- Overflow load setup ---
@@ -417,8 +473,9 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             // DRAM offset: input_x = block_q + ov_spatial - px (padding offset).
             const int input_x = bc.block_q + ov_spatial - px;
             overflow_is_valid = (input_x >= 0 && input_x < wi) ? 1 : 0;
+            int ov_c8_dram = swizzle_c8_forward<cfg>(ov_spatial, ov_c8);
             overflow_voffset = static_cast<ck_tile::index_t>(
-                (input_x * bc.C + ov_c8 * 8) * static_cast<int>(sizeof(ElementType)));
+                (input_x * bc.C + ov_c8_dram * 8) * static_cast<int>(sizeof(ElementType)));
         }
         else
         {
@@ -511,6 +568,87 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     {
         weight_load_to_lds_kyxc_dgrad<cfg, ElementType>(
             weight_lds, wei, k_slice_start, block_c_start, C_total);
+    }
+
+    // Wave-local Fprop load: only this wave's 64 threads load its own c_slice
+    // into its private LDS region (weight_lds + wave_id * WEIGHT_LDS_SIZE_UINT4).
+    // All waves call this simultaneously with no synchronization required.
+    __device__ static void load_kyxc_to_lds_wave(
+        uint4* wave_lds,        // base of this wave's LDS region
+        const ElementType* __restrict__ wei,
+        int block_k_start,
+        int c_slice,
+        int C_total)
+    {
+        constexpr int WEIGHT_K  = cfg.block_k_size();
+        constexpr int KH_KW     = cfg.kh * cfg.kw;
+        constexpr int C_SLICE   = cfg.channels_per_group();
+        constexpr int TOTAL_U4  = WEIGHT_K * KH_KW * C_SLICE / 8;
+        constexpr int NUM_PASSES = (TOTAL_U4 + WAVE_SIZE - 1) / WAVE_SIZE;
+
+        const int lane     = static_cast<int>(threadIdx.x) % WAVE_SIZE;
+        const int K_stride = KH_KW * C_total;
+
+        for(int pass = 0; pass < NUM_PASSES; pass++)
+        {
+            int flat_idx = pass * WAVE_SIZE + lane;
+            if(flat_idx < TOTAL_U4)
+            {
+                constexpr int C_UINT4 = C_SLICE / 8;
+                int c8     = flat_idx % C_UINT4;
+                int temp   = flat_idx / C_UINT4;
+                int filter = temp % KH_KW;
+                int k      = temp / KH_KW;
+
+                const ElementType* src = wei
+                    + static_cast<size_t>(block_k_start + k) * K_stride
+                    + filter * C_total
+                    + c_slice * C_SLICE
+                    + c8 * 8;
+
+                wave_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
+            }
+        }
+    }
+
+    // Wave-local Dgrad load: only this wave's 64 threads load its own k_slice
+    // into its private LDS region.
+    __device__ static void load_kyxc_to_lds_dgrad_wave(
+        uint4* wave_lds,        // base of this wave's LDS region
+        const ElementType* __restrict__ wei,
+        int k_slice_start,
+        int block_c_start,
+        int C_total)
+    {
+        constexpr int K_SLICE   = cfg.channels_per_group();
+        constexpr int KH_KW     = cfg.kh * cfg.kw;
+        constexpr int BLOCK_C   = cfg.block_k_size();
+        constexpr int TOTAL_U4  = K_SLICE * KH_KW * BLOCK_C / 8;
+        constexpr int NUM_PASSES = (TOTAL_U4 + WAVE_SIZE - 1) / WAVE_SIZE;
+
+        const int lane     = static_cast<int>(threadIdx.x) % WAVE_SIZE;
+        const int K_stride = KH_KW * C_total;
+
+        for(int pass = 0; pass < NUM_PASSES; pass++)
+        {
+            int flat_idx = pass * WAVE_SIZE + lane;
+            if(flat_idx < TOTAL_U4)
+            {
+                constexpr int C_UINT4 = BLOCK_C / 8;
+                int c8     = flat_idx % C_UINT4;
+                int temp   = flat_idx / C_UINT4;
+                int filter = temp % KH_KW;
+                int k      = temp / KH_KW;
+
+                const ElementType* src = wei
+                    + static_cast<size_t>(k_slice_start + k) * K_stride
+                    + filter * C_total
+                    + block_c_start
+                    + c8 * 8;
+
+                wave_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
+            }
+        }
     }
 
     // Read weights from LDS into registers (this->weights[]).
