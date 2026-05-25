@@ -897,8 +897,6 @@ try
     {
         // Verify that allocation actually occured.
         const int nGPUs = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->nGPUs;
-        if(nGPUs == 0)
-            return HIPFFT_ALLOC_FAILED;
         const auto data = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->data;
         // Computation requires that at least one GPU buffer is actually allocated.
         bool allnull = true;

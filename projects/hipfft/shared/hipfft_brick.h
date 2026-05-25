@@ -31,7 +31,6 @@
 #include "../library/include/hipfft/hipfft.h"
 #include "../library/include/hipfft/hipfftXt.h"
 #include "client_data_layout_helpers.h"
-#include "fft_enums.h"
 
 struct hipfft_brick
 {
@@ -69,7 +68,7 @@ struct hipfft_brick
             static_cast<std::remove_reference_t<decltype(field_idx)>::value_type>(0));
     }
 
-    // Given abrick index, return the offset in this brick
+    // Given a brick index, return the offset in this brick
     size_t brick_offset(const std::vector<size_t>& brick_idx) const
     {
         // Based on the brick's strides, return offset

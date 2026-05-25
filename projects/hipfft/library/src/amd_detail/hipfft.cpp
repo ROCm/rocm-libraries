@@ -498,6 +498,9 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     fft_io               io;
     const bool           isherm = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
     const bool           isreal = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE;
+
+    // All complex data formats are treated as part of a complex/complex transform in order to allow
+    // us to handle the split dimension being the Hermitian-symmetrized dimension.
     const fft_transform_type dft_type
         = isreal ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
 
@@ -529,12 +532,11 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
             io        = fft_io_out;
             break;
         case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
-            // TODO: impliment 1D version.
+            // TODO: implement 1D version.
             // TODO: what do we do with multi-gpu multi-batch 1D transforms?
-            throw std::runtime_error("HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED not implimented");
+            throw std::runtime_error("HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED not implemented");
             break;
         case HIPFFT_FORMAT_UNDEFINED:
-            throw std::runtime_error("Format passed is HIPFFT_FORMAT_UNDEFINED");
             break;
         default:
             throw std::runtime_error("Invalid subformat");
@@ -544,9 +546,14 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     {
         // Multi-batch transforms are trivially divided.
         splitdim = 0;
-        throw std::runtime_error("Multi-batch multi-gpu transforms not implimented");
+        return HIPFFT_NOT_IMPLEMENTED;
+        //throw std::runtime_error("Multi-batch multi-gpu transforms not implemented");
     }
 
+    // Sanity check that split_dim isn't out-of-bounds:
+    if(splitdim >= dim)
+        throw HIPFFT_INTERNAL_ERROR;
+    
     // We are going to put the Hermitian-symmetric length change here:
     auto batchlengthdata = batchlength;
     if(isherm)
@@ -564,8 +571,6 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
 
         brick.field_lower.resize(dim);
         std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
-        if(ibrick > 0)
-            brick.field_lower[splitdim] = bricks[ibrick - 1].field_lower[splitdim];
 
         const size_t splitlen      = batchlengthdata[splitdim];
         const size_t bricksplitlen = splitlen / nbricks + (ibrick < splitlen % nbricks ? 1 : 0);
@@ -732,7 +737,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
         // Lambda for converting hipfft-bricks to rocfft-bricks and adding them to a rocfft
         // description:
-        auto hipBricks2Desc = [](std::vector<hipfft_brick>& hipBricks, rocfft_field& destField) {
+        auto hipBricks2Fields = [](std::vector<hipfft_brick>& hipBricks, rocfft_field& destField) {
             for(const auto& brick : hipBricks)
             {
                 // rm -> cm
@@ -761,12 +766,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         rocfft_field spaceField = nullptr;
         if(rocfft_field_create(&spaceField) != rocfft_status_success)
             throw std::runtime_error("space-time field create failed");
-        hipBricks2Desc(plan->spaceBricks, spaceField);
+        hipBricks2Fields(plan->spaceBricks, spaceField);
 
         rocfft_field frequencyField = nullptr;
         if(rocfft_field_create(&frequencyField) != rocfft_status_success)
             throw std::runtime_error("space-time field create failed");
-        hipBricks2Desc(plan->freqBricks, frequencyField);
+        hipBricks2Fields(plan->freqBricks, frequencyField);
 
         for(auto rocfft_desc : {ip_forward_desc, op_forward_desc})
         {
@@ -1949,7 +1954,7 @@ try
 
     // 1D transforms are not currently implemented.
     if(format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
-        return HIPFFT_INVALID_VALUE;
+        return HIPFFT_NOT_IMPLEMENTED;
 
     // Only in-place multi-gpu transforms are currently implemented.
     if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_OUTPUT)
@@ -1978,12 +1983,12 @@ try
     std::vector<size_t> batches      = {plan->batch};
     std::vector<size_t> batchlengths = batches;
     batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
-    const bool isinput = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
+    const bool isspace = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
 
     const bool isinplace
         = format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
 
-    bricks = isinput ? &plan->spaceBricks : &plan->freqBricks;
+    bricks = isspace ? &plan->spaceBricks : &plan->freqBricks;
 
     xt_desc->nGPUs = static_cast<int>(bricks->size());
 
@@ -2021,7 +2026,10 @@ try
         }
 
         if(xt_desc->size[idx] == 0)
-            return HIPFFT_INTERNAL_ERROR;
+        {
+            // TODO: how should we handle the case where some devices don't have data?
+            return HIPFFT_NOT_IMPLEMENTED;
+        }
         if(hipMalloc(&(xt_desc->data[idx]), xt_desc->size[idx]) != hipSuccess)
             return HIPFFT_INTERNAL_ERROR;
     }
@@ -2074,6 +2082,7 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
             brick_length.erase(brick_length.begin() + idx);
             brick_stride.erase(brick_stride.begin() + idx);
             field_stride.erase(field_stride.begin() + idx);
+            --idx;
         }
     }
 
@@ -2113,7 +2122,7 @@ try
         return static_cast<void*>(static_cast<char*>(buf) + hipDataType_bytes(dtype, offset_elems));
     };
 
-    // This determines whether we use the input brick decomposition or the output brick
+    // This determines whether we use the space brick decomposition or the frequency brick
     // decomposition for the copy operation.
     auto brick_layout = [plan](int subFormat) -> const std::vector<hipfft_brick>& {
         switch(subFormat)
@@ -2232,7 +2241,7 @@ try
             case 1:
             {
                 auto ret = hipMemcpy(
-                    destptr, srcptr, myDesc->descriptor->size[idx], hipMemcpyHostToDevice);
+                    destptr, srcptr, myDesc->descriptor->size[idx], h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost);
                 if(ret != hipSuccess)
                 {
                     return HIPFFT_INTERNAL_ERROR;
