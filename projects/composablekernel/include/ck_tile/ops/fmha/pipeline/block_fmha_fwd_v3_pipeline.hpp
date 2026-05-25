@@ -1140,7 +1140,7 @@ struct BlockFmhaFwdV3Pipeline
             // Pre-compute scale_s / C_LOG2E outside loop for StandardAttention
             // Note: scale_s is already (softmax_scale * log2(e)) from kernel,
             //       so scale_s / C_LOG2E = softmax_scale
-            constexpr float inv_log2e = 1.0f / C_LOG2E;
+            constexpr float inv_log2e      = 1.0f / C_LOG2E;
             const float scale_s_normalized = scale_s * inv_log2e;
 
             constexpr auto lse_spans = decltype(lse)::get_distributed_spans();
