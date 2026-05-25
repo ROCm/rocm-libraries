@@ -37,7 +37,11 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NT', True, 0): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -118,7 +122,6 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
         # Global read scheduling:
         # Each GR has two instructions (addr update + buffer_load), so we list them explicitly as
         # two adjacent MFMA indices per GR.
-        kernel["SwapGlobalReadOrder"] = True
         numCodePaths = 2
 
         syncTable = [
@@ -179,6 +182,5 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

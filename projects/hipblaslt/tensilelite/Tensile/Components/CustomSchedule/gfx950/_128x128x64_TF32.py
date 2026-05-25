@@ -37,7 +37,12 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+        ('NN', True, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+    }
 )
 def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     n_mfma = 96
@@ -155,9 +160,5 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
 
-    kernel["MfmaInitCVgprs"] = True
-    kernel["UseMFMAF32XEmulation"] = True
-    kernel["UseDot2F32XEmulation"] = False
-    kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

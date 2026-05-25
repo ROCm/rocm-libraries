@@ -37,7 +37,13 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+        ('NN', True, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+        ('TN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+    }
 )
 def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     numMfma = 144
@@ -46,9 +52,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     mfmaReorder = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
 
         # Used the following constrains to create schedule
         #  - LRA0 + PACKA0 needs to be done before 1/4 MFMAs
@@ -179,9 +182,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
-        kernel["UsePLRPack"] = True
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
 
         numLrReadA = 24 
         numLrReadB = 8
@@ -358,6 +358,5 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
     return True, opt1

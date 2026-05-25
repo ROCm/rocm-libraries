@@ -38,7 +38,16 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[32, 32, 16, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    # The old body set UsePLRPack=True and UseMFMAF32XEmulation=True
+    # unconditionally for all branches. Declare each explicitly so the
+    # dispatcher propagates them and the YAML does not need to carry them.
+    required_flags={
+        ('TN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+        ('NN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+        ('NT', True, 0):  {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+    }
 )
 def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     n_mfma = 128//2//32 * 128//2//32 * 3 * 2    # 128 MT0 / 2 WT0 / 32 mfma dim  * 128/2/32 * 3 bf16 MFMAs per tf32 mfma * 2 PLR=1
@@ -211,9 +220,5 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
 
-    kernel["MfmaInitCVgprs"] = True
-    kernel["UsePLRPack"] = True
-    kernel["UseMFMAF32XEmulation"] = True
-    kernel["UseDot2F32XEmulation"] = False
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

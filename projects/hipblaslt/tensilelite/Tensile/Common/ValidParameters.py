@@ -1097,7 +1097,26 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use iterate-mode for A
     # 2: Use iterate-mode for B
     # 3: Use iterate-mode for both A and B
-    "TDMIterateMode": [-1, 0, 1, 2, 3]
+    "TDMIterateMode": [-1, 0, 1, 2, 3],
+    # rocm-libraries-2bww (strict model): `UseMFMAF32XEmulation` is YAML-
+    # tunable — CMS YAML groups declare it per-branch so the schedule's
+    # hardware-derived True-flip can be overridden where needed. When unset in
+    # YAML, Solution.py:assignProblemIndependentDerivedParameters falls back to
+    # its hardware-derived default. When set in YAML, the YAML value wins.
+    #
+    # `MfmaInitCVgprs` is intentionally NOT YAML-tunable: per
+    # rocm-libraries-4czr the framework derives it unconditionally
+    # (CMS path: True post-`hasCustomSchedule`; non-CMS path: True when
+    # `UseMFMAF32XEmulation`). No legitimate need to override from YAML.
+    #
+    # `UseDot2F32XEmulation` is intentionally NOT YAML-tunable: per
+    # rocm-libraries-2bww audit, no CMS schedule ever sets it to True; all
+    # writes are False (defensive). Framework default is False. The flag is
+    # purely framework-derived; YAML override adds churn without value.
+    # Schedule `required_flags` entries declaring `UseDot2F32XEmulation: False`
+    # remain in place as belt-and-suspenders validation (dispatch.py rejects
+    # kernels where the flag doesn't match).
+    "UseMFMAF32XEmulation": [False, True],
 }
 
 newMIValidParameters = {

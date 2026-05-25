@@ -778,6 +778,10 @@ class TestRealKernelCapture:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         # generate_real_idmap runs the full kernel pipeline including
         # customMainLoopSchedule, which now stashes _last_cms_capture.
@@ -836,6 +840,10 @@ class TestRealKernelCapture:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
@@ -975,6 +983,10 @@ class TestPhase4DefaultCapture:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
@@ -1018,6 +1030,10 @@ class TestPhase4DefaultCapture:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
@@ -1083,6 +1099,10 @@ class TestPhase4DefaultCapture:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
@@ -1129,6 +1149,10 @@ class TestPhase5DefaultTailCapture:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
@@ -1212,6 +1236,10 @@ class TestDataflowGraphIntegration:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         config.update(overrides)
         solution = _make_solution(config, asm, isaInfoMap)
@@ -1430,6 +1458,10 @@ class TestPgrPlrCaptureMatrixEndToEnd:
             'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
+            # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+            # ('TN', False, 1) branch — uniform validation requires these to be
+            # explicitly supplied in the synthetic config.
+            'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
         }
         config.update(overrides)
         solution = _make_solution(config, asm, isaInfoMap)

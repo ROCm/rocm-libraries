@@ -131,7 +131,6 @@ def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 120  # Must match actual MFMA count for 256x240x64 tile
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

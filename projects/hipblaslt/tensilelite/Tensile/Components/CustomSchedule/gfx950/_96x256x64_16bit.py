@@ -38,10 +38,14 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('TN', False, 1): {"SwapGlobalReadOrder": True},
+        ('TN', True, 1): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
 
     numMfma = 48
     optSchedule = dict()
@@ -49,7 +53,6 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 11
 
     if isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
 
         syncTable = [
             7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Finish all LRA1s and LRB1s"),

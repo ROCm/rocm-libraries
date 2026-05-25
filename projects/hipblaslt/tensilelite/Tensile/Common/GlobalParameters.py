@@ -576,7 +576,19 @@ defaultBenchmarkCommonParameters = [
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
     {"HalfPLR": [0]},
-    {"TDMIterateMode": [0]}
+    {"TDMIterateMode": [0]},
+    # rocm-libraries-2bww (strict model): `UseMFMAF32XEmulation` is
+    # YAML-tunable; default True matches the common case (TF32 on HasMFMA
+    # ISAs like gfx950). YAML may override to False (the ldm5-class TF32
+    # schedules that prefer the cvt+sub lowering). Solution.py's framework
+    # block at :644-687 only DISABLES the flag for unsupported configurations
+    # (non-TF32, non-HasMFMA) — never enables it — so a YAML-supplied False
+    # survives unchanged with no need for a YAML-provenance marker.
+    # `MfmaInitCVgprs` and `UseDot2F32XEmulation` are deliberately omitted
+    # — both are purely framework-derived, not YAML-tunable
+    # (see ValidParameters.py and rocm-libraries-4czr / rocm-libraries-2bww
+    # audit).
+    {"UseMFMAF32XEmulation": [True]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

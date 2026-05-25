@@ -66,6 +66,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -87,6 +89,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [0]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww: _128x192x32_TF32 TN+LDSTr=0+TLDS=1 requires UsePLRPack=True
         - StreamK: [3]
         - StaggerU: [0]
         - ClusterLocalRead: [1]
@@ -132,6 +136,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -170,6 +176,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -178,7 +186,7 @@ BenchmarkProblems:
           - Range: [[128], [128], [1], [32, 64, 256]]
         - BiasTypeArgs: ['s']
     - # BenchmarkProblemSizeGroup - Standard - All problem   
-      # This test verifies correctness for a specific parameter combination: CMS=1, MIArchVgpr=True, MfmaInitCVgprs=True (set manually in _get_schedule_128x128x32_TF32)
+      # This test verifies correctness for a specific parameter combination: CMS=1, MIArchVgpr=True, MfmaInitCVgprs=True (derived by Solution.py post-hasCustomSchedule per rocm-libraries-2bww/4czr)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -209,6 +217,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
         - MIArchVgpr: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -254,7 +264,7 @@ BenchmarkProblems:
           - Range: [[128], [128], [1], [32, 64, 256]]
         - BiasTypeArgs: ['s']
     - # BenchmarkProblemSizeGroup - Standard - All problem   
-      # This test verifies correctness for a specific parameter combination: CMS=1, MIArchVgpr=True, MfmaInitCVgprs=True (set manually in _get_schedule_128x128x32_TF32)
+      # This test verifies correctness for a specific parameter combination: CMS=1, MIArchVgpr=True, MfmaInitCVgprs=True (derived by Solution.py post-hasCustomSchedule per rocm-libraries-2bww/4czr)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -285,6 +295,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
         - MIArchVgpr: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -354,6 +366,8 @@ BenchmarkProblems:
         - LDSTrInst: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [0]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -392,6 +406,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [0]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -430,6 +446,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -492,6 +510,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [0]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
         - StreamK: [3]
         - LdsPadA: [8]
         - LdsPadB: [8]
@@ -536,6 +556,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): TN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -624,6 +646,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): NN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -732,6 +756,8 @@ BenchmarkProblems:
         - VectorWidthA: [4]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): NN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -764,6 +790,8 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): NN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -784,6 +812,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): NN
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN
         - StreamK: [3]
         - StaggerU: [0]
         - ClusterLocalRead: [1]
@@ -846,7 +876,9 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0]
+        - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]
+        - UsePLRPack: [1]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [2]
       BenchmarkJoinParameters:
@@ -884,6 +916,8 @@ BenchmarkProblems:
         - VectorWidthB: [2]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - UseMFMAF32XEmulation: [1]  # rocm-libraries-2bww (strict): NT
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NT
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

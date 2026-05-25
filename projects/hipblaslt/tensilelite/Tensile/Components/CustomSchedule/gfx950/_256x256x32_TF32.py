@@ -37,7 +37,12 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NT', False, 0): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+        ('TN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+    }
 )
 def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     numMfma = 192
@@ -45,9 +50,6 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
         # This schedule follows similar pattern as 192x256x32 TF32 schedule
 
         # LRA0 + GRIncA
@@ -165,9 +167,6 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS==0 and kernel["VectorWidthA"] == 4 and kernel["VectorWidthB"] == 4:
-        kernel["UsePLRPack"] = True
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
         swap_idx =   [1,2,3, # depend on DS1 
                         7,8, # depend on DS2
                          11, # depend on DS3
@@ -235,6 +234,5 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
         
-    kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

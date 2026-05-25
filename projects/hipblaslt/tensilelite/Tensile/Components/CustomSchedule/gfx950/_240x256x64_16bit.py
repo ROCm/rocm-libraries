@@ -43,7 +43,6 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     if isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = False
         optSchedule = {
             'SYNC': [[-1,
                       14,
@@ -147,5 +146,4 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     return True, opt1

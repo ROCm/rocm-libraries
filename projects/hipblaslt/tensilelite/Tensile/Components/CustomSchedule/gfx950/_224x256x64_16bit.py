@@ -152,7 +152,6 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 112
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

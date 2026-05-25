@@ -71,7 +71,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN_mixed
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -104,7 +105,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN_mixed
         - LDSTrInst: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -138,7 +140,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [0]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN_mixed
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -177,6 +180,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -216,6 +220,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -290,6 +295,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -329,6 +335,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -403,6 +410,7 @@ BenchmarkProblems:
         - LDSTrInst: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -680,6 +688,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -758,7 +767,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): NN_mixed
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -790,7 +800,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NN_mixed
         - LDSTrInst: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -879,7 +890,9 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): TT_mixed
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TT_mixed
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -928,7 +941,9 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): TT_mixed
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TT_mixed
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -983,7 +998,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1122,6 +1137,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): TN
         - MaxLDS: [163840]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -1477,7 +1493,7 @@ BenchmarkProblems:
       - MIArchVgpr: [false]
       - MatrixInstruction: [[16, 16, 32, 1, 1, 15, 4, 1, 4]]
       - DepthU: [64]
-      - UseCustomMainLoopSchedule: [0, 1]
+      - UseCustomMainLoopSchedule: [1]
       - DirectToLds: [1]
       - MaxOccupancy: [40]
       - NonTemporal: [-1]
@@ -1851,7 +1867,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1962,7 +1978,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - UsePLRPack: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1999,6 +2016,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NT
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -2216,6 +2234,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NT
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -2360,6 +2379,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NT
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -2429,6 +2449,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): NT
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -2497,7 +2518,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - LDSTrInst: [True]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0,1]
+        - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -2612,7 +2633,8 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
+        - UsePLRPack: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

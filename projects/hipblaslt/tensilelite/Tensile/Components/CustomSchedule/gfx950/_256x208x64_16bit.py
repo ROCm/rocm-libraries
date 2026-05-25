@@ -36,7 +36,11 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 2, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[4, 1]
+    mfma_wave_group=[4, 1],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', True, 1): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -74,7 +78,6 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 34
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
         nglshift = nllshift = 0
 
         optSchedule = {
@@ -145,7 +148,6 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 104
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

@@ -37,7 +37,14 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', True, 1): {"SwapGlobalReadOrder": True},
+        ('NT', True, 0): {"SwapGlobalReadOrder": True},
+        ('TN', False, 1): {"SwapGlobalReadOrder": True},
+        ('TN', True, 1): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -45,7 +52,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1 "),
             19, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
@@ -84,7 +90,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = syncTable[1::2]
         nglshift = nllshift = 16
     elif isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
@@ -124,7 +129,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         ]
         nglshift = nllshift = 16
     elif isNT(kernel) and useLDSTr and TLDS == 0:
-        kernel["SwapGlobalReadOrder"] = True
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
@@ -164,7 +168,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 120
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

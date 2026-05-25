@@ -27,7 +27,7 @@ NOT import from ``dispatch`` or any per-schedule file.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Mapping, Optional, Tuple, Union
 
 from rocisa.instruction import SBarrier, SNop, SWaitCnt
 
@@ -74,6 +74,12 @@ class CMSKernelInfo:
     TransposeLDS: int
     TransposeA: bool
     TransposeB: bool
+    # Per-branch required-flag declarations sourced from the matched
+    # schedule's `@RegisterSchedule(..., required_flags=...)` argument.
+    # Keyed on (layout_str, useLDSTr, TLDS). `wrapped_func` validates
+    # the matching entry against kernel state at dispatch time and
+    # returns UNSUPPORTED_VARIANT on mismatch.
+    required_flags: Mapping[Tuple[str, bool, int], Mapping[str, Any]] = field(default_factory=dict)
 
     def matches(self, dtype: Optional[str] = None, layout: Optional[str] = None) -> bool:
         """Check if this kernel info matches the given dtype and/or layout filter.
@@ -220,6 +226,9 @@ class ScheduleInfo:
         self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
         self.snopCode = snopCode
+        # Matched-schedule required_flags entry for the selected layout;
+        # populated by `RegisterSchedule.wrapped_func` at match time.
+        self.required_flags: Mapping[str, Any] = {}
 
     def pretty_print(self):
         print("{")

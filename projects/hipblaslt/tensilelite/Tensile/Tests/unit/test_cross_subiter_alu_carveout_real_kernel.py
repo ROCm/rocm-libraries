@@ -109,6 +109,10 @@ CANONICAL_KERNEL_CONFIG = {
     'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
     'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
     'SourceSwap': 1, 'StreamK': 0,
+    # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+    # ('TN', False, 1) branch — uniform validation requires these to be
+    # explicitly supplied in the synthetic config.
+    'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
 }
 
 

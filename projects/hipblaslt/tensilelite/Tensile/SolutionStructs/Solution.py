@@ -804,25 +804,51 @@ class Solution(collections.abc.Mapping):
       state["reorderGRInstForDTVA"] = False
       state["reorderGRInstForDTVB"] = False
 
-    # F32XEmulation related initialization
+    # F32XEmulation related initialization.
+    #
+    # rocm-libraries-2bww (strict model):
+    #
+    # `UseMFMAF32XEmulation` defaults to True (see GlobalParameters.py); YAML
+    # may override to False (e.g. the ldm5-class TF32 schedules that prefer
+    # the cvt+sub lowering). The framework only DISABLES the flag when the
+    # kernel/hardware can't support it — never enables. This means a
+    # YAML-supplied False survives the framework block intact, with no need
+    # to track YAML provenance via a marker:
+    #   * `UseF32XEmulation` false → MFMA F32X emulation is meaningless → force False.
+    #   * ISA lacks `HasMFMA` → no MFMA opcodes → force False.
+    #   * else → leave the assigned value (YAML override or default True) alone.
+    #
+    # `MfmaInitCVgprs` is NOT YAML-tunable (per rocm-libraries-4czr).
+    # It is initialized to False here and then unconditionally derived True
+    # for CMS-matched kernels (post-`hasCustomSchedule`) or for non-CMS MFMA
+    # F32X kernels (in the non-CMS-only block further down).
+    #
+    # `UseDot2F32XEmulation` is NOT YAML-tunable (per rocm-libraries-2bww
+    # audit: no CMS schedule ever sets it to True). It is unconditionally
+    # initialized to False here so the key always exists in state across
+    # both CMS and non-CMS paths (round-trip equivalence test relies on key
+    # parity). Schedule `required_flags` entries that declare it False remain
+    # in place as belt-and-suspenders validation in dispatch.py.
+    state["MfmaInitCVgprs"] = False
     state["UseDot2F32XEmulation"] = False
-    state["UseMFMAF32XEmulation"] = False
     state["UseDirect32XEmulation"] = False # directly local read into temporary vgpr
-    #ignore the F32 xDL MathOp by default.
-    #enable F32 xDL MathOp only when the input type is f32.
     if state["UseF32XEmulation"]:
       state["UseF32XEmulation"] = True
       state["UseDirect32XEmulation"] = True
       state["UseDirect32XEmulationInterleaveTreg"] = False # True: enable conventional T reg allocation
-      # select conversion logic for X3
-      # (1) UseMFMAF32XEmulation = True
-      # (2) UseDot2F32XEmulation = True (set (1) to False)
-      # (3) cvt + sub  (set both (1) and (2) False)
+      # Disable UseMFMAF32XEmulation on ISAs that lack MFMA support; leave the
+      # assigned value (YAML override or default True) untouched otherwise.
+      # See the three lowering strategies for X3:
+      #   (1) UseMFMAF32XEmulation = True    — MFMA helper (gfx950)
+      #   (2) UseDot2F32XEmulation = True    — Dot2 helper (no schedule uses this)
+      #   (3) cvt + sub                      — set both (1) and (2) False
       isa = state["ISA"]
-      if isaInfoMap[isa].asmCaps.get("HasMFMA", False):
-        state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
+      if not isaInfoMap[isa].asmCaps.get("HasMFMA", False):
+        state["UseMFMAF32XEmulation"] = False
+    else:
+      # No F32X emulation in play → the MFMA-F32X helper flag is meaningless.
+      state["UseMFMAF32XEmulation"] = False
 
-    state["MfmaInitCVgprs"] = False
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
     isa = tuple(state["ISA"])
     isgfx950 = isa[:2] == (9, 5)
@@ -2409,79 +2435,42 @@ class Solution(collections.abc.Mapping):
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
 
-    # CMS-vs-default flag-handling reconciliation (rocm-libraries-9lcs):
+    # CMS dispatch resolution (rocm-libraries-2bww, strict model).
     #
-    # The CMS path and the default (SIA3) path must accept the same set of
-    # YAML kernel-config flags so that a kernel with UseCustomMainLoopSchedule=1
-    # produces an equivalent solution to the same kernel with =0, except for
-    # the schedule-content choice. Earlier, this block silently pre-zeroed
-    # SwapGlobalReadOrder and UsePLRPack on the CMS path (and only on the
-    # CMS path), then restored UsePLRPack on the non-CMS branch via a
-    # `backup_UsePLRPack` shim. That asymmetry meant a YAML `SwapGlobalReadOrder: 1`
-    # silently became 0 on the CMS path while it remained 1 on the default path,
-    # invalidating any "did CMS produce the same result as default?" comparison.
+    # Under the strict model every CMS-relevant kernel flag comes from
+    # YAML and is NOT mutated mid-build by schedule code. That means:
     #
-    # Resolution per flag (see hasCustomSchedule and the registered schedule
-    # functions in Tensile/Components/CustomSchedule.py):
+    #   * `SwapGlobalReadOrder`, `UsePLRPack`, `MfmaInitCVgprs`,
+    #     `UseMFMAF32XEmulation`, and `UseDot2F32XEmulation` arrive at
+    #     `hasCustomSchedule` already at their YAML-declared values
+    #     (defaults supplied by Tensile/Common/GlobalParameters.py when
+    #     the YAML omits them).
     #
-    # * SwapGlobalReadOrder — NECESSARY divergence. CMS schedule functions
-    #   set this themselves (see _get_schedule_*_16bit, _tf32 etc.) based on
-    #   the schedule shape. The user has no say on the CMS path: the schedule
-    #   IS the data layout. We therefore reject loudly if the YAML requests
-    #   SwapGlobalReadOrder=1 and CMS is actually selected.
+    #   * Schedule bodies never mutate `kernel[...]` for these flags; the
+    #     decorator's `required_flags` field is a validation declaration,
+    #     not a state-derivation hook.
     #
-    # * UsePLRPack — NECESSARY divergence. Same reason: matched CMS schedules
-    #   set kernel["UsePLRPack"] = True themselves when the schedule packs LR
-    #   data. The user cannot opt in/out independently on the CMS path.
-    #
-    # * TailloopInNll — NECESSARY divergence (already loudly rejected below).
-    #
-    # In auto mode (UseCustomMainLoopSchedule == -1), we cannot reject until
-    # hasCustomSchedule resolves: if it returns False we fall through to the
-    # non-CMS path and the YAML's SwapGlobalReadOrder/UsePLRPack must be
-    # honored as the default-path semantics describe.
+    # This block therefore reduces to: query the dispatcher, set
+    # `UseCustomMainLoopSchedule` to whether a schedule was found, and
+    # reject the CMS + `TailloopInNll` combination loudly.
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       user_requested_cms = (state["UseCustomMainLoopSchedule"] == 1)
-      # Stash the YAML-supplied values so the rejection messages can quote
-      # them and so we can re-zero just before the schedule function runs.
-      yaml_SwapGlobalReadOrder = state["SwapGlobalReadOrder"]
-      yaml_UsePLRPack = state["UsePLRPack"]
-
-      # hasCustomSchedule does not read SwapGlobalReadOrder or UsePLRPack
-      # (verified in Tensile/Components/CustomSchedule.py), so it is safe
-      # to call without mutating those flags first.
-      hasCMS,_ = hasCustomSchedule(state)
+      hasCMS, _ = hasCustomSchedule(state)
       if user_requested_cms and not hasCMS:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       # Validator-coverage note: setting UseCustomMainLoopSchedule=0 here
-      # bypasses the CMS validator (Tensile/Components/CMSValidator.py) for
-      # this kernel. A False from hasCustomSchedule is therefore both an
-      # optimization-path decision AND a silent loss of validation coverage.
-      # See hasCustomSchedule docstring for the validator-side implication.
+      # bypasses the CMS validator (Tensile/Components/CMSValidator.py)
+      # for this kernel. A False from hasCustomSchedule is therefore both
+      # an optimization-path decision AND a silent loss of validation
+      # coverage. See hasCustomSchedule docstring for the validator-side
+      # implication.
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
 
       if state["UseCustomMainLoopSchedule"] == 1:
-        # CMS is actually selected. Reject loudly any YAML flag that the CMS
-        # path cannot honor. Quote the YAML value so the rejection message is
-        # actionable.
-        if yaml_SwapGlobalReadOrder:
-          reject(state, printRejectionReason,
-                 "CMS does not support YAML-requested SwapGlobalReadOrder=%d "
-                 "(the matched CMS schedule decides this flag itself). "
-                 "Either drop SwapGlobalReadOrder from the YAML or set "
-                 "UseCustomMainLoopSchedule=0." % yaml_SwapGlobalReadOrder)
-          return
-        if yaml_UsePLRPack:
-          reject(state, printRejectionReason,
-                 "CMS does not support YAML-requested UsePLRPack=%d "
-                 "(the matched CMS schedule decides this flag itself). "
-                 "Either drop UsePLRPack from the YAML or set "
-                 "UseCustomMainLoopSchedule=0." % yaml_UsePLRPack)
-          return
-        # Now zero them so the schedule function can affirmatively set them
-        # only when the matched schedule shape requires it.
-        state["SwapGlobalReadOrder"] = 0
-        state["UsePLRPack"] = 0
+        # Universal CMS post-condition: every CMS schedule needs
+        # MfmaInitCVgprs=True (per audit, zero False writes in any CMS
+        # schedule). Not YAML-tunable.
+        state["MfmaInitCVgprs"] = True
         # reject CMS + TailloopInNll
         if state["TailloopInNll"]:
           reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
@@ -2498,6 +2487,8 @@ class Solution(collections.abc.Mapping):
       # MFMA-based XF32 (gfx950) and CMS kernels are exempt.
       if state["UseF32XEmulation"] and not state["UseMFMAF32XEmulation"] and state["ForceUnrollSubIter"]:
         _applySubIterSetting(False)
+      # Non-CMS MFMA F32X emulation kernels need MfmaInitCVgprs=True;
+      # other non-CMS kernels leave it at the framework default (False).
       if state["UseMFMAF32XEmulation"]:
         state["MfmaInitCVgprs"] = True
       # usePLRPack check (default / non-CMS path)

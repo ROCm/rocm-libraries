@@ -37,7 +37,11 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', True, 1): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -124,7 +128,6 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 15
 
     elif isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1"),
                      17, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
@@ -166,7 +169,6 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 112
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

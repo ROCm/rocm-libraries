@@ -40,7 +40,6 @@ from ..shared import (
 )
 def _get_schedule_128x192x64_16bit(kernel, useLDSTr, TLDS):
     """128x192x64 TN schedule (BF16/FP16)."""
-    kernel["MfmaInitCVgprs"] = True
 
     optSchedule = dict()
     syncCode = []

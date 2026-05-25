@@ -106,5 +106,4 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
         # No matching variant found
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     return True, opt1

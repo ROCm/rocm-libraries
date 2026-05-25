@@ -84,19 +84,26 @@ def _base_config():
 # solutions because they encode the schedule-content choice itself.
 # Anything outside this allowlist must agree.
 #
-# Audit (Tensile/Components/CustomSchedule.py):
-# * SwapGlobalReadOrder, UsePLRPack — the bead's primary subjects;
-#   matched CMS schedules write these into kernel state on selection.
-# * MfmaInitCVgprs — set unconditionally to True by every CMS schedule
-#   that hits a matching variant (greppable via "MfmaInitCVgprs = True"
-#   in CustomSchedule.py). Not a bug: the schedule's instruction layout
-#   requires the C-vgprs to be initialized. The default path leaves it
-#   at the framework default (False unless UseMFMAF32XEmulation also
-#   triggers the line at Solution.py:2040), which is correct for SIA3.
+# rocm-libraries-2bww + rocm-libraries-4czr: under the strict model
+# only `UseCustomMainLoopSchedule` and `MfmaInitCVgprs` may legitimately
+# differ between the CMS=0 and CMS=1 paths.
+#
+#   * `SwapGlobalReadOrder` / `UsePLRPack` — carried by YAML; both paths
+#     see the same value.
+#   * `UseMFMAF32XEmulation` — defaults True in GlobalParameters; YAML
+#     may override to False (e.g. ldm5-class schedules); framework block
+#     in Solution.py only DISABLES (never enables) when hardware can't
+#     support it. `UseDot2F32XEmulation` — framework-derived (always False).
+#   * `MfmaInitCVgprs` — divergent by design. CMS path: unconditional True
+#     post-`hasCustomSchedule` (audit confirms every CMS schedule needs
+#     True, zero `MfmaInitCVgprs = False` writes anywhere). Non-CMS path:
+#     True only when `UseMFMAF32XEmulation` is also True (existing
+#     pre-2bww derivation at the non-CMS block). For 16-bit non-CMS
+#     kernels (this test's `_base_config()` resolves to HHS_BH), the
+#     non-CMS path correctly leaves it False because no MFMA F32X is in
+#     play — non-CMS 16-bit doesn't need C-VGPR init.
 _SCHEDULE_CHOICE_KEYS = {
     "UseCustomMainLoopSchedule",
-    "SwapGlobalReadOrder",
-    "UsePLRPack",
     "MfmaInitCVgprs",
 }
 
@@ -154,84 +161,14 @@ class TestCMSFlagReconciliation:
                         for k, v in unexpected.items())
         )
 
-    def test_cms_rejects_yaml_swap_global_read_order(self, isa_infrastructure):
-        """SwapGlobalReadOrder=1 in YAML alongside CMS=1 must reject loudly,
-        not silently zero the flag. (Pre-fix behavior: silent zero.)"""
-        _, isaInfoMap, asm = isa_infrastructure
-
-        cfg = _base_config()
-        cfg["UseCustomMainLoopSchedule"] = 1
-        cfg["SwapGlobalReadOrder"] = 1
-
-        # _make_solution asserts the resulting Solution is Valid; for
-        # this negative test we build the Solution directly and inspect
-        # the rejection state.
-        from copy import deepcopy
-        from Tensile.SolutionStructs.Solution import Solution
-        from Tensile.SolutionStructs.Problem import ProblemType
-        from Tensile.TensileLogic.HandleCustomKernel import (
-            matrixInstructionToMIParameters,
-        )
-
-        # Mirror _make_solution's setup but skip its Valid assertion.
-        isa = next(iter(isaInfoMap.keys()))
-        pt = ProblemType(cfg["ProblemType"], False)
-        config = dict(cfg)
-        config["ProblemType"] = deepcopy(pt.state)
-        config["ISA"] = isa
-        config.setdefault("KernelLanguage", "Assembly")
-        config.setdefault("WavefrontSize", 64)
-        config.setdefault("WorkGroup", [32, 8, 1])
-        mi_params = matrixInstructionToMIParameters(
-            config["MatrixInstruction"], isa, config["WavefrontSize"],
-            config["ProblemType"], config["WorkGroup"], isaInfoMap
-        )
-        config.update(mi_params)
-
-        sol = Solution(config, splitGSU=False, printSolutionRejectionReason=False,
-                       printIndexAssignmentInfo=False, assembler=asm,
-                       isaInfoMap=isaInfoMap)
-        assert not sol["Valid"], (
-            "Expected loud rejection of SwapGlobalReadOrder=1 + CMS=1, but "
-            "Solution was marked Valid (the silent-mutation regression is back)."
-        )
-
-    def test_cms_rejects_yaml_use_plr_pack(self, isa_infrastructure):
-        """UsePLRPack=1 in YAML alongside CMS=1 must reject loudly."""
-        _, isaInfoMap, asm = isa_infrastructure
-
-        cfg = _base_config()
-        cfg["UseCustomMainLoopSchedule"] = 1
-        cfg["UsePLRPack"] = 1
-
-        from copy import deepcopy
-        from Tensile.SolutionStructs.Solution import Solution
-        from Tensile.SolutionStructs.Problem import ProblemType
-        from Tensile.TensileLogic.HandleCustomKernel import (
-            matrixInstructionToMIParameters,
-        )
-
-        isa = next(iter(isaInfoMap.keys()))
-        pt = ProblemType(cfg["ProblemType"], False)
-        config = dict(cfg)
-        config["ProblemType"] = deepcopy(pt.state)
-        config["ISA"] = isa
-        config.setdefault("KernelLanguage", "Assembly")
-        config.setdefault("WavefrontSize", 64)
-        config.setdefault("WorkGroup", [32, 8, 1])
-        mi_params = matrixInstructionToMIParameters(
-            config["MatrixInstruction"], isa, config["WavefrontSize"],
-            config["ProblemType"], config["WorkGroup"], isaInfoMap
-        )
-        config.update(mi_params)
-
-        sol = Solution(config, splitGSU=False, printSolutionRejectionReason=False,
-                       printIndexAssignmentInfo=False, assembler=asm,
-                       isaInfoMap=isaInfoMap)
-        assert not sol["Valid"], (
-            "Expected loud rejection of UsePLRPack=1 + CMS=1, but "
-            "Solution was marked Valid (the silent-mutation regression is back)."
-        )
+    # rocm-libraries-2bww: deleted `test_cms_rejects_yaml_swap_global_read_order`
+    # and `test_cms_rejects_yaml_use_plr_pack`. Under Option C, the matched
+    # schedule's `required_flags` declares the SwapGlobalReadOrder / UsePLRPack
+    # value; YAML disagreement no longer rejects loudly — the schedule's
+    # declaration silently wins (the same effective behavior the legacy
+    # schedule bodies had, just declared in metadata rather than executed in
+    # the body). The silent-fallthrough invariant is still pinned by
+    # `test_cms_auto_with_yaml_flags_and_no_schedule_falls_through` below.
 
     def test_cms_auto_with_yaml_flags_and_no_schedule_falls_through(self, isa_infrastructure):
         """UseCustomMainLoopSchedule=-1 with YAML SwapGlobalReadOrder/UsePLRPack

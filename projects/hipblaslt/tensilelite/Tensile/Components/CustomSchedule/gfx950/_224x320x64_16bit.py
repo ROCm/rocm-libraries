@@ -42,8 +42,6 @@ def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
 
     if isTN(kernel) and useLDSTr and TLDS==1:
         syncTable = [

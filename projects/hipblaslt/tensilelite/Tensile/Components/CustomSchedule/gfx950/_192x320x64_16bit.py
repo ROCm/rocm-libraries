@@ -154,8 +154,6 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         'LCC':    [[numMfma-2, numMfma-1]],
     }
 
-    kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)

@@ -38,7 +38,11 @@ from ._128x160x64_TF32 import _get_schedule_128x160x64_TF32
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', True, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+    }
 )
 def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
     n_mfma = 120
@@ -49,8 +53,6 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
 
     if isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
         syncs.add(11, dscnt=8, comment="wait for LRB0 before pack to complete")
         syncs.add(16, dscnt=8, barrier=True, comment="wait for LRB0 before pack to complete", barrier_comment="barrier for GRA")
         syncs.add(33, dscnt=0, comment="wait for LRA0 before pack to complete")
@@ -152,5 +154,4 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     return True, opt1

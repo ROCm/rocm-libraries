@@ -490,6 +490,10 @@ CANONICAL_TF32_4X4_TN_CONFIG = {
     'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
     'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
     'SourceSwap': 1, 'StreamK': 0,
+    # rocm-libraries-2bww: required_flags for _get_schedule_128x128x32_TF32
+    # ('TN', False, 1) branch — uniform validation requires these to be
+    # explicitly supplied in the synthetic config.
+    'UseMFMAF32XEmulation': True, 'UsePLRPack': True,
 }
 
 
@@ -599,7 +603,19 @@ def real_kernel_capture_pair_approach_a(isa_infrastructure):
     )
 
     # --- Build #2: non-CMS reference via Approach A's helper.
-    default_cap = build_non_cms_reference(config, asm, isaInfoMap)
+    # rocm-libraries-2bww: CANONICAL_TF32_4X4_TN_CONFIG now carries
+    # UsePLRPack=True (required by the CMS schedule's required_flags for
+    # matching).  The non-CMS reference historically built WITHOUT
+    # UsePLRPack because the CMS schedule mutated it after matching; the
+    # non-CMS reference used the unmutated config.  Under strict-2bww the
+    # mutation is gone — flags live in the config — so we must strip
+    # UsePLRPack from the non-CMS reference config to preserve the
+    # intended "unmutated reference" semantics the fixture comment describes.
+    # This keeps the 3 GR-OrderInverted residuals (surfaced by Approach A's
+    # unmutated dict) as the known comparison baseline per rocm-libraries-3ija.
+    ref_config = dict(CANONICAL_TF32_4X4_TN_CONFIG)
+    ref_config['UsePLRPack'] = False
+    default_cap = build_non_cms_reference(ref_config, asm, isaInfoMap)
     return default_cap, cms_cap
 
 

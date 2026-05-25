@@ -26,7 +26,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from enum import Enum, auto
 from itertools import product
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 from rocisa.code import Macro, Module, TextBlock, ValueElseIf, ValueEndif, ValueIf
 from rocisa.instruction import (
@@ -125,6 +125,14 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     mfmaCode = removeComments(mfmaCode)
 
     _, opt1 = hasCustomSchedule(kernel)
+    # rocm-libraries-2bww (strict model): we intentionally do NOT mutate
+    # `kernel[...]` from `opt1.required_flags` here. Under the strict
+    # model the YAML supplies every CMS-relevant flag value, and the
+    # kernel dict already holds the correct values by the time
+    # `customMainLoopSchedule` runs. `required_flags` is now a
+    # decorator-side validation declaration (consumed by the runner's
+    # reference-build helper) plus the optional `wrapped_func` sanity
+    # gate.
     numCodePath = opt1.numCodePaths
     assert opt1.numMfma == len(mfmaCode)
 
@@ -399,6 +407,12 @@ def hasCustomSchedule(kernel):
     are NOT validated by the dataflow-graph machinery. A missing registration
     is therefore a silent loss of validator coverage, not just a missing
     optimization.
+
+    Schedule bodies are pure (no `kernel[...] = ...` writes for the
+    five CMS-relevant flags). Flag values arrive from YAML / framework
+    derivation; `wrapped_func` validates them against each schedule's
+    declarative `required_flags` and returns UNSUPPORTED_VARIANT on
+    mismatch.
     """
     if not kernel["UseCustomMainLoopSchedule"]:
         return False, None
@@ -514,7 +528,8 @@ class RegisterSchedule:
             ...
     """
 
-    def __init__(self, tile_config: TileConfig, dtype_predicate: Callable, vector_widths: list[int], matrix_inst: list[int], mfma_wave_group: list[int]):
+    def __init__(self, tile_config: TileConfig, dtype_predicate: Callable, vector_widths: list[int], matrix_inst: list[int], mfma_wave_group: list[int],
+                 required_flags: Optional[Mapping[Tuple[str, bool, int], Mapping[str, Any]]] = None):
         """
         Initialize the registration decorator with matching criteria.
 
@@ -524,12 +539,23 @@ class RegisterSchedule:
             vector_widths:      List of [GRVWA, GRVWB, LRVW]
             matrix_inst:        List [M, N, K, B] for MI
             mfma_wave_group:    List [rows, cols] for MIWG
+            required_flags:     Optional per-branch declaration of kernel flag
+                                values the schedule expects, keyed on
+                                (layout_str, useLDSTr, TLDS) where layout_str
+                                is one of "TN"/"NT"/"NN"/"TT". `wrapped_func`
+                                enforces these uniformly: if the kernel's
+                                flag state doesn't match, the schedule
+                                returns UNSUPPORTED_VARIANT. The matched
+                                entry is also attached to the returned
+                                `ScheduleInfo` for downstream readers.
+                                Empty/None means no flag expectations.
         """
         self.tile_config = tile_config
         self.dtype_predicate = dtype_predicate
         self.vector_widths = vector_widths
         self.matrix_inst = matrix_inst
         self.mfma_wave_group = mfma_wave_group
+        self.required_flags = required_flags or {}
 
     def _make_probe_kernel(self, transA: bool, transB: bool, useLDSTr: bool, TLDS: int, vectorWidthA: int, vectorWidthB: int) -> dict:
         """Build a synthetic kernel dict for probing layout support."""
@@ -577,6 +603,7 @@ class RegisterSchedule:
             "UseF32XEmulation": False,
             "UseDirect32XEmulation": False,
             "MfmaInitCVgprs": False,
+            "UseDot2F32XEmulation": False,
         }
 
     def _detect_supported_layouts(self, func: Callable) -> list[Tuple[bool, bool, bool, int]]:
@@ -645,6 +672,54 @@ class RegisterSchedule:
             match, schedule = func(kernel, useLDSTr, TLDS)
 
             if match:
+                # rocm-libraries-2bww (strict model): validate the matched-
+                # branch entry of `required_flags` against the kernel's
+                # current flag state. If any declared (flag, value) pair
+                # doesn't match `kernel[flag]`, the kernel is not actually
+                # configured for this schedule — refuse to match. The
+                # non-CMS path (or another CMS schedule) can take over,
+                # avoiding miscompilation from a schedule running with
+                # flag state it wasn't designed for.
+                #
+                # Concrete motivation: YAML cross-products of the form
+                # `UseCustomMainLoopSchedule: [0, 1] × SwapGlobalReadOrder: [0, 1]`
+                # create a (CMS=1, SGOR=0) fork that may tile-match a schedule
+                # whose `required_flags` declares SGOR=True; without this
+                # validation the schedule emits with SGOR=True assumptions
+                # while the kernel has SGOR=False, producing IndexError in
+                # `customMainLoopSchedule`.
+                if self.required_flags:
+                    if isTN(kernel):
+                        layout_str = "TN"
+                    elif isNT(kernel):
+                        layout_str = "NT"
+                    elif isNN(kernel):
+                        layout_str = "NN"
+                    elif isTT(kernel):
+                        layout_str = "TT"
+                    else:
+                        layout_str = "??"
+                    branch_key = (layout_str, bool(useLDSTr), int(TLDS))
+                    branch_flags = self.required_flags.get(branch_key, {})
+
+                    # Uniform required_flags contract (rocm-libraries-2bww):
+                    # every flag declared in the matched branch's
+                    # `required_flags` entry must equal the kernel's current
+                    # state.  If any (flag, expected) pair doesn't match,
+                    # refuse to match — the non-CMS path or another CMS
+                    # schedule can take over, avoiding miscompilation from a
+                    # schedule running with flag state it wasn't designed for.
+                    #
+                    # No exceptions, no allowlists.  Synthetic test configs
+                    # must explicitly declare all flags that the matched
+                    # schedule's `required_flags` entry demands; that is the
+                    # contract that strict-2bww enforces end-to-end.
+                    for _flag, _expected in branch_flags.items():
+                        if kernel.get(_flag) != _expected:
+                            return ScheduleMatchStatus.UNSUPPORTED_VARIANT, None
+
+                    if branch_flags and schedule is not None:
+                        schedule.required_flags = dict(branch_flags)
                 return ScheduleMatchStatus.FOUND, schedule
             # Inner function returned False - variant unsupported, stop searching
             return ScheduleMatchStatus.UNSUPPORTED_VARIANT, None
@@ -680,6 +755,7 @@ class RegisterSchedule:
                 MIWaveGroup=list(self.mfma_wave_group),
                 LDSTrInst=_useLDSTr,
                 TransposeLDS=_TLDS,
+                required_flags=dict(self.required_flags),
             ))
 
         # Return original function unchanged (so it can still be called directly)

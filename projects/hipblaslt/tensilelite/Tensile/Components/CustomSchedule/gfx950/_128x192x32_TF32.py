@@ -38,7 +38,19 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww (strict model): per-branch flag declarations.
+    # These mirror the values the production YAML supplies for this
+    # schedule's matched branch; the decorator copy is consumed by the
+    # 3ija runner's reference-build helper (which has no YAML) and
+    # serves as the human-readable contract between schedule and YAML.
+    required_flags={
+        ("TN", False, 1): {
+            "UsePLRPack": True,
+            "UseMFMAF32XEmulation": False,
+            "UseDot2F32XEmulation": False,
+        },
+    },
 )
 def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -48,9 +60,6 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         # TODO: Add NN schedule in upcoming PR
         return False, None
     elif isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
-        kernel["UseMFMAF32XEmulation"] = False
-        kernel["UseDot2F32XEmulation"] = False
         syncTable = [
             5,  SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for all LRA0. Skip 1*LRB0.") ,
             17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackB0. Wait for all prior LRB0 for PackB0.") ,
@@ -93,8 +102,10 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
     else:
         return False, None
-    
-    kernel["MfmaInitCVgprs"] = True
+
+    # rocm-libraries-2bww: `MfmaInitCVgprs = True` is now applied by
+    # Solution.py post-`hasCustomSchedule` (universal CMS post-condition,
+    # plan Q3b). Schedule body no longer mutates kernel state.
     numMfma = 72
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

@@ -37,7 +37,11 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', True, 1): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -47,7 +51,6 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         # TODO: This schedule can be improved when BC are resolved for MT192
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
-        kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
             'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 95]],
             'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
@@ -165,7 +168,6 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 96
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

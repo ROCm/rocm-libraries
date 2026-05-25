@@ -37,7 +37,11 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('TN', False, 1): {"UseMFMAF32XEmulation": True, "UsePLRPack": True},
+    }
 )
 def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     n_mfma = 4 * 4 * 3    # 128 MT0 / 2 WT0 / 16 mfma dim  * 128/2/16 * 3 bf16 MFMAs per tf32 mfma
@@ -50,7 +54,6 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     snopCode = []
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UseMFMAF32XEmulation"] = True
 
         lra0 = [0,0,1,1]
         syncs.add( 3, dscnt=2, comment="Wait for the first 2 LRA0 to complete before pack")
@@ -116,7 +119,5 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         optSchedule['SNOP'] = [ [s[0] for s in snops] ]
         snopCode = [s[1] for s in snops]
  
-    kernel["MfmaInitCVgprs"] = True
-    kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
     return True, opt1

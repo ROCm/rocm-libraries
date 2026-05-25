@@ -36,7 +36,11 @@ from ..shared import (
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('TN', True, 1): {"UseMFMAF32XEmulation": False, "UsePLRPack": True},
+    }
 )
 def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -44,9 +48,6 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and useLDSTr and TLDS==1:
 
-        kernel["UsePLRPack"] = True
-        kernel["UseMFMAF32XEmulation"] = False
-        kernel["UseDot2F32XEmulation"] = False
         # Used the following constrains to create schedule
         #  - LRA0 + PACKA0 needs to be done before 1/4 MFMAs - index 18
         #  - LBR0 + PACKB0 needs to be done before 2/4 MFMAs - index 36
@@ -114,7 +115,6 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 72
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1

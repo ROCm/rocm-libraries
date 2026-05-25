@@ -239,7 +239,15 @@ def test_non_cms_reference_compare_graphs_surfaces_only_known_residuals(
         pass
     cms_cap = cms_writer._last_cms_capture
     assert cms_cap is not None
-    ref_cap = build_non_cms_reference(config, asm, isaInfoMap)
+    # rocm-libraries-2bww: CANONICAL_TF32_4X4_TN_CONFIG now carries
+    # UsePLRPack=True (required by the CMS schedule's required_flags).
+    # The non-CMS reference historically built WITHOUT UsePLRPack because
+    # the CMS schedule mutated it after matching (the non-CMS reference used
+    # the unmutated config). Strip it here to preserve the "unmutated
+    # reference" semantics that surface the 3 GR-OrderInverted residuals.
+    ref_config = dict(CANONICAL_TF32_4X4_TN_CONFIG)
+    ref_config['UsePLRPack'] = False
+    ref_cap = build_non_cms_reference(ref_config, asm, isaInfoMap)
 
     ref_graph = build_dataflow_graph(ref_cap)
     subj_graph = build_dataflow_graph(cms_cap)

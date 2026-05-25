@@ -23,6 +23,7 @@
 import pytest
 from typing import Set
 
+from Tensile.Common import IsaVersion
 from Tensile.Components.CustomSchedule import (
     hasCustomSchedule, ScheduleInfo, RegisterSchedule, TileConfig,
     CMSKernelInfo, _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
@@ -413,3 +414,112 @@ class TestLayoutAutoDetection:
                     f"{info.name}: expected LocalReadVectorWidth 8, got {info.LocalReadVectorWidth}"
                 assert info.MatrixInstruction == [16, 16, 32, 1], \
                     f"{info.name}: expected MatrixInstruction 16, got {info.MatrixInstruction}"
+
+
+class _StubDataType:
+    """Minimal DataType stub that satisfies isMixed/isTF32/is16bit predicates."""
+    def isHalf(self): return False
+    def isBFloat16(self): return False
+    def isInt8(self): return False
+    def is8bitFloat(self): return False
+    def numBytes(self): return 4  # TF32 = 4 bytes; makes isMixed() False
+
+
+def _make_128x192x32_TF32_kernel(*, use_dot2: bool) -> dict:
+    """
+    Minimal kernel dict matching the _128x192x32_TF32 TN+LDSTr=0+TLDS=1 shape.
+
+    All tile-config, vector-width, and matrix-inst fields mirror the
+    @RegisterSchedule decorator for _get_schedule_128x192x32_TF32.
+
+    Decorator: TileConfig(128, 192, 32, 2, 1, 1, False, 0, 0, isa=(9,5,0))
+               vector_widths=[4, 4, 4], matrix_inst=[16,16,32,1], mfma_wave_group=[2,2]
+    """
+    dtype = _StubDataType()
+    return {
+        "ProblemType": {
+            "DataType":  dtype,
+            "DataTypeA": dtype,
+            "DataTypeB": dtype,
+            "TransposeA": True,   # TN layout
+            "TransposeB": False,
+        },
+        # Tile config
+        "MacroTile0": 128,
+        "MacroTile1": 192,
+        "DepthU": 32,
+        "PrefetchGlobalRead": 2,
+        "PrefetchLocalRead": 1,
+        "DirectToLds": 1,
+        "DtlPlusLdsBuf": False,
+        "WaveSeparateGlobalReadA": 0,
+        "WaveSeparateGlobalReadB": 0,
+        # Vector widths
+        "GlobalReadVectorWidthA": 4,
+        "GlobalReadVectorWidthB": 4,
+        "LocalReadVectorWidthA": 4,
+        "LocalReadVectorWidthB": 4,
+        # Matrix inst
+        "MatrixInstruction": [16, 16, 32, 1],
+        "MIWaveGroup": [2, 2],
+        # LDSTr / TLDS
+        "LDSTrInst": False,
+        "TransposeLDS": 1,
+        # ISA / wavefront
+        "ISA": IsaVersion(9, 5, 0),
+        "WavefrontSize": 64,
+        # Standard CMS flags
+        "UseCustomMainLoopSchedule": 1,
+        "EnableMatrixInstruction": True,
+        "UnrollLoopSwapGlobalReadOrder": False,
+        "UseF32XEmulation": True,   # makes isTF32() return True
+        "UseDirect32XEmulation": False,
+        "MfmaInitCVgprs": False,
+        "UsePLRPack": True,
+        "SwapGlobalReadOrder": False,
+        "Use64bShadowLimit": 1,
+        "ForceUnrollSubIter": False,
+        # The flag under test
+        "UseDot2F32XEmulation": use_dot2,
+        "UseMFMAF32XEmulation": False,
+    }
+
+
+class TestUseDot2F32XEmulationBailOut:
+    """
+    rocm-libraries-2bww belt-and-suspenders: schedules that declare
+    ``UseDot2F32XEmulation: False`` in their required_flags must refuse to
+    match when the kernel has ``UseDot2F32XEmulation = True``.
+
+    Pins the invariant added in dispatch.py:wrapped_func.
+    """
+
+    def test_128x192x32_TF32_bails_out_when_use_dot2_is_true(self):
+        """
+        A kernel with UseDot2F32XEmulation=True must NOT match _128x192x32_TF32.
+
+        The schedule's required_flags declares UseDot2F32XEmulation: False for
+        the TN+LDSTr=0+TLDS=1 branch. wrapped_func validation must intercept
+        this mismatch and return UNSUPPORTED_VARIANT, causing hasCustomSchedule
+        to return (False, None).
+        """
+        kernel = _make_128x192x32_TF32_kernel(use_dot2=True)
+        found, schedule = hasCustomSchedule(kernel)
+        assert found is False, (
+            "hasCustomSchedule should return False when UseDot2F32XEmulation=True "
+            "but the matched schedule declares False in required_flags"
+        )
+        assert schedule is None
+
+    def test_128x192x32_TF32_matches_when_use_dot2_is_false(self):
+        """
+        Positive control: same kernel with UseDot2F32XEmulation=False must match.
+
+        Confirms the bail-out check is not over-firing.
+        """
+        kernel = _make_128x192x32_TF32_kernel(use_dot2=False)
+        found, _ = hasCustomSchedule(kernel)
+        assert found is True, (
+            "hasCustomSchedule should return True when UseDot2F32XEmulation=False "
+            "(the declared required_flags value)"
+        )

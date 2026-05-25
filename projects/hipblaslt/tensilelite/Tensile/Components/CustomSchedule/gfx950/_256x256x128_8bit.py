@@ -74,7 +74,6 @@ def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     numMfma = 64
     # B0A0, B0A1, B1A0, B1A1
     mfmaReorder = []
-    kernel["MfmaInitCVgprs"] = True
     if not kernel["ForceUnrollSubIter"]:
         mfmaReorder = [0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27,
                        4,5,6,7, 12,13,14,15, 20,21,22,23, 28,29,30,31,

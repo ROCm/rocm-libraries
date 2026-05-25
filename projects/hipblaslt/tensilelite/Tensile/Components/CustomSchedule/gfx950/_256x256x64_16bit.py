@@ -38,7 +38,16 @@ from ..shared import (
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
+    mfma_wave_group=[2, 2],
+    # rocm-libraries-2bww: per-branch flag declarations migrated from body.
+    required_flags={
+        ('NN', False, 1): {"UsePLRPack": True},
+        ('NT', False, 0): {"UsePLRPack": True},
+        ('TT', False, 0): {"SwapGlobalReadOrder": True},
+        ('TT', False, 1): {"SwapGlobalReadOrder": True, "UsePLRPack": True},
+        ('TT', True, 0): {"SwapGlobalReadOrder": True},
+        ('TT', True, 1): {"SwapGlobalReadOrder": True},
+    }
 )
 def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
@@ -79,7 +88,6 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 and 3/8 LRB1 to complete")]
         nglshift = nllshift = 16
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
-        kernel["UsePLRPack"] = True
 
         optSchedule = {
             'SYNC'   : [[12,13, 36,44, 56,59, 66,68, 73,92]],
@@ -123,7 +131,6 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         nglshift = nllshift = 16
     elif (isNN(kernel) or isTT(kernel)) and not useLDSTr and TLDS == 1:
-        kernel["UsePLRPack"] = True
 
         optSchedule = {
             'SYNC'   : [[8, 12,13, 36,44, 56,59, 66,68, 74, 127]],
@@ -162,7 +169,6 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete"),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         if isTT(kernel):
-            kernel["SwapGlobalReadOrder"] = True
 
             optSchedule['GRIncA'], optSchedule['GRIncB'] = optSchedule['GRIncB'], optSchedule['GRIncA']
             optSchedule['LRA0'], optSchedule['LRB0'] = optSchedule['LRB0'], optSchedule['LRA0']
@@ -174,7 +180,6 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 128
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
