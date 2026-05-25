@@ -13664,10 +13664,12 @@ class KernelWriterAssembly(KernelWriter):
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
     # Read waveId once; extract M (lower bits) and N (upper bits) before AND destroys waveId.
+    waveSize = kernel["WavefrontSize"]
+    log2WaveSize = int(log(waveSize, 2))
     edgeModule.add(VReadfirstlaneB32(dst=sgpr(tmpM), src=vgpr("Serial"),
                                      comment="lane 0 serial of this wave"))
     edgeModule.add(SLShiftRightB32(dst=sgpr(tmpM), src=sgpr(tmpM),
-                                   shiftHex=6, comment="waveId = serial >> 6"))
+                                   shiftHex=log2WaveSize, comment="waveId = serial >> %d" % log2WaveSize))
     if numWavesN > 1:
       edgeModule.add(SLShiftRightB32(dst=sgpr(tmpN), src=sgpr(tmpM),
                                      shiftHex=log2numWavesM,

@@ -1401,7 +1401,7 @@ class GlobalWriteBatchWriter:
                 fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
                 fallbackLabel = Label(fallbackLabelName,
                                       f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
-                storeCodeModule.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=tt0,
+                storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
                                                comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
                 storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
                                                  comment=f"only d0={tt0-1} valid -> scalar fallback"))
@@ -1472,11 +1472,11 @@ class GlobalWriteBatchWriter:
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
             self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                      mGuardOffset=1, rowScaleShift=2)
-            storeCodeModule.add(SMovB64(dst=EXEC(), src=sgpr(self.tmpS01, 2), comment="apply exec mask"))
+            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D")
           storeCodeModule.add(tmpStoreCode)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
-            storeCodeModule.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
+            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
           if skipLabel is not None:
             storeCodeModule.add(skipLabel)
           self.storesIssued += 1
@@ -1774,9 +1774,14 @@ class GlobalWriteBatchWriter:
     validMWaveSgpr = self.parentWriter.states.subtileTotalMOffsetSgpr
     mMaskDone = Label(self.parentWriter.labels.getNameInc("align8_m_done"), "")
 
-    # --- M mask: per-lane-group selection via 64-bit right-shift ---
-    module.add(SMovB64(dst=sgpr(tmpS, 2), src=-1, comment="mask = full"))
-    module.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=blockIdxM + mGuardOffset,
+    # --- M mask: per-lane-group selection via right-shift ---
+    isWave32 = self.wavelen == 32
+    maskSgprC = self.laneSGPRC  # 1 for wave32, 2 for wave64
+    if isWave32:
+      module.add(SMovB32(dst=sgpr(tmpS), src=-1, comment="mask = full"))
+    else:
+      module.add(SMovB64(dst=sgpr(tmpS, 2), src=-1, comment="mask = full"))
+    module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), blockIdxM + mGuardOffset,
                           comment=f"SubtileMGuard > {blockIdxM + mGuardOffset}? (block fully interior)"))
     module.add(SCBranchSCC1(labelName=mMaskDone.getLabelName(),
                             comment="interior M block -> mask stays -1"))
@@ -1789,16 +1794,20 @@ class GlobalWriteBatchWriter:
     else:
       module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=sgpr(validMWaveSgpr), shiftHex=rowScaleShift,
                                 comment=f"validM_wave * {1 << rowScaleShift}"))
-    module.add(SSubU32(dst=sgpr(tmpS2), src0=64, src1=sgpr(tmpS2),
-                       comment="shiftAmt = 64 - validRows * scale"))
-    module.add(SLShiftRightB64(dst=sgpr(tmpS, 2), src=-1, shiftHex=sgpr(tmpS2),
-                               comment="M mask = -1 >> shiftAmt"))
+    module.add(SSubU32(dst=sgpr(tmpS2), src0=self.wavelen, src1=sgpr(tmpS2),
+                       comment=f"shiftAmt = {self.wavelen} - validRows * scale"))
+    if isWave32:
+      module.add(SLShiftRightB32(dst=sgpr(tmpS), src=-1, shiftHex=sgpr(tmpS2),
+                                 comment="M mask = -1 >> shiftAmt"))
+    else:
+      module.add(SLShiftRightB64(dst=sgpr(tmpS, 2), src=-1, shiftHex=sgpr(tmpS2),
+                                 comment="M mask = -1 >> shiftAmt"))
     module.add(mMaskDone)
 
     # --- N mask: per-column bit-mask for arbitrary partial N ---
     nCmpVal = (blockIdxN + 1) * 16
     nMaskDone = Label(self.parentWriter.labels.getNameInc("align8_n_done"), "")
-    module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=nCmpVal,
+    module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nCmpVal,
                           comment=f"clamped > {nCmpVal}? (not last N block)"))
     module.add(SCBranchSCC1(labelName=nMaskDone.getLabelName(),
                             comment="interior N block -> mask unchanged"))
@@ -1811,14 +1820,21 @@ class GlobalWriteBatchWriter:
                               comment="1 << partialN"))
     module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
                        comment="(1 << partialN) - 1"))
-    module.add(SLShiftLeftB32(dst=sgpr(tmpS2+1), src=sgpr(tmpS2), shiftHex=16,
-                              comment="replicate to hi16"))
-    module.add(SOrB32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr(tmpS2+1),
-                      comment="N mask word = lo16 | hi16"))
-    module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr(tmpS2),
-                       comment="mask_lo &= N mask"))
-    module.add(SAndB32(dst=sgpr(tmpS+1), src0=sgpr(tmpS+1), src1=sgpr(tmpS2),
-                       comment="mask_hi &= N mask"))
+    if isWave32:
+      # wave32: replicate lo16 to both halves without extra scratch SGPR
+      module.add(SMulI32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=hex(0x10001),
+                         comment="replicate lo16 to both halves"))
+      module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr(tmpS2),
+                         comment="mask &= N mask"))
+    else:
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2+1), src=sgpr(tmpS2), shiftHex=16,
+                                comment="replicate to hi16"))
+      module.add(SOrB32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr(tmpS2+1),
+                        comment="N mask word = lo16 | hi16"))
+      module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr(tmpS2),
+                         comment="mask_lo &= N mask"))
+      module.add(SAndB32(dst=sgpr(tmpS+1), src0=sgpr(tmpS+1), src1=sgpr(tmpS2),
+                         comment="mask_hi &= N mask"))
     module.add(nFullLabel)
     module.add(nMaskDone)
 
@@ -1923,7 +1939,7 @@ class GlobalWriteBatchWriter:
 
     if useAlign8:
       tmpS = self.tmpS01
-      module.add(SMovB64(dst=EXEC(), src=sgpr(tmpS, 2), comment="apply exec mask"))
+      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpS, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
     module.add(BufferStoreB128(
@@ -1936,7 +1952,7 @@ class GlobalWriteBatchWriter:
     ))
 
     if useAlign8:
-      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
 
     # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
     # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
@@ -2101,7 +2117,7 @@ class GlobalWriteBatchWriter:
     if useAlign8:
       self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                mGuardOffset=1, rowScaleShift=2)
-      module.add(SMovB64(dst=EXEC(), src=sgpr(self.tmpS01, 2), comment="apply exec mask"))
+      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
     module.add(BufferStoreB64(
@@ -2114,7 +2130,7 @@ class GlobalWriteBatchWriter:
     ))
 
     if useAlign8:
-      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
 
     return module
 
