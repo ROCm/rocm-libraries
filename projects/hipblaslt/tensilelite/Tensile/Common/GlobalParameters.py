@@ -450,6 +450,7 @@ defaultBenchmarkCommonParameters = [
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"DepthU": [-1]},
+    {"DepthUMX": [0]},
     {"NonTemporalE": [0]},
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},

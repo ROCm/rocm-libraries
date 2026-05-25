@@ -2175,13 +2175,27 @@ class LogicalScheduler:
         """Create GR placements for all tensors and uids at the given MT iteration.
 
         tiles: {'A': MFMATileRange, 'B': MFMATileRange}
+
+        For multi-DU tensors (numUnroll > 1), each uid gets its own K-slice
+        so that uid u loads k=[u*grGran.k, (u+1)*grGran.k).
         """
+        cfg = self.config
         result = []
         for tensor in self.tensors:
             tile = tiles['A' if tensor in ('A', 'SA') else 'B']
-            for uid in range(self.config.numUnroll.get(tensor, 1)):
+            gr = {'A': cfg.grA, 'B': cfg.grB,
+                  'SA': cfg.grSA, 'SB': cfg.grSB}.get(tensor, cfg.grA)
+            nUnroll = cfg.numUnroll.get(tensor, 1)
+            for uid in range(nUnroll):
+                if nUnroll > 1:
+                    k_start = uid * gr.k
+                    k_end = (uid + 1) * gr.k
+                    uid_tile = MFMATileRange(k_start, k_end,
+                                             tile.tileId_start, tile.tileId_end)
+                else:
+                    uid_tile = tile
                 result.append(GRPlacement(tensor=tensor, mtIteration=mt,
-                                          tiles=tile, subIterK_slot=0,
+                                          tiles=uid_tile, subIterK_slot=0,
                                           unrollId=uid))
         return result
 
@@ -2271,6 +2285,9 @@ class LogicalScheduler:
 
         Covers partitions 0..offsetPartition-1 with proper deduplication.
         Each unique (tensor, uid, tile-range, k-range) appears exactly once.
+
+        For multi-DU data tensors (numUnroll > 1), each uid only emits GRs
+        for the K slots that belong to it (uid u → k in [u*grGran.k, (u+1)*grGran.k)).
         """
         self._ensure_pass(Pass.LR)
         cfg = self.config
@@ -2289,8 +2306,14 @@ class LogicalScheduler:
                         items.append(('SA', target_range['A'], cfg.grSA))
                         items.append(('SB', target_range['B'], cfg.grSB))
                     for tensor, (t_start, t_end), gr_gran in items:
-                        if uid >= cfg.numUnroll.get(tensor, 1):
+                        nUnroll = cfg.numUnroll.get(tensor, 1)
+                        if uid >= nUnroll:
                             continue
+                        if nUnroll > 1:
+                            uid_k_start = uid * gr_gran.k
+                            uid_k_end = (uid + 1) * gr_gran.k
+                            if k < uid_k_start or k >= uid_k_end:
+                                continue
                         tr = gr_gran.tile_range(k, t_start, t_end)
                         key = (tensor, uid, tr.tileId_start, tr.tileId_end,
                                tr.subIterK_start, tr.subIterK_end)

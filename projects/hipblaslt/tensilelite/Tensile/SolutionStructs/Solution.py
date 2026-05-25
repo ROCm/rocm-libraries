@@ -735,13 +735,21 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
           return
 
+      depthUMX = state.get("DepthUMX", 0)
+      scaleDepthUData = depthUMX if depthUMX > 0 else state["DepthU"]
+      if depthUMX > 0:
+        if depthUMX < state["DepthU"]:
+          reject(state, printRejectionReason, f"DepthUMX={depthUMX} must be >= DepthU={state['DepthU']}")
+        if depthUMX % state["DepthU"] != 0:
+          reject(state, printRejectionReason, f"DepthUMX={depthUMX} must be a multiple of DepthU={state['DepthU']}")
+
       bytesLoaded = state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
-        numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
+        numBytesMXSA = (scaleDepthUData // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
         if bytesLoaded < numBytesMXSA:
           reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
       if state["ProblemType"]["MXBlockB"]:
-        numBytesMXSB = (state["DepthU"] // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
+        numBytesMXSB = (scaleDepthUData // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
         if bytesLoaded < numBytesMXSB:
           reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
@@ -2410,13 +2418,19 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
-      state["_DepthU"] = state["DepthU"]# internal
-      state["_DepthUA"] = depthUA# internal
+      depthUMX = state.get("DepthUMX", 0)
+      effectiveDepthU = depthUMX if depthUMX > 0 else depthU
+
+      state["_RawDepthU"] = depthU
+      state["_DepthU"] = effectiveDepthU
+      state["DepthU"] = effectiveDepthU
+
+      state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
-      state["_DepthUB"] = depthUB# internal
+        state["_DepthUMXSA"] = effectiveDepthU // state["ProblemType"]["MXBlockA"]
+      state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = effectiveDepthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # Auto-derived VW must keep LdsBlockSizePerPad <= 1024 bytes
@@ -3451,7 +3465,7 @@ class Solution(collections.abc.Mapping):
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
-          state["DepthU"] = depthU
+          state["DepthU"] = state.get("_DepthU", depthU)
           break
 
         # this depthU not valid

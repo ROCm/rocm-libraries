@@ -852,6 +852,10 @@ validParameters = { # we need to make sure this matches develop
     # -2 : Only allow max(GLVWA,GLVWB) < VW ?
     # -3 : Only allow min(GLVWA,GLVWB) < VW ?
     "DepthU": [-1] + list(range(2, 1024 + 1, 1)),
+    # DepthUMX: effective DepthU for MX scale tensors, in data elements.
+    # 0 = use DepthU (default). When > 0, overwrites DepthU for loop counting
+    # while data SRD advance stays at the raw DepthU.
+    "DepthUMX": [0] + list(range(2, 1024 + 1, 1)),
     # integer amount of padding to put into LDS, in 2016 this didn't seem to help performance, profilers were showing that channel conflicts weren't really hurting
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
