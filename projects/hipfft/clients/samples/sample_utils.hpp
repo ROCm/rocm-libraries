@@ -22,50 +22,15 @@
 #ifndef SAMPLE_UTILS_HPP_
 #define SAMPLE_UTILS_HPP_
 
+#include <hip/hip_runtime_api.h>
+#include <cstddef>
+#include <string>
+#include <stdexcept>
 #include <complex>
 #include <iostream>
 #include <numeric>
 #include <type_traits>
 #include <vector>
-
-std::string hipfftResult_to_name(const hipfftResult hipfftrt)
-{
-    switch(hipfftrt)
-    {
-    case HIPFFT_SUCCESS:
-        return "HIPFFT_SUCCESS";
-    case HIPFFT_INVALID_PLAN:
-        return "HIPFFT_SUCCESS";
-    case HIPFFT_ALLOC_FAILED:
-        return "HIPFFT_ALLOC_FAILED";
-    case HIPFFT_INVALID_TYPE:
-        return "HIPFFT_INVALID_TYPE";
-    case HIPFFT_INVALID_VALUE:
-        return "HIPFFT_INVALID_VALUE";
-    case HIPFFT_INTERNAL_ERROR:
-        return "HIPFFT_INTERNAL_ERROR";
-    case HIPFFT_EXEC_FAILED:
-        return "HIPFFT_EXEC_FAILED";
-    case HIPFFT_SETUP_FAILED:
-        return "HIPFFT_SETUP_FAILED";
-    case HIPFFT_INVALID_SIZE:
-        return "HIPFFT_INVALID_SIZE";
-    case HIPFFT_UNALIGNED_DATA:
-        return "HIPFFT_UNALIGNED_DATA";
-    case HIPFFT_INCOMPLETE_PARAMETER_LIST:
-        return "HIPFFT_INCOMPLETE_PARAMETER_LIST";
-    case HIPFFT_INVALID_DEVICE:
-        return "HIPFFT_INVALID_DEVICE";
-    case HIPFFT_PARSE_ERROR:
-        return "HIPFFT_PARSE_ERROR";
-    case HIPFFT_NO_WORKSPACE:
-        return "HIPFFT_NO_WORKSPACE";
-    case HIPFFT_NOT_IMPLEMENTED:
-        return "HIPFFT_NOT_IMPLEMENTED";
-    case HIPFFT_NOT_SUPPORTED:
-        return "HIPFFT_NOT_SUPPORTED";
-    }
-}
 
 std::string hipffttype_to_name(const hipfftType txtype)
 {
@@ -90,36 +55,49 @@ std::string subformat_to_name(const hipfftXtSubFormat_t subformat)
 {
     switch(subformat)
     {
+    case HIPFFT_XT_FORMAT_INPUT:
+        return "HIPFFT_XT_FORMAT_INPUT";
+    case HIPFFT_XT_FORMAT_OUTPUT:
+        return "HIPFFT_XT_FORMAT_OUTPUT";
     case HIPFFT_XT_FORMAT_INPLACE:
         return "HIPFFT_XT_FORMAT_INPLACE";
     case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
         return "HIPFFT_XT_FORMAT_INPLACE_SHUFFLED";
-    default:
-        return "";
+    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+        return "HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED";
+    case HIPFFT_FORMAT_UNDEFINED:
+        return "HIPFFT_FORMAT_UNDEFINED";
     }
-    // FIXME
 }
 
-// An array printer that with bounds on the number of outputs to show
+// An array printer with bounds on the number of outputs to show
 template <typename Tvalue>
 void printarraylimit(const std::vector<Tvalue>& vals,
                      const size_t               Nx,
                      const size_t               Ny,
                      const size_t               printlimit)
 {
+    const size_t skipmarg = 2;
+    const bool xskip = Nx > skipmarg && Nx - skipmarg > printlimit; 
+    const bool yskip = Ny > skipmarg && Ny - skipmarg > printlimit;
+
+    bool xskipped = false;
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
-        if(xidx > printlimit)
+        if(!xskipped && xskip && xidx > printlimit)
         {
+            xskipped=true;
             std::cout << "...\n";
-            xidx = Nx - 1;
+            xidx = Nx - skipmarg;
         }
+        bool yskipped = false;
         for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
-            if(yidx > printlimit)
+            if(!yskipped && yskip && yidx > printlimit)
             {
+                yskipped = true;
                 std::cout << "... ";
-                yidx = Ny - 1;
+                yidx = Ny - skipmarg;
             }
             int pos = xidx * Ny + yidx;
             std::cout << vals[pos] << " ";
@@ -136,26 +114,34 @@ void printarraylimit(const std::vector<Tvalue>& vals,
                      const size_t               Nz,
                      const size_t               printlimit)
 {
+    const size_t skipmarg = 2;
+    const bool xskip = Nx > skipmarg && Nx - skipmarg > printlimit; 
+    const bool yskip = Ny > skipmarg && Ny - skipmarg > printlimit;
+    const bool zskip = Nz > skipmarg && Nz - skipmarg > printlimit;
+    
+    bool xskipped = false;
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
-        if(xidx == printlimit)
+        if(!xskipped && xskip && xidx > printlimit)
         {
             std::cout << "\n...\n";
-            xidx = Nx - 3;
+            xidx = Nx - skipmarg;
         }
+        bool yskipped = false;
         for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
-            if(yidx == printlimit)
+            if(!yskipped && yskip && yidx > printlimit)
             {
                 std::cout << "...\n";
-                yidx = Ny - 3;
+                yidx = Ny - skipmarg;
             }
+            bool zskipped = false;
             for(size_t zidx = 0; zidx < Nz; ++zidx)
             {
-                if(zidx == printlimit)
+                if(!zskipped && zskip && zidx > printlimit)
                 {
                     std::cout << "... ";
-                    zidx = Nz - 3;
+                    zidx = Nz - skipmarg;
                 }
                 int pos = (xidx * Ny + yidx) * Nz + zidx;
                 std::cout << vals[pos] << " ";

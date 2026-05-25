@@ -59,7 +59,7 @@ int main()
     const bool linearize_output = true;
     
     // We only want to print a subset of the data:
-    const int printlimit = 8;
+    const int printlimit = 5;
 
     int deviceCount;
     if(hipGetDeviceCount(&deviceCount) != hipSuccess)
