@@ -35,7 +35,6 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
-#include <sstream>
 
 namespace TensileLite
 {
@@ -380,15 +379,6 @@ namespace TensileLite
             return rv;
         }
 
-        bool ReferenceValidator::shouldSkipNullTensor(const std::string& tensorName,
-                                                      bool hasNullPointer,
-                                                      bool hasZeroElements) const
-        {
-            // Only output tensors reach this function (filtered by isOutput() check)
-            // Output tensors should never have null pointers or zero elements
-            return false;
-        }
-
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      reference,
                                           ContractionInputs const&      result)
@@ -517,26 +507,7 @@ namespace TensileLite
                     std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
                               << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
-
-                // Check if we should skip this tensor due to null pointers or zero elements
-                bool hasNullPointer = (resPtr == nullptr || refPtr == nullptr);
-                bool hasZeroElements = (result.maxElements[i] == 0);
-
-                if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
-                {
-                    continue;
-                }
-
-                // If we reach here with null pointers or zero elements, it's an error
-                if(hasNullPointer || hasZeroElements)
-                {
-                    std::stringstream ss;
-                    ss << "Unexpected null pointer or zero elements for tensor " << tensor.getName()
-                       << " (resPtr=" << resPtr << ", refPtr=" << refPtr
-                       << ", maxElements=" << result.maxElements[i] << ")";
-                    throw std::runtime_error(ss.str());
-                }
-
+                
                 rv &= checkResults(
                     tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
@@ -545,15 +516,13 @@ namespace TensileLite
 
         void ReferenceValidator::allocateResultBuffer(size_t bytes)
         {
-            // Only skip reallocation if size matches AND buffer is valid
-            if(m_cpuResultBufferSize == bytes && m_cpuResultBuffer.get() != nullptr)
+            if(m_cpuResultBufferSize == bytes)
                 return;
-
             m_cpuResultBuffer.reset();
 
             uint8_t* buffer;
-            HIP_CHECK_EXC(hipHostMalloc((void**)&buffer, bytes, 0));
-            m_cpuResultBuffer.reset(buffer, [](uint8_t* p) { HIP_CHECK_EXC(hipHostFree(p)); });
+            HIP_CHECK_EXC(hipHostMalloc(&buffer, bytes, 0));
+            m_cpuResultBuffer.reset(buffer, hipHostFree);
             m_cpuResultBufferSize = bytes;
         }
 
@@ -593,7 +562,8 @@ namespace TensileLite
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.amaxd().totalAllocatedBytes());
 
-            allocateResultBuffer(requiredBufferSize);
+            if(m_cpuResultBufferSize < requiredBufferSize)
+                allocateResultBuffer(requiredBufferSize);
 
             if(m_printTensorA)
             {
@@ -808,31 +778,12 @@ namespace TensileLite
             size_t elementsAfterData    = 0;
 
             BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
-            // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
             if(boundsCheck == BoundsCheckMode::NaN)
                 elementsToCopy = maxElement;
             size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
 
-            // Check if we should skip this tensor due to null pointers or no data
-            bool hasNullPointer = (result == nullptr || reference == nullptr);
-            bool hasZeroElements = (bytesToCopy == 0 || maxElement == 0);
-
-            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
-            {
-                return true;
-            }
-
-            // If we reach here with null pointers or no data, it's an error
-            if(hasNullPointer || hasZeroElements)
-            {
-                std::stringstream ss;
-                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
-                   << " (result=" << result << ", reference=" << reference
-                   << ", bytesToCopy=" << bytesToCopy << ", maxElement=" << maxElement << ")";
-                throw std::runtime_error(ss.str());
-            }
-
-            allocateResultBuffer(bytesToCopy);
+            if(m_cpuResultBufferSize < bytesToCopy)
+                allocateResultBuffer(bytesToCopy);
 
             auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
 

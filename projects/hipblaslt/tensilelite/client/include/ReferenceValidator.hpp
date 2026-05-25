@@ -127,10 +127,6 @@ namespace TensileLite
         private:
             void allocateResultBuffer(size_t bytes);
 
-            bool shouldSkipNullTensor(const std::string& tensorName,
-                                      bool hasNullPointer,
-                                      bool hasZeroElements) const;
-
             std::shared_ptr<DataInitialization> m_dataInit;
             std::shared_ptr<ProblemInputs>      m_referenceInputs;
 
