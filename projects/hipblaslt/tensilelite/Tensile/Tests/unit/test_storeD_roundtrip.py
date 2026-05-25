@@ -1969,6 +1969,17 @@ CLOAD_OOB_CASES = [
     (_BETA_CFG, 64, 48),   # wave-1-N partially OOB → hits guard
     (_BETA_CFG, 32, 32),   # M and N both OOB → hits guard
     (_BETA_CFG, 32, 48),   # M OOB + N partial → hits guard
+    # storeAlign8: M%8==0 (but M%16!=0) takes NonEdge with partial-LG exec mask.
+    # C-load SrdC+2 gate operates at 16-row MMA tile granularity — verify no OOB.
+    (_BETA_CFG, 8,  64),   # M=8:  1 valid LG in wave-0, wave-1 fully OOB
+    (_BETA_CFG, 24, 64),   # M=24: partial within wave-0 (8 valid rows in 2nd tile)
+    (_BETA_CFG, 40, 64),   # M=40: wave-0 full, wave-1 partial (8 valid rows)
+    (_BETA_CFG, 56, 64),   # M=56: wave-0 full, wave-1 partial (24 valid rows)
+    (_BETA_CFG, 8,  13),   # M=8 + arbitrary N=13: both M and N partial
+    (_BETA_CFG, 40, 5),    # M=40 + N=5: partial M + very small N
+    (_BETA_CFG, 64, 3),    # full M + tiny N=3: arbitrary N boundary
+    (_BETA_CFG, 64, 13),   # full M + N=13: arbitrary N partial
+    (_BETA_CFG, 8,  1),    # M=8 + N=1: minimal partial in both dims
 ]
 
 
