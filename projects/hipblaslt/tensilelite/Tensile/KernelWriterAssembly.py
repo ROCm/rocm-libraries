@@ -17412,8 +17412,8 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping, setLds: bool = True) -> Module:
-    """Subtile variant of initTDMDescriptor(). setLds=False reprograms from tracking SGPR."""
+  def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
+    """Subtile variant of initTDMDescriptor()."""
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     ti: int = tP["idx"]
@@ -17457,47 +17457,38 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.setDataType(dtype, descSgprName(1)))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
 
-    # LDS address handling:
-    # setLds=True (prefetch): compute from constants, also init tracking SGPR
-    # setLds=False (main loop): read from tracking SGPR (maintained via XOR swap)
-    if not setLds:
-      # Main loop: read current LDS addr from tracking SGPR
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx: int = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+      # Decompose wave ID to axis component for multi-wave
+      if numWavesThisAxis < numWaves:
+        if ti == 0 and wgN > 1:
+          mod.add(SAndB32(dst=sgpr(waveOffsetSgprIdx), src0=sgpr(waveOffsetSgprIdx), src1=wgM - 1,
+                           comment=f"waveIdM = waveId %% {wgM}"))
+        elif ti == 1 and wgM > 1:
+          mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
+                                   shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+      if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+        tileBytes = round(mt // numWavesThisAxis * du * bpe)
+        padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
+                f"woffset = wId * ({tileBytes}+{padBytes})"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWavesThisAxis * du * bpe),
+                "woffset = wId * (mt // numWaves * du * bpe)"))
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+              f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+      # Save LDS offset to tracking SGPR for runtime double-buffer swap
       ldsTrackSgpr = f"tdmLdsAddr{tc}"
-      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
-    else:
-      with self.allocTmpSgpr(1) as tmpSgprRes:
-        waveOffsetSgprIdx: int = tmpSgprRes.idx
-        mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
-        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
-        # Decompose wave ID to axis component for multi-wave
-        if numWavesThisAxis < numWaves:
-          if ti == 0 and wgN > 1:
-            mod.add(SAndB32(dst=sgpr(waveOffsetSgprIdx), src0=sgpr(waveOffsetSgprIdx), src1=wgM - 1,
-                             comment=f"waveIdM = waveId %% {wgM}"))
-          elif ti == 1 and wgM > 1:
-            mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
-                                     shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
-        if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-          tileBytes = round(mt // numWavesThisAxis * du * bpe)
-          padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
-          mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
-                  f"woffset = wId * ({tileBytes}+{padBytes})"))
-        else:
-          mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWavesThisAxis * du * bpe),
-                  "woffset = wId * (mt // numWaves * du * bpe)"))
-        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
-                f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
-        mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
-        # Save LDS offset to tracking SGPR for runtime double-buffer swap
-        ldsTrackSgpr = f"tdmLdsAddr{tc}"
-        mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
-        # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
-        # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
-        swapMaskSgpr = f"tdmLdsSwapMask{tc}"
-        ldsTotalSize = self.ldsTotalSize
-        mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
-        mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
-
+      mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
+      # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
+      # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
+      swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+      ldsTotalSize = self.ldsTotalSize
+      mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+      mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
     sizeShifter = 1 if dtype.isFloat4() else 0
     sizeShifterDim = sizeShifter
 
