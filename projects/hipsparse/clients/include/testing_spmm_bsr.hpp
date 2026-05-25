@@ -49,7 +49,6 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int64_t              mb         = 10;
-    int64_t              nb         = 10;
     int64_t              kb         = 10;
     int64_t              n          = 10;
     int64_t              nnzb       = 10;
@@ -215,12 +214,12 @@ void testing_spmm_bsr(Arguments argus)
         return;
     }
 
-    // The host BSR matrix-matrix reference (host_bsrmm) requires column-major
-    // B and C, and supports non-transpose / transpose B.
-    if(orderB != HIPSPARSE_ORDER_COL || orderC != HIPSPARSE_ORDER_COL)
-    {
-        return;
-    }
+    // // The host BSR matrix-matrix reference (host_bsrmm) requires column-major
+    // // B and C, and supports non-transpose / transpose B.
+    // if(orderB != HIPSPARSE_ORDER_COL || orderC != HIPSPARSE_ORDER_COL)
+    // {
+    //     return;
+    // }
 
     if(blockDim < 1)
     {
@@ -250,55 +249,27 @@ void testing_spmm_bsr(Arguments argus)
     // Redefine sparse matrix values
     hipsparseInit<T>(hcsr_val, hcsr_val.size(), 1);
 
-    // Convert the CSR matrix to BSR on the host. The helper expects int-based
-    // row/column arrays, so temporarily project the CSR index arrays through
-    // int vectors when I/J are not already int.
     J mb = (m + blockDim - 1) / blockDim;
     J kb = (k + blockDim - 1) / blockDim;
 
-    std::vector<int> hcsr_row_ptr_int(hcsr_row_ptr.size());
-    std::vector<int> hcsr_col_ind_int(hcsr_col_ind.size());
-    for(size_t i = 0; i < hcsr_row_ptr.size(); ++i)
-    {
-        hcsr_row_ptr_int[i] = static_cast<int>(hcsr_row_ptr[i]);
-    }
-    for(size_t i = 0; i < hcsr_col_ind.size(); ++i)
-    {
-        hcsr_col_ind_int[i] = static_cast<int>(hcsr_col_ind[i]);
-    }
+    I              nnzb = 0;
+    std::vector<I> hbsr_row_ptr;
+    std::vector<J> hbsr_col_ind;
+    std::vector<T> hbsr_val;
 
-    int              nnzb_int = 0;
-    std::vector<int> hbsr_row_ptr_int;
-    std::vector<int> hbsr_col_ind_int;
-    std::vector<T>   hbsr_val;
-
-    host_csr_to_bsr<T>(block_dir,
-                       static_cast<int>(m),
-                       static_cast<int>(k),
-                       static_cast<int>(blockDim),
-                       nnzb_int,
-                       idx_base,
-                       hcsr_row_ptr_int,
-                       hcsr_col_ind_int,
-                       hcsr_val,
-                       idx_base,
-                       hbsr_row_ptr_int,
-                       hbsr_col_ind_int,
-                       hbsr_val);
-
-    I nnzb = static_cast<I>(nnzb_int);
-
-    // Copy the BSR index arrays into the caller-selected I/J precision.
-    std::vector<I> hbsr_row_ptr(hbsr_row_ptr_int.size());
-    std::vector<J> hbsr_col_ind(hbsr_col_ind_int.size());
-    for(size_t i = 0; i < hbsr_row_ptr_int.size(); ++i)
-    {
-        hbsr_row_ptr[i] = static_cast<I>(hbsr_row_ptr_int[i]);
-    }
-    for(size_t i = 0; i < hbsr_col_ind_int.size(); ++i)
-    {
-        hbsr_col_ind[i] = static_cast<J>(hbsr_col_ind_int[i]);
-    }
+    host_csr_to_bsr<I, J, T>(block_dir,
+                             m,
+                             k,
+                             blockDim,
+                             nnzb,
+                             idx_base,
+                             hcsr_row_ptr,
+                             hcsr_col_ind,
+                             hcsr_val,
+                             idx_base,
+                             hbsr_row_ptr,
+                             hbsr_col_ind,
+                             hbsr_val);
 
     // BSR matrix dimensions in terms of scalar rows/cols.
     J A_m = mb * blockDim;
@@ -425,23 +396,23 @@ void testing_spmm_bsr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
         // Host SpMM reference using the int-projection of the BSR matrix.
-        host_bsrmm<T>(static_cast<int>(mb),
-                      static_cast<int>(n),
-                      static_cast<int>(kb),
-                      static_cast<int>(blockDim),
-                      block_dir,
-                      transA,
-                      transB,
-                      h_alpha,
-                      hbsr_row_ptr_int,
-                      hbsr_col_ind_int,
-                      hbsr_val,
-                      hB,
-                      static_cast<int>(ldb),
-                      h_beta,
-                      hC_gold,
-                      static_cast<int>(ldc),
-                      idx_base);
+        host_bsrmm<I, J, T>(mb,
+                            n,
+                            kb,
+                            blockDim,
+                            block_dir,
+                            transA,
+                            transB,
+                            h_alpha,
+                            hbsr_row_ptr,
+                            hbsr_col_ind,
+                            hbsr_val,
+                            hB,
+                            ldb,
+                            h_beta,
+                            hC_gold,
+                            ldc,
+                            idx_base);
 
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_1.data());
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_2.data());

@@ -230,49 +230,24 @@ void testing_spmv_bsr(Arguments argus)
     J mb = (m + blockDim - 1) / blockDim;
     J nb = (n + blockDim - 1) / blockDim;
 
-    std::vector<int> hcsr_row_ptr_int(hcsr_row_ptr.size());
-    std::vector<int> hcol_ind_int(hcol_ind.size());
-    for(size_t i = 0; i < hcsr_row_ptr.size(); ++i)
-    {
-        hcsr_row_ptr_int[i] = static_cast<int>(hcsr_row_ptr[i]);
-    }
-    for(size_t i = 0; i < hcol_ind.size(); ++i)
-    {
-        hcol_ind_int[i] = static_cast<int>(hcol_ind[i]);
-    }
+    I              nnzb = 0;
+    std::vector<I> hbsr_row_ptr;
+    std::vector<J> hbsr_col_ind;
+    std::vector<T> hbsr_val;
 
-    int              nnzb_int = 0;
-    std::vector<int> hbsr_row_ptr_int;
-    std::vector<int> hbsr_col_ind_int;
-    std::vector<T>   hbsr_val;
-
-    host_csr_to_bsr<T>(block_dir,
-                       static_cast<int>(m),
-                       static_cast<int>(n),
-                       static_cast<int>(blockDim),
-                       nnzb_int,
-                       idx_base,
-                       hcsr_row_ptr_int,
-                       hcol_ind_int,
-                       hval,
-                       idx_base,
-                       hbsr_row_ptr_int,
-                       hbsr_col_ind_int,
-                       hbsr_val);
-
-    I nnzb = static_cast<I>(nnzb_int);
-
-    // Copy the BSR index arrays into the caller-selected I/J precision.
-    std::vector<I> hbsr_row_ptr(hbsr_row_ptr_int.size());
-    std::vector<J> hbsr_col_ind(hbsr_col_ind_int.size());
-    for(size_t i = 0; i < hbsr_row_ptr_int.size(); ++i)
-    {
-        hbsr_row_ptr[i] = static_cast<I>(hbsr_row_ptr_int[i]);
-    }
-    for(size_t i = 0; i < hbsr_col_ind_int.size(); ++i)
-    {
-        hbsr_col_ind[i] = static_cast<J>(hbsr_col_ind_int[i]);
-    }
+    host_csr_to_bsr<I, J, T>(block_dir,
+                             m,
+                             n,
+                             blockDim,
+                             nnzb,
+                             idx_base,
+                             hcsr_row_ptr,
+                             hcol_ind,
+                             hval,
+                             idx_base,
+                             hbsr_row_ptr,
+                             hbsr_col_ind,
+                             hbsr_val);
 
     // BSR matrix dimensions in terms of scalar rows/cols.
     J x_size = nb * blockDim;
@@ -375,16 +350,16 @@ void testing_spmv_bsr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * y_size, hipMemcpyDeviceToHost));
 
         // Host SpMV reference using the int-projection of the BSR matrix.
-        host_bsrmv<T>(block_dir,
+        host_bsrmv<I, J, T>(block_dir,
                       transA,
-                      static_cast<int>(mb),
-                      static_cast<int>(nb),
-                      static_cast<int>(nnzb),
+                      mb,
+                      nb,
+                      nnzb,
                       h_alpha,
-                      hbsr_row_ptr_int.data(),
-                      hbsr_col_ind_int.data(),
+                      hbsr_row_ptr.data(),
+                      hbsr_col_ind.data(),
                       hbsr_val.data(),
-                      static_cast<int>(blockDim),
+                      blockDim,
                       hx.data(),
                       h_beta,
                       hy_gold.data(),

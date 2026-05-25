@@ -611,23 +611,23 @@ void testing_bsrmm(const Arguments& argus)
         CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
         // Host bsrmm
-        host_bsrmm<T>(mb,
-                      n,
-                      kb,
-                      block_dim,
-                      dirA,
-                      transA,
-                      transB,
-                      h_alpha,
-                      hbsr_row_ptrA,
-                      hbsr_col_indA,
-                      hbsr_valA,
-                      hB,
-                      ldb,
-                      h_beta,
-                      hC_gold,
-                      ldc,
-                      idx_base);
+        host_bsrmm(mb,
+                   n,
+                   kb,
+                   block_dim,
+                   dirA,
+                   transA,
+                   transB,
+                   h_alpha,
+                   hbsr_row_ptrA,
+                   hbsr_col_indA,
+                   hbsr_valA,
+                   hB,
+                   ldb,
+                   h_beta,
+                   hC_gold,
+                   ldc,
+                   idx_base);
 
         // Unit check
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_1.data());
