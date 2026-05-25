@@ -133,6 +133,9 @@ globalParameters["CpuThreads"] = (
 # Scope: only kernels emitted through the StinkyTofu assembly path carry the embedded total in the
 # generated ``.s`` and participate in this check; that same encoding total feeds
 # ``.amdhsa_inst_pref_size`` in ``.amdhsa_kernel`` metadata for CP instruction prefetch.
+# Currently this applies to gfx1250 only (StinkyTofu gfx1250 emitter and CP prefetch on that arch).
+# Testing: ``tox`` turns on ``CheckASMCodeSize=True`` for the default Tensile pytest runs (see
+# ``tox.ini``), so gfx1250 kernels built during those tests are verified automatically.
 globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output

@@ -452,7 +452,7 @@ std::string SignatureKernelDescriptor::toString() const {
     // trailing newline.
     for (const auto& d : extraKernelDirectives) {
         kStr += d;
-        if (d.empty() || d.back() != '\n') kStr += "\n";
+        if (d.empty() || d.back() != '\n') kStr += '\n';
     }
 
     kStr += ".end_amdhsa_kernel\n";
