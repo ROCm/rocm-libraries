@@ -1239,9 +1239,8 @@ def mainLoop(writer, kernel):
   grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
   grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   numSubIterK = tiA.localMMATileGrid[1]
-  # R-period: number of data body iters covered by one scale fetch.  R == 1 for
-  # non-MX kernels and for MX kernels with ScaleDepthURatio == 1 (the existing
-  # MT128x128/DU=256 baseline), so the scheduler sees no change for those cases.
+  # R-period: data body iters per scale fetch.  R == 1 for non-MX and for
+  # ScaleDepthURatio == 1 (no scheduler change for those cases).
   scaleSchedulingPeriod = 1
   if scaleTiA is not None:
     scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiA, 'scaleSchedulingPeriod', 1))
@@ -1249,13 +1248,12 @@ def mainLoop(writer, kernel):
     scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiB, 'scaleSchedulingPeriod', 1))
   R = scaleSchedulingPeriod
 
-  # Decouple-scale-DU (Path B): scale LR/GR k_gran is expressed in the
-  # scheduler's data-side K-slot units.  The geometry's lrSubtileShape[1]
-  # and localMMATileGrid[1] are sized from scaleDepthU = R * data_DU, so
-  # they already encode the R factor.  We divide by R to express "one
-  # scale LR/GR per data body iter" — the same as R==1 — and rely on the
-  # emit-time gating in InstructionEmitter.populate to actually fire the
-  # scale op only in ui%R == 0.  For R==1 the divisions are no-ops.
+  # Path B: scale LR/GR k_gran is expressed in data-side K-slot units.
+  # Geometry's lr/localMMATileGrid[1] already encode R (sized from
+  # scaleDepthU = R*data_DU); divide by R for "one scale LR/GR per data
+  # body iter", same as R==1.  Emit-time gating in
+  # InstructionEmitter.populate actually fires the scale op only at the
+  # right ui.  R==1 makes the division a no-op.
   def _div_r(v):
     assert v % R == 0, (
       f"scale granularity {v} not divisible by ScaleDepthURatio={R}; check "

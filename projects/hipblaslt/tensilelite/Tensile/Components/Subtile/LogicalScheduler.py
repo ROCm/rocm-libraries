@@ -139,23 +139,17 @@ class ReadGranularity:
 class SchedulerConfig:
     """Configuration for the MFMATile-based scheduler.
 
-    scaleSchedulingPeriod (R): how many data body iters a single scale fetch
-    covers (ScaleDepthURatio).  R == 1 is the historical behavior; R > 1 is
-    used by the MXFP8 MT256x256/DU=128 path where the scale DepthU is 2x the
-    data DepthU.
-
-    When R > 1 the scheduler keeps numSubIterK at the data-side value
-    (one schedule period == one data body iter).  The R-period cadence is
-    realised at the EMIT layer:
-      - assign_vgpr_tiles forces unroll_factor = lcm(natural, R) so the
-        assembly emits R distinct body copies per outer loop iteration.
-      - InstructionEmitter.populate gates scale GR (DTL) and the scale
-        gr_inc / lr_inc preOps so they fire only in the ui%R == 0 copy.
-        Scale LRs (ds_read) are NOT gated — they fire every copy into
-        cycled VGPRs, all reading the same 4 B LDS slot (R K-position
-        bytes packed); the MFMA op_sel selects byte (ui%R) of that VGPR.
-      - emitAllLoops keeps LoopCounterL decrement=1 and exitValue=pgr
-        per emit copy: each copy IS one data body iter.
+    scaleSchedulingPeriod (R) = ScaleDepthURatio: data body iters per scale
+    fetch.  R==1 is the historical behavior; R>1 is used by the MXFP8
+    MT256x256/DU=128 path.  R>1 keeps numSubIterK at the data-side value;
+    the R-period cadence is realised at the EMIT layer:
+      - assign_vgpr_tiles forces unroll_factor = lcm(natural, R) (R distinct
+        body copies per outer iter).
+      - InstructionEmitter.populate gates scale GR / gr_inc / lr_inc; data
+        SRD+swap fire every copy.  Scale LRs fire every copy; MFMA op_sel
+        picks byte (ui%R) of the packed 4 B scale VGPR.
+      - emitAllLoops keeps LoopCounterL decrement=1 / exitValue=pgr per emit
+        copy (each copy IS one data body iter).
     """
     numMFMATilesM: int    # MFMA tiles in M dimension (for A)
     numMFMATilesN: int    # MFMA tiles in N dimension (for B)
@@ -181,30 +175,20 @@ class SchedulerConfig:
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
 
-        # Decouple-scale-DU: validate R.  Must be >= 1 and a power of 2.
         R = self.scaleSchedulingPeriod
         assert R >= 1 and (R & (R - 1)) == 0, (
             f"scaleSchedulingPeriod must be a positive power of 2, got {R}")
-        # numSubIterK stays at the data-side value.  numSubIterK_data is an
-        # alias kept for emit-time consumers that want to be explicit; the
-        # two are bit-identical (no widening anymore).
+        # numSubIterK_data is an explicit alias for emit-time consumers.
         self.numSubIterK_data = self.numSubIterK
         if R > 1:
             assert self.hasScale, (
                 "scaleSchedulingPeriod>1 requires scale tensors (hasScale)")
-            # The scale LR/GR k_gran must divide the data-side period: one
-            # scheduler period = one data body iter, so scale ops at
-            # k_gran=lrSA.k must fit cleanly inside data_numSubIterK slots
-            # (typically k_gran == numSubIterK_data, producing exactly one
-            # scale LR/GR per period — same as R=1).
             assert self.numSubIterK_data % self.lrSA.k == 0 or \
                    self.lrSA.k % self.numSubIterK_data == 0, (
                 f"lrSA.k ({self.lrSA.k}) must be commensurate with "
                 f"numSubIterK_data ({self.numSubIterK_data})")
-            # Op_sel byte index of the 4 B scale VGPR is
-            #   (a % 2) + 2 * (subIterK + (ui % R) * numSubIterK_data)
-            # which must stay in [0, 4).  That requires R*numSubIterK_data<=2
-            # (the only supported MXFP8 configs).
+            # Op_sel byte = (a%2) + 2*(subIterK + (ui%R)*numSubIterK_data)
+            # must stay in [0, 4) -> R*numSubIterK_data <= 2.
             assert R * self.numSubIterK_data <= 2, (
                 f"R*numSubIterK_data ({R}*{self.numSubIterK_data}) must be "
                 "<= 2 (scale VGPR holds at most 2 K-bytes per M parity).")
@@ -533,28 +517,15 @@ class LogicalScheduler:
         # Track placed K-prefetch LRs across partitions (for dedup).
         placed = set()
 
-        # Decouple-scale-DU symmetric MXSA placement (R>1 + numPartitionsN>1):
-        #   When the partition grid splits the N-axis (numPartitionsN>1) but
-        #   leaves the M-axis whole (numPartitionsM=1), MXSB naturally gets
-        #   a partition-0 LR (its first half of N-tiles), while MXSA's M-axis
-        #   range is identical across partitions and the loaded_ranges dedup
-        #   suppresses any partition-0 MXSA LR (the partition-1 mt=1 LR alone
-        #   covers MXSA's data via carry_active).  Under R>1 PGR>0,
-        #   insert_gr_lr_inc rewrites scale lr_inc into a postOp on the last
-        #   pre-MT-transition LR (the partition-0 anchor); without a
-        #   partition-0 MXSA LR there is no MT transition to detect for SA,
-        #   and the fallback puts MXSA's lr_inc as a preOp on the partition-1
-        #   mt=1 LR — which empirically produces wrong reads at the M=64 /
-        #   partition-1 boundary for MT256x256x128 MXFP8 K>=512.
-        #
-        #   Force-place an MXSA partition-0 LR mirroring MXSB so the MT
-        #   transition is symmetric and insert_gr_lr_inc anchors MXSA's
-        #   lr_inc postOp on the partition-0 LR.  The extra ds_reads are
-        #   functionally redundant (MXSA's M-range is full under
-        #   numPartitionsM=1) but cost a small constant number of LDS reads
-        #   per outer iter in exchange for a symmetric R>1 schedule.
-        #   Strictly gated to R>1 + numPartitionsN>1 + hasScale so R==1 and
-        #   single-partition schedules stay bit-identical.
+        # Symmetric MXSA partition-0 LR (R>1 + numPartitionsN>1):
+        #   With numPartitionsM=1, MXSA's M-range is identical across
+        #   partitions so loaded_ranges dedups its partition-0 LR.  Without
+        #   it, insert_gr_lr_inc sees no MT transition for SA under R>1 PGR>0
+        #   and falls back to a preOp on the partition-1 mt=1 LR — producing
+        #   wrong reads at the partition-1 boundary in MT256x256x128 MXFP8
+        #   K>=512.  Force-place mirroring MXSB so the MT-transition rewrite
+        #   anchors symmetrically; gated to R>1 + numPartitionsN>1 + hasScale
+        #   so R==1 stays bit-identical.
         force_sa_partition0 = (
             cfg.scaleSchedulingPeriod > 1
             and cfg.numPartitionsN > 1
@@ -646,11 +617,9 @@ class LogicalScheduler:
                                   force_sa: bool = False) -> List[SubIterKSlot]:
         """Place MFMAs and LRs for one partition.
 
-        ``force_sa`` (Decouple-scale-DU symmetric MXSA, see place_LRs comment):
-        when True, treat MXSA as if its side were loading on wrapping chunks
-        even if ``load['A']`` is False.  Used in partition 0 under R>1 +
-        numPartitionsN>1 to give MXSA a partition-0 LR mirroring MXSB so the
-        Round-3 scale lr_inc postOp anchors symmetrically.
+        ``force_sa``: treat MXSA as loading on wrapping chunks even if
+        ``load['A']`` is False.  Used to give MXSA a partition-0 LR
+        mirroring MXSB; see the symmetric-MXSA block in place_LRs.
         """
         cfg = self.config
         numK = cfg.numSubIterK
@@ -677,9 +646,8 @@ class LogicalScheduler:
 
                 # For wrapping chunks, only include tensors whose side is
                 # loading so that slot assignment reflects active tensors.
-                # A and B always participate (their wrapping is gated inside
-                # the loop) to keep slot indices stable for their k_gran group.
-                # Under force_sa, also keep MXSA so the symmetric partition-0
+                # A and B always participate to keep slot indices stable.
+                # force_sa also keeps MXSA so the symmetric partition-0
                 # anchor gets placed even when load['A'] is False.
                 if is_wrap and multi_part:
                     group = [(t, g) for t, g in group_all
@@ -917,12 +885,8 @@ class LogicalScheduler:
         self.needs_unrolling = self.unroll_factor > 1
         self.tile_peaks = max_peaks
 
-        # Decouple-scale-DU: force unroll_factor to be a multiple of R so the
-        # mainloop emits whole R-periods only.  When R==1 lcm is a no-op and
-        # the output matches the pre-existing scheduler bit-for-bit; when R>1
-        # the additional copies share the natural cycle (we extend the unroll
-        # loop below to populate tile_maps for the extra iterations so each
-        # placement carries one tile_map per emitted copy).
+        # Force unroll_factor to a multiple of R so the mainloop emits whole
+        # R-periods only.  R==1 is a no-op (lcm = identity).
         R = self.config.scaleSchedulingPeriod
         if R > 1 and (self.unroll_factor % R) != 0:
             target_uf = _lcm(max(self.unroll_factor, 1), R)
@@ -938,18 +902,11 @@ class LogicalScheduler:
                                  pools, last_read, lr_grans, numK):
         """Continue the assign_vgpr_tiles unroll loop until `target_uf` iters.
 
-        Used by the R-period (scaleSchedulingPeriod>1) path to force
-        unroll_factor to a multiple of R when natural convergence would have
-        stopped earlier.  Each extra iteration appends one tile_map entry to
-        every MFMA/LR placement, matching the per-ui populate cycling.  The
-        function is a faithful continuation of the loop body in
-        assign_vgpr_tiles (Phase 2) — it does NOT change semantics, only
-        extends the iteration count.
+        Faithful continuation of Phase 2 of assign_vgpr_tiles — appends one
+        tile_map per extra iter, does not change semantics.
         """
         from collections import deque  # match Phase 2's import scope
 
-        # Resume from convergent state.  natural_uf is len(all_next_iters);
-        # we already wrote tile_maps for iters 0..natural_uf-1.
         for extra_iter in range(self.unroll_factor, target_uf):
             active = dict(carry_active)
             for t in self.tensors:
@@ -1669,28 +1626,17 @@ class LogicalScheduler:
         last_lr = {}  # tensor -> last LR placement seen
         lr_inc_tensors = set()  # tensors that already received lr_inc
 
-        # Decouple-scale-DU MT256 R=2 PGR=2 partition-handoff fix:
-        #   Under PGR>0 with scaleSchedulingPeriod (R) > 1, scale (SA/SB)
-        #   lr_inc placed as a preOp on the new-MT scale LR causes the LDS
-        #   read-side swap to fire at the partition transition BEFORE the
-        #   trailing scale ds_reads of the period have completed (those
-        #   reads use the still-pre-swap LR base VGPR, while subsequent
-        #   reads end up post-swap; the populate walk interleaves MFMAs +
-        #   data LRs between scale LRs in different partitions, so part
-        #   of the scale read period straddles the swap).  This produces
-        #   wrong-half scale reads at the waveM=0 / partition-1 boundary
-        #   (e.g. column 64 in MT256x256x128 MXFP8 K>=512).
-        #
-        #   Move scale lr_inc to a postOp on the LAST pre-transition LR
-        #   so the swap fires AFTER all R-period-worth of scale ds_reads
-        #   for the current MT, matching the PGR=0 cadence (which already
-        #   uses a postOp on last_lr — passing case 3/3 for R=2 PGR=0).
-        #   Data lr_inc keeps its preOp-on-new-MT position; for data the
-        #   per-body cadence is governed by emit_lr_inc + emit_gr_inc in
-        #   InstructionEmitter (Round 2 patch) and the placement-level
-        #   swap continues to anchor at the MT transition.  R == 1
-        #   bypasses the rewrite below entirely so R=1 schedules remain
-        #   bit-identical to the pre-fix baseline.
+        # MT-transition partition-handoff fix for R>1 + PGR>0:
+        #   The default preOp-on-new-MT placement fires the scale LR swap at
+        #   the partition transition BEFORE the trailing scale ds_reads of
+        #   the period complete (the populate walk interleaves data LRs from
+        #   the next partition into the still-running scale read period),
+        #   producing wrong-half scale reads at the partition boundary
+        #   (column 64 in MT256x256x128 MXFP8 K>=512).  Move scale lr_inc to
+        #   a postOp on the last pre-transition LR so the swap fires AFTER
+        #   all R-period-worth of scale reads (matching the PGR=0 cadence
+        #   below).  Data lr_inc keeps its preOp-on-new-MT position; R==1
+        #   bypasses this rewrite and stays bit-identical to legacy.
         R = self.config.scaleSchedulingPeriod
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
@@ -1895,19 +1841,14 @@ class LogicalScheduler:
                         ordered_lrs[0].deps = [
                             Dep(ref=last_gr, mt_offset=0)]
 
-                # ── Phase 4: Consolidate MFMA deps ──
-                # After Phase 1 the LRs form a linear chain B→…→tail; MFMA
-                # must depend on the chain TAIL (last_lr) so the chain orders
-                # before MFMA without producing fan-out (two children sharing
-                # a parent).  This matters when an LR carries a postOp: its
-                # placement_tail_id resolves to the postOp module, and if
-                # MFMA's same-slot LR dep points at that intermediate LR
-                # while the next LR in the chain ALSO chains through it,
-                # both wait_lr (from MFMA's preOp) and the next LR end up
-                # with the same `before` predecessor — which trips the
-                # uniqueness assertion in InstructionScheduler.extractPathsFromBeforeDeps.
-                # Consolidating to last_lr is a no-op when MFMA already
-                # depends on the tail and keeps single-LR slots bit-identical.
+                # ── Phase 4: Consolidate MFMA deps onto LR chain tail ──
+                # MFMA must depend on last_lr (not an intermediate LR) so the
+                # chain orders before MFMA without fan-out.  Required when an
+                # LR carries a postOp: placement_tail_id then points at the
+                # postOp module, and two children sharing it trips the
+                # uniqueness assert in
+                # InstructionScheduler.extractPathsFromBeforeDeps.
+                # No-op when MFMA already depends on the tail.
                 if slot.mfma and last_lr is not None:
                     slot_lr_set = set(id(lr) for lr in ordered_lrs)
                     lr_deps = [d for d in slot.mfma.deps
@@ -2427,17 +2368,11 @@ class LogicalScheduler:
         For unroll_factor > 1, emits per-unroll copies with correct vgpr tiles.
         Each mainloop exit jumps to its corresponding NGLL→NLL pair.
 
-        Decouple-scale-DU last-iter no-prefetch path: when pgr >= 2 +
-        scaleSchedulingPeriod > 1, the mainloop emits TWO copies of each
-        per-ui body — a regular one with full prefetch and a "last iter"
-        one with prefetch-only ops stripped (see InstructionEmitter
-        strip_prefetch).  At LoopBeginL we test counter <= pgr + uf and
-        branch to the last-iter copies, which exit via the existing
-        ExitC{ui} → NGLL_C{ui} chain.  This fixes the MT256 R=2 PGR=2
-        SrdA/SrdMXSA over-fetch by one tile-stride past the buffer end
-        (crashes when the last M-tile's buffer lands on a page boundary).
-        Under R == 1 or pgr < 2 the original single-body mainloop is
-        kept for bit-identical legacy codegen.
+        Last-iter no-prefetch variant (pgr>=2 + R>1): emits a second set of
+        body copies with prefetch ops stripped (see InstructionEmitter
+        strip_prefetch).  Branches to them at counterL<=pgr+uf, fixing the
+        SrdMXSA OOB DTL on the last iter.  R==1 or pgr<2 keeps the single
+        path (bit-identical legacy).
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import (SSubU32, SCmpEQU32, SCmpLeU32,
@@ -2459,14 +2394,9 @@ class LogicalScheduler:
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "")
 
-        # Decouple-scale-DU: with scaleSchedulingPeriod=R, the assembly emits
-        # R distinct body copies per outer iteration (unroll_factor is a
-        # multiple of R, forced in assign_vgpr_tiles).  Each emit copy IS one
-        # data body iter — data SRD/LDS placements advance by 1 DU per copy
-        # just like R==1.  Scale operations are gated at populate time so the
-        # scale SRD/LDS swap fires only in the ui%R == 0 copy, naturally
-        # advancing once per R copies.  LoopCounter cadence therefore matches
-        # the data side (decrement=1, exitValue=pgr) regardless of R.
+        # LoopCounter cadence matches the data side (decrement=1,
+        # exitValue=pgr) regardless of R: each emit copy IS one data body
+        # iter, and scale ops are gated to ui%R==0/R-1 at populate time.
         exitValue = self.config.pgr
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
@@ -2474,12 +2404,8 @@ class LogicalScheduler:
 
         gate_last_iter = getattr(self, '_gate_last_iter', False)
         if gate_last_iter:
-            # Last outer iter enters C0 with counterL == pgr + uf; each body
-            # copy decrements counterL by 1, so the last iter's C{ui} body
-            # enters with counterL == pgr + uf - ui.  All values in
-            # [pgr+1, pgr+uf] => last iter.  We test the C0-entry value
-            # (counterL <= pgr+uf) once at the top of the loop and branch
-            # to the stripped-prefetch copies for the entire last iter.
+            # Last outer iter enters C0 with counterL in [pgr+1, pgr+uf];
+            # one test at the top routes the whole iter to the stripped path.
             lastIterEntry = Label("LoopLastIterL", "")
             module.add(SCmpLeU32(
                 src0=sgpr("LoopCounterL"), src1=exitValue + uf,
@@ -2488,10 +2414,8 @@ class LogicalScheduler:
                 labelName=lastIterEntry.getLabelName(),
                 comment="last iter → MAINLOOP_LASTITER (no prefetch)"))
 
-            # Regular (prefetch) path.  By the LoopBeginL guard,
-            # counterL > pgr + uf at entry; after uf decrements counterL
-            # > pgr, so we always loop back — no intermediate exit checks
-            # needed inside the regular body.
+            # Regular path: counterL > pgr+uf at entry guarantees we always
+            # loop back after uf decrements; no intermediate exit checks.
             for ui in range(uf):
                 module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                           self._emitted_per_unroll[ui]))
@@ -2501,10 +2425,9 @@ class LogicalScheduler:
             module.add(SBranch(labelName=loopBegin.getLabelName(),
                                comment="restart mainloop (regular path)"))
 
-            # Last-iter (no-prefetch) path.  Same SSubU32 + SCmpEQU32 +
-            # SCBranchSCC1 cadence as the original single-body mainloop,
-            # but using the stripped-prefetch body copies.  Last ui
-            # falls through to SkipMainloop → NGLL_C{uf-1}.
+            # Last-iter path: same exit cadence as the single-body mainloop,
+            # but using stripped-prefetch copies; falls through to
+            # SkipMainloop → NGLL_C{uf-1}.
             module.add(lastIterEntry)
             for ui in range(uf):
                 module.add(self._emitLoop(
@@ -2711,25 +2634,12 @@ class LogicalScheduler:
 
         emitter.populate(self._preloop_emitted, unroll_iter=0)
 
-        # Decouple-scale-DU last-iter scale-GR strip (R>1 + PGR>=2):
-        #   With R>1, the mainloop's last outer iter walks SrdMXSA by
-        #   IPT/2 advances of 256 bytes, landing at orig + K bytes —
-        #   exactly one M-block-row stride past the scale buffer's
-        #   valid K range.  The C0 scale buffer_load that fires at
-        #   this SRD reads OOB.  For interior M-tiles the over-fetch
-        #   lands in adjacent tile memory; for the last M-tile it
-        #   reads past the scale buffer end and crashes when the HSA
-        #   allocation lands on a page boundary.  Data SRD on the
-        #   other hand ends at orig + K - 128 (last valid in-row DU),
-        #   so the data buffer_loads are NOT OOB.  We emit a SECOND
-        #   copy of each body with only the scale `gr` ops stripped
-        #   (see InstructionEmitter._is_prefetch_only) and branch to
-        #   it on the last outer iter.  All other ops (data GRs, all
-        #   SRD advances, all LW/LR XORs, data lr_inc, scale lr_inc)
-        #   keep firing on the last iter, preserving the LDS / SRD /
-        #   LW base state cadence the un-fixed NGLL/NLL chain depends
-        #   on.  R == 1 keeps the single-body mainloop for
-        #   bit-identical legacy codegen.
+        # Last-iter scale-GR strip (R>1 + PGR>=2): after the last outer iter
+        # SrdMXSA lands at orig+K (one M-block-row stride OOB), while SrdA
+        # ends at orig+K-128 (in-bounds).  Build a second copy of each body
+        # with only scale `gr` stripped; emitAllLoops branches to it on the
+        # last iter so all SRD advances and LW/LR swaps still fire (the
+        # NGLL/NLL chain sees the un-fixed LDS/SRD state cadence).
         self._gate_last_iter = (
             self.config.pgr >= 2
             and self.config.scaleSchedulingPeriod > 1

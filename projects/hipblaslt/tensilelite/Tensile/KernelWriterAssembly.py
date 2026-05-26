@@ -4201,18 +4201,13 @@ class KernelWriterAssembly(KernelWriter):
             #
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
             #
-            # scaleSpanK: per-scale-fetch K span in DATA elements.  For MX scale
-            # swizzled layout this MUST use the SCALE-side DU (= R*DepthU under
-            # ScaleDepthURatio>1), not the data DepthU.  Otherwise at R>1 with
-            # DepthU<swizzleSize1 the integer division `DepthU//swizzleSize1`
-            # truncates to 0 and the buffer SRD limit drops the LAST swizzle
-            # block from the valid range, so wave-N lanes covering the last N
-            # tile read OOB and return 0x00.  That manifested as ~2^-120
-            # outputs in MT256/R=2 (the bug this comment block now guards).
-            #
-            # For A/B data the swizzleBlockSize path is gated by
-            # isPreShuffledAB (not MX-scale), so the formula stays as
-            # `DepthU // swizzleSize1`.
+            # scaleSpanK: per-scale-fetch K span in DATA elements.  For MX
+            # scale swizzled layout this MUST be R*DepthU (under R>1) — using
+            # DepthU when DepthU<swizzleSize1 truncates DepthU//swizzleSize1
+            # to 0, dropping the last swizzle block from the SRD limit and
+            # producing OOB 0x00 reads for wave-N lanes (~2^-120 outputs in
+            # MT256/R=2).  A/B data takes the isPreShuffledAB branch, not
+            # MX-scale, so it stays at DepthU.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
             if isMxSwizzledScaleLayout:
               scaleR     = kernel.get("ScaleDepthURatio%s" % tcab, 1)

@@ -96,12 +96,9 @@ class InstructionEmitter:
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
-        # Decouple-scale-DU op_sel: scaleSchedulingPeriod (R) > 1 means one
-        # scale fetch covers R body copies' worth of K-bytes packed in the
-        # 4 B scale VGPR.  numSubIterK is the data-side value (not widened),
-        # so we add (ui % R) * numSubIterK_data to subIterK to advance the
-        # scale byte index from one body copy to the next.  For R==1 this
-        # collapses to the original `(a%2) + 2*subIterK` formula.
+        # Under R>1 one scale fetch packs R body copies' K-bytes into the 4B
+        # scale VGPR; advance the op_sel byte index by (ui%R)*numSubIterK_data
+        # per body copy.  R==1 collapses to the legacy (a%2)+2*subIterK formula.
         R = self.config.scaleSchedulingPeriod
         numSubIterK_data = getattr(self.config, 'numSubIterK_data',
                                    self.config.numSubIterK)
@@ -158,18 +155,12 @@ class InstructionEmitter:
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
             # One ds_read_b32 per scale group loads the whole (2,2) LR subtile
-            # — 4 MMA scale tiles == 4 bytes per lane — into a single VGPR.
-            # dsOffset strides by lrSubtileSize in the M dimension only; the K
-            # position within the LR subtile is implicit because a single
-            # b32 load covers all K within the subtile.  With
-            # scaleSchedulingPeriod (R) > 1 the scheduler emits exactly one
-            # scale LR per period covering [0, R*numSubIterK_data) K-slots,
-            # which corresponds to one (2,2) LR subtile's K-extent under the
-            # supported configs (lrSubtileShape[1] == R*numSubIterK_data),
-            # so the existing dsOffset addressing stays valid.  The scale
-            # LDS region itself is R times larger (driven by _DepthUMXS{tc}
-            # widening in Solution.py); LR buffer-swap selects which half of
-            # that region this fetch reads from.
+            # (4 MMA scale tiles = 4 bytes/lane) into a single VGPR.  dsOffset
+            # strides only in M; the K position is implicit because one b32
+            # covers the subtile's K-extent.  Invariant under R>1:
+            # lrSubtileShape[1] == R*numSubIterK_data, so the same addressing
+            # walks the 2x-larger scale LDS region in Solution.py's
+            # _DepthUMXS{tc} allocation.
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
@@ -228,33 +219,13 @@ class InstructionEmitter:
     def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor.
 
-        Decouple-scale-DU (data path): under scaleSchedulingPeriod (R) > 1
-        the unroll factor is expanded to R body copies per outer iter, and
-        each body copy processes a DIFFERENT K-position of MFMA work (op_sel
-        selects which K byte of the packed-R-K-positions scale VGPR is used
-        for that copy's MFMA).  For PGR>=2 with PRELOOP-prefetched data,
-        the per-iter cadence is "consume R K-positions from one LDS half,
-        prefetch R K-positions to the OTHER half".  Each body copy alternates
-        which half it reads from, so the LDS read-side swap (v_xor on the
-        sharedVgprLROffset) must fire EVERY body copy (R toggles per outer
-        iter = net identity, with halves alternating per copy).
-        ─ ui=0 reads from one half, ui=R-1 reads from the other ─ and the
-        next outer iter's ui=0 picks up where this iter's ui=R-1 left off.
-        Firing only at ui%R == 0 (the old behavior) caused all R body copies
-        to read from the SAME half, so C1+ MFMAs got stale data from the
-        previous outer iter's prefetch, producing wrong results for K>=512
-        in subtile_mxfp8_mt256 PGR=2.
-
-        For R == 1 the loop has exactly one body copy per outer iter, so
-        "every body copy" reduces to "every outer iter" — bit-identical to
-        legacy R=1 behavior.
-
-        Scale lr_inc (SA/SB) ops are gated out of this handler entirely by
-        InstructionEmitter.populate via _scale_op_gated_out (at ui%R != R-1
-        for scale lr_inc; the asymmetry comes from scale lr/gr_inc being a
-        single atomic op rather than the data path's split SRD-advance vs
-        LDS-swap), so the path below only governs data (A/B) tensors in
-        practice.
+        Under R>1 the data LR-side swap must fire on EVERY body copy so
+        consecutive copies alternate which LDS half they read (R toggles per
+        outer iter = net identity).  Gating to ui%R==0 makes all R copies read
+        the SAME half and C1+ MFMAs consume stale data — the K>=512
+        subtile_mxfp8_mt256 PGR=2 wrong-result bug.  R==1 reduces to
+        once-per-outer-iter (legacy).  Scale lr_inc (SA/SB) is gated out of
+        this handler by populate via _scale_op_gated_out (fires at ui%R==R-1).
         """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
@@ -265,31 +236,12 @@ class InstructionEmitter:
     def emit_gr_inc(self, source, unroll_iter=0):
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor.
 
-        Decouple-scale-DU (data path): the data SRD must advance on EVERY
-        body copy so the next GR reads the next data-DU of K (cumulatively
-        walking R*DU per outer iter under R>1).  The LDS write-side swap
-        (s_xor LocalWriteBaseAddr with Swap) also fires on EVERY body copy:
-        this is the mirror of the read-side cadence in emit_lr_inc — each
-        body copy alternates which LDS half it WRITES to, so consecutive
-        body copies inside one outer iter prefetch their K-positions to
-        DIFFERENT halves without overwriting each other.  Net per outer
-        iter = R toggles = identity, leaving the LW pointer back at its
-        outer-iter-start state for the next iter's first body copy to
-        target the same starting half as before.  Firing the LW swap only
-        at ui%R == 0 (the old behavior) made body copies 1..R-1 inside an
-        outer iter overwrite each other's prefetched K-positions at the
-        same LDS offset — only the LAST copy's data survived, and earlier
-        body copies' data was lost.  This caused wrong MFMA inputs in
-        subsequent iterations and propagated to NGLL/NLL fall-through for
-        K>=512 in subtile_mxfp8_mt256 PGR=2.
-
-        For R == 1 the loop is one-body-copy-per-outer-iter, so "every
-        body copy" = "every outer iter" — bit-identical to legacy.
-
-        Scale gr_inc (SA/SB) ops are gated out of this handler entirely by
-        InstructionEmitter.populate via _scale_op_gated_out at ui%R != 0,
-        so the scale path still emits both ScalePtrUpdate and ScaleLDSSwap
-        atomically (when it does emit).
+        Mirror of emit_lr_inc on the write side: under R>1 BOTH the data SRD
+        advance AND the LW swap fire on every body copy so consecutive copies
+        prefetch to ALTERNATING LDS halves (otherwise copies 1..R-1 overwrite
+        copy 0 at the same offset — the K>=512 PGR=2 wrong-result bug).
+        R==1 is bit-identical to legacy.  Scale gr_inc (SA/SB) is gated to
+        ui%R==0 by populate so scale SRD+LW swap stay one atomic op.
         """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
@@ -316,82 +268,26 @@ class InstructionEmitter:
     def populate(self, emitted, unroll_iter=0, strip_prefetch=False):
         """Walk emitted partitions and fill em.instructions.
 
-        Decouple-scale-DU: when scaleSchedulingPeriod (R) > 1, the
-        emission cadence within an R-period of body copies is:
+        Per-ui emission cadence under R>1 (R==1: every gate is "fire"):
 
-          Scale (SA/SB) path  — gated atomically at populate time via
-          _scale_op_gated_out (whole op is skipped in non-firing copies):
-            - scale GR (DTL → LDS) and scale gr_inc (SRD advance + LDS
-              write-side swap) fire in the FIRST copy of the period
-              (ui%R == 0) so the DTL goes to the current half and the
-              swap sets up the next period's write target.
-            - scale lr_inc (LDS read-side swap) fires in the LAST copy
-              of the period (ui%R == R-1) so the swap happens AFTER
-              all R copies have read the same half (PGR=0 postOp
-              cadence).  Under PGR>0 with R>1, LogicalScheduler.insert_gr_lr_inc
-              re-anchors scale lr_inc that the MT-transition walk
-              detected from a preOp on the new-MT scale LR to a postOp
-              on the last pre-transition scale LR (see the
-              "MT256 R=2 PGR=2 partition-handoff fix" comment in
-              LogicalScheduler.py).  For numPartitionsN>1 +
-              numPartitionsM=1 (MIWaveGroup=[2,2] at MT256x256), the
-              M-axis is not split across partitions so MXSA's
-              loaded_ranges naturally dedups its partition-0 LR;
-              place_LRs force-places a symmetric MXSA partition-0 LR
-              under R>1 + numPartitionsN>1 so the MT-transition walk
-              fires for SA the same way it fires for SB, anchoring
-              MXSA's lr_inc postOp on the partition-0 LR (see the
-              force_sa_partition0 block in place_LRs).
-            - scale LR (ds_read) is NOT gated: it re-issues the same
-              4 B load into a cycled VGPR each copy.  MFMA op_sel
-              picks the right K byte per copy (see emit_mfma).
+          Scale (SA/SB) — gated here via _scale_op_gated_out:
+            gr, gr_inc : ui%R == 0     (DTL + SRD advance + LW swap)
+            lr_inc     : ui%R == R-1   (LR swap after all R reads;
+                                        insert_gr_lr_inc rewrites MT-
+                                        transition preOp->postOp under
+                                        PGR>0; see LogicalScheduler.py)
+            lr         : every copy    (same 4B reload, op_sel picks byte)
 
-          Data (A/B) path  — gated INSIDE emit_gr_inc / emit_lr_inc
-          because the SRD advance and the LDS swap have different
-          cadences:
-            - data SRD advance (s_add Srd{tc}, Srd{tc}, DU*bpe) fires
-              every copy in emit_gr_inc — the SRD cumulatively walks
-              R*DU per outer iter so the next GR reads the next K-DU.
-            - data LDS write-side swap (s_xor LocalWriteBaseAddr,
-              Swap) fires only at ui%R == 0 — the next period's R
-              GRs all write into the OTHER half (preOp on GR, so the
-              swap happens before the GR).
-            - data LDS read-side swap (v_xor sharedVgprLROffset,
-              sharedVgprLROffsetSwap) fires only at ui%R == 0 — same
-              gate as the write-side swap.  lr_inc is a preOp on LR
-              so firing at ui%R == 0 means the swap is sandwiched
-              between outer iter N's last LR (ui=R-1) and outer iter
-              N+1's first LR (ui=0).  Both bodies of a given outer
-              iter then consume the SAME LDS half.
+          Data (A/B) — gated INSIDE emit_gr_inc / emit_lr_inc because
+          SRD advance and LDS swap have different cadences (see those
+          docstrings): SRD/LW/LR swaps all fire every copy.
 
-        For R == 1 every gate reduces to "fire every copy" and the
-        output is bit-identical to the pre-R-period scheduler.
-
-        strip_prefetch (last-iter mainloop variant): when True, the
-        scale buffer_load that walks SrdMXSA / SrdMXSB one tile-stride
-        past the valid K range is stripped to an empty instruction
-        list.  Per the over-fetch analysis (see scaleSchedulingPeriod
-        R>1 + PGR>=2 path), AFTER the last mainloop outer iter
-            SrdMXSA = orig + (IPT/2)·256 = orig + K bytes
-            SrdA    = orig + (IPT-1)·128 = orig + K - 128 bytes
-        i.e. only the scale SRD ends up past the valid K range
-        (one M-block-row stride OOB).  Data SRD ends one DU SHORT
-        of the buffer end, so the data buffer_load at K-128 is still
-        in-bounds for the row.  Stripping just the scale `gr` on the
-        last iter avoids the scale OOB DTL while keeping every other
-        op (data GRs that read valid K bytes, all SRD advances, all
-        LW/LR XORs, partition-transition data lr_inc) intact — LDS
-        state cadence at NGLL_C{ui} entry stays bit-identical to the
-        un-fixed code.  Stripped op types:
-          - 'gr' for tensor in (SA, SB)  — OOB scale DTL load
-        NOT stripped:
-          - 'gr'     for A, B       (data GRs read valid in-row K)
-          - 'gr_inc' for all tensors (SRD advance + LW XOR; needed so
-                                      NGLL sees the same SRD / LW base
-                                      state as the un-fixed code)
-          - 'lr_inc' for all tensors (scale + data LR XOR; same LDS
-                                      half cadence preserved for NGLL)
-          - mfma / lr / wait_gr / wait_lr / sync / skip
+        strip_prefetch (R>1 + PGR>=2 last outer iter): only the scale `gr`
+        DTL is stripped because after the last iter
+            SrdMXSA = orig + K            (one M-row stride OOB)
+            SrdA    = orig + K - 128      (still in-bounds)
+        SRD advances and LW/LR XORs are NOT stripped so the NGLL/NLL
+        fall-through sees the same SRD/LDS state as the un-fixed code.
         """
         R = self.config.scaleSchedulingPeriod
         for partition_emitted in emitted:
@@ -410,14 +306,7 @@ class InstructionEmitter:
 
     @staticmethod
     def _is_prefetch_only(em) -> bool:
-        """Return True for the scale GR (DTL b128) ops that go OOB on
-        the last mainloop outer iter.
-
-        Only the scale `gr` (SA/SB) is stripped — see populate()
-        docstring (strip_prefetch) for the over-fetch analysis.  Data
-        GR is NOT stripped because SrdA / SrdB end at K - 128 (last
-        valid byte) rather than at K.
-        """
+        """Return True for scale GR (SA/SB); see populate() strip_prefetch."""
         if em.opType != 'gr':
             return False
         tensor = getattr(em.source, 'tensor', None)
@@ -427,7 +316,7 @@ class InstructionEmitter:
     def _scale_op_gated_out(em, unroll_iter: int, R: int) -> bool:
         """Return True for scale ops that should NOT emit in this ui.
 
-        See populate() docstring for the cadence rationale.
+        Cadence rationale: see populate().
         """
         tensor = getattr(em.source, 'tensor', None)
         if tensor not in ('SA', 'SB'):

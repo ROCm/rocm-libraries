@@ -32,17 +32,10 @@ from rocisa.instruction import (
 # Scale GR offset
 # ---------------------------------------------------------------------------
 #
-# NOTE: this is currently a STUB (returns immediately on the first line).
-# The active implementation lives in `_graTileAssignmentScaleSwizzledCommon`
-# below; the unreachable body here is kept as a sketch. Any R-period audit
-# of the GR offset math should be applied to that function, not this one.
-#
-# Caveat: if the STUB return is ever removed, the body below uses
-# `ti.localSubtileGrid[1]` instead of `ti.lrGlobalSubtileGrid[1]`. For
-# MXScaleTilePair the former is always 1 (see Kernel.py: TileInfo for
-# MXScale sets `localSubtileGrid=[1,1]`), so the formula would not pick up
-# the R-period growth in per-scale-fetch K subtile count and would
-# silently miscompile for any scaleDepthU > one LR K subtile.
+# STUB — active path is `_graTileAssignmentScaleSwizzledCommon` below.  If
+# this body is ever revived, replace `ti.localSubtileGrid[1]` (always 1 for
+# MXScale) with `ti.lrGlobalSubtileGrid[1]`, else R-period growth in the
+# per-scale-fetch K subtile count is lost.
 
 def emitScaleGROffset(ti, writer, kernel):
   """Compute per-thread DTL vaddr for scale GR load."""
@@ -181,26 +174,11 @@ def emitScaleLROffset(ti, writer, kernel):
 # Scale LR load
 # ---------------------------------------------------------------------------
 #
-# R-period invariants (decouple MXFP8 scale DepthU):
-#   numScaleGroups = (lrGlobalSubtileGrid[0] / waveGroupSize) * lrGlobalSubtileGrid[1]
-#   is the count of ds_read_b32 instructions a wave issues per *scale fetch*.
-#   With ScaleDepthURatio{tc} = R, lrGlobalSubtileGrid[1] scales linearly
-#   with R, so numScaleGroups scales linearly with R as well: a single scale
-#   fetch covers R times more K-bytes per wave, requiring R times more
-#   ds_reads to drain the wider per-wave LDS region into VGPRs.
-#
-#   groupStride = lrSubtileSize is R-INVARIANT. LR subtiles remain
-#   contiguous in LDS along K because UnrollMajorLDSMXS{A,B}=True in
-#   Solution.py (calcLdsNumBytesAB), so consecutive group ids simply step
-#   one lrSubtileSize down the K axis of the wave's partition. The total
-#   range covered, numScaleGroups * lrSubtileSize, equals the per-wave
-#   partition size computed in _applyScaleWavePartitionLROffset, which
-#   itself grows by R.
-#
-#   This function is not currently on the active call path — the legacy
-#   `localReadDoScaleSubtile` / `emitSubtileScaleDsRead` pair below is
-#   what's wired up. Its loop bound uses `localSubtileGrid` instead of
-#   `lrGlobalSubtileGrid`; see the comment on `emitSubtileScaleDsRead`.
+# R-period invariants: numScaleGroups ∝ R (via lrGlobalSubtileGrid[1]);
+# groupStride = lrSubtileSize is R-invariant (UnrollMajorLDSMXS{A,B}=True
+# keeps LR subtiles contiguous along K).  Not on the active path — the
+# legacy localReadDoScaleSubtile/emitSubtileScaleDsRead pair below is wired
+# up.
 
 def emitScaleLRLoad(ti, writer, kernel):
   """Emit ds_read_b32 for all scale groups."""
@@ -229,18 +207,11 @@ def emitScaleLRLoad(ti, writer, kernel):
 # Scale GR ptr update
 # ---------------------------------------------------------------------------
 #
-# R-period invariants (decouple MXFP8 scale DepthU):
-#   `inc` is the byte stride for advancing the scale SRD from one scale
-#   fetch to the next. It equals (per-wave LR coverage along K) *
-#   (bytes per LR subtile) for a single M-column slice:
-#       inc = lrSubtileSize * lrGlobalSubtileGrid[1]
-#           = bytes per scale K-span fetched per call
-#           = R * dataDU * bpe / mxBlock     (per scale tensor)
-#   The K-loop driver fires this update once per scale fetch (= once per
-#   R data-DepthU body iterations under the R-period scheduler), so the
-#   pointer naturally advances by R * dataDU worth of scale bytes per
-#   call without any per-iteration multiplier here. R=1 reduces to the
-#   legacy "advance by dataDU/mxBlock scale bytes per call" cadence.
+# `inc` = lrSubtileSize * lrGlobalSubtileGrid[1] = R * dataDU * bpe / mxBlock
+# per scale tensor.  Called once per scale fetch (= once per R data-DU body
+# iters under the R-period scheduler), so the SRD advances by R*dataDU worth
+# of scale bytes per call.  R=1 reduces to "advance by dataDU/mxBlock per
+# call" (legacy).
 
 def emitScaleGRPtrUpdate(ti, writer, kernel):
   """Advance scale SRD base pointer by one depthU iteration."""
@@ -303,30 +274,11 @@ def emitScaleLRLDSSwap(ti, writer, kernel):
 #
 # Output: sharedVgprGROffset[0] = grOffset (used as vaddr in DTL load)
 #
-# ---------------------------------------------------------------------------
-# R-period invariant (decouple MXFP8 scale DepthU):
-#   With ScaleDepthURatio{A,B} = R (>=1; default 1 = legacy behavior), one
-#   scale fetch covers R data-DepthU iterations of K, and
-#   MXScaleTilePair.depthU is sized to R * dataDU. Consequently
-#       lrGlobalSubtileGrid[1]  ∝  R
-#   (K-dim LR subtile count per scale fetch grows linearly with R), and
-#   therefore
-#       numThreadsPerGroup = lrSubtileSize * lrGlobalSubtileGrid[1] / loadWidth
-#                          ∝ R
-#   i.e. R times more threads cooperate per scale "column" on each fetch.
-#   This matches the larger per-fetch LDS scale region allocated by
-#   Solution.py (calcLdsNumBytesAB uses _DepthUMXS{A,B} = R*dataDU/mxBlock).
-#
-#   numThreadsPerGroup must:
-#     (a) remain a power of two — the formula uses VLShiftRightB32 with
-#         shiftHex = log2(numThreadsPerGroup), and we apply bit-length /
-#         math.log2 below;
-#     (b) fit inside a single wavefront — DTL is per-wave, and groupId
-#         derived from a single `serial` value cannot reach beyond the
-#         wave's lane count without aliasing.
-#   Both already held at R=1 for every supported config; the asserts
-#   below catch a misconfigured R that would silently break the math.
-# ---------------------------------------------------------------------------
+# R-period invariant: numThreadsPerGroup ∝ R via lrGlobalSubtileGrid[1].
+# It must stay a power of two (we use log2 / bit_length below) and fit in
+# one wavefront (DTL is per-wave; groupId from a single `serial` cannot
+# alias across waves).  Asserts below catch a misconfigured R that would
+# silently break either.
 def _graTileAssignmentScaleSwizzledCommon(tc, writer, kernel):
   module = Module()
 
@@ -339,15 +291,12 @@ def _graTileAssignmentScaleSwizzledCommon(tc, writer, kernel):
   loadWidthShift = loadWidth.bit_length() - 1
 
   # lrSubtileSize = LR subtile bytes (2x2 MMA tiles = 256B for FP4 scale).
-  # This equals the old "2 * subtileSize" (2 M-adjacent [1,2] subtiles).
-  # lrGlobalSubtileGrid[1] = K-dim subtile count = old localSubtileGrid[1].
-  # Under R-period scheduling, lrGlobalSubtileGrid[1] (and therefore
-  # numThreadsPerGroup) scales linearly with ScaleDepthURatio{tc}.
+  # lrGlobalSubtileGrid[1] = K-dim subtile count (= old localSubtileGrid[1]
+  # at R=1; scales linearly with R).
   scaleGroupSize = ti_.lrSubtileSize
   numThreadsPerGroup = (scaleGroupSize * int(ti_.lrGlobalSubtileGrid[1])) // loadWidth
 
-  # R-period invariants: must be pow2 (we use log2 / bit_length below) and
-  # must fit within a single wavefront (one buffer_load is per-wave).
+  # R-period invariants: must be pow2 and fit one wavefront (see header).
   assert numThreadsPerGroup > 0 and (numThreadsPerGroup & (numThreadsPerGroup - 1)) == 0, \
     "scale%s: numThreadsPerGroup=%d must be a power of two (uses bit-shift cadence; " \
     "check lrSubtileSize=%d * lrGlobalSubtileGrid[1]=%s / loadWidth=%d)" % \
@@ -407,37 +356,18 @@ def graTileAssignmentScaleSwizzled(writer, kernel):
 #
 # Output: sharedVgprLROffset[0] = partitionIndex * totalScaleBytes
 #
-# ---------------------------------------------------------------------------
-# R-period invariant (decouple MXFP8 scale DepthU):
-#   totalScaleBytes is the size of ONE wave's scale LDS partition per scale
-#   fetch. With ScaleDepthURatio{tc} = R, MXScaleTilePair.depthU is sized to
-#   R * dataDU, so lrGlobalSubtileGrid[1] grows by R and
-#       totalScaleBytes  ∝  R.
-#
-#   This is consistent with the LDS allocation in Solution.py
-#   (calcLdsNumBytesAB, UnrollMajorLDSMXS{A,B}=True branch):
-#       ldsNumBytes = (_DepthUMXS{tc} + ldsPad) * MacroTile{tc} * bpe
-#   where _DepthUMXS{tc} = R * dataDU / mxBlock{tc} (Solution.py line
-#   ~2373/2376 under the R-period plan). Because the LDS allocation also
-#   grows by R, the per-wave partitions still tile the scale region exactly:
-#       partitions_per_dim    = MIWaveGroup[index]
-#       totalScaleBytes_wave  = ldsNumBytes / MIWaveGroup[index]
-#   (modulo ldsPad, which is added outside this function).
-#
-#   The assert below catches the easy-to-miss case where an R chosen at
-#   the kernel level makes lrGlobalSubtileGrid[0] no longer divisible by
-#   MIWaveGroup[index]; under R=1 this divisibility is already enforced by
-#   TileInfo._check_dim (waveGroupSize argument), so this never fires for
-#   legacy configs.
-# ---------------------------------------------------------------------------
+# R-period invariant: totalScaleBytes ∝ R via lrGlobalSubtileGrid[1].
+# Solution.py grows the matching LDS allocation by R (calcLdsNumBytesAB
+# with _DepthUMXS{tc} = R*dataDU/mxBlock), so wave partitions still tile
+# the scale region exactly.  The assert below catches an R that breaks
+# lrGlobalSubtileGrid[0] divisibility by MIWaveGroup[index] (TileInfo
+# already enforces this at R=1).
 def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId):
   tc = ti_.tc
 
   # totalScaleBytes = bytes per wave partition in LDS for this scale tensor.
-  # lrGlobalSubtileGrid[0] = M-dim LR subtile count (globalMMATileGrid[0] / lrSubtileShape[0])
-  # lrGlobalSubtileGrid[1] = K-dim LR subtile count — scales linearly with
-  #                          ScaleDepthURatio{tc} (= R), so totalScaleBytes ∝ R.
-  # lrSubtileSize = bytes per LR subtile (2x2 MMA tiles for FP4 scale)
+  # lrGlobalSubtileGrid[0/1] = M/K-dim LR subtile counts;
+  # lrSubtileSize = bytes per LR subtile (2x2 MMA tiles for FP4 scale).
   index = 0 if tc == 'MXSA' else 1
   assert int(ti_.lrGlobalSubtileGrid[0]) % kernel["MIWaveGroup"][index] == 0, \
     "scale%s: lrGlobalSubtileGrid[0]=%s not divisible by MIWaveGroup[%d]=%d — " \
@@ -567,28 +497,12 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 # Each 32-bit VGPR holds 4 E8M0 scale bytes; opsel/opsel_hi selects
 # the correct byte per MFMA invocation.
 #
-# ---------------------------------------------------------------------------
-# R-period invariants (decouple MXFP8 scale DepthU):
-#   `groupStride = lrSubtileSize` is R-INVARIANT — the byte size of one
-#   LR subtile (2x2 MMA scale tiles) does not depend on ScaleDepthURatio.
-#   `dsOffset = groupStride * scaleGroupIdx` simply walks consecutive LR
-#   subtiles along K in the wave's LDS partition, which is contiguous along
-#   K because Solution.py uses UnrollMajorLDSMXS{A,B}=True (see LDS layout
-#   comment around Solution.py:2625-2638).
-#
-#   The number of groups (= number of times this is called per scale fetch)
-#   is owned by the caller. Under R-period it should scale linearly with R
-#   so that R * dataDU worth of K is drained from LDS per scale fetch
-#   (matching the wider per-wave partition; see _applyScaleWavePartitionLROffset).
-#
-#   Caveat (pre-existing, NOT introduced by R-period): the current caller
-#   `localReadDoScaleSubtile` derives `numScaleGroups` from
-#   `tileInfo.localSubtileGrid`, which for MXScale is always [1, 1] (see
-#   Kernel.py TileInfo MXScaleTilePair branch). That value is invariant
-#   under R, so this PGR=0 call site would NOT pick up the R-period growth.
-#   The active scheduler path (`emitScaleLRLoad` above, used via the
-#   LogicalScheduler) uses `lrGlobalSubtileGrid` and DOES scale with R.
-# ---------------------------------------------------------------------------
+# groupStride = lrSubtileSize is R-invariant; the number of groups (owned
+# by the caller) should scale with R.  Pre-existing caveat: the PGR=0
+# caller `localReadDoScaleSubtile` derives numScaleGroups from
+# tileInfo.localSubtileGrid (always [1,1] for MXScale) and does NOT pick
+# up R-growth; the active scheduler path (emitScaleLRLoad) uses
+# lrGlobalSubtileGrid and does.
 def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   """Emit a single DSLoadB32 for a scale group (2 M-adjacent [1,2] subtiles).
   Each ds_read_b32 loads 4 bytes = 4 E8M0 scale values into one VGPR."""
@@ -631,16 +545,10 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 ##################################################
 # Scale SRD pointer update: advance scale SRD by scaleDepthU * scaleBpe bytes.
 #
-# R-period invariant (decouple MXFP8 scale DepthU):
-#   Thin wrapper around `emitScaleGRPtrUpdate`. The increment encoded by
-#   that function already equals R * dataDU worth of scale bytes per call,
-#   so this wrapper must be invoked exactly ONCE per scale fetch
-#   (= once per R data-DepthU body iterations under the R-period
-#   LogicalScheduler). Calling it more often would over-advance the SRD
-#   by a factor of R. For R=1 this collapses to the legacy
-#   "once per body iter" cadence and the call-frequency invariant is
-#   trivially satisfied.
-#
+# Thin wrapper around `emitScaleGRPtrUpdate` (which encodes R*dataDU bytes
+# per call).  MUST be invoked exactly once per scale fetch (= once per R
+# data-DU body iters under the R-period scheduler); calling more often
+# over-advances the SRD by R.
 def globalReadScalePtrUpdates(tc, writer, kernel):
   ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
   return emitScaleGRPtrUpdate(ti_, writer, kernel)
@@ -651,18 +559,9 @@ def globalReadScalePtrUpdates(tc, writer, kernel):
 # For Swizzled Scales each wave will collectively stream
 # the scale values
 #
-# ---------------------------------------------------------------------------
-# R-period invariant (decouple MXFP8 scale DepthU):
-#   `bytesPerLoad = loadWidth * wavesize` is the per-wave byte footprint of
-#   ONE buffer_load_b128 (the only DTL load shape used for scales). This
-#   shape — and therefore the per-wave M0 base offset spacing
-#   (`waveId * bytesPerLoad`) and the Swap{MXSA,MXSB} XOR mask derivation
-#   — is R-INVARIANT. ScaleDepthURatio{tc} only affects how MANY of these
-#   loads happen per scale fetch and the size of the LDS scale region
-#   (`ldsTotalSize` already accounts for that via Solution.py's
-#   `_DepthUMXS{tc} = R * dataDU / mxBlock` allocation), not the per-load
-#   layout the SGPRs initialized here depend on.
-# ---------------------------------------------------------------------------
+# bytesPerLoad = loadWidth * wavesize (per-wave footprint of one
+# buffer_load_b128) is R-invariant; R only affects how many loads happen
+# per scale fetch and the LDS scale region size (handled by ldsTotalSize).
 def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
   module = Module()
 
