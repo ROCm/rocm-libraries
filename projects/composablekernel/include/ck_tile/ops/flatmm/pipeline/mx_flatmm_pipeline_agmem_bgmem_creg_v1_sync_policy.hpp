@@ -131,9 +131,12 @@ struct MXFlatmmPipelineAgBgCrPolicySync : UniversalFlatmmPipelineAgBgCrPolicy
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
         const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
 
-        // Same K2 as async baseline and distribution (DWORDx3=12 for fp6).
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : DWORDx4;
-        constexpr index_t K1 = kDramLoadPackBytes / DWORDx4; // 8
+        // fp6: K2=48 (3×dwordx4) so window's safe vector length = 48,
+        // triggering the N==48 inline-asm path (3× buffer_load_dwordx4).
+        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? 3 * DWORDx4 : DWORDx4;
+        constexpr index_t K1 = std::is_same_v<ADataType, pk_fp6x16_t>
+                                   ? 4   // K1*K2=192, 192/12=16 (exact)
+                                   : kDramLoadPackBytes / DWORDx4; // 8
         const index_t K0     = cols / (K1 * K2 / sizeof(ADataType) * APackedSize);
         const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
 
