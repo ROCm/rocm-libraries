@@ -579,12 +579,29 @@ def computeLRReaderForBoundary(kernel, ti, K_remain: int, tc: str,
     consumer_lane = lane16Group * mi_m + lane16
 
     # --- LR offset formula ---
+    # `_lraTileAssignment_legacy` computes one `colOffset_pre` per
+    # subIterK (`sharedVgprLROffset[i]`):
+    #   sharedVgprLROffset[0] = (rotation + lane16Group) % blockSize
+    #   sharedVgprLROffset[i+1] = (sharedVgprLROffset[i] + numMFMACols)
+    #                              % blockSize
+    # which expands to:
+    #   colOffset_pre[subIterK] = (rotation + lane16Group
+    #                              + subIterK * numMFMACols) % blockSize
+    # NOTE: only sharedVgprLROffset[0] passes through the
+    # permlane16_swap; subsequent VGPRs are computed AFTER the swap
+    # via additions to vgpr[0]'s post-swap value. So for subIterK > 0
+    # we need to apply the per-MFMA stride to the POST-SWAP value of
+    # vgpr[0], not before.
+    numMFMACols = int(ti.mmaTileShape[1] * bpe) // loadWidthLR
     ldsRowId = lane16 // numRowsPerLDSBanks
     rotation = (ldsRowId // 2) * 2
-    colOffset_pre = (rotation + lane16Group) % blockSize_LR
-    colOffset_post = _lrPermlane16Swap(consumer_lane, colOffset_pre,
-                                       numRowsPerLDSBanks, blockSize_LR,
-                                       mi_m)
+    colOffset_pre_0 = (rotation + lane16Group) % blockSize_LR
+    colOffset_post_0 = _lrPermlane16Swap(consumer_lane, colOffset_pre_0,
+                                         numRowsPerLDSBanks, blockSize_LR,
+                                         mi_m)
+    colOffset_pre = colOffset_pre_0
+    colOffset_post = (colOffset_post_0
+                      + subIterK_target * numMFMACols) % blockSize_LR
     row_offset_bytes = lane16 * subIterKBytes
     per_lane_addr = colOffset_post * loadWidthLR + row_offset_bytes
 
@@ -865,7 +882,7 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
                     "lane_target=runtime"
                     % (tc, tc, m_last, wave_target)))
         module.add(SWaitCnt(
-            vlcnt=0,
+            vlcnt=0, vscnt=-1,
             comment="narrowLoad[%s]: wait for buffer_load_ushort to "
                     "complete" % tc))
 
@@ -940,6 +957,45 @@ def emitTailTrailingNarrowLoad(kw, kernel) -> Module:
             labelName=skipAllLabel.getLabelName(),
             comment="narrowLoad: K_remain even -- nothing to repair"))
 
+        # Drain the wide DTLs (issued just above by
+        # `globalReadDoSubtile('A')` / `('B')`) into LDS BEFORE
+        # firing the narrow load. Without this drain, the narrow
+        # load's LDS write at `m0_target` races with the wide DTL's
+        # write to the same byte: the wide load delivers the
+        # align-DOWN-clipped value 0, the narrow load delivers the
+        # correct K=K_remain-1 byte, and hardware ordering between
+        # the two is undefined. Draining first guarantees the
+        # narrow load wins.
+        module.add(SWaitCnt(
+            vlcnt=0, vscnt=-1,
+            comment="narrowLoad: drain wide DTL writes to LDS before "
+                    "the narrow load overwrites the boundary slot"))
+
+        # Un-tighten Srd<tc>+2 by `bpr` bytes so the narrow load's
+        # `byte_target = m_last*stride*bpe + K_local*bpe` (which is
+        # at or one byte past `NumRecords_after_align_DOWN`) succeeds
+        # the SRD bound check. The narrow load reads `bpe=2` bytes
+        # at `byte_target`; the post-align-DOWN NumRecords is
+        # `byte_target - K_remain%bpr*bpe` for the last m-row's
+        # boundary, so adding back `bpr` covers up to one DWORD
+        # worth of read (= 2 BF16 elements; we only read 1, the
+        # extra bpe headroom keeps the math symmetric with the
+        # pre-tighten align-UP shape). Restored after the narrow
+        # load so the post-tail-loop epilogue (which uses SrdC/SrdD,
+        # not SrdA/B) sees the same SRD shape it would under
+        # align-UP+no-narrow-load. The restore could be elided
+        # safely (no subsequent SrdA/B use in the kernel body) but
+        # we keep it for shape parity.
+        module.addComment0(
+            "narrowLoad: temporarily un-tighten Srd<tc>+2 by bpr=4 "
+            "so the K=K_remain-1 byte read is in-bounds")
+        module.add(SAddU32(
+            dst=sgpr("SrdA+2"), src0=sgpr("SrdA+2"), src1=4,
+            comment="narrowLoad: SrdA+2 += bpr"))
+        module.add(SAddU32(
+            dst=sgpr("SrdB+2"), src0=sgpr("SrdB+2"), src1=4,
+            comment="narrowLoad: SrdB+2 += bpr"))
+
         # Allocate one VGPR for vaddr=0 (shared across A and B emits).
         vAddrZero = kw.vgprPool.checkOut(1, "tailNarrowLoadVAddr0")
         module.add(VMovB32(
@@ -952,6 +1008,14 @@ def emitTailTrailingNarrowLoad(kw, kernel) -> Module:
             for tc, ti in (('A', tiA), ('B', tiB)):
                 module.add(_emitNarrowLoadForOperand(
                     kw, kernel, tc, ti, tiA, vAddrZero, sExecSave))
+
+        # Restore Srd<tc>+2 to the align-DOWN-tightened value.
+        module.add(SSubU32(
+            dst=sgpr("SrdA+2"), src0=sgpr("SrdA+2"), src1=4,
+            comment="narrowLoad: SrdA+2 -= bpr (restore align-DOWN)"))
+        module.add(SSubU32(
+            dst=sgpr("SrdB+2"), src0=sgpr("SrdB+2"), src1=4,
+            comment="narrowLoad: SrdB+2 -= bpr (restore align-DOWN)"))
 
         kw.vgprPool.checkIn(vAddrZero)
         module.add(skipAllLabel)

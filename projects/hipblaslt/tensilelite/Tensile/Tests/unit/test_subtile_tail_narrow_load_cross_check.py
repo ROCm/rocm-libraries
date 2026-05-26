@@ -175,7 +175,8 @@ _GEOMETRIES_BF16 = [
     (128,  32, 64, 4, 1),    # WG=(4,1) — odd.yaml asymmetric shape
 ]
 
-_K_REMAINS = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]
+_K_REMAINS = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31,
+              33, 35, 47, 49, 63]
 
 
 @pytest.mark.parametrize("MT0,MT1,depthU,wg_m,wg_n", _GEOMETRIES_BF16,
