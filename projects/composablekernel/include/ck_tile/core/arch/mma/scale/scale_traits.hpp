@@ -84,6 +84,19 @@ CK_TILE_HOST_DEVICE void print_flags(DefaultScaleMfmaCtrlFlags const& ctrlFlags)
            ctrlFlags.OPSEL_B);
 }
 
+/**
+ * @struct DefaultScaleWmmaCtrlFlags
+ * @brief Default WMMA scale control flags for GFX1250 scale WMMA operations.
+ */
+struct DefaultScaleWmmaCtrlFlags
+{
+};
+
+CK_TILE_HOST_DEVICE void print_flags(DefaultScaleWmmaCtrlFlags const&)
+{
+    printf("CtrlFlags      (ScaleWmma, no flags)\n");
+}
+
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
