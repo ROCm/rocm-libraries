@@ -37,8 +37,8 @@
 #include <cstdlib>
 #include "driver.hpp"
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen/tensor_holder.hpp>
+#include <miopen/verify.hpp>
 
 template <class T>
 void tensor_vec_forward(

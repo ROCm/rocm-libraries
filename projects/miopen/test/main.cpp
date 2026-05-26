@@ -24,17 +24,9 @@
  *
  *******************************************************************************/
 #include "get_handle.hpp"
-#include "test.hpp"
-#include "random.hpp"
 #include "workspace.hpp"
-#include <array>
-#include <iterator>
-#include <memory>
-#include <miopen/miopen.h>
+#include "test.hpp"
 #include <miopen/tensor_extra.hpp>
-#include <vector>
-
-#include <thread>
 
 #define WORKAROUND_SWDEV_511223 1
 
