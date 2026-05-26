@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/mma_data_format.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
@@ -19,41 +20,12 @@ namespace ck_tile::core::arch::mma {
 
 namespace scale::detail {
 
+// Backward-compatible aliases — prefer MatrixFmtCode / MatrixFmtCode_v from mma_data_format.hpp
 template <typename T>
-struct ScaleDataTypeToFlag;
-
-template <>
-struct ScaleDataTypeToFlag<fp8_t> // e4m3 (4 exponent bits 3 mantissa bits)
-{
-    static constexpr int32_t value = 0;
-};
-
-template <>
-struct ScaleDataTypeToFlag<bf8_t> // e5m2
-{
-    static constexpr int32_t value = 1;
-};
-
-template <>
-struct ScaleDataTypeToFlag<pk_fp6x16_t> // e2m3
-{
-    static constexpr int32_t value = 2;
-};
-
-template <>
-struct ScaleDataTypeToFlag<pk_bf6x16_t> // e3m2
-{
-    static constexpr int32_t value = 3;
-};
-
-template <>
-struct ScaleDataTypeToFlag<pk_fp4_t> // e2m1
-{
-    static constexpr int32_t value = 4;
-};
+using ScaleDataTypeToFlag = MatrixFmtCode<T>;
 
 template <typename T>
-inline constexpr int32_t ScaleDataTypeToFlag_v = ScaleDataTypeToFlag<T>::value;
+inline constexpr int32_t ScaleDataTypeToFlag_v = MatrixFmtCode_v<T>;
 
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
