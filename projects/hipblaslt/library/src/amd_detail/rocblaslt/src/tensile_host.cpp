@@ -3145,15 +3145,24 @@ void initTensileGemmData(rocblaslt_handle       handle,
 #ifdef HIPBLASLT_USE_ROCROLLER
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
-    // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
+    // Do not use rocRoller for FP4 A + FP4 B or FP8 A + FP8 B with pre-swizzled
+    // (shuffled) scale layout. For FP8, this routes the problem to the Tensile
+    // F8BS_MXA32_MXB32 swizzled-scale library produced by the MXFP8 ScaleDepthURatio
+    // branch (matching the FP4 carve-out already in place).
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
+    bool isFp8A = (prob.a_type == HIP_R_8F_E4M3 || prob.a_type == HIP_R_8F_E5M2
+                   || prob.a_type == HIP_R_8F_E4M3_FNUZ
+                   || prob.a_type == HIP_R_8F_E5M2_FNUZ);
+    bool isFp8B = (prob.b_type == HIP_R_8F_E4M3 || prob.b_type == HIP_R_8F_E5M2
+                   || prob.b_type == HIP_R_8F_E4M3_FNUZ
+                   || prob.b_type == HIP_R_8F_E5M2_FNUZ);
     bool isShuffledScale
         = (prob.scaleAType
                == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
            && prob.scaleBType
                   == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT);
-    if(isFp4A && isFp4B && isShuffledScale)
+    if(((isFp4A && isFp4B) || (isFp8A && isFp8B)) && isShuffledScale)
         return false;
 
     return handle->useRocRoller == 1
