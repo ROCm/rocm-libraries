@@ -59,7 +59,13 @@ def is_tile_config_valid(tile: Dict[str, Any]) -> bool:
     return True
 
 
-def is_trait_combination_valid(trait: Dict[str, Any]) -> bool:
+def is_trait_combination_valid(trait: Dict[str, Any], family: str = "universal") -> bool:
+    """Validate a trait config row.
+
+    `family` selects which scale-layout combinations are accepted:
+      - "universal" : (unscaled, unscaled), (PerTensor, PerTensor)  (P0/P0b)
+      - "blockscale": (Block2D<.,.>, Block2D<.,.>)                  (P1)
+    """
     if trait.get("pipeline", "decode") != "decode":
         return False
     if trait.get("scheduler", "intrawave") != "intrawave":
@@ -74,20 +80,19 @@ def is_trait_combination_valid(trait: Dict[str, Any]) -> bool:
 
     x_scale = trait.get("x_scale_layout", "void")
     w_scale = trait.get("w_scale_layout", "void")
-    # Allowed combinations:
-    #   (unscaled, unscaled)         P0
-    #   (PerTensor, PerTensor)       P0b
-    #   (Block2D<.,.>, Block2D<.,.>) P1   (handled by the blockscale family)
-    if _is_unscaled(x_scale) and _is_unscaled(w_scale):
-        pass
-    elif _is_per_tensor(x_scale) and _is_per_tensor(w_scale):
-        pass
-    elif _is_block2d(x_scale) and _is_block2d(w_scale):
-        # The universal family does not own blockscale; the blockscale
-        # family validator should accept these instead.
-        return False
+
+    if family == "universal":
+        if _is_unscaled(x_scale) and _is_unscaled(w_scale):
+            pass
+        elif _is_per_tensor(x_scale) and _is_per_tensor(w_scale):
+            pass
+        else:
+            return False
+    elif family == "blockscale":
+        if not (_is_block2d(x_scale) and _is_block2d(w_scale)):
+            return False
     else:
-        return False
+        raise ValueError(f"Unknown family for is_trait_combination_valid: {family!r}")
 
     return True
 

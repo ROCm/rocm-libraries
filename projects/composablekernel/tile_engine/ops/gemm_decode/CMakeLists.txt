@@ -42,15 +42,20 @@ endif()
 # as the codegen is wired in P1+.
 add_custom_target(benchmark_gemm_decode_all)
 add_custom_target(benchmark_gemm_decode_universal_all)
+add_custom_target(benchmark_gemm_decode_blockscale_all)
 
 # Datatype + orientation collection targets. The full sweep over
 # (dtype, layout, orientation, traits, tile) lands with the codegen in P1+.
 foreach(_dt IN LISTS GEMM_DECODE_DATATYPE)
     add_custom_target(benchmark_gemm_decode_universal_${_dt})
+    add_custom_target(benchmark_gemm_decode_blockscale_${_dt})
 endforeach()
 add_custom_target(benchmark_gemm_decode_universal_smallm)
 add_custom_target(benchmark_gemm_decode_universal_smalln)
+add_custom_target(benchmark_gemm_decode_blockscale_smallm)
 
 add_dependencies(benchmark_gemm_decode_all benchmark_gemm_decode_universal_all)
+add_dependencies(benchmark_gemm_decode_all benchmark_gemm_decode_blockscale_all)
 
 add_subdirectory(universal EXCLUDE_FROM_ALL)
+add_subdirectory(blockscale EXCLUDE_FROM_ALL)

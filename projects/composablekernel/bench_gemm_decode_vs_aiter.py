@@ -34,8 +34,9 @@ from aiter.jit.utils.chip_info import get_cu_num
 
 
 CK_BUILD = Path("/home/AMD/samremes/dev/rocm-libraries/projects/composablekernel/build")
-GEMM_DECODE_BF16_EXE = CK_BUILD / "bin" / "benchmark_gemm_decode_universal_bf16_smallm_default"
-GEMM_DECODE_FP8_EXE  = CK_BUILD / "bin" / "benchmark_gemm_decode_universal_fp8_smallm_pertensor"
+GEMM_DECODE_BF16_EXE       = CK_BUILD / "bin" / "benchmark_gemm_decode_universal_bf16_smallm_default"
+GEMM_DECODE_FP8_EXE        = CK_BUILD / "bin" / "benchmark_gemm_decode_universal_fp8_smallm_pertensor"
+GEMM_DECODE_BLOCKSCALE_EXE = CK_BUILD / "bin" / "benchmark_gemm_decode_blockscale_fp8_smallm_dsv3"
 
 
 SHAPES = [
@@ -44,6 +45,7 @@ SHAPES = [
     (1, 4096, 7168),
     (1, 12288, 4096),
     (4, 8192, 7168),
+    (1, 7168, 7168),   # DSV3 a8w8_blockscale smoke shape
 ]
 
 
@@ -126,7 +128,10 @@ def bench_gemm_decode(M: int, N: int, K: int, exe: Path = GEMM_DECODE_BF16_EXE,
     ]
     samples_us, samples_tflops, samples_gbs = [], [], []
     for _ in range(trials):
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as ex:
+            return {"error": ex.stderr.strip() or ex.stdout.strip() or str(ex)}
         line = res.stdout.strip().splitlines()[0]
         m = re.search(r"\|\s*([\d.]+)\s*ms,\s*([\d.]+)\s*TFLOP/s,\s*([\d.]+)\s*GB/s", line)
         if not m:
@@ -138,6 +143,39 @@ def bench_gemm_decode(M: int, N: int, K: int, exe: Path = GEMM_DECODE_BF16_EXE,
     return {"us": statistics.median(samples_us),
             "gbs": statistics.median(samples_gbs),
             "tflops": statistics.median(samples_tflops)}
+
+
+def bench_aiter_blockscale(M: int, N: int, K: int, repeat: int = 100):
+    """AITER FP8 a8w8 blockscale GEMM (cktile path).
+
+    Uses Block2D<1, 128> X / Block2D<128, 128> W, the DSV3 convention. The
+    tuned CSV inside AITER chooses the kernel; we do not override.
+    """
+    device = "cuda"
+    fp8_dtype = torch.float8_e4m3fn
+    if M % 1 != 0 or N % 128 != 0 or K % 128 != 0:
+        return None
+
+    inp = torch.randn(M, K, dtype=torch.float32, device=device).clamp_(-1, 1).to(fp8_dtype)
+    weights = torch.randn(N, K, dtype=torch.float32, device=device).clamp_(-1, 1).to(fp8_dtype)
+    x_scale = torch.full((M, K // 128), 0.1, dtype=torch.float32, device=device)
+    w_scale = torch.full((N // 128, K // 128), 0.1, dtype=torch.float32, device=device)
+    out = torch.empty(M, N, dtype=torch.bfloat16, device=device)
+
+    fn = lambda: aiter.gemm_a8w8_blockscale(inp, weights, x_scale, w_scale,
+                                            dtype=torch.bfloat16, out=out)
+    try:
+        fn()
+        torch.cuda.synchronize()
+    except Exception as ex:
+        return {"error": str(ex)}
+
+    sec = time_callable(fn, warmup=20, repeat=repeat)
+    us = sec * 1e6
+    bytes_total = float(M * K + N * K) * 1.0 + float(M * N) * 2.0
+    bw = bytes_total / sec / 1e9
+    tflops = _flops(M, N, K) / sec / 1e12
+    return {"us": us, "gbs": bw, "tflops": tflops}
 
 
 def bench_aiter_wvSplitKQ(M: int, N: int, K: int, repeat: int = 100):
@@ -223,6 +261,27 @@ def main() -> int:
         else:
             print(f"{shape_str:<22} {tag:<28} {r['us']:8.2f} {r['tflops']:10.2f} {r['gbs']:10.1f}")
         print()
+
+        # FP8 blockscale head-to-head (P1 vs AITER gemm_a8w8_blockscale).
+        # Skip shapes that don't divide the DSV3 block sizes (X = 1x128,
+        # W = 128x128) - the bench harness reports these as missing.
+        if N % 128 == 0 and K % 128 == 0:
+            for k_batch in (1, 2):
+                r = bench_gemm_decode(M, N, K, exe=GEMM_DECODE_BLOCKSCALE_EXE, k_batch=k_batch)
+                tag = f"gemm_decode BS (kb={k_batch})"
+                if "error" in r:
+                    print(f"{shape_str:<22} {tag:<28} {'-':>8} {'-':>10} {'-':>10}  ({r['error']})")
+                else:
+                    print(f"{shape_str:<22} {tag:<28} {r['us']:8.2f} {r['tflops']:10.2f} {r['gbs']:10.1f}")
+
+            r = bench_aiter_blockscale(M, N, K)
+            if r is not None:
+                tag = "aiter::a8w8_blockscale"
+                if "error" in r:
+                    print(f"{shape_str:<22} {tag:<28} {'-':>8} {'-':>10} {'-':>10}  ({r['error']})")
+                else:
+                    print(f"{shape_str:<22} {tag:<28} {r['us']:8.2f} {r['tflops']:10.2f} {r['gbs']:10.1f}")
+            print()
 
     return 0
 
