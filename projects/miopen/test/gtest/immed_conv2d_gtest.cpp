@@ -17,8 +17,10 @@ using TestCase = ConvTestBaseTestCase<NamedParameter<size_t>,              // ba
                                       NamedParameter<std::string>          // out_layout
                                       >;
 
-template <typename T>
-auto GenCases(bool smoke_test)
+// Dummy unused arguments have been inserted to make the 'INSTANTIATE_MIOPEN_TEST_SUITE' macro
+// happy.
+template <typename T, typename... Args>
+auto GenCases(bool smoke_test, Args&&...)
 {
     using ct = conv_test<T, TestCase, ConvApi::Immediate>;
     BaseConvTestParameters<ConvApi::Immediate> baseParams;
@@ -67,20 +69,6 @@ auto GenCases(bool smoke_test)
                              out_layout);
 }
 
-template <typename T>
-auto GetCasesFull()
-{
-    static const auto cases = GenCases<T>(false);
-    return cases;
-}
-
-template <typename T>
-auto GetCasesSmoke()
-{
-    static const auto cases = GenCases<T>(true);
-    return cases;
-}
-
 } // namespace
 
 template <class T>
@@ -103,37 +91,12 @@ struct immed_conv2d_test : public conv_test<T, TestCase, ConvApi::Immediate>
     }
 };
 
-using GPU_Immed_Conv2d_FP32  = immed_conv2d_test<float>;
-using GPU_Immed_Conv2d_FP16  = immed_conv2d_test<half_float::half>;
-using GPU_Immed_Conv2d_BFP16 = immed_conv2d_test<bfloat16>;
+using MIOPEN_TESTSUITE_NAME(GPU_Immed_Conv2d_) = immed_conv2d_test<MIOPEN_GTEST_DATA_TYPE>;
 
-TEST_P(GPU_Immed_Conv2d_FP32, TestFloat) { run(); }
-TEST_P(GPU_Immed_Conv2d_FP16, TestFloat16) { run(); }
-TEST_P(GPU_Immed_Conv2d_BFP16, TestBFloat16) { run(); }
+TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Immed_Conv2d_), MIOPEN_TEST_INFO(Test)) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Immed_Conv2d_FP32,
-                         GetCasesSmoke<float>(),
-                         DefaultTestNameGenerator<TestCase>{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Immed_Conv2d_FP32,
-                         GetCasesFull<float>(),
-                         DefaultTestNameGenerator<TestCase>{});
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Immed_Conv2d_FP16,
-                         GetCasesSmoke<half_float::half>(),
-                         DefaultTestNameGenerator<TestCase>{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Immed_Conv2d_FP16,
-                         GetCasesFull<half_float::half>(),
-                         DefaultTestNameGenerator<TestCase>{});
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Immed_Conv2d_BFP16,
-                         GetCasesSmoke<bfloat16>(),
-                         DefaultTestNameGenerator<TestCase>{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Immed_Conv2d_BFP16,
-                         GetCasesFull<bfloat16>(),
-                         DefaultTestNameGenerator<TestCase>{});
+// The last argument is a dummy argument, just to make the 'INSTANTIATE_MIOPEN_TEST_SUITE' macro
+// happy. It is not used in the test.
+INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0),
+                              MIOPEN_TESTSUITE_NAME(GPU_Immed_Conv2d_),
+                              0);

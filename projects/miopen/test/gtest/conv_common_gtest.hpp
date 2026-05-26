@@ -1826,8 +1826,8 @@ struct verify_forward_conv_int8 : conv_base<T>
 template <class T>
 std::vector<T> generate_data_limited(const std::vector<T>& dims,
                                      int limit_multiplier,
-                                     bool full_set = true,
-                                     int limit_set = 2)
+                                     bool full_set = !MIOPEN_SMOKE_TEST,
+                                     int limit_set = MIOPEN_TEST_LIMIT)
 {
     if(full_set)
     {
@@ -1852,7 +1852,7 @@ template <class T>
 std::vector<T> generate_data_limited(const std::vector<T>& dims,
                                      int limit_multiplier,
                                      T single,
-                                     bool full_set = true,
+                                     bool full_set = !MIOPEN_SMOKE_TEST,
                                      int limit_set = MIOPEN_TEST_LIMIT)
 {
     if(full_set)
