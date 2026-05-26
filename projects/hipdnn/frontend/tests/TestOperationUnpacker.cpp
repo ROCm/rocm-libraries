@@ -23,6 +23,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
@@ -422,6 +423,16 @@ TEST(TestCreateNodeForType, CreatesRMSNormNode)
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
     auto typedNode = std::dynamic_pointer_cast<RMSNormNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesRMSNormBackwardNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<RMSNormBackwardNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 

@@ -570,38 +570,38 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     auto& modFields = inst.modifiers[modKey];
 
     if (modKey == "mod.ds") {
-        if (fields.count("offset")) {
+        if (fields.contains("offset")) {
             modFields["na"] = "1";
             modFields["offset"] = fields["offset"];
-        } else if (fields.count("offset0") || fields.count("offset1")) {
+        } else if (fields.contains("offset0") || fields.contains("offset1")) {
             modFields["na"] = "2";
-            modFields["offset0"] = fields.count("offset0") ? fields["offset0"] : "0";
-            modFields["offset1"] = fields.count("offset1") ? fields["offset1"] : "0";
+            modFields["offset0"] = fields.contains("offset0") ? fields["offset0"] : "0";
+            modFields["offset1"] = fields.contains("offset1") ? fields["offset1"] : "0";
         }
-        if (fields.count("gds")) modFields["gds"] = "true";
+        if (fields.contains("gds")) modFields["gds"] = "true";
 
     } else if (modKey == "mod.mubuf") {
-        if (fields.count("offen")) modFields["offen"] = "true";
+        if (fields.contains("offen")) modFields["offen"] = "true";
         // "offen offset:N" emits both as a single unit; "offset" key carries the value.
-        if (fields.count("offset")) modFields["offset12"] = fields["offset"];
-        if (fields.count("glc") || fields.count("sc0")) modFields["glc"] = "true";
-        if (fields.count("slc") || fields.count("sc1")) modFields["slc"] = "true";
-        if (fields.count("nt")) modFields["nt"] = "true";
-        if (fields.count("lds")) modFields["lds"] = "true";
+        if (fields.contains("offset")) modFields["offset12"] = fields["offset"];
+        if (fields.contains("glc") || fields.contains("sc0")) modFields["glc"] = "true";
+        if (fields.contains("slc") || fields.contains("sc1")) modFields["slc"] = "true";
+        if (fields.contains("nt")) modFields["nt"] = "true";
+        if (fields.contains("lds")) modFields["lds"] = "true";
 
     } else if (modKey == "mod.flat") {
-        if (fields.count("offset")) modFields["offset12"] = fields["offset"];
-        if (fields.count("glc") || fields.count("sc0")) modFields["glc"] = "true";
-        if (fields.count("slc") || fields.count("sc1")) modFields["slc"] = "true";
-        if (fields.count("lds")) modFields["lds"] = "true";
+        if (fields.contains("offset")) modFields["offset12"] = fields["offset"];
+        if (fields.contains("glc") || fields.contains("sc0")) modFields["glc"] = "true";
+        if (fields.contains("slc") || fields.contains("sc1")) modFields["slc"] = "true";
+        if (fields.contains("lds")) modFields["lds"] = "true";
 
     } else if (modKey == "mod.global") {
-        if (fields.count("offset")) modFields["offset"] = fields["offset"];
+        if (fields.contains("offset")) modFields["offset"] = fields["offset"];
 
     } else if (modKey == "mod.smem") {
-        if (fields.count("offset")) modFields["offset"] = fields["offset"];
-        if (fields.count("glc")) modFields["glc"] = "true";
-        if (fields.count("nv")) modFields["nv"] = "true";
+        if (fields.contains("offset")) modFields["offset"] = fields["offset"];
+        if (fields.contains("glc")) modFields["glc"] = "true";
+        if (fields.contains("nv")) modFields["nv"] = "true";
     }
 
     return !sawUnrepresentable;
@@ -773,7 +773,7 @@ static std::optional<int> parseDirectiveInt(const std::string& line, const std::
     trimStr(rest);
     if (rest.empty()) return std::nullopt;
     auto v = safeAtoiStr(rest);
-    return v ? std::optional<int>(*v) : std::nullopt;
+    return v;
 }
 
 /// Determine the isaVersion array from the arch ID.
@@ -958,21 +958,21 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
                 trimStr(rhs);
                 out = (rhs == "True" || rhs == "true" || rhs == "1");
             };
-            if (body.rfind("ThreadTile=", 0) == 0)
+            if (body.starts_with("ThreadTile="))
                 parseTwoInts(body, threadTile);
-            else if (body.rfind("SubGroup=", 0) == 0)
+            else if (body.starts_with("SubGroup="))
                 parseTwoInts(body, subGroup);
-            else if (body.rfind("WaveGroup=", 0) == 0)
+            else if (body.starts_with("WaveGroup="))
                 parseTwoInts(body, waveGroup);
-            else if (body.rfind("VectorWidthA=", 0) == 0)
+            else if (body.starts_with("VectorWidthA="))
                 parseInt(body, vectorWidthA);
-            else if (body.rfind("VectorWidthB=", 0) == 0)
+            else if (body.starts_with("VectorWidthB="))
                 parseInt(body, vectorWidthB);
-            else if (body.rfind("DirectToLdsA=", 0) == 0)
+            else if (body.starts_with("DirectToLdsA="))
                 parseBool(body, directToLdsA);
-            else if (body.rfind("DirectToLdsB=", 0) == 0)
+            else if (body.starts_with("DirectToLdsB="))
                 parseBool(body, directToLdsB);
-            else if (body.rfind("UseSgprForGRO=", 0) == 0) {
+            else if (body.starts_with("UseSgprForGRO=")) {
                 bool ub = false;
                 parseBool(body, ub);
                 useSgprForGRO = ub ? 1 : 0;
@@ -983,7 +983,7 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
                     trimStr(rhs);
                     if (auto v = safeAtoiStr(rhs)) useSgprForGRO = *v;
                 }
-            } else if (body.rfind("GlobalReadVectorWidthA=", 0) == 0 ||
+            } else if (body.starts_with("GlobalReadVectorWidthA=") ||
                        body.find("GlobalReadVectorWidthA=") != std::string::npos) {
                 // The combined form is "GlobalReadVectorWidthA=N, GlobalReadVectorWidthB=M".
                 size_t pa = body.find("GlobalReadVectorWidthA=");
@@ -1190,28 +1190,45 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
         // This lets raw .s files carry token group hints without affecting the assembler.
         std::vector<int> lineTokens;
 
-        // When preserveComments is enabled, capture a trailing "// ..." or ";"
-        // comment so we can re-attach it to the parsed instruction/directive.
-        // Note: if the comment turns out to be a "st.token:" annotation we
-        // discard lineComment below (after the token parser populates
-        // lineTokens) so that hidden annotations are not echoed as comments.
+        // Find first '//' or ';' line-comment delimiter that is OUTSIDE any
+        // /* ... */ block. Naive line.find("//") / find(';') would truncate
+        // inside a block like `/* foo//bar */`, dropping the closing `*/` and
+        // leaving an unterminated comment that the assembler would extend
+        // across subsequent instructions.
+        // Out-param `kind`: 0 = '//', 1 = ';'. Returns npos if none found.
+        auto findLineCommentOutsideBlock = [](const std::string& s, int& kind) -> size_t {
+            size_t i = 0;
+            while (i < s.size()) {
+                if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '*') {
+                    size_t end = s.find("*/", i + 2);
+                    if (end == std::string::npos)
+                        return std::string::npos;  // unclosed; leave whole line
+                    i = end + 2;
+                    continue;
+                }
+                if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '/') {
+                    kind = 0;
+                    return i;
+                }
+                if (s[i] == ';') {
+                    kind = 1;
+                    return i;
+                }
+                ++i;
+            }
+            return std::string::npos;
+        };
+
+        // Capture trailing "// ..." or ";" text so the emitter can re-attach
+        // it to the parsed instruction. If the captured text is actually a
+        // "st.token:" annotation, the token parser below populates lineTokens
+        // and we clear lineComment so hidden annotations are not echoed back.
         std::string lineComment;
         if (options.preserveComments) {
-            size_t pos = std::string::npos;
-            size_t skip = 0;
-            for (size_t i = 0; i + 1 < line.size(); ++i) {
-                if (line[i] == '/' && line[i + 1] == '/') {
-                    pos = i;
-                    skip = 2;
-                    break;
-                }
-            }
-            size_t semi = line.find(';');
-            if (semi != std::string::npos && (pos == std::string::npos || semi < pos)) {
-                pos = semi;
-                skip = 1;
-            }
+            int kind = -1;
+            size_t pos = findLineCommentOutsideBlock(line, kind);
             if (pos != std::string::npos) {
+                size_t skip = (kind == 0) ? 2 : 1;
                 lineComment = line.substr(pos + skip);
                 size_t f = lineComment.find_first_not_of(" \t");
                 if (f == std::string::npos)
@@ -1222,15 +1239,15 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
                 if (l != std::string::npos) lineComment.resize(l + 1);
             }
         }
-        for (size_t i = 0; i + 1 < line.size(); ++i) {
-            if (line[i] == '/' && line[i + 1] == '/') {
-                std::string comment = line.substr(i + 2);
-                // Search for "st.token:" anywhere in the comment so that other
-                // comment text (e.g. "// load A // st.token:0") is tolerated.
+        {
+            int kind = -1;
+            size_t pos = findLineCommentOutsideBlock(line, kind);
+            if (pos != std::string::npos && kind == 0) {
+                // '//' line comment — also parse 'st.token:' annotation
+                std::string comment = line.substr(pos + 2);
                 size_t tokPos = comment.find("st.token:");
                 if (tokPos != std::string::npos) {
                     std::string tokenList = comment.substr(tokPos + 9);
-                    // Parse comma-separated integers
                     size_t p = 0;
                     while (p < tokenList.size()) {
                         while (p < tokenList.size() &&
@@ -1248,13 +1265,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
                         if (p < tokenList.size() && tokenList[p] == ',') ++p;
                     }
                 }
-                line = line.substr(0, i);
-                break;
+                line = line.substr(0, pos);
+            } else if (pos != std::string::npos && kind == 1) {
+                line = line.substr(0, pos);
             }
-        }
-        {
-            size_t semi = line.find(';');
-            if (semi != std::string::npos) line = line.substr(0, semi);
         }
 
         // Trim leading/trailing whitespace
@@ -1288,7 +1302,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
         // (e.g. `.long X // hi`) and unparsable instructions still round-trip.
         auto textBlockWithComment = [&](const std::string& base) {
             if (lineComment.empty()) return makeTextBlock(base);
-            return makeTextBlock(base + "  // " + lineComment);
+            std::string withComment = base;
+            withComment += "  // ";
+            withComment += lineComment;
+            return makeTextBlock(withComment);
         };
 
         // Directives: lines starting with '.'

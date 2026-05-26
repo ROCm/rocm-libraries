@@ -29,7 +29,7 @@ using namespace stinkytofu::test;
  * 1. Add case: case logical::YourNewInst: return YourNewInst(...);
  * 2. That's it! Coverage guard reads this automatically.
  */
-LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
+static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
     switch (opcode) {
         case logical::VAddU32:
             return VAddU32(vgpr(0), vgpr(1), vgpr(2));
