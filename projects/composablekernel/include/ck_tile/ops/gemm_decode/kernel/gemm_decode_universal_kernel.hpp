@@ -15,14 +15,21 @@ namespace ck_tile {
 // C = A * B^T (SmallM orientation) or, when kNPerWarp > 1, kNPerWarp adjacent
 // columns of one row of C. Adapted from the gate/up form in
 // ops/warp_decode/kernel/warp_decode_gate_up_kernel.hpp with expert routing,
-// gate/up duality, SwiGLU, and the FP8 / Block2D scale paths removed for P0.
+// gate/up duality, SwiGLU, and the Block2D scale path removed.
 //
-// P0 implements only:
+// Supported scale subconfigurations (selected at compile time via
+// (XScaleLayout, WScaleLayout)):
+//   - (void, void)               unscaled BF16 or FP16              (P0)
+//   - (PerTensor, PerTensor)     per-tensor FP8 (FP32 scale scalars) (P0b)
+//
+// Other constraints:
 //   - kOutputAxis = SmallM
-//   - XScaleLayout = WScaleLayout = void  (unscaled BF16/FP16)
-//   - kHasBias = false
 //   - kMPerWarp = kNPerWarp = 1
 //   - kWarpsPerBlock = 1
+//   - kBPreshuffle = false                (P4 hook reserved)
+//   - kHasBias is honoured: when true, the [N] bias vector is added in
+//     the epilogue (k_id = 0 only when split-K is active, see
+//     gemm_decode_universal_bias_epilogue.png).
 //   - AtomicAdd split-K epilogue when k_batch > 1
 template <typename Problem_, typename Policy_ = GemmDecodePolicy>
 struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
@@ -34,6 +41,8 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
     using BDataType       = typename Problem::BDataType;
     using ComputeDataType = typename Problem::ComputeDataType;
     using CDataType       = typename Problem::CDataType;
+    using XScaleDataType  = typename Problem::XScaleDataType;
+    using WScaleDataType  = typename Problem::WScaleDataType;
     using XScaleLayout    = typename Problem::XScaleLayout;
     using WScaleLayout    = typename Problem::WScaleLayout;
 
@@ -44,16 +53,25 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
     static constexpr GemmDecodeOutputAxis kOutputAxis = Problem::kOutputAxis;
     static constexpr bool    kHasBias      = Problem::kHasBias;
 
+    static constexpr bool kIsUnscaled  = GemmDecodeScaleLayoutTraits<XScaleLayout>::is_unscaled &&
+                                         GemmDecodeScaleLayoutTraits<WScaleLayout>::is_unscaled;
+    static constexpr bool kIsPerTensor = GemmDecodeScaleLayoutTraits<XScaleLayout>::is_per_tensor &&
+                                         GemmDecodeScaleLayoutTraits<WScaleLayout>::is_per_tensor;
+
     static_assert(kOutputAxis == GemmDecodeOutputAxis::SmallM,
                   "GemmDecodeUniversalKernel P0 supports only SmallM orientation.");
     static_assert(kMPerWarp == 1 && kNPerWarp == 1,
                   "GemmDecodeUniversalKernel P0 supports only kMPerWarp = kNPerWarp = 1.");
     static_assert(Problem::kWarpsPerBlock == 1,
                   "GemmDecodeUniversalKernel P0 expects exactly one warp per block.");
-    static_assert(GemmDecodeScaleLayoutTraits<XScaleLayout>::is_unscaled &&
-                      GemmDecodeScaleLayoutTraits<WScaleLayout>::is_unscaled,
-                  "GemmDecodeUniversalKernel P0 supports only unscaled (void) layouts.");
-    static_assert(!kHasBias, "GemmDecodeUniversalKernel P0 disables the bias epilogue.");
+    static_assert(kIsUnscaled || kIsPerTensor,
+                  "GemmDecodeUniversalKernel only supports (unscaled, unscaled) and "
+                  "(PerTensor, PerTensor) scale layouts; blockscale uses the dedicated "
+                  "GemmDecodeBlockscaleKernel.");
+    static_assert(!Problem::kBPreshuffle,
+                  "GemmDecodeUniversalKernel: preshuffled-B path lands in P4.");
+    static_assert(!kHasBias,
+                  "GemmDecodeUniversalKernel: bias epilogue lands in the next commit.");
 
     struct Kargs
     {
@@ -101,6 +119,27 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                      stride_a,
                      stride_b,
                      stride_c,
+                     k_batch};
+    }
+
+    // Overload for PerTensor scaled subconfig. p_x_scale / p_w_scale are
+    // FP32 scalars (one per tensor) and p_bias is an optional [N] vector.
+    CK_TILE_HOST static Kargs MakeKernelArgs(const void* p_a,
+                                             const void* p_b,
+                                             void*       p_c,
+                                             const void* p_x_scale,
+                                             const void* p_w_scale,
+                                             const void* p_bias,
+                                             index_t     M,
+                                             index_t     N,
+                                             index_t     K,
+                                             index_t     stride_a,
+                                             index_t     stride_b,
+                                             index_t     stride_c,
+                                             index_t     k_batch = 1)
+    {
+        return Kargs{p_a,       p_b,       p_c,      p_x_scale, p_w_scale, p_bias,
+                     M,         N,         K,        stride_a,  stride_b,  stride_c,
                      k_batch};
     }
 
@@ -166,6 +205,21 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
             // the buffer.
             return fail("GemmDecodeUniversalKernel AtomicAdd split-K requires N % 2 == 0.");
         }
+        if constexpr(kIsPerTensor)
+        {
+            if(kargs.p_x_scale == nullptr || kargs.p_w_scale == nullptr)
+            {
+                return fail("GemmDecodeUniversalKernel PerTensor requires non-null scale "
+                            "pointers.");
+            }
+            // The dot2 K-loop body packs FP8x4 -> two BF16x2 pairs, so each
+            // lane's K slice must contain a multiple of 4 FP8 elements.
+            if((kVector % 4) != 0)
+            {
+                return fail("GemmDecodeUniversalKernel PerTensor FP8 path requires "
+                            "kVector divisible by 4.");
+            }
+        }
         return true;
     }
 
@@ -192,6 +246,17 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
         const index_t my_iter        = base_iter + (k_id < extra_iter ? 1 : 0);
         const index_t k_offset       = iter_start * kTileN;
         const index_t num_iter       = my_iter;
+
+        // Loop-invariant scale broadcast: PerTensor reads two FP32 scalars.
+        ComputeDataType x_scale_val = type_convert<ComputeDataType>(1.0f);
+        ComputeDataType w_scale_val = type_convert<ComputeDataType>(1.0f);
+        if constexpr(kIsPerTensor)
+        {
+            x_scale_val = type_convert<ComputeDataType>(
+                *static_cast<const XScaleDataType*>(kargs.p_x_scale));
+            w_scale_val = type_convert<ComputeDataType>(
+                *static_cast<const WScaleDataType*>(kargs.p_w_scale));
+        }
 
         const auto a_view = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const ADataType*>(kargs.p_a),
@@ -224,13 +289,52 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
             auto a_tile = load_tile(a_window);
             auto b_tile = load_tile(b_window);
 
-            constexpr auto spans = decltype(a_tile)::get_distributed_spans();
-            sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                constexpr auto idx = make_tuple(make_tuple(), idx1);
-                const auto a_val = type_convert<ComputeDataType>(a_tile[idx]);
-                const auto b_val = type_convert<ComputeDataType>(b_tile[idx]);
-                acc += a_val * b_val;
-            });
+            if constexpr(Problem::kUseDot2)
+            {
+                static_assert(std::is_same_v<ComputeDataType, float>,
+                              "GemmDecodeUniversalKernel dot2 path expects FP32 "
+                              "accumulation.");
+                static_assert(kVector % 2 == 0,
+                              "GemmDecodeUniversalKernel dot2 path requires kVector "
+                              "divisible by 2.");
+
+                // Sweep kVector/2 BF16x2 pairs. For BF16/FP16 inputs, each pair is
+                // already one uint32_t in the tile thread buffer; for FP8 inputs we
+                // have one uint32_t per 4 FP8s (kVector/4 words) and split each
+                // word into two BF16x2 pairs via fp8x2_to_bf16x2.
+                static_for<0, kVector / 2, 1>{}([&](auto ipair) {
+                    uint32_t a_pair;
+                    uint32_t b_pair;
+                    if constexpr(std::is_same_v<ADataType, fp8_t>)
+                    {
+                        constexpr index_t word = ipair.value / 2;
+                        constexpr index_t sel  = ipair.value % 2;
+                        a_pair = fp8x2_to_bf16x2<sel>(
+                            a_tile.get_thread_buffer().template get_as<uint32_t>(
+                                number<word>{}));
+                        b_pair = fp8x2_to_bf16x2<sel>(
+                            b_tile.get_thread_buffer().template get_as<uint32_t>(
+                                number<word>{}));
+                    }
+                    else
+                    {
+                        // BF16/FP16: each pair is one uint32_t holding two halfs.
+                        a_pair = a_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
+                        b_pair = b_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
+                    }
+                    acc = dot2_bf16_packed_add(acc, a_pair, b_pair);
+                });
+            }
+            else
+            {
+                constexpr auto spans = decltype(a_tile)::get_distributed_spans();
+                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                    constexpr auto idx = make_tuple(make_tuple(), idx1);
+                    const auto a_val = type_convert<ComputeDataType>(a_tile[idx]);
+                    const auto b_val = type_convert<ComputeDataType>(b_tile[idx]);
+                    acc += a_val * b_val;
+                });
+            }
 
             move_tile_window(a_window, {0, kTileN});
             move_tile_window(b_window, {0, kTileN});
@@ -240,7 +344,13 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
 
         if(get_lane_id() == 0)
         {
-            const index_t n      = n_base;
+            const index_t n = n_base;
+            // PerTensor: fold the two scalar scales into the reduced acc.
+            if constexpr(kIsPerTensor)
+            {
+                acc = acc * x_scale_val * w_scale_val;
+            }
+
             auto* p_c            = static_cast<CDataType*>(kargs.p_c);
             const auto out_value = type_convert<CDataType>(acc);
             if(k_batch == 1)

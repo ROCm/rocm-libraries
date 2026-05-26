@@ -64,9 +64,25 @@ void ReferenceGemm(const HostTensor<ADataType>& a,
 // host's sequential sum, and BF16/FP16 inputs amplify the per-element error
 // roughly with sqrt(K) * eps. The constants below are conservative and
 // matched to the K=7168 test shapes.
-template <typename CDataType>
+template <typename CDataType, typename ADataType = CDataType>
 float AbsoluteTolerance(index_t K)
 {
+#ifdef CK_TILE_USE_OCP_FP8
+    if constexpr(std::is_same_v<ADataType, fp8_t>)
+    {
+        // FP8 (E4M3) inputs lose ~3 mantissa bits relative to BF16, so the
+        // accumulated noise is roughly 4-8x the BF16 figure. Bias also gets
+        // multiplied by sA*sB so we leave headroom.
+        if constexpr(std::is_same_v<CDataType, bf16_t>)
+        {
+            return 1.5f * std::sqrt(static_cast<float>(K));
+        }
+        else if constexpr(std::is_same_v<CDataType, fp16_t>)
+        {
+            return 1.0f * std::sqrt(static_cast<float>(K));
+        }
+    }
+#endif
     if constexpr(std::is_same_v<CDataType, bf16_t>)
     {
         return 0.5f * std::sqrt(static_cast<float>(K));
@@ -208,6 +224,169 @@ void RunMatrix(const std::string& dtype_name)
     }
 }
 
+#ifdef CK_TILE_USE_OCP_FP8
+// PerTensor FP8 reference: dequant inputs to FP32, sum, then multiply by
+// sA * sB. Mirrors the kernel's epilogue convention.
+template <typename ADataType, typename BDataType, typename CDataType>
+void ReferenceGemmPerTensor(const HostTensor<ADataType>& a,
+                            const HostTensor<BDataType>& b,
+                            float                        sA,
+                            float                        sB,
+                            HostTensor<CDataType>&       c,
+                            index_t                      M,
+                            index_t                      N,
+                            index_t                      K)
+{
+    for(index_t m = 0; m < M; ++m)
+    {
+        for(index_t n = 0; n < N; ++n)
+        {
+            float acc = 0.0f;
+            for(index_t k = 0; k < K; ++k)
+            {
+                acc += type_convert<float>(a(m, k)) * type_convert<float>(b(n, k));
+            }
+            c(m, n) = type_convert<CDataType>(acc * sA * sB);
+        }
+    }
+}
+
+template <typename ADataType, typename BDataType, typename CDataType>
+::testing::AssertionResult RunFp8PerTensorCase(const std::string& test_name,
+                                               const DecodeShape& shape,
+                                               index_t            k_batch)
+{
+    using ComputeDataType = float;
+    using Problem         = GemmDecodeProblem<ADataType,
+                                              BDataType,
+                                              ComputeDataType,
+                                              CDataType,
+                                              /*XScaleDataType=*/float,
+                                              /*WScaleDataType=*/float,
+                                              GemmDecodeScaleLayout::PerTensor,
+                                              GemmDecodeScaleLayout::PerTensor,
+                                              /*kVector=*/16,
+                                              /*kUseDot2=*/true,
+                                              /*kUsePackedFp32=*/false,
+                                              /*kMPerWarp=*/1,
+                                              /*kNPerWarp=*/1,
+                                              GemmDecodeOutputAxis::SmallM,
+                                              /*kHasBias=*/false,
+                                              /*kWarpsPerBlock=*/1>;
+    using Kernel  = GemmDecodeUniversalKernel<Problem, GemmDecodePolicy>;
+
+    HostTensor<ADataType> a({shape.M, shape.K});
+    HostTensor<BDataType> b({shape.N, shape.K});
+    HostTensor<CDataType> c_host({shape.M, shape.N});
+    HostTensor<CDataType> c_dev({shape.M, shape.N});
+
+    // FP8 has limited dynamic range; keep inputs in [-1, 1].
+    FillRandom(a, -1.0f, 1.0f, 0xA1u);
+    FillRandom(b, -1.0f, 1.0f, 0xB2u);
+
+    const float sA = 0.125f; // arbitrary non-trivial scales
+    const float sB = 0.0625f;
+
+    ReferenceGemmPerTensor<ADataType, BDataType, CDataType>(a, b, sA, sB, c_host,
+                                                            shape.M, shape.N, shape.K);
+
+    DeviceMem a_buf(a.get_element_space_size_in_bytes());
+    DeviceMem b_buf(b.get_element_space_size_in_bytes());
+    DeviceMem c_buf(c_dev.get_element_space_size_in_bytes());
+    DeviceMem sa_buf(sizeof(float));
+    DeviceMem sb_buf(sizeof(float));
+
+    a_buf.ToDevice(a.mData.data());
+    b_buf.ToDevice(b.mData.data());
+    sa_buf.ToDevice(&sA);
+    sb_buf.ToDevice(&sB);
+    c_buf.SetZero();
+
+    auto kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
+                                        b_buf.GetDeviceBuffer(),
+                                        c_buf.GetDeviceBuffer(),
+                                        sa_buf.GetDeviceBuffer(),
+                                        sb_buf.GetDeviceBuffer(),
+                                        /*p_bias=*/nullptr,
+                                        shape.M,
+                                        shape.N,
+                                        shape.K,
+                                        /*stride_a=*/shape.K,
+                                        /*stride_b=*/shape.K,
+                                        /*stride_c=*/shape.N,
+                                        /*k_batch=*/k_batch);
+
+    if(!Kernel::IsSupportedArgument(kargs))
+    {
+        return ::testing::AssertionFailure()
+               << test_name << ": Kargs unexpectedly rejected by IsSupportedArgument().";
+    }
+
+    const stream_config s{nullptr, /*time_kernel=*/false};
+    try
+    {
+        launch_gemm_decode_universal<Kernel>(kargs, s);
+    }
+    catch(const std::exception& ex)
+    {
+        return ::testing::AssertionFailure() << test_name << ": launch threw: " << ex.what();
+    }
+
+    c_buf.FromDevice(c_dev.mData.data());
+
+    const float atol  = AbsoluteTolerance<CDataType, ADataType>(shape.K);
+    float max_diff    = 0.0f;
+    index_t bad_index = -1;
+    for(index_t i = 0; i < static_cast<index_t>(c_host.get_element_space_size()); ++i)
+    {
+        const float h    = type_convert<float>(c_host.mData[i]);
+        const float d    = type_convert<float>(c_dev.mData[i]);
+        const float diff = std::abs(h - d);
+        if(diff > max_diff)
+        {
+            max_diff  = diff;
+            bad_index = i;
+        }
+    }
+
+    if(max_diff > atol)
+    {
+        const float h = type_convert<float>(c_host.mData[bad_index]);
+        const float d = type_convert<float>(c_dev.mData[bad_index]);
+        return ::testing::AssertionFailure()
+               << test_name << " (M=" << shape.M << ", N=" << shape.N << ", K=" << shape.K
+               << ", k_batch=" << k_batch << "): mismatch at i=" << bad_index << " host=" << h
+               << " dev=" << d << " diff=" << max_diff << " atol=" << atol;
+    }
+    return ::testing::AssertionSuccess();
+}
+
+template <typename ADataType, typename BDataType, typename CDataType>
+void RunFp8PerTensorMatrix(const std::string& dtype_name)
+{
+    constexpr index_t K = 7168;
+    const std::vector<index_t> Ms{1, 2, 4, 8};
+    const std::vector<index_t> Ns{512, 4096, 8192};
+    const std::vector<index_t> KBatches{1, 2};
+
+    for(index_t M : Ms)
+    {
+        for(index_t N : Ns)
+        {
+            for(index_t kb : KBatches)
+            {
+                const DecodeShape shape{M, N, K};
+                const std::string name = dtype_name + " M=" + std::to_string(M) +
+                                         " N=" + std::to_string(N) + " K=" + std::to_string(K) +
+                                         " kb=" + std::to_string(kb);
+                EXPECT_TRUE(
+                    (RunFp8PerTensorCase<ADataType, BDataType, CDataType>(name, shape, kb)));
+            }
+        }
+    }
+}
+#endif // CK_TILE_USE_OCP_FP8
+
 // Build a Kargs with a fixed valid baseline that callers can perturb to
 // trigger specific IsSupportedArgument rejections.
 template <typename Kernel>
@@ -252,6 +431,18 @@ TEST(GemmDecodeUniversalUnscaled, AtomicAddSplitKVariety)
     EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t>("BF16 split=2", shape, 2)));
     EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t>("BF16 split=4", shape, 4)));
 }
+
+#ifdef CK_TILE_USE_OCP_FP8
+TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorMatrix)
+{
+    RunFp8PerTensorMatrix<fp8_t, fp8_t, bf16_t>("FP8/FP8/BF16");
+}
+
+TEST(GemmDecodeUniversalFp8, Fp8Fp8ToFp16PerTensorMatrix)
+{
+    RunFp8PerTensorMatrix<fp8_t, fp8_t, fp16_t>("FP8/FP8/FP16");
+}
+#endif // CK_TILE_USE_OCP_FP8
 
 TEST(GemmDecodeUniversalNegative, RejectsNullPointers)
 {

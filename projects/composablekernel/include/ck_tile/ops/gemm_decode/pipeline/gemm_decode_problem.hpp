@@ -106,7 +106,11 @@ template <typename ADataType_,
           index_t kNPerWarp_                      = 1,
           GemmDecodeOutputAxis kOutputAxis_       = GemmDecodeOutputAxis::SmallM,
           bool kHasBias_                          = false,
-          index_t kWarpsPerBlock_                 = 1>
+          index_t kWarpsPerBlock_                 = 1,
+          // Reserved for the P4 wvSplitK-style row-interleaved B layout
+          // ([N / YTILE, K, YTILE]) with kNPerWarp > 1 register cross-N reuse.
+          // P0/P0b/P1 keep row-major B; both kernels static_assert this off.
+          bool kBPreshuffle_                      = false>
 struct GemmDecodeProblem
 {
     using ADataType        = remove_cvref_t<ADataType_>;
@@ -125,6 +129,7 @@ struct GemmDecodeProblem
     static constexpr index_t kNPerWarp           = kNPerWarp_;
     static constexpr GemmDecodeOutputAxis kOutputAxis = kOutputAxis_;
     static constexpr bool    kHasBias            = kHasBias_;
+    static constexpr bool    kBPreshuffle        = kBPreshuffle_;
 
     static constexpr index_t kWarpsPerBlock = kWarpsPerBlock_;
     static constexpr index_t kBlockSize     = kWarpsPerBlock * get_warp_size();
