@@ -842,18 +842,9 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // Get GfxArchID from architecture array
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-    // Populate assembler-capability-derived module options from rocisa asmCaps.
-    // This is done here (in the rocisa conversion layer, which is the only
-    // stinkytofu TU allowed to depend on rocisa headers) so that the
-    // stinkytofu library itself stays decoupled from rocisa.
-    StinkyAsmModule::ModuleOptions finalModuleOptions = moduleOptions;
-    {
-        auto probedCaps = rocisa::rocIsa::getInstance().getAsmCaps();
-        finalModuleOptions.HasVgprMSB16 =
-            probedCaps.count("HasVgprMSB16") && probedCaps.at("HasVgprMSB16");
-    }
-
-    StinkyAsmModule stinkyAsmModule(moduleName, arch, finalModuleOptions);
+    // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
+    // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
+    StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
 
     // Add instruction groups registered by the target backend.
     if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
