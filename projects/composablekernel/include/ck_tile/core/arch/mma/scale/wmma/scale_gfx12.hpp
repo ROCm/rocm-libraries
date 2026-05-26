@@ -40,9 +40,9 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec,
          int32_t scaleA, int32_t scaleB)
     {
-        return {__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(0,
+        return {__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(scale::detail::ScaleDataTypeToFlag_v<fp8_t>,
                                                                  bit_cast<int32x16_t>(aVec),
-                                                                 0,
+                                                                 scale::detail::ScaleDataTypeToFlag_v<fp8_t>,
                                                                  bit_cast<int32x16_t>(bVec),
                                                                  0,
                                                                  cVec,
@@ -90,9 +90,9 @@ struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, C
                                bVec.data[4], bVec.data[5], bVec.data[6],  bVec.data[7],
                                bVec.data[8], bVec.data[9], bVec.data[10], bVec.data[11],
                                0, 0, 0, 0};
-        return {__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(2,
+        return {__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(scale::detail::ScaleDataTypeToFlag_v<pk_fp6x16_t>,
                                                                  a_padded,
-                                                                 2,
+                                                                 scale::detail::ScaleDataTypeToFlag_v<pk_fp6x16_t>,
                                                                  b_padded,
                                                                  0,
                                                                  cVec,
@@ -138,9 +138,9 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CtrlFlags, Compile
                                0, 0, 0, 0, 0, 0, 0, 0};
         int32x16_t b_padded = {b8[0], b8[1], b8[2], b8[3], b8[4], b8[5], b8[6], b8[7],
                                0, 0, 0, 0, 0, 0, 0, 0};
-        return {__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(4,
+        return {__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
                                                                  a_padded,
-                                                                 4,
+                                                                 scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
                                                                  b_padded,
                                                                  0,
                                                                  cVec,
