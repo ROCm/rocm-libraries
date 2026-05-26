@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include "rtc_cache.h"
 #include "solution_map.h"
 #include "tuning_helper.h"
+#include <atomic>
 #include <fcntl.h>
 #include <memory>
 
@@ -48,9 +49,9 @@ int log_tuning_fd   = -1;
 int log_graph_fd    = -1;
 
 extern const char* ROCFFT_VERSION_STRING;
-// flag tracking if rocfft_cleanup needs to be called before
-// (re-)executing rocfft_setup's body
-static bool rocfft_cleanup_needed = false;
+// Counter incremented (resp. decremented) at every call to
+// rocfft_setup (resp. rocfft_cleanup)
+static std::atomic<size_t> rocfft_usage_count{0};
 
 /**
  *  @brief Logging function
@@ -89,12 +90,8 @@ static void open_log_stream(const char* environment_variable_name, int& log_fd)
 rocfft_status rocfft_setup()
 try
 {
-    if(rocfft_cleanup_needed)
-    {
-        auto tmp = rocfft_cleanup();
-        if(tmp != rocfft_status_success)
-            return tmp;
-    }
+    if(rocfft_usage_count++ > 0)
+        return rocfft_status_success;
 
     rocfft_ostream::setup();
     RTCCache::single = std::make_unique<RTCCache>();
@@ -156,7 +153,6 @@ try
     TuningBenchmarker::GetSingleton().Setup();
 
     log_trace(__func__, ROCFFT_VERSION_STRING);
-    rocfft_cleanup_needed = true;
     return rocfft_status_success;
 }
 catch(...)
@@ -168,8 +164,24 @@ catch(...)
 rocfft_status rocfft_cleanup()
 try
 {
-    if(!rocfft_cleanup_needed)
+    // Only the last call to rocfft_cleanup does the cleanup
+    if(rocfft_usage_count == 0)
+    {
+        if(LOG_TRACE_ENABLED())
+        {
+            // Note: this would never log to a user-defined file (if ROCFFT_LOG_TRACE_PATH
+            // is not empty), as "rocfft_usage_count == 0" implies that such a file was
+            // already closed or never opened in the first place: rocfft_cerr is used.
+            (*LogSingleton::GetInstance().GetTraceOS())
+                << "rocfft_setup was called fewer times than rocfft_cleanup: invalid usage of "
+                   "rocfft."
+                << std::endl;
+        }
+        return rocfft_status_failure;
+    }
+    if(--rocfft_usage_count > 0)
         return rocfft_status_success;
+
     // Logging is potentially unsafe if we're in the middle of static
     // deinitialization, as log structures might have already been
     // cleaned up.
@@ -227,7 +239,6 @@ try
 
     // stop all log worker threads
     rocfft_ostream::cleanup();
-    rocfft_cleanup_needed = false;
     return rocfft_status_success;
 }
 catch(...)
