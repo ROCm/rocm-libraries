@@ -879,14 +879,18 @@ class TestNarrowTrailingLoadEmit:
 
     def test_asem1_emits_buffer_load_ushort_lds(self):
         """ASEM=1 bf16 emit must contain a `buffer_load_ushort … lds`
-        inside an EXEC-guarded block. Pins the positive shape.
+        inside an EXEC-guarded block. Phase A1.e: TWO ushort loads
+        per operand (K_remain-2 and K_remain-1), both under one
+        EXEC=1 region.
         """
         tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
         assert tail
-        # Positive pins
-        assert re.search(r"buffer_load_ushort[^\n]*lds", tail), (
-            "ASEM=1 tail must emit `buffer_load_ushort … lds`. "
-            "Tail head:\n" + tail[:2000]
+        # Positive pins: 2 loads × 2 operands = 4 buffer_load_ushort.
+        ushort_loads = re.findall(r"buffer_load_ushort[^\n]*lds", tail)
+        assert len(ushort_loads) == 4, (
+            f"ASEM=1 tail must emit 4 `buffer_load_ushort … lds` "
+            f"(K_remain-2 + K_remain-1 for each of A and B); got "
+            f"{len(ushort_loads)}. Tail head:\n" + tail[:2000]
         )
         assert re.search(
             r"s_mov_b64\s+s\[\d+:\d+\]\s*,\s*exec",
@@ -913,15 +917,23 @@ class TestNarrowTrailingLoadEmit:
             "narrow load B must emit per-wave skip label"
 
     def test_asem1_emits_runtime_kremain_gate(self):
-        """The whole narrow load helper is wrapped in a `K_remain & 1`
-        gate. Pin the `s_and_b32 ..., LoopCounterL, 1` plus the
-        skip label.
+        """The whole narrow load helper is wrapped in TWO runtime
+        gates: (1) `K_remain & 1` (odd K?), and (2) `K_remain >= 2`
+        (= K_remain*bpe >= bpr for bf16, the Phase A1.e two-load
+        coverage gate). Pin both plus the skip label.
         """
         tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
         assert tail
         assert re.search(
             r"s_and_b32\s+s\[?\d+\]?,\s*s\[sgprLoopCounterL\]\s*,\s*1\b",
             tail), "narrow load must gate on `K_remain & 1`"
+        assert re.search(
+            r"s_cmp_ge_u32\s+s\[sgprLoopCounterL\]\s*,\s*2\b",
+            tail), (
+            "narrow load must gate on `K_remain >= 2` "
+            "(= K_remain*bpe >= bpr for bf16; the K_remain=1 "
+            "multi-row-clip case falls back to align-UP)"
+        )
         assert "label_tailNarrowLoadSkipAll" in tail, (
             "narrow load must emit `tailNarrowLoadSkipAll:` for "
             "even-K runtime skip"

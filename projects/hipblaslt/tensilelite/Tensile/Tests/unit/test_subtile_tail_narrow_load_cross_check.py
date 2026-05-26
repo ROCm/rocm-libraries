@@ -29,7 +29,9 @@ import pytest
 from Tensile.Components.Subtile.SubtileTailNarrowLoad import (
     computeLDSStartOffsetB,
     computeLRReaderForBoundary,
+    computeLRReadersForBoundary,
     computeNarrowLoadDescriptor,
+    computeNarrowLoadDescriptorsForBoundary,
     subtileTailNarrowLoadApplies,
 )
 from Tensile.Tests.unit._subtile_tailloop_fixtures import (
@@ -57,18 +59,35 @@ def _build_tile_infos(MT0, MT1, depthU, wg_m, wg_n, asem=1):
 
 def _cross_check_one(kernel, tiA, tiB, K_remain):
     """Run the cross-check for one (kernel, K_remain). Asserts that
-    GR.m0_target == LR.lds_byte_target for both A and B."""
+    GR.m0_target == LR.lds_byte_target for both A and B.
+
+    Phase A1.e: validates the FULL list of narrow-load targets (zero,
+    one, or two entries per operand depending on K_remain), not just
+    the K=K_remain-1 entry. For K_remain odd >= 2 (= bf16 odd >= 3),
+    expects TWO entries per operand (K_remain-2 and K_remain-1) and
+    cross-checks each against the corresponding LR-reader oracle.
+    For K_remain*bpe < bpr (= K_remain=1 bf16) expects ZERO entries
+    (align-UP fall-through).
+    """
     for tc, ti in (('A', tiA), ('B', tiB)):
-        gr = computeNarrowLoadDescriptor(kernel, ti, K_remain, tc, tiA=tiA)
-        lr = computeLRReaderForBoundary(kernel, ti, K_remain, tc, tiA=tiA)
-        assert gr.m0_target == lr.lds_byte_target, (
-            f"GR↔LR LDS-byte disagreement for tc={tc} K_remain={K_remain}:\n"
-            f"  GR: {gr.explain}\n"
-            f"  LR: {lr.explain}\n"
-            f"  GR.m0_target = {gr.m0_target}\n"
-            f"  LR.lds_byte  = {lr.lds_byte_target}\n"
-            f"  delta        = {gr.m0_target - lr.lds_byte_target}"
-        )
+        gr_list = computeNarrowLoadDescriptorsForBoundary(
+            kernel, ti, K_remain, tc, tiA=tiA)
+        lr_list = computeLRReadersForBoundary(
+            kernel, ti, K_remain, tc, tiA=tiA)
+        assert len(gr_list) == len(lr_list), (
+            f"GR/LR descriptor list length mismatch for tc={tc} "
+            f"K_remain={K_remain}: GR has {len(gr_list)} entries, "
+            f"LR has {len(lr_list)}.")
+        for i, (gr, lr) in enumerate(zip(gr_list, lr_list)):
+            assert gr.m0_target == lr.lds_byte_target, (
+                f"GR↔LR LDS-byte disagreement for tc={tc} "
+                f"K_remain={K_remain} entry={i}:\n"
+                f"  GR: {gr.explain}\n"
+                f"  LR: {lr.explain}\n"
+                f"  GR.m0_target = {gr.m0_target}\n"
+                f"  LR.lds_byte  = {lr.lds_byte_target}\n"
+                f"  delta        = {gr.m0_target - lr.lds_byte_target}"
+            )
 
 
 # ── Canonical pins (from the C.1 worked example) ────────────────────────────
@@ -84,18 +103,26 @@ class TestCanonicalPins:
     def test_canonical_MT128x128_K129(self):
         """MT 128×128 BF16 DU=64 WG=(2,2), K=129 → K_remain=1.
 
-        Pinned values from the C.2 worked example, cross-checked
-        against `subtile_bf16_anyk_k2.yaml` MT128x128x64 disassembly:
-          A: wave=3, sId0_last=3, rowId=7, lane=62, m0=16352,
-             vaddr_within_row=0.
-          B: wave=3, sId0_last=3, rowId=7, lane=62, m0=32736,
-             vaddr_within_row=0.
+        Pinned values from the C.2 worked example.
+
+        Phase A1.e: K_remain=1 is the multi-row-clip case where the
+        narrow-load repair is unsafe (would corrupt row M-2). The
+        SRD tightener falls back to align-UP via the runtime
+        `K_remain*bpe < bpr` bump, and the narrow-load emit returns
+        no targets. Cross-check expects EMPTY descriptor lists for
+        both A and B.
+
+        The legacy single-descriptor surface (`computeNarrowLoadDescriptor`)
+        is still kept for backwards compat with the existing pins and
+        returns the K=K_remain-1 descriptor (m0_A=16352, m0_B=32736).
         """
         kernel, _, tiA, tiB = _build_tile_infos(
             MT0=128, MT1=128, depthU=64, wg_m=2, wg_n=2, asem=1)
         assert subtileTailNarrowLoadApplies(kernel), \
             "MT 128×128 BF16 must be in scope for the narrow load"
 
+        # Legacy single-descriptor surface (still used by the
+        # `TestNarrowTrailingLoadEmit` shape pins).
         descA = computeNarrowLoadDescriptor(kernel, tiA, K_remain=1, tc='A',
                                             tiA=tiA)
         assert descA.wave_target == 3, descA.explain
@@ -114,22 +141,39 @@ class TestCanonicalPins:
         # × 2048 each, aligned up to 2 * 2048 = 4096).
         assert computeLDSStartOffsetB(tiA) == 16384
 
+        # Phase A1.e: K_remain=1 falls through to align-UP; no
+        # narrow-load descriptors should be returned.
+        listA = computeNarrowLoadDescriptorsForBoundary(
+            kernel, tiA, K_remain=1, tc='A', tiA=tiA)
+        listB = computeNarrowLoadDescriptorsForBoundary(
+            kernel, tiB, K_remain=1, tc='B', tiA=tiA)
+        assert listA == [], \
+            f"K_remain=1: A descriptor list should be empty, got {listA}"
+        assert listB == [], \
+            f"K_remain=1: B descriptor list should be empty, got {listB}"
+
         _cross_check_one(kernel, tiA, tiB, K_remain=1)
 
     def test_canonical_MT128x128_K131(self):
-        """Same geometry, K_remain=3 (the other shape exercised by
-        `subtile_bf16_anyk_odd.yaml`)."""
+        """Same geometry, K_remain=3 — Phase A1.e expects TWO
+        narrow-load descriptors per operand (K_remain-2=1 and
+        K_remain-1=2 of row 127). Both at colId_post=0, lane 62 of
+        wave 3. m0 differs by `bpe=2` between the two entries.
+        """
         kernel, _, tiA, tiB = _build_tile_infos(
             MT0=128, MT1=128, depthU=64, wg_m=2, wg_n=2, asem=1)
-        descA = computeNarrowLoadDescriptor(kernel, tiA, K_remain=3, tc='A',
-                                            tiA=tiA)
-        # K_local = 2, K_within_lane = 2 (byte offset 4 within the
-        # lane's 16B chunk). Wave/lane unchanged from K_remain=1
-        # because K_local is still in colId_post=0.
-        assert descA.wave_target == 3, descA.explain
-        assert descA.lane_target == 62, descA.explain
-        # m0 = 16352 + (K_within_lane * bpe) = 16352 + 4 = 16356.
-        assert descA.m0_target == 16356, descA.explain
+        listA = computeNarrowLoadDescriptorsForBoundary(
+            kernel, tiA, K_remain=3, tc='A', tiA=tiA)
+        assert len(listA) == 2, \
+            f"K_remain=3 expects 2 narrow loads, got {len(listA)}"
+        # K_remain-2 = K=1: K_within_lane=1 → m0 = 16352 + 2 = 16354.
+        assert listA[0].wave_target == 3
+        assert listA[0].lane_target == 62
+        assert listA[0].m0_target == 16354, listA[0].explain
+        # K_remain-1 = K=2: K_within_lane=2 → m0 = 16352 + 4 = 16356.
+        assert listA[1].wave_target == 3
+        assert listA[1].lane_target == 62
+        assert listA[1].m0_target == 16356, listA[1].explain
         _cross_check_one(kernel, tiA, tiB, K_remain=3)
 
     def test_canonical_MT128x128_K_remain_5(self):
@@ -148,14 +192,30 @@ class TestCanonicalPins:
         _cross_check_one(kernel, tiA, tiB, K_remain=7)
 
     def test_canonical_MT128x128_K_remain_9(self):
-        """K_remain=9 → K_local=8 → colId_post crosses to 1.
+        """K_remain=9 → K_remain-2=7 in colId_post=0 (lane 62) and
+        K_remain-1=8 in colId_post=1 (different lane).
 
-        First K_remain value where the missing K-element lives in a
-        DIFFERENT lane's chunk than K_remain<8. Exercises the
-        colId_post → colId_pre inversion for a non-zero colId_post.
+        Phase A1.e pin: the two narrow loads target DIFFERENT
+        lanes/m0 values here. K_remain-2=7 stays in lane 62 (lane
+        bytes 14-15 of its chunk = K=7 byte). K_remain-1=8 jumps to
+        the next lane in the K-stripe (colId_post=1 → lane 63 with
+        colId_pre derived via the wave 3 swizzle).
         """
         kernel, _, tiA, tiB = _build_tile_infos(
             MT0=128, MT1=128, depthU=64, wg_m=2, wg_n=2, asem=1)
+        listA = computeNarrowLoadDescriptorsForBoundary(
+            kernel, tiA, K_remain=9, tc='A', tiA=tiA)
+        assert len(listA) == 2
+        # K_remain-2 = K=7: lane 62 (colId_post=0), K_within_lane=7
+        assert listA[0].wave_target == 3
+        assert listA[0].lane_target == 62, \
+            f"K_remain=9 K=7: expected lane 62, got {listA[0].explain}"
+        # K_remain-1 = K=8: different lane (colId_post=1)
+        assert listA[1].wave_target == 3
+        assert listA[1].lane_target != listA[0].lane_target, (
+            f"K_remain=9 expects K_remain-2 and K_remain-1 in "
+            f"DIFFERENT lanes (colId_post=0 vs colId_post=1); "
+            f"got both at lane {listA[0].lane_target}")
         _cross_check_one(kernel, tiA, tiB, K_remain=9)
 
 
@@ -187,29 +247,31 @@ def test_gr_lr_cross_check_bf16(MT0, MT1, depthU, wg_m, wg_n, K_remain):
     """Cross-check GR.m0_target == LR.lds_byte_target across the bf16
     geometry × K_remain cross-product.
 
+    Phase A1.e: the cross-check now validates the FULL list of
+    narrow-load descriptors (zero, one, or two entries depending on
+    K_remain):
+      - K_remain odd >= 2 (= K_remain*bpe >= bpr): TWO descriptors,
+        both cross-checked.
+      - K_remain == 1 (= K_remain*bpe < bpr for bf16): ZERO
+        descriptors (align-UP fall-through); the cross-check just
+        verifies the GR and LR lists are both empty.
+      - K_remain even: ZERO descriptors (the static
+        `subtileTailNarrowLoadApplies` gate rejects these).
+
     Skips combinations where:
       - K_remain >= DepthU (no tail loop fires).
-      - K_remain is even (the narrow load only fires for odd K_remain;
-        even K_remain is fully covered by align-DOWN with no missing
-        BF16 element).
-      - The geometry is not in Phase A1's coverage (
-        :func:`subtileTailNarrowLoadApplies` returns False or the
+      - The geometry is not in Phase A1's coverage
+        (:func:`subtileTailNarrowLoadApplies` returns False or the
         derivation hits NotImplementedError).
     """
     if K_remain >= depthU:
         pytest.skip(f"K_remain={K_remain} >= DepthU={depthU}; tail loop "
                     "doesn't fire")
-    if K_remain % 2 == 0:
-        pytest.skip(f"K_remain={K_remain} even; align-DOWN covers it "
-                    "without a narrow load")
 
     try:
         kernel, _, tiA, tiB = _build_tile_infos(
             MT0=MT0, MT1=MT1, depthU=depthU, wg_m=wg_m, wg_n=wg_n, asem=1)
     except (ValueError, ZeroDivisionError) as e:
-        # TileInfo raises for malformed geometries (MT not divisible,
-        # localSubtileGrid[1]==0 → /0, etc.). Skip those -- they're
-        # outside the Solution.py gate anyway.
         pytest.skip(f"TileInfo build failed: {e}")
 
     if not subtileTailNarrowLoadApplies(kernel):

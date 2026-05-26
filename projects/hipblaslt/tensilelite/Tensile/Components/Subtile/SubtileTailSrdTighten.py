@@ -43,6 +43,7 @@ import math
 from rocisa.code import Module
 from rocisa.container import sgpr
 from rocisa.instruction import (
+    SCSelectB32, SCmpEQU32,
     SLShiftLeftB32, SLShiftRightB32, SMovB32,
     SAddU32, SAndB32, SSubU32,
 )
@@ -163,9 +164,11 @@ def emitTailSrdTightenSubtile(kw, kernel):
 
     if useAlignDown:
         module.addComment2(
-            "Tighten Srd<tc>+2 to K_remain*bpe rounded DOWN to bpr=4 "
-            "(structural OOR clip; trailing odd element repaired by "
-            "narrow buffer_load_ushort below)")
+            "Tighten Srd<tc>+2: K_remain*bpe >= bpr → roundDown(.,bpr=4) "
+            "(structural OOR clip; trailing odd pair repaired by two "
+            "narrow buffer_load_ushort loads below); K_remain*bpe < bpr "
+            "→ bump to bpr (= align-UP equivalent for K_remain=1 where "
+            "multi-row clip would otherwise drop legitimate K=0 data)")
     else:
         module.addComment2(
             "Tighten Srd<tc>+2 to K_remain*bpe rounded up to bpr=4 "
@@ -181,15 +184,33 @@ def emitTailSrdTightenSubtile(kw, kernel):
             module.add(SMovB32(
                 dst=sgpr(scaledKRem), src=sgpr("LoopCounterL"),
                 comment="K_remain * bpe (bpe=1)"))
-        if not useAlignDown:
+        if useAlignDown:
+            # Phase A1.e: align-DOWN gives 0 when K_remain*bpe < bpr;
+            # for K_remain=1 (= the multi-row-clip case the narrow load
+            # cannot repair) we want align-UP behavior = bpr. Do
+            # align-DOWN unconditionally, then runtime-bump zero up to
+            # bpr (which is the align-UP roundUp value for any
+            # K_remain*bpe in (0, bpr)).
+            module.add(SAndB32(
+                dst=sgpr(scaledKRem), src0=sgpr(scaledKRem),
+                src1=hex(alignMaskInv),
+                comment="alignedBytes_down = roundDown(K_remain*bpe, %u)"
+                        % bpr))
+            module.add(SCmpEQU32(
+                src0=sgpr(scaledKRem), src1=0,
+                comment="K_remain*bpe < bpr (= alignedBytes_down == 0)?"))
+            module.add(SCSelectB32(
+                dst=sgpr(scaledKRem), src0=bpr, src1=sgpr(scaledKRem),
+                comment="if SCC1: alignedBytes = bpr (align-UP for "
+                        "K_remain=1; multi-row-clip case)"))
+        else:
             module.add(SAddU32(
                 dst=sgpr(scaledKRem), src0=sgpr(scaledKRem), src1=(bpr - 1),
                 comment="+ (bpr-1) for roundUp"))
-        module.add(SAndB32(
-            dst=sgpr(scaledKRem), src0=sgpr(scaledKRem), src1=hex(alignMaskInv),
-            comment=("alignedBytes = roundDown(K_remain*bpe, %u)"
-                     if useAlignDown
-                     else "alignedBytes = roundUp(K_remain*bpe, %u)") % bpr))
+            module.add(SAndB32(
+                dst=sgpr(scaledKRem), src0=sgpr(scaledKRem),
+                src1=hex(alignMaskInv),
+                comment="alignedBytes = roundUp(K_remain*bpe, %u)" % bpr))
         # delta provably >= 0 under both align-UP and align-DOWN to
         # bpr=4 (alignedBytes <= K_remain*bpe + bpr <= DepthU*bpe for
         # any K_remain in [0, DepthU)). When delta=0 (already-aligned

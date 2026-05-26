@@ -135,3 +135,97 @@ on gfx9/gfx950.
 - YAML gauntlet: `subtile_bf16_anyk_odd.yaml` K=1 / K=3 / K=97 BSS
   shapes FAIL with align-DOWN + single-element narrow load. K=1: 214
   incorrect / 16384. K=3: 102 incorrect / 16384.
+
+## Phase A1.e — two narrow loads + runtime K_remain=1 fallback
+
+### What changed
+
+1. `computeNarrowLoadDescriptorsForBoundary(kernel, ti, K_remain, tc)`
+   returns the list of narrow-load descriptors needed to repair the
+   align-DOWN-clipped DWORD: two entries for K_remain odd >= 2 (one
+   for K_remain-2, one for K_remain-1), zero entries for K_remain=1
+   (multi-row clip, unsafe).
+2. `_emitNarrowLoadForOperand` now emits TWO `buffer_load_ushort …
+   lds` per operand under one per-wave gate + EXEC=1 region.
+3. `emitTailSrdTightenSubtile` adds a runtime `K_remain*bpe >= bpr`
+   check (via `s_cmp_eq + s_cselect`): when the align-DOWN aligned
+   bytes is 0 (= K_remain=1 for bf16), bump to `bpr` so the SRD
+   behaves like the legacy align-UP. The narrow-load emit gates the
+   same way (= skips when K_remain*bpe < bpr).
+4. Cross-check harness extended (`computeLRReadersForBoundary` +
+   list-aware `_cross_check_one`) to validate BOTH narrow-load slots
+   per operand against the LR-reader oracle.
+
+### Phase A1.e gauntlet results — `subtile_bf16_anyk_odd.yaml`
+
+Tested with two-narrow-loads + K_remain=1 align-UP fallback:
+
+| MT          | K (= K_remain) | Status | Errors / 16384 |
+|---|---|---|---|
+| 64×64       | 1, 3, 7, 17, 31 | PASS | 0 |
+| 128×32      | 1, 3, 7, 17, 31 | PASS | 0 |
+| 128×128     | 1               | PASS | 0 (align-UP fallback) |
+| 128×128     | 3               | FAIL | 203 |
+| 128×128     | 7               | FAIL | ~190 |
+| 128×128     | 17              | FAIL | ~150 |
+| 128×128     | 31              | FAIL | ~100 |
+| 128×128     | 33 (BSS)        | FAIL | 213 (BSS) |
+| 128×128     | 97 (BSS)        | FAIL | 122 (BSS) |
+
+A/B isolation (single K_remain-1 narrow load only, no K_remain-2):
+
+- MT 128×128 K=3: 111 errors (vs 203 with both loads). The K_remain-2
+  narrow load ADDS ~92 errors instead of fixing any.
+
+No narrow load at all (align-DOWN baseline):
+
+- MT 128×128 K=3: 183 errors. Adding K_remain-1 narrow load: 111
+  (= -72). Adding K_remain-2 narrow load: 203 (= +92 over K_remain-1).
+
+### What's wrong (open question)
+
+The K_remain-2 narrow load is structurally correct on paper:
+
+- `computeNarrowLoadDescriptorsForBoundary` returns descriptors whose
+  `m0_target` matches the LR-reader oracle's `lds_byte_target` for
+  K_local=K_remain-2 — the harness asserts this for all
+  `subtile_bf16_anyk_odd.yaml` shapes.
+- The asm emits the load with the right `vaddr=0 / soffset =
+  m_last*stride*bpe + K_local*bpe / m0 = LDS byte for lane_target's
+  chunk slot for K=K_remain-2`.
+- For MT 64×64 and MT 128×32 the two-load repair works (= the
+  pre-Option-A page-fault gauntlet matches).
+
+But MT 128×128 with both narrow loads gives MORE errors than with
+the single narrow load. The K_remain-2 narrow load is overwriting
+a byte that — for MT 128×128 specifically — already has the right
+value (or the LR consumer reads from a different byte than the
+oracle predicts).
+
+Hypotheses still to investigate:
+1. The LR oracle's `consumer_wave` / `wave_partition` derivation is
+   off for MT 128×128 wg=(2,2) when sId0_LR has a non-trivial value
+   (3 in this case). The harness's formula matches the GR-side
+   m0 by construction, but neither side may match the actual ASM's
+   `_lraTileAssignment_legacy` for sId0=3.
+2. The wide DTL for MT 128×128's larger LDS layout might be writing
+   the K_remain-2 byte from a different lane (= not lane 57/62 with
+   colId_post=0 as the harness assumes) due to a subtile-row-walk
+   offset the harness doesn't model.
+3. The narrow load's `m0` computation in asm shares an SGPR scratch
+   with the K_remain-1 load below it; an aliasing / dependence bug
+   could be writing the wrong K_local value.
+
+### Next steps
+
+- Either: dump the actual LDS bytes via a CPU-readable scratch
+  buffer at the end of the tail loop (= add a temporary debug
+  store) to confirm WHICH byte is wrong.
+- Or: hard-code a known constant into the K_remain-2 narrow load
+  (= write 0xDEAD to the target byte) and inspect D's error
+  pattern to confirm the byte IS the one the LR consumer reads.
+- Or: revert the K_remain-2 emit and ship only Phase 2
+  (= K_remain=1 align-UP fallback + single K_remain-1 narrow load
+  for the K_remain odd >= 3 partial repair). This restores
+  MT 128×128 K=1 (the dominant failing shape) and accepts the
+  remaining MT 128×128 K=3 etc. failures as documented limitation.

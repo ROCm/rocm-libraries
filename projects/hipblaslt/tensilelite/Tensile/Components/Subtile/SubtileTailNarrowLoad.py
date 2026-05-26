@@ -50,7 +50,8 @@ from rocisa.code import Label, Module
 from rocisa.container import EXEC, MUBUFModifiers, sgpr, vgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB32, BufferLoadU16,
-    SAddU32, SAndB32, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, SCmpLgU32,
+    SAddU32, SAndB32, SCBranchSCC0, SCBranchSCC1,
+    SCmpEQU32, SCmpGeU32, SCmpLgU32,
     SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SOrB32,
     SSubU32, SWaitCnt,
     VLShiftRightB32, VMovB32, VReadfirstlaneB32,
@@ -306,47 +307,32 @@ def computeLDSStartOffsetB(tiA) -> int:
     return int(((numASubtiles * tiA.subtileSize + readSize - 1) // readSize) * readSize)
 
 
-def computeNarrowLoadDescriptor(kernel, ti, K_remain: int, tc: str,
-                                tiA=None) -> NarrowLoadDescriptor:
-    """Compile-time-resolved descriptor for ONE operand's narrow load.
+def _computeNarrowLoadDescriptorForKLocal(kernel, ti, K_local: int,
+                                          tc: str, tiA=None
+                                          ) -> NarrowLoadDescriptor:
+    """Compile-time-resolved descriptor for ONE BF16 element at
+    K=K_local of the operand's last m-row.
 
-    Args:
-      kernel:   live kernel dict
-      ti:       TileInfo for the operand (A or B)
-      K_remain: compile-time constant or symbolic max for derivation;
-                pass a concrete int here for the cross-check / canonical
-                pins. The runtime emitter computes the same descriptor
-                using compile-time-known kernel keys + a runtime
-                `LoopCounterL` SGPR for the K_last_local-dependent
-                fields (sId1_last, lane_target).
-      tc:       'A' or 'B'.
-      tiA:      A-operand TileInfo for `ldsStartOffsetB` derivation;
-                required when tc == 'B'.
+    Phase A1.e calls this twice (with K_local = K_remain-2 and
+    K_local = K_remain-1) to repair both BF16 elements of the
+    DWORD-clipped slot under align-DOWN.
 
-    Phase A1 restriction: localSubtileGrid[1] == 1 supported as
-    compile-time; localSubtileGrid[1] > 1 raises NotImplementedError
-    (covers all DepthU ≤ 64 with bf16 mmaTileShape K=32, but DU=128
-    needs a runtime sId1 branch -- staged for a follow-up).
+    Phase A1 restriction: localSubtileGrid[1] == 1 supported;
+    localSubtileGrid[1] > 1 raises NotImplementedError. loadRatioGR
+    must be 1.0.
     """
     if ti.loadRatioGR != 1.0:
         raise NotImplementedError(
-            f"computeNarrowLoadDescriptor: loadRatioGR={ti.loadRatioGR} "
-            f"not yet in Phase A1 coverage")
+            f"_computeNarrowLoadDescriptorForKLocal: loadRatioGR="
+            f"{ti.loadRatioGR} not yet in Phase A1 coverage")
     if ti.localSubtileGrid[1] != 1:
         raise NotImplementedError(
-            f"computeNarrowLoadDescriptor: localSubtileGrid[1]="
-            f"{ti.localSubtileGrid[1]} > 1 is staged for DU>subIterK; not "
-            f"yet encoded in Phase A1")
-    if K_remain <= 0:
-        raise ValueError(f"K_remain must be > 0, got {K_remain}")
+            f"_computeNarrowLoadDescriptorForKLocal: localSubtileGrid[1]="
+            f"{ti.localSubtileGrid[1]} > 1 is staged for DU>subIterK")
+    if K_local < 0:
+        raise ValueError(f"K_local must be >= 0, got {K_local}")
 
-    # --- Per-operand "last row" in the operand's M-equivalent axis ---
-    # For A: M-axis is rows of A = MacroTile0; M_last = MacroTile0 - 1.
-    # For B: M-axis is rows of B (the K-contracted axis in TN GEMM) =
-    #        MacroTile1. M_last = MacroTile1 - 1.
-    # (Both tileInfos store .macroTile = the operand's M dimension.)
     m_last = ti.macroTile - 1
-
     bpe = int(ti.bpe)
     loadWidthGR = ti.loadWidthGR
     elementsPerLane = loadWidthGR // bpe       # 8 for bf16 b128
@@ -356,39 +342,23 @@ def computeNarrowLoadDescriptor(kernel, ti, K_remain: int, tc: str,
     ldsRowBankSize = _DEFAULT_LDS_BANK_COUNT * _DEFAULT_LDS_BANK_WIDTH
     numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
 
-    # K_last_local is the LOCAL K index of the trailing valid element
-    # within the tail's DepthU window. K_local = K_remain - 1.
-    K_local = K_remain - 1
-
-    # --- Step 1: wave / sId0 / rowId for m_last ---
     wave_target, rowOffset_wave, sId0_last, rowId_last = \
         _grWavePartitionForRow(kernel, ti, m_last)
 
-    # --- Step 2: sId1 of the missing element ---
-    # K-direction subtile span (elements) = subtileShape[1] * mmaTileShape[1].
-    # With localSubtileGrid[1] == 1, sId1_last is always 0.
     K_per_subtile = ti.subtileShape[1] * ti.mmaTileShape[1]
     sId1_last = K_local // K_per_subtile
     K_local_in_subtile = K_local % K_per_subtile
 
-    # --- Step 3: colId_post (the post-swizzle K-stripe containing K_local) ---
-    # Each lane carries elementsPerLane K-elements. colId selects the
-    # K-stripe; K-within-lane is the remainder.
     colId_post = K_local_in_subtile // elementsPerLane
     K_within_lane = K_local_in_subtile % elementsPerLane
 
-    # --- Step 4: colId_pre that yields colId_post for this row ---
-    # ldsRowId for the GR is computed from the lane's rowId (laneId
-    # // blockSize_GR), and rowId_last is exactly our target.
     ldsRowId = rowId_last // numRowsPerLDSBanks
     colId_pre = _grSwizzledColIdPre(ldsRowId, 0, wave_target,
                                     blockSize_GR, numRowsPerLDSBanks,
                                     colId_post)
 
-    # --- Step 5: lane_target ---
     lane_target = rowId_last * blockSize_GR + colId_pre
 
-    # --- Step 6: m0_target (absolute LDS byte address) ---
     LWA = _grWaveLWA(kernel, ti, rowOffset_wave)
     if tc == 'B':
         if tiA is None:
@@ -401,17 +371,6 @@ def computeNarrowLoadDescriptor(kernel, ti, K_remain: int, tc: str,
                  + lane_target * loadWidthGR
                  + K_within_lane * bpe)
 
-    # --- Step 7: vaddr_target (global byte offset for A[m_last, K-1])
-    # At tail entry the Srd<tc> base has been advanced by
-    # `K_aligned * bpe` per row (NOT per global byte -- the row stride
-    # is StrideA0I or StrideB1J, which the buffer-load multiplies by
-    # the lane's voff). The voff we want for the firing lane is
-    # `m_last * stride * bpe + K_local_in_subtile * bpe`. We don't
-    # have the runtime stride at compile time, so we encode it as the
-    # *row index* (m_last) and the within-row *byte offset*
-    # (K_local_in_subtile * bpe); the emitter multiplies by the
-    # runtime stride SGPR.
-    #
     # The "vaddr_target" stored here is the WITHIN-ROW byte offset
     # (K_local_in_subtile * bpe). The emitter combines this with
     # `m_last * stride * bpe` at emit time.
@@ -436,6 +395,60 @@ def computeNarrowLoadDescriptor(kernel, ti, K_remain: int, tc: str,
         sId1_last=sId1_last,
         explain=explain,
     )
+
+
+def computeNarrowLoadDescriptor(kernel, ti, K_remain: int, tc: str,
+                                tiA=None) -> NarrowLoadDescriptor:
+    """Legacy single-descriptor surface (= descriptor for K=K_remain-1).
+    Kept for the canonical pins; new callers should prefer
+    :func:`computeNarrowLoadDescriptorsForBoundary` which returns a
+    list of descriptors (zero, one, or two) depending on K_remain.
+    """
+    if K_remain <= 0:
+        raise ValueError(f"K_remain must be > 0, got {K_remain}")
+    return _computeNarrowLoadDescriptorForKLocal(
+        kernel, ti, K_remain - 1, tc, tiA=tiA)
+
+
+def computeNarrowLoadDescriptorsForBoundary(kernel, ti, K_remain: int,
+                                            tc: str, tiA=None):
+    """Return the list of narrow-load descriptors needed to repair the
+    align-DOWN-clipped DWORD on the last m-row of the operand.
+
+    Phase A1.e two-narrow-load gating for bf16/fp16 (bpe=2, bpr=4):
+
+    - `K_remain * bpe < bpr` (= K_remain == 1): the dropped DWORD
+      spans MULTIPLE matrix rows (because the row stride is also
+      bpr-misaligned for odd K), so a per-lane single-DWORD repair
+      is structurally insufficient. Return [] and rely on the
+      caller falling back to align-UP for these shapes.
+
+    - `K_remain * bpe >= bpr` AND K_remain odd (= K_remain in
+      {3, 5, 7, …}): the dropped DWORD contains BOTH K=K_remain-2
+      AND K=K_remain-1 of row M-1. Return both descriptors.
+
+    - K_remain even (= the static gate
+      `subtileTailNarrowLoadApplies(kernel)` already rejects these,
+      so this branch is unreachable in production): return [] as a
+      defensive default.
+    """
+    bpe = int(ti.bpe)
+    bpr = 4
+    if K_remain <= 0:
+        return []
+    if K_remain * bpe < bpr:
+        return []
+    if (K_remain & 1) == 0:
+        # Even K_remain: K_remain*bpe is bpr-aligned by definition;
+        # no DWORD-clip past K_remain. (Static `subtileTailNarrowLoadApplies`
+        # already gates this out, but be defensive for the harness.)
+        return []
+    return [
+        _computeNarrowLoadDescriptorForKLocal(
+            kernel, ti, K_remain - 2, tc, tiA=tiA),
+        _computeNarrowLoadDescriptorForKLocal(
+            kernel, ti, K_remain - 1, tc, tiA=tiA),
+    ]
 
 
 # ── LR side: oracle ───────────────────────────────────────────────────────
@@ -486,35 +499,74 @@ def _lrPermlane16Swap(lane_id: int, colOffset_pre: int,
     return (peer_rotation + peer_lane16Group) % blockSize_LR
 
 
+def _computeLRReaderForKLocal(kernel, ti, K_local: int, tc: str,
+                              tiA=None) -> LRReaderTarget:
+    """LR-side oracle for K=K_local of the operand's last m-row.
+
+    Used internally by :func:`computeLRReaderForBoundary` (which is
+    just `_computeLRReaderForKLocal(..., K_remain-1, ...)`) and by
+    :func:`computeLRReadersForBoundary` (which returns the two-element
+    list for the dropped DWORD).
+    """
+    return _lrReaderImpl(kernel, ti, K_local, tc, tiA)
+
+
+def computeLRReadersForBoundary(kernel, ti, K_remain: int, tc: str,
+                                tiA=None):
+    """Phase A1.e: return the list of LR-reader targets corresponding
+    to :func:`computeNarrowLoadDescriptorsForBoundary`'s list.
+
+    For each narrow load the GR-side descriptor expects to emit, the
+    LR-side reader oracle predicts the LDS byte the per-lane mask
+    init's ds_read will fetch for that K_local. Mirrors the gating in
+    `computeNarrowLoadDescriptorsForBoundary` (zero for K_remain*bpe
+    < bpr; one for K_remain even (defensive); two for K_remain odd
+    with K_remain*bpe >= bpr).
+    """
+    bpe = int(ti.bpe)
+    bpr = 4
+    if K_remain <= 0:
+        return []
+    if K_remain * bpe < bpr:
+        return []
+    if (K_remain & 1) == 0:
+        return []
+    return [
+        _computeLRReaderForKLocal(kernel, ti, K_remain - 2, tc, tiA=tiA),
+        _computeLRReaderForKLocal(kernel, ti, K_remain - 1, tc, tiA=tiA),
+    ]
+
+
 def computeLRReaderForBoundary(kernel, ti, K_remain: int, tc: str,
                                tiA=None) -> LRReaderTarget:
     """LR-side oracle: which LDS byte does the per-lane mask init
-    expect to contain the (M_last, K_last_local) element?
+    expect to contain the (M_last, K_remain-1) element?
+
+    Thin wrapper around :func:`_lrReaderImpl` for the legacy single-
+    reader call site. New callers should prefer
+    :func:`computeLRReadersForBoundary` which returns the list of
+    readers paired with `computeNarrowLoadDescriptorsForBoundary`'s
+    list.
+    """
+    if K_remain <= 0:
+        raise ValueError(f"K_remain must be > 0, got {K_remain}")
+    return _lrReaderImpl(kernel, ti, K_remain - 1, tc, tiA)
+
+
+def _lrReaderImpl(kernel, ti, K_local: int, tc: str, tiA=None
+                  ) -> LRReaderTarget:
+    """LR-side oracle for K=K_local of the operand's last m-row.
 
     Mirrors `_lraTileAssignment_legacy` from
     `Components/Subtile/SubtileLREmit.py` (the bf16/fp16 path; the
     fp8 K_group rotation branch is out of scope for Phase A1).
-
-    Strategy:
-      1. Identify the (wave, lane16, lane16Group, sId0_LR, sId1_LR)
-         tuple that consumes the (M_last, K_local) MFMA input. This
-         is the LR mirror of the GR derivation: the wave whose MFMA
-         covers M_last (determined by MIWaveGroup partition) and the
-         lane16 within that wave's M-direction MFMA tile that covers
-         M_last.
-      2. Walk the LR swizzle (intra-wave rotation + permlane16 swap +
-         row offset) to compute the LDS byte that lane consults for
-         SubtileX[sId0_LR, sId1_LR] subIterK=0.
-
-    The returned `lds_byte_target` MUST equal the
-    `NarrowLoadDescriptor.m0_target` computed by
-    :func:`computeNarrowLoadDescriptor` for the same inputs --
-    that's the cross-check the harness asserts.
     """
     if ti.localSubtileGrid[1] != 1:
         raise NotImplementedError(
-            f"computeLRReaderForBoundary: localSubtileGrid[1]="
+            f"_lrReaderImpl: localSubtileGrid[1]="
             f"{ti.localSubtileGrid[1]} > 1 staged for DU>subIterK")
+    if K_local < 0:
+        raise ValueError(f"K_local must be >= 0, got {K_local}")
 
     m_last = ti.macroTile - 1
     bpe = int(ti.bpe)
@@ -527,7 +579,6 @@ def computeLRReaderForBoundary(kernel, ti, K_remain: int, tc: str,
     ldsRowBankSize = _DEFAULT_LDS_BANK_COUNT * _DEFAULT_LDS_BANK_WIDTH
     numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
 
-    K_local = K_remain - 1
     K_per_subtile = ti.subtileShape[1] * ti.mmaTileShape[1]
     sId1_LR = K_local // K_per_subtile
     K_local_in_subtile = K_local % K_per_subtile
@@ -671,14 +722,155 @@ def subtileTailNarrowLoadOperandSupported(ti) -> bool:
 # ── Emitter (uses the descriptor + per-wave EXEC mask) ─────────────────────
 
 
+def _emitOneNarrowLoad(module, kw, kernel, tc, ti, vAddrZero,
+                       sScratch, sSoffset,
+                       K_remain_minus: int,
+                       wave_target: int, rowId_last: int,
+                       sId0_last: int, m_last: int,
+                       loadWidthGR: int, blockSize_GR: int,
+                       elementsPerLane: int, bpe: int,
+                       LWA_const_offset: int, colIdPreOffset: int,
+                       lwa_sgpr_name: str, srd_sgpr_name: str,
+                       stride_sgpr_name: str,
+                       label_suffix: str):
+    """Emit ONE narrow load for K_local = LoopCounterL - 1 - K_remain_minus.
+
+    `K_remain_minus = 0` → K_local = K_remain - 1 (high BF16 in dropped DWORD).
+    `K_remain_minus = 1` → K_local = K_remain - 2 (low BF16 in dropped DWORD).
+
+    Assumes EXEC has already been set to lane 0 only by the caller.
+    Emits the address derivation + the BufferLoadU16 + a vmcnt wait.
+    Caller (`_emitNarrowLoadForOperand`) handles EXEC snapshot/restore
+    once around both loads.
+
+    sScratch and sSoffset are caller-provided SGPRs (re-used across
+    both loads to keep the SGPR footprint flat).
+    """
+    klocal_subtract = K_remain_minus + 1  # K_local = LoopCounterL - klocal_subtract
+
+    # ---- Runtime K-tail address computation ----
+    # s_klocal = LoopCounterL - klocal_subtract
+    module.add(SSubU32(
+        dst=sgpr(sScratch), src0=sgpr("LoopCounterL"), src1=klocal_subtract,
+        comment="narrowLoad[%s %s]: K_local = LoopCounterL - %u"
+                % (tc, label_suffix, klocal_subtract)))
+    # s_kwl = s_klocal & (elementsPerLane - 1)
+    module.add(SAndB32(
+        dst=sgpr(sSoffset), src0=sgpr(sScratch),
+        src1=elementsPerLane - 1,
+        comment="narrowLoad[%s %s]: K_within_lane = K_local %% %u"
+                % (tc, label_suffix, elementsPerLane)))
+    # s_colId_post = s_klocal >> log2(elementsPerLane)
+    module.add(SLShiftRightB32(
+        dst=sgpr(sScratch), src=sgpr(sScratch),
+        shiftHex=hex(elementsPerLane.bit_length() - 1),
+        comment="narrowLoad[%s %s]: colId_post = K_local // %u"
+                % (tc, label_suffix, elementsPerLane)))
+    # s_colId_pre = (s_colId_post + colIdPreOffset) & (blockSize-1)
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=hex(colIdPreOffset),
+        comment="narrowLoad[%s %s]: colId_pre = colId_post + "
+                "(-rotation_intra + waveRotation) mod blockSize"
+                % (tc, label_suffix)))
+    module.add(SAndB32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=blockSize_GR - 1,
+        comment="narrowLoad[%s %s]: colId_pre &= %u"
+                % (tc, label_suffix, blockSize_GR - 1)))
+    # s_lane_target = rowId_last * blockSize + s_colId_pre
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=rowId_last * blockSize_GR,
+        comment="narrowLoad[%s %s]: lane_target = colId_pre + "
+                "rowId_last(=%u) * blockSize(=%u)"
+                % (tc, label_suffix, rowId_last, blockSize_GR)))
+
+    # ---- m0 = LWA<tc> + sId0_last * subtileSize + lane_target * loadWidthGR
+    #              + K_within_lane * bpe ----
+    module.add(SAddU32(
+        dst=mgpr(0),
+        src0=sgpr(lwa_sgpr_name),
+        src1=hex(LWA_const_offset),
+        comment="narrowLoad[%s %s]: m0 = LWA%s + sId0_last(=%u)*"
+                "subtileSize"
+                % (tc, label_suffix, tc, sId0_last)))
+    module.add(SLShiftLeftB32(
+        dst=sgpr(sScratch), src=sgpr(sScratch),
+        shiftHex=hex(loadWidthGR.bit_length() - 1),
+        comment="narrowLoad[%s %s]: lane_target * loadWidthGR(=%u)"
+                % (tc, label_suffix, loadWidthGR)))
+    module.add(SAddU32(
+        dst=mgpr(0), src0=mgpr(0), src1=sgpr(sScratch),
+        comment="narrowLoad[%s %s]: m0 += lane_target * loadWidthGR"
+                % (tc, label_suffix)))
+    module.add(SLShiftLeftB32(
+        dst=sgpr(sScratch), src=sgpr(sSoffset),
+        shiftHex=hex(bpe.bit_length() - 1),
+        comment="narrowLoad[%s %s]: K_within_lane * bpe(=%u)"
+                % (tc, label_suffix, bpe)))
+    module.add(SAddU32(
+        dst=mgpr(0), src0=mgpr(0), src1=sgpr(sScratch),
+        comment="narrowLoad[%s %s]: m0 += K_within_lane * bpe"
+                % (tc, label_suffix)))
+
+    # ---- soffset = m_last * stride * bpe + K_local * bpe ----
+    module.add(SSubU32(
+        dst=sgpr(sScratch), src0=sgpr("LoopCounterL"),
+        src1=klocal_subtract,
+        comment="narrowLoad[%s %s]: re-derive K_local for soffset"
+                % (tc, label_suffix)))
+    module.add(SLShiftLeftB32(
+        dst=sgpr(sScratch), src=sgpr(sScratch),
+        shiftHex=hex(bpe.bit_length() - 1),
+        comment="narrowLoad[%s %s]: K_local * bpe"
+                % (tc, label_suffix)))
+    module.add(SMulI32(
+        dst=sgpr(sSoffset), src0=m_last,
+        src1=sgpr(stride_sgpr_name),
+        comment="narrowLoad[%s %s]: m_last(=%u) * %s"
+                % (tc, label_suffix, m_last, stride_sgpr_name)))
+    module.add(SLShiftLeftB32(
+        dst=sgpr(sSoffset), src=sgpr(sSoffset),
+        shiftHex=hex(bpe.bit_length() - 1),
+        comment="narrowLoad[%s %s]: m_last * stride * bpe"
+                % (tc, label_suffix)))
+    module.add(SAddU32(
+        dst=sgpr(sSoffset), src0=sgpr(sSoffset),
+        src1=sgpr(sScratch),
+        comment="narrowLoad[%s %s]: soffset = m_last*stride*bpe + "
+                "K_local*bpe" % (tc, label_suffix)))
+
+    # ---- Issue the narrow load ----
+    mubuf = MUBUFModifiers(offen=True, offset12=0, lds=True,
+                           glc=False, slc=False, nt=False)
+    module.add(BufferLoadU16(
+        dst=None, vaddr=vgpr(vAddrZero),
+        saddr=sgpr(srd_sgpr_name, 4),
+        soffset=sgpr(sSoffset), mubuf=mubuf,
+        comment="narrowLoad[%s %s]: 2-byte trailing element "
+                "%s[m_last=%u, K_local = LoopCounterL - %u] → "
+                "LDS slot of wave %u"
+                % (tc, label_suffix, tc, m_last, klocal_subtract,
+                   wave_target)))
+    module.add(SWaitCnt(
+        vlcnt=0, vscnt=-1,
+        comment="narrowLoad[%s %s]: wait for buffer_load_ushort "
+                "to complete" % (tc, label_suffix)))
+
+
 def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
                               sExecSave) -> Module:
-    """Emit the narrow load for one operand (`tc` ∈ {'A','B'}).
+    """Emit the narrow load(s) for one operand (`tc` ∈ {'A','B'}).
 
-    Walks the descriptor for K_remain treated as a runtime SGPR
-    (`LoopCounterL`). All compile-time terms are baked into hex
-    immediates; the runtime portion (K_within_lane, colId_post,
-    colId_pre, lane_target, soffset) is computed in SGPRs.
+    Phase A1.e: emits TWO `buffer_load_ushort … lds` -- one for
+    K_local = K_remain-2 (low BF16 in the align-DOWN-dropped DWORD)
+    and one for K_local = K_remain-1 (high BF16). Both go through the
+    same per-wave gate and EXEC=1 region; the address derivation is
+    redone per load because the (K_remain-2 / K_remain-1) pair may
+    cross an `elementsPerLane` boundary (and thus pick different
+    lane_target / m0 values, e.g. K_remain=9 with K_remain-2=7 in
+    colId_post=0 and K_remain-1=8 in colId_post=1).
     """
     module = Module("tailTrailingNarrowLoad %s" % tc)
 
@@ -688,53 +880,24 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
     blockSize_GR = ti.subIterKBytes // loadWidthGR
     subtileSize_bytes = ti.subtileSize
 
-    # Wave / row resolution at the LAST row of the operand's M-axis.
     m_last = ti.macroTile - 1
     wave_target, rowOffset_wave, sId0_last, rowId_last = \
         _grWavePartitionForRow(kernel, ti, m_last)
 
-    # Compile-time swizzle inversion constants (intra-wave + inter-wave
-    # rotation). `_grSwizzleColIds_legacy` forward chain:
-    #   rotation_intra = blockSize - (ldsRowId // 2) * 2
-    #   waveRotation   = (waveId & 1) * (2*numRowsPerLDSBanks)
-    #   colId_post     = (colId_pre + rotation_intra - waveRotation) % blockSize
-    # Inversion:
-    #   colId_pre = (colId_post - rotation_intra + waveRotation) % blockSize
     ldsRowBankSize = _ldsRowBankSize(kw)
     numRowsPerLDSBanks = ldsRowBankSize // ti.subIterKBytes
     ldsRowId = rowId_last // numRowsPerLDSBanks
     rotation_intra = blockSize_GR - (ldsRowId // 2) * 2
     waveRot_shift = (2 * numRowsPerLDSBanks).bit_length() - 1
     waveRotation = (wave_target & 1) << waveRot_shift
-    # In the K_remain in [1, elementsPerLane] case (colId_post = 0)
-    # the inversion collapses to a constant; the runtime path below
-    # handles the general K_remain by computing
-    # `s_colId_pre = (s_colId_post - rotation_intra + waveRotation) & (blockSize-1)`.
     colIdPreOffset = (-rotation_intra + waveRotation) & 0xffffffff
 
-    # Subtile + LWA constants.
     LWA_const_offset = sId0_last * subtileSize_bytes
-
-    # LR partition constants for B (mirrors `_lraTileAssignment_legacy`
-    # `_lraWavePartitioning_legacy`). We don't need this for the GR
-    # write target (LWA already accounts for the wave's region), but
-    # we do for the SrdB byte index since SrdB itself is already at
-    # the K_aligned offset per row. (Both A and B SRDs at tail entry
-    # point one DU past the prior iter's start, so the per-row stride
-    # multiplies the row index from 0..MT-1; no wave-partition
-    # adjustment to vaddr.)
 
     stride_sgpr_name = "StrideA0I" if tc == 'A' else "StrideB1J"
     lwa_sgpr_name = "LocalWriteBaseAddr%s" % tc
     srd_sgpr_name = "Srd%s" % tc
 
-    # Allocate SGPR scratch for runtime computation + EXEC mask.
-    # Layout (4 sgprs):
-    #   sScratch+0: s_waveId / s_klocal / s_kwl / s_colId_pre / s_lane / s_m0_off
-    #   sScratch+1: s_soffset (lives across the BufferLoad)
-    #   sScratch+2..3: unused tail (allocated to satisfy 4-sgpr alignment
-    #                  in case allocTmpSgpr's preference for power-of-2
-    #                  blocks kicks in).
     with kw.allocTmpSgpr(2) as scratchInfo:
         sScratch = scratchInfo.idx
         sSoffset = sScratch + 1
@@ -767,99 +930,7 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
             comment="narrowLoad[%s]: skip — not wave %u"
                     % (tc, wave_target)))
 
-        # ---- Runtime K-tail address computation ----
-        # s_klocal = LoopCounterL - 1
-        module.add(SSubU32(
-            dst=sgpr(sScratch), src0=sgpr("LoopCounterL"), src1=1,
-            comment="narrowLoad[%s]: K_local = LoopCounterL - 1" % tc))
-        # s_kwl = s_klocal & (elementsPerLane - 1)
-        module.add(SAndB32(
-            dst=sgpr(sSoffset), src0=sgpr(sScratch),
-            src1=elementsPerLane - 1,
-            comment="narrowLoad[%s]: K_within_lane = K_local %% %u"
-                    % (tc, elementsPerLane)))
-        # s_colId_post = s_klocal >> log2(elementsPerLane)
-        module.add(SLShiftRightB32(
-            dst=sgpr(sScratch), src=sgpr(sScratch),
-            shiftHex=hex(elementsPerLane.bit_length() - 1),
-            comment="narrowLoad[%s]: colId_post = K_local // %u"
-                    % (tc, elementsPerLane)))
-        # s_colId_pre = (s_colId_post + colIdPreOffset) & (blockSize-1)
-        module.add(SAddU32(
-            dst=sgpr(sScratch), src0=sgpr(sScratch),
-            src1=hex(colIdPreOffset),
-            comment="narrowLoad[%s]: colId_pre = colId_post + "
-                    "(-rotation_intra + waveRotation) mod blockSize"
-                    % tc))
-        module.add(SAndB32(
-            dst=sgpr(sScratch), src0=sgpr(sScratch),
-            src1=blockSize_GR - 1,
-            comment="narrowLoad[%s]: colId_pre &= %u" % (tc, blockSize_GR - 1)))
-        # s_lane_target = rowId_last * blockSize + s_colId_pre
-        module.add(SAddU32(
-            dst=sgpr(sScratch), src0=sgpr(sScratch),
-            src1=rowId_last * blockSize_GR,
-            comment="narrowLoad[%s]: lane_target = colId_pre + "
-                    "rowId_last(=%u) * blockSize(=%u)"
-                    % (tc, rowId_last, blockSize_GR)))
-
-        # ---- m0 = LWA<tc> + sId0_last * subtileSize + lane_target * loadWidthGR
-        #              + K_within_lane * bpe ----
-        # Build m0 in mgpr(0):
-        #   m0 = LWA + LWA_const_offset
-        module.add(SAddU32(
-            dst=mgpr(0),
-            src0=sgpr(lwa_sgpr_name),
-            src1=hex(LWA_const_offset),
-            comment="narrowLoad[%s]: m0 = LWA%s + sId0_last(=%u)*"
-                    "subtileSize(=%u)=%u"
-                    % (tc, tc, sId0_last, subtileSize_bytes,
-                       LWA_const_offset)))
-        #   s_lane_target_scaled = s_lane_target * loadWidthGR
-        module.add(SLShiftLeftB32(
-            dst=sgpr(sScratch), src=sgpr(sScratch),
-            shiftHex=hex(loadWidthGR.bit_length() - 1),
-            comment="narrowLoad[%s]: lane_target * loadWidthGR(=%u)"
-                    % (tc, loadWidthGR)))
-        module.add(SAddU32(
-            dst=mgpr(0), src0=mgpr(0), src1=sgpr(sScratch),
-            comment="narrowLoad[%s]: m0 += lane_target * loadWidthGR"
-                    % tc))
-        #   m0 += K_within_lane * bpe
-        # bpe == 2 for all Phase A1 shapes -- single left-shift.
-        module.add(SLShiftLeftB32(
-            dst=sgpr(sScratch), src=sgpr(sSoffset),
-            shiftHex=hex(bpe.bit_length() - 1),
-            comment="narrowLoad[%s]: K_within_lane * bpe(=%u)"
-                    % (tc, bpe)))
-        module.add(SAddU32(
-            dst=mgpr(0), src0=mgpr(0), src1=sgpr(sScratch),
-            comment="narrowLoad[%s]: m0 += K_within_lane * bpe" % tc))
-
-        # ---- soffset = m_last * stride * bpe + K_local * bpe ----
-        # Recompute K_local since we trashed sScratch above.
-        module.add(SSubU32(
-            dst=sgpr(sScratch), src0=sgpr("LoopCounterL"), src1=1,
-            comment="narrowLoad[%s]: re-derive K_local for soffset" % tc))
-        module.add(SLShiftLeftB32(
-            dst=sgpr(sScratch), src=sgpr(sScratch),
-            shiftHex=hex(bpe.bit_length() - 1),
-            comment="narrowLoad[%s]: K_local * bpe" % tc))
-        module.add(SMulI32(
-            dst=sgpr(sSoffset), src0=m_last,
-            src1=sgpr(stride_sgpr_name),
-            comment="narrowLoad[%s]: m_last(=%u) * %s" % (tc, m_last,
-                    stride_sgpr_name)))
-        module.add(SLShiftLeftB32(
-            dst=sgpr(sSoffset), src=sgpr(sSoffset),
-            shiftHex=hex(bpe.bit_length() - 1),
-            comment="narrowLoad[%s]: m_last * stride * bpe" % tc))
-        module.add(SAddU32(
-            dst=sgpr(sSoffset), src0=sgpr(sSoffset), src1=sgpr(sScratch),
-            comment="narrowLoad[%s]: soffset = m_last*stride*bpe + "
-                    "K_local*bpe" % tc))
-
-        # ---- Save EXEC, restrict to lane 0 ----
+        # ---- Save EXEC, restrict to lane 0 (held across BOTH loads) ----
         module.add(SMovB64(
             dst=sgpr(sExecSave, 2), src=EXEC(),
             comment="narrowLoad[%s]: snapshot EXEC for restore" % tc))
@@ -867,38 +938,35 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
             dst=EXEC(), src=hex(1),
             comment="narrowLoad[%s]: EXEC = lane 0 only" % tc))
 
-        # ---- Issue the narrow load ----
-        # vaddr=0 (lane 0 only, no per-lane offset); soffset carries
-        # the global byte offset for A[m_last, K_local]; m0 holds the
-        # absolute LDS byte address.
-        #
-        # NOTE: a 4-byte `buffer_load_dword` variant was attempted to
-        # cover the K_remain-2 + K_remain-1 dropped pair under
-        # align-DOWN's per-DWORD clip, but it WORSENED the K_remain=1
-        # gauntlet shape (errors went from 214 → 430 / 16384) because
-        # the K_remain=1 case has a multi-ROW cross-DWORD clip that
-        # the 4-byte load corrupts (the 4 bytes span 2 row's K=0
-        # values with stride=1, and writing them to lane 62's LDS
-        # chunk plants row 126's K=0 into row 127's slot). See
-        # `docs/narrow-trailing-load-structural-issue.md` for the
-        # full diagnosis. Reverting to ushort keeps K_remain=1 at the
-        # 214-error baseline while still partially fixing K_remain
-        # in {3, 5, 7, ...} (one element per row repaired; K_remain-2
-        # remains zero).
-        mubuf = MUBUFModifiers(offen=True, offset12=0, lds=True,
-                               glc=False, slc=False, nt=False)
-        module.add(BufferLoadU16(
-            dst=None, vaddr=vgpr(vAddrZero),
-            saddr=sgpr(srd_sgpr_name, 4),
-            soffset=sgpr(sSoffset), mubuf=mubuf,
-            comment="narrowLoad[%s]: trailing element %s[m_last=%u, "
-                    "K_aligned + K_remain-1] → LDS slot of wave %u "
-                    "lane_target=runtime"
-                    % (tc, tc, m_last, wave_target)))
-        module.add(SWaitCnt(
-            vlcnt=0, vscnt=-1,
-            comment="narrowLoad[%s]: wait for buffer_load_ushort to "
-                    "complete" % tc))
+        # ---- Load 1: K_local = K_remain - 2 (low BF16 of dropped DWORD) ----
+        _emitOneNarrowLoad(
+            module, kw, kernel, tc, ti, vAddrZero,
+            sScratch, sSoffset,
+            K_remain_minus=1, wave_target=wave_target,
+            rowId_last=rowId_last, sId0_last=sId0_last, m_last=m_last,
+            loadWidthGR=loadWidthGR, blockSize_GR=blockSize_GR,
+            elementsPerLane=elementsPerLane, bpe=bpe,
+            LWA_const_offset=LWA_const_offset,
+            colIdPreOffset=colIdPreOffset,
+            lwa_sgpr_name=lwa_sgpr_name,
+            srd_sgpr_name=srd_sgpr_name,
+            stride_sgpr_name=stride_sgpr_name,
+            label_suffix="K_remain-2")
+
+        # ---- Load 2: K_local = K_remain - 1 (high BF16 of dropped DWORD) ----
+        _emitOneNarrowLoad(
+            module, kw, kernel, tc, ti, vAddrZero,
+            sScratch, sSoffset,
+            K_remain_minus=0, wave_target=wave_target,
+            rowId_last=rowId_last, sId0_last=sId0_last, m_last=m_last,
+            loadWidthGR=loadWidthGR, blockSize_GR=blockSize_GR,
+            elementsPerLane=elementsPerLane, bpe=bpe,
+            LWA_const_offset=LWA_const_offset,
+            colIdPreOffset=colIdPreOffset,
+            lwa_sgpr_name=lwa_sgpr_name,
+            srd_sgpr_name=srd_sgpr_name,
+            stride_sgpr_name=stride_sgpr_name,
+            label_suffix="K_remain-1")
 
         # ---- Restore EXEC ----
         module.add(SMovB64(
@@ -953,11 +1021,19 @@ def emitTailTrailingNarrowLoad(kw, kernel) -> Module:
     if not subtileTailNarrowLoadOperandSupported(tiB):
         return module
 
-    # Runtime gate: skip the whole helper when K_remain is even.
-    # `K_remain & 1 == 0` means align-DOWN didn't drop anything past
-    # the bpr boundary (K_remain*bpe is already mult of bpr=4).
+    # Runtime gate: skip the whole helper unless K_remain is odd AND
+    # K_remain*bpe >= bpr. The two-narrow-load repair only works for
+    # K_remain odd >= 2 (= K_remain*bpe >= bpr for bf16); for
+    # K_remain=1 the dropped DWORD spans multiple matrix rows because
+    # stride*bpe is also bpr-misaligned, so we instead fall through
+    # to the align-UP behavior that the SRD tightener emits as a
+    # runtime bump-to-bpr (see emitTailSrdTightenSubtile). When this
+    # gate skips, the wide DTL's bpr-1 over-read carries the
+    # trailing element exactly as the pre-Option-A behavior did.
     module.addComment2(
-        "Tail narrow trailing-element load (bf16 odd-K only)")
+        "Tail narrow trailing-element load (bf16 odd-K with "
+        "K_remain*bpe >= bpr only)")
+    bpr_runtime_gate_value = 2   # bpr/bpe = 4/2 = 2 for bf16
     with kw.allocTmpSgpr(1) as gateInfo:
         sGate = gateInfo.idx
         skipAllLabel = Label("tailNarrowLoadSkipAll", "")
@@ -970,6 +1046,21 @@ def emitTailTrailingNarrowLoad(kw, kernel) -> Module:
         module.add(SCBranchSCC0(
             labelName=skipAllLabel.getLabelName(),
             comment="narrowLoad: K_remain even -- nothing to repair"))
+        # Phase A1.e: also gate on K_remain >= bpr/bpe (= 2 for bf16).
+        # Below this threshold the SRD tightener falls back to
+        # align-UP and no narrow-load repair is needed (in fact, it
+        # would be incorrect because the dropped DWORD spans
+        # multiple matrix rows; see
+        # `docs/narrow-trailing-load-structural-issue.md`).
+        module.add(SCmpGeU32(
+            src0=sgpr("LoopCounterL"), src1=bpr_runtime_gate_value,
+            comment="narrowLoad: K_remain >= bpr/bpe (= %u)?"
+                    % bpr_runtime_gate_value))
+        module.add(SCBranchSCC0(
+            labelName=skipAllLabel.getLabelName(),
+            comment="narrowLoad: K_remain*bpe < bpr -- SRD tightener "
+                    "fell back to align-UP, narrow load is unsafe "
+                    "(multi-row clip case)"))
 
         # Drain the wide DTLs (issued just above by
         # `globalReadDoSubtile('A')` / `('B')`) into LDS BEFORE
