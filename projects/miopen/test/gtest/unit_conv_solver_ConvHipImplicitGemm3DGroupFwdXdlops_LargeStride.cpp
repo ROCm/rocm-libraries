@@ -13,11 +13,11 @@
 //   such tensors (X, W, Y on device plus host-side reference), so heavyweight
 //   instances are gated at runtime by an explicit memory estimate.
 //
-// The 2D large-stride API sweep confirmed Fwd applicability at this shape across
-// FP16/BFP16 (it is not in IsFwdKnownFailing3D), so this test should compile and
-// run cleanly on a 64 GB-class GPU. Excluded from the standard test category via
-// test_categories.yaml. Each variant dynamically skips when the device cannot
-// fit the estimated working set.
+// The 3D large-stride API sweep confirms Fwd applicability at this shape across
+// FP16/BFP16, so this test should compile and run cleanly on a 64 GB-class GPU.
+// Excluded from the standard test category via test_categories.yaml. Each
+// variant dynamically skips when the device cannot fit the estimated working
+// set.
 
 #include <algorithm>
 #include <cstddef>
@@ -45,9 +45,9 @@ template <TestDataType type>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    // Restricted to gfx90A and gfx94X: covered by CI and manually qualified
-    // for the large-stride kernel-launch path on this shape.
-    Gpu supportedDevices = Gpu::gfx90A | Gpu::gfx94X;
+    // Restricted to gfx90A, gfx94X, and gfx950: covered by CI and manually
+    // qualified for the large-stride kernel-launch path on this shape.
+    Gpu supportedDevices = Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
