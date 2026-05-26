@@ -220,10 +220,10 @@ void BatchnormValidator::checkTensorConfigSupported(
 void BatchnormValidator::checkInferenceTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr)
 {
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
@@ -232,10 +232,10 @@ void BatchnormValidator::checkInferenceTensorConfigSupported(
 void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr)
 {
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
@@ -247,12 +247,12 @@ void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
 {
     checkFwdActivationModeSupported(actAttr);
 
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
-    std::vector<int64_t> intermediateTensorIds
+    const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkTensorConfigSupported(
@@ -265,12 +265,12 @@ void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupporte
 {
     checkFwdActivationModeSupported(actAttr);
 
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
-    std::vector<int64_t> intermediateTensorIds
+    const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkTensorConfigSupported(
@@ -287,8 +287,9 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
             "Batchnorm forward training does not support peer statistics");
     }
 
-    std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnAttr.mean_tensor_uid().has_value())
     {
@@ -306,6 +307,8 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr)
 {
+    checkFwdActivationModeSupported(actAttr);
+
     if(bnAttr.peer_stats_tensor_uid() != nullptr && !bnAttr.peer_stats_tensor_uid()->empty())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -313,8 +316,9 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
             "Batchnorm forward training does not support peer statistics");
     }
 
-    std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnAttr.mean_tensor_uid().has_value())
     {
@@ -324,7 +328,8 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     {
         statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
     }
-    std::vector<int64_t> intermediateTensorIds = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
+    const std::vector<int64_t> intermediateTensorIds
+        = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
@@ -339,9 +344,9 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm backward does not support peer statistics");
     }
 
-    std::vector<int64_t> ioTensorIds
+    const std::vector<int64_t> ioTensorIds
         = {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {
+    const std::vector<int64_t> affineTensorIds = {
         bnBwdAttr.scale_tensor_uid(), bnBwdAttr.dscale_tensor_uid(), bnBwdAttr.dbias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnBwdAttr.mean_tensor_uid().has_value())
@@ -356,7 +361,7 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 }
 
-void BatchnormValidator::checkInferenceActivationBackwardTensorConfigSupported(
+void BatchnormValidator::checkBwdActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr)
@@ -378,12 +383,12 @@ void BatchnormValidator::checkInferenceActivationBackwardTensorConfigSupported(
             "Activation backward node must have a second input tensor (in_1)");
     }
 
-    std::vector<int64_t> ioTensorIds
+    const std::vector<int64_t> ioTensorIds
         = {bnBwdAttr.x_tensor_uid(), *actIn1Uid, bnBwdAttr.dx_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
-                                            bnBwdAttr.dscale_tensor_uid(),
-                                            bnBwdAttr.dbias_tensor_uid(),
-                                            bnInfAttr.bias_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
+                                                  bnBwdAttr.dscale_tensor_uid(),
+                                                  bnBwdAttr.dbias_tensor_uid(),
+                                                  bnInfAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnBwdAttr.mean_tensor_uid().has_value())
     {
@@ -393,10 +398,10 @@ void BatchnormValidator::checkInferenceActivationBackwardTensorConfigSupported(
     {
         statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
     }
-    std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
-                                                  actAttr.in_0_tensor_uid(),
-                                                  actAttr.out_0_tensor_uid(),
-                                                  bnBwdAttr.dy_tensor_uid()};
+    const std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
+                                                        actAttr.in_0_tensor_uid(),
+                                                        actAttr.out_0_tensor_uid(),
+                                                        bnBwdAttr.dy_tensor_uid()};
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);

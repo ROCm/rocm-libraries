@@ -33,7 +33,10 @@
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ComgrProbe.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
@@ -56,8 +59,20 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
         .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
+        .def("setOutputName", &StinkyAsmModule::setOutputName,
+             "Set the name used for output files (e.g. cost file); use full kernel name to match "
+             ".o basename")
+        .def("getOutputName", &StinkyAsmModule::getOutputName,
+             "Get the output file basename; empty means use getName()")
+        .def("setOutputDir", &StinkyAsmModule::setOutputDir,
+             "Set output directory for cost file: comparison_output/<yaml_name>; file goes to "
+             "<outputDir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModule::getOutputDir,
+             "Get the output directory; empty means current directory")
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
+        .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
+             "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
              "Run the optimization pipeline on this module");
 
@@ -185,6 +200,34 @@ NB_MODULE(_stinkytofu, m) {
     // Architecture IDs
     // ========================================================================
     nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
+
+    // ========================================================================
+    // Toolchain capability probing (via comgr)
+    // ========================================================================
+    m.def("hasComgrSupport", &hasComgrSupport,
+          "Return True if this build was compiled with comgr support");
+
+    m.def(
+        "probeToolchainCaps",
+        [](std::array<int, 3> arch) {
+            auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info)
+                throw nb::value_error(("Unsupported architecture: gfx" + std::to_string(arch[0]) +
+                                       std::to_string(arch[1]) + std::to_string(arch[2]))
+                                          .c_str());
+            GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+            AsmCapsConfig caps = ToolchainCaps::probe(archId);
+            nb::dict result;
+            result["VgprMsbMode"] = static_cast<int>(caps.vgprMsbMode);
+            return result;
+        },
+        nb::arg("arch"),
+        "Probe toolchain capabilities for [major, minor, stepping]. Results are cached.");
+
+    nb::enum_<VgprMsbMode>(m, "VgprMsbMode")
+        .value("NONE", VgprMsbMode::None)
+        .value("MSB8", VgprMsbMode::Msb8)
+        .value("MSB16", VgprMsbMode::Msb16);
 
     // ========================================================================
     // PyLogicalModule - Python-Specific High-Level IR Container
@@ -356,7 +399,7 @@ NB_MODULE(_stinkytofu, m) {
     // which provides validation and automatic argument reordering.
     m.def(
         "Intrinsic",
-        [](const std::string& name, nb::kwargs kwargs) {
+        [](const std::string& name, const nb::kwargs& kwargs) {
             // Convert kwargs to ordered vector of registers
             // Note: Python dicts maintain insertion order (Python 3.7+)
             std::vector<StinkyRegister> args;

@@ -1,218 +1,100 @@
 .. meta::
-   :description: hipRAND installation guide
-   :keywords: hipRAND, ROCm, library, API, tool, installation, build, Python wrapper
+   :description: Installation instructions for hipRAND
+   :keywords: lib, hiprand, rand, rng, random, algorithm, install, sdk, rocm
 
 .. _installation:
 
-*******************************************************************
-Installing and building hipRAND
-*******************************************************************
+***************
+Install hipRAND
+***************
 
-To install hipRAND, choose between the following two methods:
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
--   :ref:`Using prebuilt packages from the ROCm repositories <prebuilt-packages>`
--   :ref:`Building from source <build-from-source>`   
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./build`.
 
-.. _prebuilt-packages:
+.. _install-rocm:
 
-Install using prebuilt packages
-===============================
+Install the ROCm Core SDK
+=========================
 
-The prebuilt hipRAND packages require a ROCm-enabled platform.
-For information on installing ROCm, see the `ROCm installation guide <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
-After installing ROCm or enabling the ROCm repositories, use the system package manager to install hipRAND.
+hipRAND is included with the ROCm Core SDK on Linux and Windows. For the most
+complete installation on Linux, we recommend that developers use the
+``amdrocm-core-sdk`` meta package.
 
-For Ubuntu and Debian:
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
-.. code-block:: shell
+.. _install-base:
 
-   sudo apt-get install hiprand
+Install ROCm rand libraries on Linux
+====================================
 
-For SLES:
+Alternatively, if you want to install hipRAND as part of the ROCm
+rand package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
+additional ROCm libraries and tools, install the ``amdrocm-rand`` package.
+This includes hipRAND and rocRAND.
 
-.. code-block:: shell
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-   sudo dnf install hiprand
+2. Install the ROCm rand package that matches your desired ROCm version,
+   development package needs, and AMD GPU architecture. Package names use the
+   following format:
 
-These commands install hipRAND in the ``/opt/rocm`` directory.
+   .. code-block:: shell-session
 
-.. _build-from-source:
+      amdrocm-rand<-dev/-devel><rocm_version><-llvm_target>
 
-Build hipRAND from source
-===============================
+   Where:
 
-This section provides the information required to build hipRAND from source.
+   * ``<-dev/-devel>`` specifies whether to install the library files and
+     headers. Omit this suffix to only install runtime packages.
 
-Requirements
-----------------------------
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
-To build hipRAND for the ROCm platform, CMake version 3.16 or later is required,
-along with the following components:
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-* `ROCm Software <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_ (version 5.0.0 or later)
-* `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
 
-Downloading the source code
-----------------------------
+   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
+     for a single AMD GPU architecture. Omit this to install for all
+     architectures at the cost of disk space.
 
-The hipRAND source code is available from the `hiprand folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand>`_ of
-the `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ GitHub repository.
-Use the branch that matches the ROCm version installed on the system.
-The hipRAND source code can be cloned in two different ways.
+   For example: ``amdrocm-rand-dev7.13-gfx950``
 
-.. note::
+   Use the following command to install the latest development package release
+   for supported GPU architectures:
 
-   For both methods, replace all occurrences of "x.y" in the commands with the version number matching your ROCm installation.
-   For example, if you have ROCm 7.0 installed, clone the ``release/rocm-rel-7.0`` branch.
+   .. tab-set::
 
-*  Clone the entire `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ repository.
-   This is the default method and is the recommended option if you need to install other
-   ROCm libraries alongside hipRAND. However, due to the download size, ``git clone``
-   might take a significant amount of time to complete.
+      .. tab-item:: Debian-based distros
 
-   On a system with ROCm x.y installed, use the following command to obtain the source code
-   for hipRAND version x.y. Replace x.y with the actual version:
+         .. code-block:: bash
 
-   .. code-block:: shell
+            sudo apt install amdrocm-rand-dev
 
-      git clone -b release/rocm-rel-7.0 https://github.com/ROCm/rocm-libraries.git
+      .. tab-item:: RHEL-based distros
 
-*  Clone the individual hipRAND project folder. This option only fetches the hipRAND source code,
-   without any additional ROCm libraries. This significantly reduces the amount of time required
-   to complete the clone operation. However, it requires Git 2.25 or later.
-   To use this method to obtain the source code for hipRAND version x.y, run the following commands.
-   Replace x.y with the actual version:
+         .. code-block:: bash
 
-   .. code-block:: shell
+            sudo dnf install amdrocm-rand-devel
 
-      git clone -b release/rocm-rel-x.y --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git
-      cd rocm-libraries
-      git sparse-checkout set --cone projects/hiprand
-      git checkout release/rocm-rel-x.y
+      .. tab-item:: SLES
 
-.. note::
+         .. code-block:: bash
 
-   To build ROCm 6.4 and earlier, use the hipRAND repository at `<https://github.com/ROCm/hipRAND>`_.
-   For more information, see the documentation associated with the release you want to build.
+            sudo zypper install amdrocm-rand-devel
 
-Building the library
-----------------------------
+.. _install-nightly:
 
-After obtaining the sources and dependencies, build hipRAND for ROCm software using the installation script:
+Install a nightly build
+=======================
 
-.. code-block:: shell
-
-    cd rocm-libraries/projects/hiprand
-    ./install --install
-
-This automatically builds all required dependencies, excluding Git and the requirements listed above,
-and installs the project to ``/opt/rocm``. For further information, run the ``./install --help`` command.
-
-The clients, which are enabled using the ``--clients`` option, consist of the hipRAND tests and add the additional dependency
-of `GoogleTest <https://github.com/google/googletest>`_.
-
-Building with CMake
-----------------------------
-
-For a more detailed installation process, build hipRAND manually using CMake.
-This enables certain configuration options that are not available through the ``install`` script.
-To build hipRAND, use CMake with the following configuration:
-
-.. code-block:: shell
-
-    cd rocm-libraries/projects/hiprand; mkdir build; cd build
-    # Configure the project
-    CXX=<compiler> cmake [options] ..
-    # Build
-    make -j$(nproc)
-    # Optionally, run the tests
-    ctest --output-on-failure
-    # Install
-    [sudo] make install
-
-Where ``<compiler>`` should be set to ``hipcc`` or ``amdclang`` for ROCm.
-The default build configuration is ``Release``.
-
-Here are the CMake options:
-
-* ``BUILD_FORTRAN_WRAPPER``: Builds the Fortran wrapper when set to ``ON``. Defaults to ``OFF``.
-* ``BUILD_TEST``: Builds the hipRAND tests when set to ``ON``. Defaults to ``OFF``.
-* ``BUILD_BENCHMARK``: Builds the hipRAND benchmarks when set to ``ON``. Defaults to ``OFF``.
-* ``BUILD_ADDRESS_SANITIZER``: Builds with address sanitization enabled when set to ``ON``. Defaults to ``OFF``.
-* ``ROCRAND_PATH``: Specifies a rocRAND install other than the default system installed version.
-* ``DOWNLOAD_ROCRAND``: Downloads and installs rocRAND in the build directory when set to ``ON``. Defaults to ``OFF``.
-* ``EXTERNAL_DEPS_FORCE_DOWNLOAD``: Downloads and builds the external dependencies (everything except rocRAND) instead of using the system-installed dependencies when set to ``ON``. Defaults to ``OFF``.
-* ``ROCRAND_FETCH_METHOD``. Set this to the method to use to download rocRAND. Can be set to ``PACKAGE``, ``DOWNLOAD``, or ``MONOREPO``. Set to ``MONOREPO`` if rocRAND isn't already installed and you're building hipRAND from within a clone of the `rocm-libraries <https://github.com/ROCm/rocm-libraries/>`_ repository that also includes rocRAND. Set to ``DOWNLOAD`` if rocRAND isn't installed and you aren't in a clone of the ``rocm-libraries`` repository that includes rocRAND. ``DOWNLOAD`` will clone the repository using sparse checkout so that only the necessary files are downloaded. Set to ``PACKAGE`` if rocRAND is already installed. If you specify ``PACKAGE`` but rocRAND isn't installed, the files will be downloaded using the same method as the ``DOWNLOAD`` option. The default method is ``PACKAGE``.
-
-If you are using ``ROCRAND_PATH`` or ``DOWNLOAD_ROCRAND`` when rocRAND is already installed in the default location,
-you must use the ``CMAKE_NO_SYSTEM_FROM_IMPORTED=ON`` option to configure the project.
-Failing to do so might process the rocRAND headers from the system-installed version instead of the specified version,
-leading to errors or missing functionality.
-
-Common build errors
-^^^^^^^^^^^^^^^^^^^
-
-Use the following tips to troubleshoot build problems.
-
-*  ``rocrand`` package configuration file not found:
-
-   .. code-block:: shell
-
-      Could not find a package configuration file provided by "rocrand" with any of the following names:
-
-      rocrandConfig.cmake
-      rocrand-config.cmake
-
-   **Solution**: Install `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_.
-
-*  ``ROCM`` package configuration file not found:
-
-   .. code-block:: shell
-
-      Could not find a package configuration file provided by "ROCM" with any of the following names:
-
-      ROCMConfig.cmake
-      rocm-config.cmake
-
-   **Solution**: Install the `ROCm CMake modules <https://github.com/ROCm/rocm-cmake>`_.
-
-Building the Python API wrapper
-===============================
-
-This section provides the information required to build the hipRAND Python API wrapper.
-
-Requirements
-----------------------------
-
-The hipRAND Python API Wrapper requires the following dependencies:
-
-* hipRAND
-* Python 3.5
-* NumPy (This is installed automatically as a dependency, if necessary.)
-
-.. note::
-    
-   If hipRAND is built from source but is either not installed or installed in a
-   non-standard directory, then set the ``ROCRAND_PATH`` or ``HIPRAND_PATH`` environment variable to the
-   path containing ``libhiprand.so`` as shown below:
-
-   .. code-block:: shell
-
-      export HIPRAND_PATH=~/rocm-libraries/projects/hiprand/build/library/
-
-Installation
-----------------------------
-
-To install the Python hipRAND module using ``pip``, run these commands:
-
-.. code-block:: shell
-
-   cd rocm-libraries/projects/hiprand/python/hiprand
-   pip install .
-
-Use these commands to run the tests:
-
-.. code-block:: shell
-
-   cd rocm-libraries/projects/hiprand/python/hiprand
-   python tests/hiprand_test.py
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including hipRAND.
+See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.

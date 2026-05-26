@@ -16,7 +16,7 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 | **Group of related instructions** | Use `DEF_BATCH(.format = X, ...)` to share the format across entries. Each entry is `Class, "mnemonic"` with optional per-entry `.flags`, `.cost`, `.operand_fields`, `.logical`. |
 | **Used from Logical IR / Rocisa** | Add `.logical = "LogicalName"` to the `DEF_T` / `DEF_BATCH` entry. Tablegen auto-generates the `setGfxXXXLogicalToArchMap()` — no manual `.cpp` edit needed. Also add an entry in `tools/tablegen/LogicalInstructionDefs.inc`. |
 | **Non-default cost** | Add `.cost = {cycle, latency}` to the `DEF_T` or `DEF_BATCH` entry. No .cpp edit. |
-| **Modifier-dependent cost** (e.g. matrix fmt) | Add `.costOverride = { { MatrixFmtData(FP4, FP4), cycle, latency } }` alongside `.cost`. |
+| **Modifier-dependent cost** (e.g. matrix fmt) | Add `.costOverride = { { MatrixFmtModifiers(FP4, FP4), cycle, latency } }` alongside `.cost`. |
 | **Operand requirements** (e.g. 4 SGPRs, 8 SGPRs) | Define `.fields` in the format (e.g., `DEF_FORMAT(TENSOR, .fields = { {S0, ..., sgpr, 128}, {S1, ..., sgpr, 256} })`) or override per-instruction via `.operand_fields = { {D0, .size=64} }`. Tablegen generates `*_operands.inc`. No manual .hpp edit. |
 | **Dual-encoding operand override** | Add `.alt_operand_fields = { ... }` for the promoted encoding (e.g. VOP3 form of a VOP2 instruction). |
 | **New flag or format** | Add flag in `include/stinkytofu/hardware/Flags.def` and/or format in `hardware/src/gfx/GfxXXX/GfxXXXFormats.def`; then use in DEF_T / DEF_BATCH. |
@@ -196,7 +196,7 @@ Matrix instructions can have different costs depending on the data format. Use `
 DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4",
     .format = WMMA,
     .cost = {5, 8},
-    .costOverride = { { MatrixFmtData(FP4, FP4), 3, 4 } },
+    .costOverride = { { MatrixFmtModifiers(FP4, FP4), 3, 4 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} }
 )
 ```
@@ -206,7 +206,7 @@ Inside a `DEF_BATCH`:
 ```c
 DEF_BATCH(.format = MXWMMA_SCALE16,
     VWmmaScale16F3216x16x128F8f6f4Inst, "v_wmma_scale16_f32_16x16x128_f8f6f4",
-        .cost = {6, 8}, .costOverride = { { MatrixFmtData(FP4, FP4), 4, 4 } },
+        .cost = {6, 8}, .costOverride = { { MatrixFmtModifiers(FP4, FP4), 4, 4 } },
 )
 ```
 
@@ -308,7 +308,7 @@ Instruction **definitions** and **costs** live in `.def` files; tablegen generat
 | **Generated** (do not edit) | `hardware/generated/GfxXXX_init.inc`, `GfxXXX_costs.inc`, `GfxXXX_operands.inc` | Produced by tablegen from .def |
 | **Rocisa LogicalToArch map** | Auto-generated from `.logical` in .def (or manually in `GfxXXX.cpp`) | Prefer `.logical = "Name"` in the DEF_T / DEF_BATCH entry |
 | **Operand requirements** | `GfxXXXFormats.def` / `GfxXXXInstructions.def` | Define `.fields` in format or `.operand_fields` / `.alt_operand_fields` per-instruction; tablegen -> `*_operands.inc` (included by GfxXXX.hpp) |
-| **Modifier-dependent costs** | `GfxXXXInstructions.def` | `.costOverride = { { MatrixFmtData(...), cycle, latency } }` alongside `.cost` |
+| **Modifier-dependent costs** | `GfxXXXInstructions.def` | `.costOverride = { { MatrixFmtModifiers(...), cycle, latency } }` alongside `.cost` |
 
 ### Gfx1250
 

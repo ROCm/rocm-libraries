@@ -50,7 +50,7 @@ __forceinline__ __device__ __host__ auto toAccumCType(T val)
 
 template <typename FpPrecVecType,
           typename FpPrecType
-          = hip_kernel_provider::mapped_vector_info<FpPrecVecType>::UnderlyingType>
+          = typename hip_kernel_provider::mapped_vector_info<FpPrecVecType>::UnderlyingType>
 __forceinline__ __device__ __host__ auto batchBwdNormalization(const FpPrecVecType value,
                                                                const FpPrecVecType xhat,
                                                                const FpPrecType dbias,
@@ -88,7 +88,7 @@ __forceinline__ __device__ __host__ auto batchBwdNormalization(const FpPrecVecTy
 template <typename FpPrecVecType,
           hip_kernel_provider::neuron_op_type NrnOpType,
           typename FpPrecType
-          = hip_kernel_provider::mapped_vector_info<FpPrecVecType>::UnderlyingType>
+          = typename hip_kernel_provider::mapped_vector_info<FpPrecVecType>::UnderlyingType>
 __forceinline__ __host__ __device__ FpPrecVecType
     vectorizedBwdActivationOp(FpPrecVecType const& dy,
                               FpPrecVecType const& xnorm,

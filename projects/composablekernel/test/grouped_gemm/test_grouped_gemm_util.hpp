@@ -18,8 +18,12 @@
 #include "profiler/profile_grouped_gemm_impl.hpp"
 #include "profiler/profile_grouped_gemm_fixed_nk_impl.hpp"
 
-extern ck::index_t param_mask;
-extern ck::index_t instance_index;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+
+static ck::index_t param_mask     = 0xffffff;
+static ck::index_t instance_index = -1;
 
 namespace ck {
 namespace test {
@@ -325,3 +329,21 @@ class TestGroupedGemm : public testing::Test
 
 } // namespace test
 } // namespace ck
+
+int main(int argc, char** argv)
+{
+    testing::InitGoogleTest(&argc, argv);
+    if(argc == 1) {}
+    else if(argc == 3)
+    {
+        param_mask     = strtol(argv[1], nullptr, 0);
+        instance_index = atoi(argv[2]);
+    }
+    else
+    {
+        std::cout << "Usage of " << argv[0] << std::endl;
+        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
+    }
+    return RUN_ALL_TESTS();
+}
+#pragma clang diagnostic pop
