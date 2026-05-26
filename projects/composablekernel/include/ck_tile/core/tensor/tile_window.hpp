@@ -1782,6 +1782,16 @@ struct tile_window_with_static_distribution
         });
     }
 
+    CK_TILE_DEVICE const auto& get_pre_computed_coords() const [[clang::lifetimebound]]
+    {
+        return pre_computed_coords_;
+    }
+
+    CK_TILE_DEVICE const auto& get_pre_computed_warp_coords() const [[clang::lifetimebound]]
+    {
+        return pre_computed_warp_coords_;
+    }
+
     private:
     // Cached computation for global strides
     CK_TILE_DEVICE auto get_cached_global_strides() const
