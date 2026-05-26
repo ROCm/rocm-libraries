@@ -1116,15 +1116,28 @@ class TestTailSrdTightenSubtile:
 
     The tightening fires once at tail entry (after the PGR>0 entry
     gating, before openLoop), shrinks `SrdA+2` and `SrdB+2` by
-    `DepthU*bpe - roundUp(K_remain*bpe, bpr=4)`, and is gated to
-    non-MX, non-swizzled, bpe in {1,2}, symmetric A/B kernels. Earlier
-    m-rows are over-protected (handled by lane mask + sub-lane refine);
-    the tightening's job is exclusively the last m-row's last GR thread
-    which would otherwise read past A/B's allocated K bytes.
+    `DepthU*bpe - alignedBytes`, and is gated to non-MX,
+    non-swizzled, bpe in {1,2}, symmetric A/B kernels. Earlier
+    m-rows are over-protected (handled by lane mask + sub-lane
+    refine); the tightening's job is exclusively the last m-row's
+    last GR thread which would otherwise read past A/B's allocated
+    K bytes.
 
-    Under align-UP to bpr=4, `delta = DepthU*bpe - alignedBytes` is
-    provably >= 0, so there is NO runtime cbranch/skip-label -- when
-    delta=0 the SSubs are harmless no-ops.
+    Two paths feed alignedBytes:
+      - align-UP (legacy): when ASEM*bpe is a multiple of bpr=4
+        (e.g. ASEM=32 / bf16), the trailing K_remain is guaranteed
+        bpr-aligned so the bpr-1 over-read is a no-op; align-UP
+        keeps the wide DTL carrying the trailing element. The
+        default test fixture (ASEM=32) lands here.
+      - align-DOWN: when ASEM*bpe is not bpr-aligned (e.g. ASEM=1
+        with bf16) the helper switches to align-DOWN and a
+        per-wave-EXEC narrow `buffer_load_ushort … lds` repopulates
+        the dropped K=K_remain-1 element. See
+        `TestTailSrdTightenSubtileAlignDown` below.
+
+    `delta = DepthU*bpe - alignedBytes` is provably >= 0 under both
+    align-UP and align-DOWN to bpr=4, so there is NO runtime
+    cbranch/skip-label -- when delta=0 the SSubs are harmless no-ops.
     """
 
     @pytest.fixture
@@ -1153,11 +1166,16 @@ class TestTailSrdTightenSubtile:
 
     def test_emits_alignedBytes_chain(self, bf16_pgr0_asm):
         """The aligned-K-bytes chain is the runtime fingerprint of the
-        helper: `s_lshl_b32 <s>, sgprLoopCounterL, 0x1` (bf16 bpe=2)
-        then `s_add_u32 <s>, <s>, 3` and `s_and_b32 <s>, <s>, 0xfffffffc`
-        for bpr=4 alignment. (bpr is BufferLoad's natural granularity;
-        a per-byte clip would over-tighten and drop the trailing
-        odd-K element from the wide load.)
+        helper. ASEM=32 (the default fixture) satisfies
+        `ASEM*bpe % bpr == 0` → `subtileTailNarrowLoadApplies`
+        returns False → align-UP path is retained (no structural
+        change). The chain is therefore the legacy:
+          - `s_lshl_b32 <s>, sgprLoopCounterL, 0x1` (K_remain * bpe)
+          - `s_add_u32 <s>, <s>, 3`                 (+ (bpr-1))
+          - `s_and_b32 <s>, <s>, 0xfffffffc`        (roundUp to bpr=4)
+
+        (`TestTailSrdTightenSubtileAlignDown` pins the alternative
+        align-DOWN path for ASEM=1 / odd-K shapes.)
         """
         tail = _extract_tail_section(bf16_pgr0_asm)
         assert tail

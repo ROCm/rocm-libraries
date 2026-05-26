@@ -49,6 +49,7 @@ from .SubtileTailMask import (
     emitTailSubLaneMaskRefineSubtile,
     subtileTailByteShiftApplies,
 )
+from .SubtileTailNarrowLoad import emitTailTrailingNarrowLoad
 from .SubtileTailSrdTighten import (
     emitTailSrdTightenSubtile,
     emitTailSrdTightenSubtileMX,
@@ -258,11 +259,16 @@ def emitTailLoopScaffoldSubtile(kw, kernel, tensorParametersA, tensorParametersB
         module.add(globalReadDoSubtile('A', kw, kernel))
         module.add(globalReadDoSubtile('B', kw, kernel))
 
-        # No narrow trailing-element load: `buffer_load_*_d16 ... lds`
-        # is rejected by the assembler on gfx950. Instead the wide DTL
-        # load + buffer-engine OOB suppression keeps in-bounds bytes in
-        # LDS and leaves OOB bytes stale; `emitTailSubLaneMaskRefineSubtile`
-        # zeros those stale bytes in VGPR after the local read.
+        # Narrow trailing-element load. Gated on bf16/fp16 + non-MX +
+        # loadRatioGR=1.0 + localSubtileGrid[1]=1 (Phase A1 case
+        # coverage). When the gate fires, the SRD tighten above used
+        # align-DOWN (closing the structural bpr-1 over-read), which
+        # leaves K=K_remain-1 of row M-1 zeroed on the last m-row of
+        # the WG; the per-wave-EXEC `buffer_load_ushort … lds` below
+        # repopulates that one LDS slot. Outside the gate the
+        # tightener stays align-UP and no narrow load is emitted (the
+        # in-page bpr-1 over-read is preserved as before).
+        module.add(emitTailTrailingNarrowLoad(kw, kernel))
 
         # MX scale tail GR. Host pads MXSA/MXSB with zeros and
         # pre-swizzles them (`ContractionProblemGemm::setMXScale{A,B}`

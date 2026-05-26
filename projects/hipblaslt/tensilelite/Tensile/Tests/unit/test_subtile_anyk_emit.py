@@ -851,12 +851,121 @@ class TestAnyKEmit_Precompute:
         )
 
 
+# ── Narrow trailing-load emit pins (ASEM=1 odd-K path) ──────────────────────
+
+
+class TestNarrowTrailingLoadEmit:
+    """Pins the structural shape of the narrow trailing-element load
+    emitted between the wide DTL and the post-DTL `s_barrier` for
+    bf16 ASEM=1 kernels.
+
+    The narrow load:
+      1. snapshots EXEC into a 2-SGPR pair (`s_mov_b64 sgpr_pair,
+         exec`),
+      2. computes waveId in SGPR (v_lshrrev + v_readfirstlane),
+      3. skip-branches when this wave is not the trailing-element
+         owner (`s_cmp_eq_u32 s_waveId, wave_target; s_cbranch_scc0`),
+      4. derives runtime address terms (K_local, colId_post,
+         colId_pre, lane_target, m0, soffset),
+      5. issues `buffer_load_ushort … lds` with EXEC=1 (lane 0 only),
+      6. SWaitCnt vlcnt(0); restores EXEC.
+
+    All emitted between `globalReadDoSubtile('B')` and the post-DTL
+    `s_waitcnt vmcnt(0); s_barrier`. The whole block is statically
+    gated on `subtileTailNarrowLoadApplies(kernel)` (bf16/fp16 /
+    non-MX / non-swizzled / ASEM*bpe % bpr != 0) AND runtime-gated
+    on `K_remain & 1 != 0` (no-op skip for even K_remain).
+    """
+
+    def test_asem1_emits_buffer_load_ushort_lds(self):
+        """ASEM=1 bf16 emit must contain a `buffer_load_ushort … lds`
+        inside an EXEC-guarded block. Pins the positive shape.
+        """
+        tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
+        assert tail
+        # Positive pins
+        assert re.search(r"buffer_load_ushort[^\n]*lds", tail), (
+            "ASEM=1 tail must emit `buffer_load_ushort … lds`. "
+            "Tail head:\n" + tail[:2000]
+        )
+        assert re.search(
+            r"s_mov_b64\s+s\[\d+:\d+\]\s*,\s*exec",
+            tail), "narrow load must snapshot EXEC into an SGPR pair"
+        assert re.search(
+            r"s_mov_b64\s+exec\s*,\s*0?x?1\b",
+            tail), "narrow load must set EXEC=lane 0 only"
+        assert re.search(
+            r"s_mov_b64\s+exec\s*,\s*s\[\d+:\d+\]",
+            tail), "narrow load must restore EXEC from the snapshot SGPR"
+
+    def test_asem1_emits_per_wave_gate(self):
+        """The per-wave gate is `s_cmp_eq_u32 s_waveId, wave_target;
+        s_cbranch_scc0 tailNarrowLoadSkip<tc>_w<N>`. Pin both A and B
+        skip labels (one per operand).
+        """
+        tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
+        assert tail
+        assert re.search(
+            r"label_tailNarrowLoadSkipA_w\d+:?", tail), \
+            "narrow load A must emit per-wave skip label"
+        assert re.search(
+            r"label_tailNarrowLoadSkipB_w\d+:?", tail), \
+            "narrow load B must emit per-wave skip label"
+
+    def test_asem1_emits_runtime_kremain_gate(self):
+        """The whole narrow load helper is wrapped in a `K_remain & 1`
+        gate. Pin the `s_and_b32 ..., LoopCounterL, 1` plus the
+        skip label.
+        """
+        tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
+        assert tail
+        assert re.search(
+            r"s_and_b32\s+s\[?\d+\]?,\s*s\[sgprLoopCounterL\]\s*,\s*1\b",
+            tail), "narrow load must gate on `K_remain & 1`"
+        assert "label_tailNarrowLoadSkipAll" in tail, (
+            "narrow load must emit `tailNarrowLoadSkipAll:` for "
+            "even-K runtime skip"
+        )
+
+    def test_asem2_emits_no_buffer_load_ushort(self):
+        """ASEM=2 → ASEM*bpe % bpr == 0 → narrow load static-gated
+        OFF. Negative pin.
+        """
+        tail = _extract_tail_section(_emit_anyk_tail_asm(asem=2, pgr=0))
+        assert tail
+        assert not re.search(r"buffer_load_ushort[^\n]*lds", tail), (
+            "ASEM=2 tail must NOT emit `buffer_load_ushort … lds` "
+            "(static gate `ASEM*bpe %% bpr == 0` rejects it). "
+            "Tail head:\n" + tail[:2000]
+        )
+
+    def test_asem8_emits_no_buffer_load_ushort(self):
+        """ASEM=8 (multiple of bpr/bpe=2): negative pin.
+
+        Even though ASEM=8 IS the byte-refine boundary
+        (numMIInUnroll=8 for bf16), the narrow-load static gate is
+        `ASEM*bpe % bpr == 0` which is True for ASEM=8 → no narrow
+        load.
+        """
+        tail = _extract_tail_section(_emit_anyk_tail_asm(asem=8, pgr=0))
+        assert tail
+        assert not re.search(r"buffer_load_ushort[^\n]*lds", tail), (
+            "ASEM=8 tail must NOT emit `buffer_load_ushort … lds`."
+        )
+
+
 # ── Regression net: K%32 emit must stay identical ────────────────────────────
 
 class TestAnyKEmit_K32Unchanged:
     """K%32 (ASEM=32) regression net: structural fingerprint (cmp /
     cndmask presence + absence of any-K helper opcodes) so the K32
     emit cannot silently drift when the any-K helpers change.
+
+    The narrow trailing-load helper is statically GATED OFF for ASEM
+    multiples of bpr/bpe (= 2 for bf16); ASEM=32 satisfies this so
+    no `buffer_load_ushort … lds` or `s_and_b32 ..., 7` appears in
+    the K32 emit. (The narrow load only emits when ASEM*bpe % bpr
+    != 0, i.e. ASEM in {1, 3, 5, ...}.)
     """
 
     K32_FINGERPRINT_HAS_LANE_CMP = True

@@ -21,6 +21,18 @@ hold (non-MX vs MX, swizzled-A/B, asymmetric bpe, DepthU <= MX_PAD_K,
 …) and returns an empty Module in that case so the call sequence at
 the scaffold stays uniform.
 
+For bf16/fp16 odd-K paths covered by
+:mod:`SubtileTailNarrowLoad`, :func:`emitTailSrdTightenSubtile`
+emits ``roundDown(K_remain*bpe, bpr=4)`` (align-DOWN) instead of
+the legacy ``roundUp(...)``. Align-DOWN closes the bpr-1-byte
+over-read structurally; the missing K=K_remain-1 BF16 element on
+the last m-row is re-populated by the per-wave-EXEC narrow
+``buffer_load_ushort … lds`` that
+:func:`SubtileTailNarrowLoad.emitTailTrailingNarrowLoad` emits
+between the wide DTL and the post-DTL `s_waitcnt vmcnt(0); s_barrier`.
+Shapes outside that helper's gate (loadRatioGR != 1.0,
+localSubtileGrid[1] > 1, int8) stay on the legacy align-UP path.
+
 The kernel-writer object (``kw`` first arg) is the live KernelWriter
 instance; helpers reach into ``kw.states.*`` for tile metadata and
 into ``kw.allocTmpSgpr`` for scratch allocation.
@@ -33,6 +45,11 @@ from rocisa.container import sgpr
 from rocisa.instruction import (
     SLShiftLeftB32, SLShiftRightB32, SMovB32,
     SAddU32, SAndB32, SSubU32,
+)
+
+from .SubtileTailNarrowLoad import (
+    subtileTailNarrowLoadApplies,
+    subtileTailNarrowLoadOperandSupported,
 )
 
 
@@ -132,9 +149,27 @@ def emitTailSrdTightenSubtile(kw, kernel):
         return module
     alignMaskInv = (~(bpr - 1)) & 0xffffffff
 
-    module.addComment2(
-        "Tighten Srd<tc>+2 to K_remain*bpe rounded up to bpr=4 "
-        "(OOR clip on last m-row)")
+    # Gate decision: when the narrow trailing-load helper covers this
+    # kernel's geometry (bf16/fp16 / non-MX / loadRatioGR=1.0 /
+    # localSubtileGrid[1]=1), switch to align-DOWN. The helper
+    # re-populates the K=K_remain-1 BF16 slot via a per-wave-EXEC
+    # `buffer_load_ushort … lds`. Otherwise keep the legacy align-UP
+    # so the wide DTL still carries the trailing element (its bpr-1
+    # over-read is in-page by the AssertSummationElementMultiple
+    # padding contract, as before).
+    useAlignDown = (subtileTailNarrowLoadApplies(kernel)
+                    and subtileTailNarrowLoadOperandSupported(tiA)
+                    and subtileTailNarrowLoadOperandSupported(tiB))
+
+    if useAlignDown:
+        module.addComment2(
+            "Tighten Srd<tc>+2 to K_remain*bpe rounded DOWN to bpr=4 "
+            "(structural OOR clip; trailing odd element repaired by "
+            "narrow buffer_load_ushort below)")
+    else:
+        module.addComment2(
+            "Tighten Srd<tc>+2 to K_remain*bpe rounded up to bpr=4 "
+            "(OOR clip on last m-row)")
     with kw.allocTmpSgpr(2) as tmpInfo:
         scaledKRem = tmpInfo.idx
         delta = tmpInfo.idx + 1
@@ -146,14 +181,21 @@ def emitTailSrdTightenSubtile(kw, kernel):
             module.add(SMovB32(
                 dst=sgpr(scaledKRem), src=sgpr("LoopCounterL"),
                 comment="K_remain * bpe (bpe=1)"))
-        module.add(SAddU32(
-            dst=sgpr(scaledKRem), src0=sgpr(scaledKRem), src1=(bpr - 1),
-            comment="+ (bpr-1) for roundUp"))
+        if not useAlignDown:
+            module.add(SAddU32(
+                dst=sgpr(scaledKRem), src0=sgpr(scaledKRem), src1=(bpr - 1),
+                comment="+ (bpr-1) for roundUp"))
         module.add(SAndB32(
             dst=sgpr(scaledKRem), src0=sgpr(scaledKRem), src1=hex(alignMaskInv),
-            comment="alignedBytes = roundUp(K_remain*bpe, %u)" % bpr))
-        # delta provably >= 0 under align-UP to bpr=4; when delta=0
-        # the SSubs are harmless no-ops, so no runtime skip needed.
+            comment=("alignedBytes = roundDown(K_remain*bpe, %u)"
+                     if useAlignDown
+                     else "alignedBytes = roundUp(K_remain*bpe, %u)") % bpr))
+        # delta provably >= 0 under both align-UP and align-DOWN to
+        # bpr=4 (alignedBytes <= K_remain*bpe + bpr <= DepthU*bpe for
+        # any K_remain in [0, DepthU)). When delta=0 (already-aligned
+        # K_remain in the align-UP case, or K_remain*bpe < bpr in the
+        # align-DOWN case) the two SSubs are harmless no-ops, so no
+        # runtime skip needed.
         module.add(SSubU32(
             dst=sgpr(delta), src0=depthUBytes, src1=sgpr(scaledKRem),
             comment="delta = DepthU*bpe - alignedBytes (>= 0)"))

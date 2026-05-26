@@ -652,13 +652,6 @@ def subtileTailNarrowLoadOperandSupported(ti) -> bool:
 
 
 # ── Emitter (uses the descriptor + per-wave EXEC mask) ─────────────────────
-#
-# This commit only adds the cross-check harness + the pure-python
-# derivation (descriptor + LR oracle). The actual rocisa emitter is
-# staged in a follow-up commit so that landing it together with the
-# align-DOWN tighten flip in `SubtileTailSrdTighten.py` is the single
-# atomic behavior change. Until then `emitTailTrailingNarrowLoad`
-# returns an empty Module (no scaffold caller wires it yet either).
 
 
 def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
@@ -887,10 +880,79 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
 
 
 def emitTailTrailingNarrowLoad(kw, kernel) -> Module:
-    """Stub. The full rocisa emitter lands in the follow-up commit
-    together with the Phase B' align-DOWN switch in
-    :mod:`SubtileTailSrdTighten`. Until then this returns an empty
-    Module so callers can adopt the call site early without changing
-    behavior.
+    """Emit per-wave-EXEC-guarded narrow trailing-element loads for A
+    and B, after the wide DTL + align-DOWN tighten leaves K=K_remain-1
+    of row M-1 clipped to zero.
+
+    Compile-time-resolves the descriptor (wave_target, sId0_last, …)
+    via :func:`_grWavePartitionForRow` and emits, for each operand:
+
+      1. Compute waveId in SGPR (broadcasted via v_readfirstlane).
+      2. Per-wave skip branch: `s_cmp_eq_u32 s_waveId, wave_target` →
+         `s_cbranch_scc0 skip_label` so only `wave_target` proceeds.
+      3. Runtime derive `K_local, K_within_lane, colId_post,
+         colId_pre, lane_target, m0, soffset` from `LoopCounterL`.
+      4. Save EXEC; set EXEC = lane 0 only.
+      5. Issue `buffer_load_ushort … lds` with vaddr=0,
+         soffset=(m_last*stride+K_local)*bpe, m0=absolute LDS byte.
+      6. SWaitCnt vlcnt(0); restore EXEC.
+
+    Gated on:
+      - :func:`subtileTailNarrowLoadApplies` (kernel-level: bpe=2,
+        non-MX, non-swizzled).
+      - :func:`subtileTailNarrowLoadOperandSupported` (per-operand:
+        loadRatioGR=1.0, localSubtileGrid[1]=1). Both operands must
+        be in scope; otherwise we skip emission entirely (the
+        Phase B' align-DOWN tighten is gated the same way, so
+        unsupported shapes stay on align-UP without regression).
+      - Runtime: only fires when `LoopCounterL & 1 != 0` (odd
+        K_remain). A single `s_and_b32 s_tmp, LoopCounterL, 1;
+        s_cmp_lg_u32 s_tmp, 0; s_cbranch_scc0 skip` precedes the
+        whole block, so the steady-state even-K tail pays just
+        3 instructions.
     """
-    return Module("tailTrailingNarrowLoad")
+    module = Module("tailTrailingNarrowLoad")
+    if not subtileTailNarrowLoadApplies(kernel):
+        return module
+
+    tiA = kw.states.a.tileInfo
+    tiB = kw.states.b.tileInfo
+    if not subtileTailNarrowLoadOperandSupported(tiA):
+        return module
+    if not subtileTailNarrowLoadOperandSupported(tiB):
+        return module
+
+    # Runtime gate: skip the whole helper when K_remain is even.
+    # `K_remain & 1 == 0` means align-DOWN didn't drop anything past
+    # the bpr boundary (K_remain*bpe is already mult of bpr=4).
+    module.addComment2(
+        "Tail narrow trailing-element load (bf16 odd-K only)")
+    with kw.allocTmpSgpr(1) as gateInfo:
+        sGate = gateInfo.idx
+        skipAllLabel = Label("tailNarrowLoadSkipAll", "")
+        module.add(SAndB32(
+            dst=sgpr(sGate), src0=sgpr("LoopCounterL"), src1=1,
+            comment="narrowLoad: K_remain & 1 (odd K?)"))
+        module.add(SCmpLgU32(
+            src0=sgpr(sGate), src1=0,
+            comment="narrowLoad: K_remain odd?"))
+        module.add(SCBranchSCC0(
+            labelName=skipAllLabel.getLabelName(),
+            comment="narrowLoad: K_remain even -- nothing to repair"))
+
+        # Allocate one VGPR for vaddr=0 (shared across A and B emits).
+        vAddrZero = kw.vgprPool.checkOut(1, "tailNarrowLoadVAddr0")
+        module.add(VMovB32(
+            dst=vgpr(vAddrZero), src=0,
+            comment="narrowLoad: vaddr = 0 (lane 0 only fires under EXEC=1)"))
+
+        # Allocate EXEC-save SGPR pair (held across A→B emits).
+        with kw.allocTmpSgpr(2, alignment=2) as execSaveInfo:
+            sExecSave = execSaveInfo.idx
+            for tc, ti in (('A', tiA), ('B', tiB)):
+                module.add(_emitNarrowLoadForOperand(
+                    kw, kernel, tc, ti, tiA, vAddrZero, sExecSave))
+
+        kw.vgprPool.checkIn(vAddrZero)
+        module.add(skipAllLabel)
+    return module
