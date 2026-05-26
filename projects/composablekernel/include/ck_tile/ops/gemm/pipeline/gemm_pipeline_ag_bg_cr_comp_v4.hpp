@@ -1026,6 +1026,10 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
                 block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
                 __builtin_amdgcn_sched_barrier(0);
             }
+            // Drain any in-flight async writes before returning so the caller (e.g. the
+            // CShuffleEpilogue, which reuses the same shared memory) does not race with
+            // our pending tail prefetches into win(0)/win(1).
+            block_sync_lds_direct_load();
             return c_block_tile;
         }
 
