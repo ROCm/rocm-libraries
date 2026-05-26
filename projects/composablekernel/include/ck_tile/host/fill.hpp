@@ -521,14 +521,14 @@ struct FillUniformScaleDistribution
             numeric_traits<ScaleType>::mant; // mantissa bits: 0 (e8m0), 3 (e4m3/e5m3)
 
         // Extract the biased IEEE 754 exponent byte from each float bound.
-        // get_exponent(f) == (bit_cast<uint32_t>(f) >> 23) & 0xFF — the raw 8-bit exponent field.
+        // get_exponent(f) == (bit_cast<uint32_t>(f) >> 23) & 0xFF - the raw 8-bit exponent field.
         // Non-power-of-two values snap down: get_exponent(0.1f) == get_exponent(0.0625f) == 123.
         const int ieee_min = static_cast<int>(numeric_utils<float>::get_exponent(min_scale_));
         const int ieee_max = static_cast<int>(numeric_utils<float>::get_exponent(max_scale_));
 
         // Absolute limits of the raw byte space for this type.
         // raw=0 is reserved: denorm-zero for e4m3/e5m3 (decodes to 0.0), and subnormal
-        // territory for e8m0 (2^-127) — excluded to keep all generated values usable as scales.
+        // territory for e8m0 (2^-127) - excluded to keep all generated values usable as scales.
         // binary_max is the last finite raw value (binary_nan - 1 for all ExMy types).
         constexpr int raw_min = 1;
         constexpr int raw_max = static_cast<int>(numeric<ScaleType>::binary_max);
@@ -537,7 +537,7 @@ struct FillUniformScaleDistribution
         // raw bytes. (ieee_exp - float_bias) gives the true power: e.g. 123-127 = -4 for 0.0625.
         // Adding type_bias maps into the target encoding: e.g. -4+7 = 3 for e4m3.
         // Left-shift by mant_bits places the exponent field: e.g. 3<<3 = 24 for e4m3.
-        // max_r uses mant=0 (not | mant_mask) so it decodes to exactly max_scale — the
+        // max_r uses mant=0 (not | mant_mask) so it decodes to exactly max_scale - the
         // power-of-two itself. This ensures no generated value exceeds max_scale_ in float space.
         // std::max/min clamp to the valid byte range, preventing out-of-range or NaN raw values.
         const int min_r =
@@ -551,7 +551,7 @@ struct FillUniformScaleDistribution
         assert(min_r <= max_r);
 
         // Sample raw bytes uniformly in [min_r, max_r], then construct ScaleType directly
-        // from the raw byte — bypassing the float ctor which would discard mantissa bits.
+        // from the raw byte - bypassing the float ctor which would discard mantissa bits.
         std::mt19937 gen(seed_.has_value() ? *seed_ : std::random_device{}());
         std::uniform_int_distribution<int> dist(min_r, max_r);
         std::generate(first, last, [&]() { return ScaleType(static_cast<RawType>(dist(gen))); });
