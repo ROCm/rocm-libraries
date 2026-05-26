@@ -296,25 +296,97 @@ The MT 128×128 K_remain odd ≥ 3 failures match the pre-A1.e Option A
 state — A1.e did NOT regress those, and A1.e Phase 2 made K_remain=1
 work that didn't pre-A1.e.
 
-### Open question and merge recommendation
+### Phase A1.e fix-v2: sentinel-write diagnostic localizes the bug
 
-The branch as it stands is strictly BETTER than pre-A1.e Option A
-(K_remain=1 now passes) but strictly WORSE than pre-Option-A
-align-UP (which was 117/117 on `subtile_bf16_anyk_odd.yaml`). Two
-paths forward:
+Per the option-α plan: a `ds_write_b16` sentinel write to the
+suspected K_remain-2 LDS byte (32738) for MT 128×128 K=3 BSS shape:
 
-1. **Land this branch as-is**: gauntlet has ~6 MT 128×128 K_remain odd
-   ≥ 3 shapes failing. Reviewer-facing pitch: "align-DOWN structurally
-   closes the page-fault concern; K_remain=1 fallback to align-UP
-   makes the K_remain=1 case match pre-Option-A; K_remain ≥ 3 odd
-   cases on MT 128×128 lose some K-element repairs due to a B-side
-   LR-oracle discrepancy we couldn't localize within the diagnostic
-   budget; SAFE to land because the failure mode is bf16 accuracy
-   loss, not page-fault."
-2. **Revert this branch entirely**: ship nothing. The page-fault
-   concern stays at pre-Option-A levels (= the audit note's bpr-1
-   over-read claim remains live but empirically rare).
+- **With drain BEFORE the sentinel write but WITHOUT the K_remain-2
+  narrow load**: sentinel `0x4400` (= +192 BF16) propagates as
+  ~1500-magnitude diffs in `D[*, 127]` (= 128 elements of col 127).
+  This confirms (a) byte 32738 IS the LR-reader slot for B[127, K=1]
+  (= harness oracle correct), (b) `ds_write_b16` with EXEC=1 commits
+  to the LDS byte correctly given `s_waitcnt lgkmcnt(0)`, and (c)
+  `D[*, 127]` (= column 127, column-major decoding) is the expected
+  propagation locus.
+- **WITH the K_remain-2 narrow load enabled + sentinel after it**:
+  sentinel diff magnitudes drop to ~1–6 (= NOT the expected ~1500).
+  The K_remain-2 narrow load's `buffer_load_ushort … lds` write
+  somehow CLOBBERS the subsequent sentinel `ds_write_b16` write to
+  the same byte, even with `s_waitcnt 0` (= drains vmcnt + lgkmcnt)
+  between them. The likely cause is a gfx950
+  `buffer_load_*_lds` quirk where the LDS commit ordering is not
+  fully serialized by lgkmcnt with respect to a same-byte
+  `ds_write_b16` issued shortly after.
 
-Recommended: (1) if the reviewer accepts bf16 accuracy loss on a
-narrow subset of shapes in exchange for structurally closing the
-page-fault concern; (2) if not.
+### Phase A1.e fix-v2: 2-step "buffer→VGPR ; VGPR→LDS" works
+
+Switching the narrow-load emit from the 1-step
+`buffer_load_ushort … lds` to the 2-step
+
+  `buffer_load_ushort vDst, vAddr, sSrd, sSOffset offen` →
+  `s_waitcnt vmcnt(0)` →
+  `v_mov_b32 vAddr, m0` →
+  `ds_write_b16 vAddr, vDst offset:0` →
+  `s_waitcnt lgkmcnt(0)`
+
+…sidesteps the quirk. Both A and B sides now use `ds_write_b16`
+for the LDS commit, which is known to be EXEC-respecting and
+lgkmcnt-tracked. Results:
+
+| Shape (MT 128×128)              | Pre-A1.e | A1.e (1-step) | A1.e fix-v2 (2-step) |
+|---|---|---|---|
+| K=1 (= K_remain=1)              | FAIL 214 | PASS (align-UP fallback) | PASS |
+| K=33 BSS (= K_remain=33)        | FAIL ~213 | FAIL ~213 | **PASS** (=107 GFlops) |
+| K=97 BSS (= K_remain=33, K_aligned=64) | FAIL ~122 | FAIL ~122 | still FAIL |
+| K=3 / K=7 / K=17 / K=31 BBS     | FAIL 102+ | FAIL ~200 | partial — ~108 errors (small magnitudes) |
+
+K=33 BSS (= the most prominent failing shape) is now GREEN. K=3 BBS
+is improved (= 108 vs 187 errors with the 1-step approach) but not
+fully fixed; the residual errors are small-magnitude (1–6) which
+suggests they're a separate issue from the K_remain-2 byte clobber
+(= maybe per-MFMA mask edge case for K_remain=3 specifically, or a
+second LDS race we haven't isolated).
+
+### Final state (committed, NOT pushed)
+
+- 2-step narrow loads for K=K_remain-2 AND K=K_remain-1, both A
+  and B, behind one per-wave gate + one EXEC=1 region.
+- `s_waitcnt 0` drain BEFORE the narrow loads (= drains wide DTL's
+  vmcnt + lgkmcnt).
+- Sentinel helper retained but disabled (= `_SENTINEL_B_K_REMAIN_MINUS_2
+  = None`); re-arm for future diagnostics.
+- Harness pins updated for K_remain=3 (= two descriptors expected)
+  and K_remain=9 (= two descriptors at different lanes).
+- `test_asem1_emits_buffer_load_ushort_lds` pin: expects ≥4
+  `buffer_load_ushort` (no `lds`) + ≥4 `ds_write_b16`.
+
+### Open question (deferred)
+
+K=3 / K=7 / K=17 / K=31 / K=35 / K=97 BBS MT 128×128 still fail with
+small-magnitude diffs (~1-6). Possible causes not investigated:
+
+1. **K_remain=3 specific case**: K_remain-2 and K_remain-1 sit in
+   the SAME lane chunk for K_remain=3 (= colId_post=0 both). A
+   `ds_write_b16` to byte 32738 followed by a second
+   `ds_write_b16` to byte 32740 (same chunk, adjacent 2-byte
+   slots) may have a subtle write-buffer behavior.
+2. **K=97 BSS (K_aligned=64)**: the SRD has been advanced past the
+   prefetch iter. My narrow load's `soffset` may need adjustment
+   for the post-advance SRD state (= different from K=33 case
+   where K_aligned=0 = no advance). Not investigated.
+3. **bf16 rounding noise**: 108 errors with ulp-scale diffs at
+   MT 128×128 but 0 errors at MT 64×64 / MT 128×32 for the same
+   K value suggests rounding noise that scales with MT size. The
+   test tolerance may need a slight loosening for MT 128×128
+   K_remain odd cases.
+
+### Recommendation
+
+1. **Land the current state**: gauntlet has K=33 BSS GREEN (= the
+   user-reported failing shape) plus all MT 64×64 and MT 128×32
+   shapes GREEN; residual K=3/7/17/31/35/97 BBS MT 128×128
+   small-diff failures are a known limitation documented in this
+   file.
+2. **Or investigate (1)/(2)/(3)** before landing if a clean 100%
+   gauntlet pass is required.

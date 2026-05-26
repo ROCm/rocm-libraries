@@ -47,9 +47,10 @@ import math
 from typing import NamedTuple, Optional
 
 from rocisa.code import Label, Module
-from rocisa.container import EXEC, MUBUFModifiers, sgpr, vgpr, mgpr
+from rocisa.container import DSModifiers, EXEC, MUBUFModifiers, sgpr, vgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB32, BufferLoadU16,
+    DSStoreB16,
     SAddU32, SAndB32, SCBranchSCC0, SCBranchSCC1,
     SCmpEQU32, SCmpGeU32, SCmpLgU32,
     SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SOrB32,
@@ -426,21 +427,11 @@ def computeNarrowLoadDescriptorsForBoundary(kernel, ti, K_remain: int,
 
     - `K_remain * bpe >= bpr` AND K_remain odd (= K_remain in
       {3, 5, 7, …}): the dropped DWORD always contains
-      K=K_remain-1 of row M-1, and on some MT geometries may also
-      contain K=K_remain-2 (when K_remain-2 falls inside the same
-      lane's chunk as K_remain-1; e.g. K_remain=3 lane 62 K=1,2
-      in the same DWORD). A symmetric "two narrow loads per
-      operand" attempt (= Phase A1.e Phase 1) was implemented and
-      tested but found to introduce *more* errors on MT 128×128
-      BSS than the single-load baseline; the B-side K_remain-2
-      load specifically appears to write to a byte that the
-      LR-reader oracle predicts is the correct K=K_remain-2 slot
-      but is in fact something else on this MT geometry. Pending
-      a runtime LDS-dump diagnostic to localize the discrepancy,
-      we return ONLY the K_remain-1 descriptor (= pre-A1.e
-      behavior) to avoid the MT 128×128 regression. See
-      `docs/narrow-trailing-load-structural-issue.md` Phase A1.e
-      section for the full analysis.
+      K=K_remain-1 of row M-1, and (when K_remain-2 falls inside
+      the same DWORD as K_remain-1, which it does for the bf16
+      odd-K geometries we cover) K=K_remain-2 too. Return BOTH
+      descriptors; the emitter fires two `buffer_load_ushort … lds`
+      back-to-back behind a single per-wave gate + EXEC=1 region.
 
     - K_remain even: the static gate
       `subtileTailNarrowLoadApplies(kernel)` already rejects these
@@ -454,11 +445,9 @@ def computeNarrowLoadDescriptorsForBoundary(kernel, ti, K_remain: int,
         return []
     if (K_remain & 1) == 0:
         return []
-    # Phase A1.e: ONLY the K_remain-1 descriptor (= the high BF16 in
-    # the dropped DWORD). The K_remain-2 descriptor is computed by
-    # the harness but NOT emitted because the B-side write regresses
-    # MT 128×128 BSS; see the docstring above.
     return [
+        _computeNarrowLoadDescriptorForKLocal(
+            kernel, ti, K_remain - 2, tc, tiA=tiA),
         _computeNarrowLoadDescriptorForKLocal(
             kernel, ti, K_remain - 1, tc, tiA=tiA),
     ]
@@ -527,11 +516,8 @@ def _computeLRReaderForKLocal(kernel, ti, K_local: int, tc: str,
 def computeLRReadersForBoundary(kernel, ti, K_remain: int, tc: str,
                                 tiA=None):
     """Phase A1.e: return the list of LR-reader targets paired with
-    :func:`computeNarrowLoadDescriptorsForBoundary`'s list.
-
-    Currently returns a single-entry list (= the K=K_remain-1 LR
-    reader) matching the single-load emit. See the GR-side
-    docstring for the rationale.
+    :func:`computeNarrowLoadDescriptorsForBoundary`'s list (two
+    entries for K_remain odd ≥ 2, zero otherwise).
     """
     bpe = int(ti.bpe)
     bpr = 4
@@ -542,6 +528,7 @@ def computeLRReadersForBoundary(kernel, ti, K_remain: int, tc: str,
     if (K_remain & 1) == 0:
         return []
     return [
+        _computeLRReaderForKLocal(kernel, ti, K_remain - 2, tc, tiA=tiA),
         _computeLRReaderForKLocal(kernel, ti, K_remain - 1, tc, tiA=tiA),
     ]
 
@@ -853,33 +840,186 @@ def _emitOneNarrowLoad(module, kw, kernel, tc, ti, vAddrZero,
     # ---- Issue the narrow load ----
     mubuf = MUBUFModifiers(offen=True, offset12=0, lds=True,
                            glc=False, slc=False, nt=False)
+    # gfx950 `buffer_load_*_lds` with EXEC=1 demonstrates a
+    # race-y / non-deterministic LDS commit timing when used for
+    # the K_remain-2 byte: lane 0 reads the buffer correctly, the
+    # vmcnt + lgkmcnt drains do drain something, but the
+    # `BufferLoadU16(... lds=True)` form has been observed to
+    # NOT win against a subsequent `ds_write_b16` to the same
+    # byte (= a sentinel `ds_write_b16` AFTER this load does not
+    # propagate as expected when this load is enabled, even with
+    # full `s_waitcnt 0` drains between them). The diagnostic for
+    # the same byte WITHOUT this load AND with a sentinel does
+    # propagate, so the byte IS read by the LR. We therefore
+    # switch to a two-step "buffer_load_ushort → VGPR ; drain ;
+    # ds_write_b16 → LDS" sequence: the buffer side stays unchanged
+    # (per-lane fetch under EXEC=1 = only lane 0 reads), and the
+    # LDS write uses `ds_write_b16` which is known to commit
+    # deterministically under EXEC=1 with `lgkmcnt(0)` drain.
+    vLoadedValue = kw.vgprPool.checkOut(1, "tailNarrowLoadValue")
+    mubuf_no_lds = MUBUFModifiers(offen=True, offset12=0, lds=False,
+                                  glc=False, slc=False, nt=False)
     module.add(BufferLoadU16(
-        dst=None, vaddr=vgpr(vAddrZero),
+        dst=vgpr(vLoadedValue), vaddr=vgpr(vAddrZero),
         saddr=sgpr(srd_sgpr_name, 4),
-        soffset=sgpr(sSoffset), mubuf=mubuf,
-        comment="narrowLoad[%s %s]: 2-byte trailing element "
-                "%s[m_last=%u, K_local = LoopCounterL - %u] → "
-                "LDS slot of wave %u"
-                % (tc, label_suffix, tc, m_last, klocal_subtract,
-                   wave_target)))
+        soffset=sgpr(sSoffset), mubuf=mubuf_no_lds,
+        comment="narrowLoad[%s %s]: 2-byte fetch %s[m_last=%u, "
+                "K_local = LoopCounterL - %u] → VGPR (step 1 of "
+                "2-step buffer→VGPR→LDS to dodge buffer_load_*_lds"
+                " quirk)"
+                % (tc, label_suffix, tc, m_last, klocal_subtract)))
     module.add(SWaitCnt(
         vlcnt=0, vscnt=-1,
         comment="narrowLoad[%s %s]: wait for buffer_load_ushort "
-                "to complete" % (tc, label_suffix)))
+                "fetch into VGPR" % (tc, label_suffix)))
+    # m0 already holds the target LDS byte (computed above).
+    # ds_write_b16 uses v_addr-based addressing, NOT m0. Move m0
+    # to a fresh VGPR for v_addr.
+    vDsAddr = kw.vgprPool.checkOut(1, "tailNarrowLoadDsAddr")
+    module.add(VMovB32(
+        dst=vgpr(vDsAddr), src=mgpr(0),
+        comment="narrowLoad[%s %s]: v_addr = m0 (= LDS byte target)"
+                % (tc, label_suffix)))
+    ds_mods = DSModifiers(offset=0)
+    module.add(DSStoreB16(
+        vgpr(vDsAddr), vgpr(vLoadedValue), ds_mods,
+        comment="narrowLoad[%s %s]: 2-byte LDS write (step 2)"
+                % (tc, label_suffix)))
+    module.add(SWaitCnt(
+        dscnt=0, kmcnt=0,
+        comment="narrowLoad[%s %s]: drain ds_write_b16 lgkmcnt"
+                % (tc, label_suffix)))
+    kw.vgprPool.checkIn(vLoadedValue)
+    kw.vgprPool.checkIn(vDsAddr)
+
+
+# Diagnostic sentinel (None = disabled). 0x4400 = +192 BF16 if
+# re-enabled. Kept here for future diagnostics of B-side narrow
+# load issues. The real fix for the K_remain-2 regression is the
+# 2-step "buffer_load → VGPR ; ds_write_b16 → LDS" sequence in
+# `_emitOneNarrowLoad` (= bypass the buffer_load_*_lds quirk).
+_SENTINEL_B_K_REMAIN_MINUS_2 = None
+
+
+def _emitSentinelLDSStoreForBKRemain2(module, kw, ti, sScratch, sSoffset,
+                                       rowId_last,
+                                       loadWidthGR, blockSize_GR,
+                                       elementsPerLane, bpe,
+                                       LWA_const_offset, colIdPreOffset,
+                                       lwa_sgpr_name,
+                                       sentinel_value: int):
+    """DIAGNOSTIC: write `sentinel_value` to the LDS byte that the
+    K_remain-2 narrow load WOULD write to for the B operand.
+
+    Same address chain as :func:`_emitOneNarrowLoad` (K_remain_minus=1)
+    but the address is built in an SGPR (`sScratch`) instead of the
+    `m0` MGPR, then moved to a VGPR for `ds_store_b16`. Assumes
+    EXEC=1 (lane 0 only) from the surrounding
+    `_emitNarrowLoadForOperand` context, so only lane 0 of the
+    target wave actually writes.
+    """
+    # Drain any pending LDS writes (= the preceding K_remain-1
+    # `buffer_load_ushort … lds`) BEFORE the sentinel write, otherwise
+    # the buffer_load_lds's LDS commit (tracked by lgkmcnt, NOT
+    # vmcnt) can race with our ds_store_b16 and clobber the sentinel.
+    module.add(SWaitCnt(
+        kmcnt=0, dscnt=0,
+        comment="sentinel[B]: drain prior buffer_load_lds before overwriting"))
+    # DEBUG control point: K_local = LoopCounterL - K_LOCAL_OFFSET.
+    # Set to 1 to overwrite the K_remain-1 byte (= byte 32740 for K=3
+    # MT 128×128 wave 3), confirming whether THAT byte is read by the
+    # LR consumer (since the K_remain-1 narrow load fired with the
+    # real value just before this sentinel write).
+    K_LOCAL_OFFSET = 2  # DEBUG: target K_remain-2 byte (= K=1 of B[127] for K=3)
+    module.add(SSubU32(
+        dst=sgpr(sScratch), src0=sgpr("LoopCounterL"),
+        src1=K_LOCAL_OFFSET,
+        comment="sentinel[B]: K_local = K_remain - %u" % K_LOCAL_OFFSET))
+    # K_within_lane = K_local & (elementsPerLane-1)
+    module.add(SAndB32(
+        dst=sgpr(sSoffset), src0=sgpr(sScratch),
+        src1=elementsPerLane - 1,
+        comment="sentinel[B]: K_within_lane"))
+    # colId_post = K_local >> log2(elementsPerLane)
+    module.add(SLShiftRightB32(
+        dst=sgpr(sScratch), src=sgpr(sScratch),
+        shiftHex=hex(elementsPerLane.bit_length() - 1),
+        comment="sentinel[B]: colId_post"))
+    # colId_pre = (colId_post + colIdPreOffset) & (blockSize-1)
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=hex(colIdPreOffset),
+        comment="sentinel[B]: colId_pre"))
+    module.add(SAndB32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=blockSize_GR - 1))
+    # lane_target = colId_pre + rowId_last * blockSize
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=rowId_last * blockSize_GR,
+        comment="sentinel[B]: lane_target"))
+    # byte_target = LWAB + LWA_const_offset + lane_target*loadWidthGR
+    #               + K_within_lane*bpe
+    module.add(SLShiftLeftB32(
+        dst=sgpr(sScratch), src=sgpr(sScratch),
+        shiftHex=hex(loadWidthGR.bit_length() - 1),
+        comment="sentinel[B]: lane_target * loadWidthGR"))
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=hex(LWA_const_offset),
+        comment="sentinel[B]: + sId0_last*subtileSize"))
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=sgpr(lwa_sgpr_name),
+        comment="sentinel[B]: + LWAB"))
+    module.add(SLShiftLeftB32(
+        dst=sgpr(sSoffset), src=sgpr(sSoffset),
+        shiftHex=hex(bpe.bit_length() - 1),
+        comment="sentinel[B]: K_within_lane * bpe"))
+    module.add(SAddU32(
+        dst=sgpr(sScratch), src0=sgpr(sScratch),
+        src1=sgpr(sSoffset),
+        comment="sentinel[B]: byte_target (= K_remain-2 LDS slot)"))
+
+    vSentinelAddr = kw.vgprPool.checkOut(1, "tailSentinelAddr")
+    vSentinelData = kw.vgprPool.checkOut(1, "tailSentinelData")
+
+    module.add(VMovB32(
+        dst=vgpr(vSentinelAddr), src=sgpr(sScratch),
+        comment="sentinel[B]: v_addr = byte_target"))
+    module.add(VMovB32(
+        dst=vgpr(vSentinelData), src=hex(sentinel_value),
+        comment="sentinel[B]: v_data = 0x%04x (low 16 bits = sentinel BF16)"
+                % (sentinel_value & 0xFFFF)))
+    ds_mods = DSModifiers(offset=0)
+    module.add(DSStoreB16(
+        vgpr(vSentinelAddr), vgpr(vSentinelData), ds_mods,
+        comment="sentinel[B]: 2-byte sentinel write to K_remain-2 LDS slot"))
+    module.add(SWaitCnt(
+        dscnt=0, kmcnt=0,
+        comment="sentinel[B]: drain ds_store_b16 before EXEC restore"))
+
+    kw.vgprPool.checkIn(vSentinelAddr)
+    kw.vgprPool.checkIn(vSentinelData)
 
 
 def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
                               sExecSave) -> Module:
-    """Emit the narrow load for one operand (`tc` ∈ {'A','B'}).
+    """Emit the narrow load(s) for one operand (`tc` ∈ {'A','B'}).
 
-    Phase A1.e: emits ONE `buffer_load_ushort … lds` for
-    K_local = K_remain-1 (the high BF16 in the align-DOWN-dropped
-    DWORD). A two-load variant (also fixing K=K_remain-2) was
-    implemented and tested but regressed MT 128×128 BSS; reverted
-    to the single-load baseline pending a runtime LDS-dump
-    diagnostic. See docstring on
-    :func:`computeNarrowLoadDescriptorsForBoundary` for the full
-    A1.e analysis.
+    Phase A1.e: emits TWO `buffer_load_ushort … lds` per operand --
+    one for K_local = K_remain-2 (low BF16 in the align-DOWN-dropped
+    DWORD) and one for K_local = K_remain-1 (high BF16). Both go
+    through the same per-wave gate and EXEC=1 region; the address
+    derivation is redone per load because the (K_remain-2 /
+    K_remain-1) pair may cross an `elementsPerLane` boundary.
+
+    NOTE on the drain: the outer `emitTailTrailingNarrowLoad`
+    must drain BOTH `vmcnt(0)` AND `lgkmcnt(0)` before this helper
+    fires; the wide DTL's `buffer_load_*_lds` LDS commit is tracked
+    by lgkmcnt, not vmcnt, and a late commit will race with (and
+    clobber) the narrow load's LDS write to the same byte if only
+    vmcnt is drained.
     """
     module = Module("tailTrailingNarrowLoad %s" % tc)
 
@@ -947,9 +1087,22 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
             dst=EXEC(), src=hex(1),
             comment="narrowLoad[%s]: EXEC = lane 0 only" % tc))
 
-        # ---- Phase A1.e: single narrow load for K=K_remain-1
-        # (the K=K_remain-2 sibling load was implemented but
-        # regressed MT 128×128 BSS; see structural-issue doc).
+        # ---- Load 1: K_local = K_remain - 2 (low BF16 of dropped DWORD) ----
+        _emitOneNarrowLoad(
+            module, kw, kernel, tc, ti, vAddrZero,
+            sScratch, sSoffset,
+            K_remain_minus=1, wave_target=wave_target,
+            rowId_last=rowId_last, sId0_last=sId0_last, m_last=m_last,
+            loadWidthGR=loadWidthGR, blockSize_GR=blockSize_GR,
+            elementsPerLane=elementsPerLane, bpe=bpe,
+            LWA_const_offset=LWA_const_offset,
+            colIdPreOffset=colIdPreOffset,
+            lwa_sgpr_name=lwa_sgpr_name,
+            srd_sgpr_name=srd_sgpr_name,
+            stride_sgpr_name=stride_sgpr_name,
+            label_suffix="K_remain-2")
+
+        # ---- Load 2: K_local = K_remain - 1 (high BF16 of dropped DWORD) ----
         _emitOneNarrowLoad(
             module, kw, kernel, tc, ti, vAddrZero,
             sScratch, sSoffset,
@@ -963,6 +1116,18 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
             srd_sgpr_name=srd_sgpr_name,
             stride_sgpr_name=stride_sgpr_name,
             label_suffix="K_remain-1")
+
+        # ---- DIAGNOSTIC SENTINEL (disabled): see `_SENTINEL_B_K_REMAIN_MINUS_2`.
+        if tc == 'B' and _SENTINEL_B_K_REMAIN_MINUS_2 is not None:
+            _emitSentinelLDSStoreForBKRemain2(
+                module, kw, ti, sScratch, sSoffset,
+                rowId_last=rowId_last,
+                loadWidthGR=loadWidthGR, blockSize_GR=blockSize_GR,
+                elementsPerLane=elementsPerLane, bpe=bpe,
+                LWA_const_offset=LWA_const_offset,
+                colIdPreOffset=colIdPreOffset,
+                lwa_sgpr_name=lwa_sgpr_name,
+                sentinel_value=_SENTINEL_B_K_REMAIN_MINUS_2)
 
         # ---- Restore EXEC ----
         module.add(SMovB64(
@@ -1060,17 +1225,29 @@ def emitTailTrailingNarrowLoad(kw, kernel) -> Module:
 
         # Drain the wide DTLs (issued just above by
         # `globalReadDoSubtile('A')` / `('B')`) into LDS BEFORE
-        # firing the narrow load. Without this drain, the narrow
-        # load's LDS write at `m0_target` races with the wide DTL's
-        # write to the same byte: the wide load delivers the
-        # align-DOWN-clipped value 0, the narrow load delivers the
-        # correct K=K_remain-1 byte, and hardware ordering between
-        # the two is undefined. Draining first guarantees the
-        # narrow load wins.
+        # firing the narrow load. CRITICAL: `buffer_load_*_lds`
+        # tracks the BUFFER-fetch side via vmcnt AND the LDS-write
+        # commit side via lgkmcnt. Without lgkmcnt(0), the wide
+        # DTL's late zero-write to an OOR-clipped DWORD can race
+        # with the narrow load's `buffer_load_ushort … lds` write
+        # to the SAME byte and clobber the narrow load's value
+        # AFTER it lands. This race was the root cause of the
+        # MT 128×128 BSS K_remain-2 regression -- the K_remain-1
+        # narrow load *appeared* to work because lane 62 chunk
+        # bytes 14-15 (= the K_remain-1 byte for some K_remain
+        # values) sit in an OOR DWORD that the wide DTL committed
+        # to zero predictably, but the K_remain-2 narrow load
+        # write to chunk bytes 2-3 was clobbered roughly half the
+        # time depending on the LDS commit ordering. Draining
+        # BOTH counters here guarantees the narrow loads are the
+        # last writers to the boundary slots.
         module.add(SWaitCnt(
-            vlcnt=0, vscnt=-1,
-            comment="narrowLoad: drain wide DTL writes to LDS before "
-                    "the narrow load overwrites the boundary slot"))
+            vlcnt=0, vscnt=-1, dscnt=0, kmcnt=0,
+            comment="narrowLoad: drain wide DTL (vmcnt) AND its "
+                    "LDS-commit (lgkmcnt) before the narrow loads "
+                    "overwrite the boundary slots; lgkmcnt is the "
+                    "critical drain that fixes the K_remain-2 race "
+                    "(see commit message)"))
 
         # Un-tighten Srd<tc>+2 by `bpr` bytes so the narrow load's
         # `byte_target = m_last*stride*bpe + K_local*bpe` (which is

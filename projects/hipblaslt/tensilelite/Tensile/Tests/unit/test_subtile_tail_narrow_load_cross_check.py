@@ -155,21 +155,24 @@ class TestCanonicalPins:
         _cross_check_one(kernel, tiA, tiB, K_remain=1)
 
     def test_canonical_MT128x128_K131(self):
-        """Same geometry, K_remain=3 — Phase A1.e currently emits a
-        SINGLE narrow load per operand (K_remain-1 = K=2 of row 127).
-        The K_remain-2 sibling was implemented but reverted due to
-        MT 128×128 BSS regression; see structural-issue doc.
+        """Same geometry, K_remain=3 — Phase A1.e emits TWO narrow
+        loads per operand (K_remain-2=1 and K_remain-1=2 of row 127).
+        Both at colId_post=0 lane 62 wave 3. m0 differs by `bpe=2`.
         """
         kernel, _, tiA, tiB = _build_tile_infos(
             MT0=128, MT1=128, depthU=64, wg_m=2, wg_n=2, asem=1)
         listA = computeNarrowLoadDescriptorsForBoundary(
             kernel, tiA, K_remain=3, tc='A', tiA=tiA)
-        assert len(listA) == 1, \
-            f"K_remain=3 (single-load) expects 1 narrow load, got {len(listA)}"
-        # K_remain-1 = K=2: K_within_lane=2 → m0 = 16352 + 4 = 16356.
+        assert len(listA) == 2, \
+            f"K_remain=3 expects 2 narrow loads, got {len(listA)}"
+        # K_remain-2 = K=1: K_within_lane=1 → m0 = 16352 + 2 = 16354.
         assert listA[0].wave_target == 3
         assert listA[0].lane_target == 62
-        assert listA[0].m0_target == 16356, listA[0].explain
+        assert listA[0].m0_target == 16354, listA[0].explain
+        # K_remain-1 = K=2: K_within_lane=2 → m0 = 16352 + 4 = 16356.
+        assert listA[1].wave_target == 3
+        assert listA[1].lane_target == 62
+        assert listA[1].m0_target == 16356, listA[1].explain
         _cross_check_one(kernel, tiA, tiB, K_remain=3)
 
     def test_canonical_MT128x128_K_remain_5(self):
@@ -188,19 +191,23 @@ class TestCanonicalPins:
         _cross_check_one(kernel, tiA, tiB, K_remain=7)
 
     def test_canonical_MT128x128_K_remain_9(self):
-        """K_remain=9 → K_remain-1=8 in colId_post=1 (lane 63 with
-        wave 3 swizzle). Single-load A1.e: one descriptor targeting
-        K=8 of row 127. The K_remain-2=7 sibling (in colId_post=0
-        lane 62) is currently NOT emitted (reverted).
+        """K_remain=9 → K_remain-2=7 in colId_post=0 (lane 62) and
+        K_remain-1=8 in colId_post=1 (different lane). A1.e expects
+        TWO narrow loads at DIFFERENT lanes (= cross elementsPerLane
+        boundary).
         """
         kernel, _, tiA, tiB = _build_tile_infos(
             MT0=128, MT1=128, depthU=64, wg_m=2, wg_n=2, asem=1)
         listA = computeNarrowLoadDescriptorsForBoundary(
             kernel, tiA, K_remain=9, tc='A', tiA=tiA)
-        assert len(listA) == 1, \
-            f"K_remain=9 (single-load) expects 1 narrow load, got {len(listA)}"
-        # K_remain-1 = K=8: colId_post=1 lane is different from lane 62.
+        assert len(listA) == 2, \
+            f"K_remain=9 expects 2 narrow loads, got {len(listA)}"
         assert listA[0].wave_target == 3
+        assert listA[1].wave_target == 3
+        assert listA[0].lane_target != listA[1].lane_target, (
+            f"K_remain=9 K_remain-2 and K_remain-1 should land on "
+            f"different lanes (colId_post=0 vs =1); got both at "
+            f"lane {listA[0].lane_target}")
         _cross_check_one(kernel, tiA, tiB, K_remain=9)
 
 

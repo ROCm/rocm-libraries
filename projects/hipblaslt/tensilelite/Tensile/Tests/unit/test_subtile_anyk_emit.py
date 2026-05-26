@@ -878,20 +878,26 @@ class TestNarrowTrailingLoadEmit:
     """
 
     def test_asem1_emits_buffer_load_ushort_lds(self):
-        """ASEM=1 bf16 emit must contain a `buffer_load_ushort … lds`
-        inside an EXEC-guarded block. Phase A1.e: ONE ushort load
-        per operand (= K_remain-1 = the high BF16 in the dropped
-        DWORD); the K_remain-2 sibling was implemented but reverted
-        pending root-cause investigation.
+        """ASEM=1 bf16 emit must contain `buffer_load_ushort` (no
+        lds=True) + `ds_write_b16` pairs inside an EXEC-guarded
+        block. Phase A1.e fix-v2: 2-step "buffer→VGPR ; VGPR→LDS"
+        per narrow load to dodge the `buffer_load_*_lds` quirk.
+        4 narrow loads total (K_remain-2 + K_remain-1 per A,B) =
+        4 buffer_load_ushort + 4 ds_write_b16.
         """
         tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
         assert tail
-        # Positive pins: 1 load × 2 operands = 2 buffer_load_ushort.
-        ushort_loads = re.findall(r"buffer_load_ushort[^\n]*lds", tail)
-        assert len(ushort_loads) == 2, (
-            f"ASEM=1 tail must emit 2 `buffer_load_ushort … lds` "
-            f"(K_remain-1 for each of A and B); got "
+        # 4 narrow loads, 2-step each.
+        ushort_loads = re.findall(r"buffer_load_ushort[^\n]*offen", tail)
+        ds_writes = re.findall(r"ds_write_b16[^\n]*", tail)
+        assert len(ushort_loads) >= 4, (
+            f"ASEM=1 tail must emit >= 4 `buffer_load_ushort` for "
+            f"narrow loads (2-step buffer→VGPR step 1); got "
             f"{len(ushort_loads)}. Tail head:\n" + tail[:2000]
+        )
+        assert len(ds_writes) >= 4, (
+            f"ASEM=1 tail must emit >= 4 `ds_write_b16` for narrow "
+            f"loads (2-step VGPR→LDS step 2); got {len(ds_writes)}."
         )
         assert re.search(
             r"s_mov_b64\s+s\[\d+:\d+\]\s*,\s*exec",
