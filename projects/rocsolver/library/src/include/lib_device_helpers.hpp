@@ -1426,13 +1426,12 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
 // with explicit 1's on the diagonals and 0's outside the trapezoids.
 //
 template <typename I>
-__host__ __device__ I get_v_block_index(
-    I nt, I i, I j )
+__host__ __device__ I get_v_block_index(I nt, I i, I j)
 {
     I r;
     // k in unmtr goes from -(nt-1) to (nt-1), inclusive. k2 = k + nt - 1.
-    I k2 = 2*j - i + nt - 1;
-    if (k2 < nt)
+    I k2 = 2 * j - i + nt - 1;
+    if(k2 < nt)
     {
         // Lower-left portion of conceptual V, where k <= 0.
         // The number of V blocks in set k2 follows the pattern,
@@ -1440,8 +1439,8 @@ __host__ __device__ I get_v_block_index(
         //   1, 1, 2, 2, 3, 3, 4, 4, 4, 3, 3, 2, 2, 1, 1
         // For k2 < nt, sum the first k2 terms.
         // Recall sum( 1, 2, ..., L ) = L*(L+1)/2; double that.
-        I L = k2/2;
-        r = (k2 % 2 == 0 ? L*(L+1) : (L+1)*(L+1));
+        I L = k2 / 2;
+        r = (k2 % 2 == 0 ? L * (L + 1) : (L + 1) * (L + 1));
         r += j;
     }
     else // k2 >= nt
@@ -1449,9 +1448,9 @@ __host__ __device__ I get_v_block_index(
         // Upper-right portion of conceptual V, where k > 0.
         // Take total number of V blocks and subtract
         // last 2*nt - 1 - k2 terms of ( ..., 2, 2, 1, 1 ).
-        I total = nt*(nt+1)/2;
-        I L = nt - 1 - k2/2;
-        I sub = (k2 % 2 != 0 ? L*(L+1) : (L+1)*(L+1));
+        I total = nt * (nt + 1) / 2;
+        I L = nt - 1 - k2 / 2;
+        I sub = (k2 % 2 != 0 ? L * (L + 1) : (L + 1) * (L + 1));
         r = total - sub + i - j;
     }
     return r;
@@ -1462,21 +1461,15 @@ __host__ __device__ I get_v_block_index(
 // Householder vector, determined by sweep and task.
 //
 template <typename I>
-__host__ __device__ void get_v_index(
-    I n,
-    I kd,
-    I sweep,
-    I task,
-    I& vi,
-    I& vj )
+__host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
 {
     // todo: compute nt once & pass?
-    I nt = ceildiv( n, kd );    // number of block-cols in conceptual V.
-    I j = sweep / kd;           // block-col j
-    I i = j + task;             // block-row i
-    I r = get_v_block_index( nt, i, j );
-    vi = sweep % kd;            // row within V array
-    vj = vi + r*kd;             // col within V array
+    I nt = ceildiv(n, kd); // number of block-cols in conceptual V.
+    I j = sweep / kd; // block-col j
+    I i = j + task; // block-row i
+    I r = get_v_block_index(nt, i, j);
+    vi = sweep % kd; // row within V array
+    vj = vi + r * kd; // col within V array
 }
 
 ROCSOLVER_END_NAMESPACE

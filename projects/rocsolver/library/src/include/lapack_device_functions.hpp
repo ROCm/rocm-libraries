@@ -1381,22 +1381,10 @@ __device__ I slaed6(I kniter,
                     S ssfmin = std::numeric_limits<S>::min(),
                     I MAXIT = 50)
 {
-    auto lam_abs = [](auto x) -> auto
-    {
-        return std::abs(x);
-    };
-    auto lam_sqrt = [](auto x) -> auto
-    {
-        return std::sqrt(x);
-    };
-    auto lam_max = [](auto x, auto y, auto z) -> auto
-    {
-        return std::max(std::max(x, y), z);
-    };
-    auto lam_min = [](auto x, auto y) -> auto
-    {
-        return std::min(x, y);
-    };
+    auto lam_abs = [](auto x) -> auto { return std::abs(x); };
+    auto lam_sqrt = [](auto x) -> auto { return std::sqrt(x); };
+    auto lam_max = [](auto x, auto y, auto z) -> auto { return std::max(std::max(x, y), z); };
+    auto lam_min = [](auto x, auto y) -> auto { return std::min(x, y); };
 
     S dscale[3]{}, zscale[3]{};
     struct X_t
@@ -1726,26 +1714,11 @@ __device__ I slaed4(I n,
                     S ssfmin = std::numeric_limits<S>::min(),
                     I MAXIT = 50)
 {
-    auto lam_abs = [](auto x) -> auto
-    {
-        return std::abs(x);
-    };
-    auto lam_sqr = [](auto x) -> auto
-    {
-        return x * x;
-    };
-    auto lam_sqrt = [](auto x) -> auto
-    {
-        return std::sqrt(x);
-    };
-    auto lam_max = [](auto x, auto y) -> auto
-    {
-        return std::max(x, y);
-    };
-    auto lam_min = [](auto x, auto y) -> auto
-    {
-        return std::min(x, y);
-    };
+    auto lam_abs = [](auto x) -> auto { return std::abs(x); };
+    auto lam_sqr = [](auto x) -> auto { return x * x; };
+    auto lam_sqrt = [](auto x) -> auto { return std::sqrt(x); };
+    auto lam_max = [](auto x, auto y) -> auto { return std::max(x, y); };
+    auto lam_min = [](auto x, auto y) -> auto { return std::min(x, y); };
 
     i = i + 1;
     S zz[3]{};

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -51,12 +51,12 @@ const vector<vector<int>> matrix_size_range = {
     // invalid
     {-1, 1, 2},
     {1, 0, 1},
-    {20, 5, 13},  // ldab >= 14
+    {20, 5, 13}, // ldab >= 14
     // normal (valid) samples
     {10, 2, 5},
     {20, 20, 59},
-    {128, 32, 96},   // ldab >= 95
-    {128, 40, 120},  // ldab >= 119
+    {128, 32, 96}, // ldab >= 95
+    {128, 40, 120}, // ldab >= 119
 };
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
@@ -65,31 +65,31 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     // invalid
     {-1, 1, 2},
     {1, 0, 1},
-    {20, 5, 13},  // ldab >= 14
+    {20, 5, 13}, // ldab >= 14
     // normal (valid) samples
     {10, 2, 5},
     {20, 20, 59},
-    {128, 32, 96},   // ldab >= 95
-    {128, 40, 120},  // ldab >= 119
+    {128, 32, 96}, // ldab >= 95
+    {128, 40, 120}, // ldab >= 119
 };
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
-    {152, 64, 192},   // ldab >= 191
-    {640, 64, 192},   // ldab >= 191
-    {1000, 128, 384},  // ldab >= 383
-    {512, 312, 960},  // ldab >= 935
+    {152, 64, 192}, // ldab >= 191
+    {640, 64, 192}, // ldab >= 191
+    {1000, 128, 384}, // ldab >= 383
+    {512, 312, 960}, // ldab >= 935
 };
 
 const vector<vector<int64_t>> large_matrix_size_range_64 = {
-    {152, 64, 192},   // ldab >= 191
-    {640, 64, 192},   // ldab >= 191
-    {1000, 128, 384},  // ldab >= 383
-    {512, 312, 960},  // ldab >= 935
+    {152, 64, 192}, // ldab >= 191
+    {640, 64, 192}, // ldab >= 191
+    {1000, 128, 384}, // ldab >= 383
+    {512, 312, 960}, // ldab >= 935
 };
 
 template <typename I>
-Arguments sb2st_hb2st_setup_arguments( sb2st_hb2st_tuple<I> tup )
+Arguments sb2st_hb2st_setup_arguments(sb2st_hb2st_tuple<I> tup)
 {
     vector<I> matrix_size = std::get<0>(tup);
     char uplo = std::get<1>(tup);
@@ -112,15 +112,15 @@ class SB2ST_HB2ST_BASE : public ::TestWithParam<sb2st_hb2st_tuple<I>>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ( hipGetLastError(), hipSuccess );
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>
     void run_tests()
     {
-        Arguments arg = sb2st_hb2st_setup_arguments( this->GetParam() );
+        Arguments arg = sb2st_hb2st_setup_arguments(this->GetParam());
 
-        if (arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 1)
+        if(arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 1)
             testing_sb2st_hb2st_bad_arg<T, I>();
 
         testing_sb2st_hb2st<T, I>(arg);
@@ -137,58 +137,58 @@ class SB2ST_HB2ST_64 : public SB2ST_HB2ST_BASE<int64_t>
 
 // non-batch tests
 
-TEST_P( SB2ST_HB2ST, __float )
+TEST_P(SB2ST_HB2ST, __float)
 {
     run_tests<float>();
 }
 
-TEST_P( SB2ST_HB2ST, __double )
+TEST_P(SB2ST_HB2ST, __double)
 {
     run_tests<double>();
 }
 
-TEST_P( SB2ST_HB2ST, __float_complex )
+TEST_P(SB2ST_HB2ST, __float_complex)
 {
     run_tests<rocblas_float_complex>();
 }
 
-TEST_P( SB2ST_HB2ST, __double_complex )
+TEST_P(SB2ST_HB2ST, __double_complex)
 {
     run_tests<rocblas_double_complex>();
 }
 
-TEST_P( SB2ST_HB2ST_64, __float )
+TEST_P(SB2ST_HB2ST_64, __float)
 {
     run_tests<float>();
 }
 
-TEST_P( SB2ST_HB2ST_64, __double )
+TEST_P(SB2ST_HB2ST_64, __double)
 {
     run_tests<double>();
 }
 
-TEST_P( SB2ST_HB2ST_64, __float_complex )
+TEST_P(SB2ST_HB2ST_64, __float_complex)
 {
     run_tests<rocblas_float_complex>();
 }
 
-TEST_P( SB2ST_HB2ST_64, __double_complex )
+TEST_P(SB2ST_HB2ST_64, __double_complex)
 {
     run_tests<rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P( daily_lapack,
-                          SB2ST_HB2ST,
-                          Combine( ValuesIn( large_matrix_size_range ), ValuesIn( uplo_range ) ) );
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SB2ST_HB2ST,
+                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
 
-INSTANTIATE_TEST_SUITE_P( checkin_lapack,
-                          SB2ST_HB2ST,
-                          Combine( ValuesIn( matrix_size_range ), ValuesIn( uplo_range ) ) );
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SB2ST_HB2ST,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
 
-INSTANTIATE_TEST_SUITE_P( daily_lapack,
-                          SB2ST_HB2ST_64,
-                          Combine( ValuesIn( large_matrix_size_range_64 ), ValuesIn( uplo_range ) ) );
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SB2ST_HB2ST_64,
+                         Combine(ValuesIn(large_matrix_size_range_64), ValuesIn(uplo_range)));
 
-INSTANTIATE_TEST_SUITE_P( checkin_lapack,
-                          SB2ST_HB2ST_64,
-                          Combine( ValuesIn( matrix_size_range_64 ), ValuesIn( uplo_range ) ) );
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SB2ST_HB2ST_64,
+                         Combine(ValuesIn(matrix_size_range_64), ValuesIn(uplo_range)));

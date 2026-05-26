@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,28 +30,27 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename I, typename S, typename U>
-rocblas_status rocsolver_sb2st_hb2st_impl(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const I n,
-    const I kd,
-    U Aband,
-    const I ldab,
-    S* D,
-    S* E,
-    U V,
-    const I ldv,
-    T* tau )
+rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
+                                          rocblas_fill uplo,
+                                          const I n,
+                                          const I kd,
+                                          U Aband,
+                                          const I ldab,
+                                          S* D,
+                                          S* E,
+                                          U V,
+                                          const I ldv,
+                                          T* tau)
 {
-    ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv );
+    ROCSOLVER_ENTER_TOP("sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv);
 
-    if (! handle)
+    if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_sb2st_hb2st_argCheck(
-        handle, uplo, n, kd, ldab, ldv, Aband, D, E, V, tau );
-    if (st != rocblas_status_continue)
+    rocblas_status st
+        = rocsolver_sb2st_hb2st_argCheck(handle, uplo, n, kd, ldab, ldv, Aband, D, E, V, tau);
+    if(st != rocblas_status_continue)
         return st;
 
     // working with unshifted arrays
@@ -68,24 +67,18 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     // memory workspace sizes:
     // size of reusable workspace
     size_t size_work;
-    rocsolver_sb2st_hb2st_getMemorySize<false, T, I, S>(
-        n, kd, batch_count, &size_work );
+    rocsolver_sb2st_hb2st_getMemorySize<false, T, I, S>(n, kd, batch_count, &size_work);
 
-    if (rocblas_is_device_memory_size_query( handle ) )
-        return rocblas_set_optimal_device_memory_size( handle, size_work );
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(handle, size_work);
 
     // no memory workspace allocation
-    assert( size_work == 0 );
+    assert(size_work == 0);
 
     // execution
     return rocsolver_sb2st_hb2st_template<false, false, T, I>(
-        handle, uplo, n, kd,
-        Aband, shiftA, ldab, strideA,
-        D, strideD,
-        E, strideE,
-        V, ldv, strideV,
-        tau, strideTau,
-        batch_count );
+        handle, uplo, n, kd, Aband, shiftA, ldab, strideA, D, strideD, E, strideE, V, ldv, strideV,
+        tau, strideTau, batch_count);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -98,153 +91,145 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
-    float* Aband,
-    const rocblas_int ldab,
-    float* D,
-    float* E,
-    float* V,
-    const rocblas_int ldv,
-    float* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(rocblas_handle handle,
+                                                 rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 float* Aband,
+                                                 const rocblas_int ldab,
+                                                 float* D,
+                                                 float* E,
+                                                 float* V,
+                                                 const rocblas_int ldv,
+                                                 float* tau)
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<float, rocblas_int>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<float, rocblas_int>(handle, uplo, n, kd, Aband,
+                                                                     ldab, D, E, V, ldv, tau);
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
-    double* Aband,
-    const rocblas_int ldab,
-    double* D,
-    double* E,
-    double* V,
-    const rocblas_int ldv,
-    double* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(rocblas_handle handle,
+                                                 rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 double* Aband,
+                                                 const rocblas_int ldab,
+                                                 double* D,
+                                                 double* E,
+                                                 double* V,
+                                                 const rocblas_int ldv,
+                                                 double* tau)
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<double, rocblas_int>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<double, rocblas_int>(handle, uplo, n, kd, Aband,
+                                                                      ldab, D, E, V, ldv, tau);
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
-    rocblas_float_complex* Aband,
-    const rocblas_int ldab,
-    float* D,
-    float* E,
-    rocblas_float_complex* V,
-    const rocblas_int ldv,
-    rocblas_float_complex* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(rocblas_handle handle,
+                                                 rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 rocblas_float_complex* Aband,
+                                                 const rocblas_int ldab,
+                                                 float* D,
+                                                 float* E,
+                                                 rocblas_float_complex* V,
+                                                 const rocblas_int ldv,
+                                                 rocblas_float_complex* tau)
 {
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex, rocblas_int>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
-    rocblas_double_complex* Aband,
-    const rocblas_int ldab,
-    double* D,
-    double* E,
-    rocblas_double_complex* V,
-    const rocblas_int ldv,
-    rocblas_double_complex* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(rocblas_handle handle,
+                                                 rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 rocblas_double_complex* Aband,
+                                                 const rocblas_int ldab,
+                                                 double* D,
+                                                 double* E,
+                                                 rocblas_double_complex* V,
+                                                 const rocblas_int ldv,
+                                                 rocblas_double_complex* tau)
 {
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex, rocblas_int>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st_64(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const int64_t n,
-    const int64_t kd,
-    float* Aband,
-    const int64_t ldab,
-    float* D,
-    float* E,
-    float* V,
-    const int64_t ldv,
-    float* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st_64(rocblas_handle handle,
+                                                    rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    float* Aband,
+                                                    const int64_t ldab,
+                                                    float* D,
+                                                    float* E,
+                                                    float* V,
+                                                    const int64_t ldv,
+                                                    float* tau)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_sb2st_hb2st_impl<float, int64_t>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<float, int64_t>(handle, uplo, n, kd, Aband, ldab,
+                                                                 D, E, V, ldv, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st_64(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const int64_t n,
-    const int64_t kd,
-    double* Aband,
-    const int64_t ldab,
-    double* D,
-    double* E,
-    double* V,
-    const int64_t ldv,
-    double* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st_64(rocblas_handle handle,
+                                                    rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    double* Aband,
+                                                    const int64_t ldab,
+                                                    double* D,
+                                                    double* E,
+                                                    double* V,
+                                                    const int64_t ldv,
+                                                    double* tau)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_sb2st_hb2st_impl<double, int64_t>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<double, int64_t>(handle, uplo, n, kd, Aband, ldab,
+                                                                  D, E, V, ldv, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st_64(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const int64_t n,
-    const int64_t kd,
-    rocblas_float_complex* Aband,
-    const int64_t ldab,
-    float* D,
-    float* E,
-    rocblas_float_complex* V,
-    const int64_t ldv,
-    rocblas_float_complex* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st_64(rocblas_handle handle,
+                                                    rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    rocblas_float_complex* Aband,
+                                                    const int64_t ldab,
+                                                    float* D,
+                                                    float* E,
+                                                    rocblas_float_complex* V,
+                                                    const int64_t ldv,
+                                                    rocblas_float_complex* tau)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex, int64_t>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st_64(
-    rocblas_handle handle,
-    rocblas_fill uplo,
-    const int64_t n,
-    const int64_t kd,
-    rocblas_double_complex* Aband,
-    const int64_t ldab,
-    double* D,
-    double* E,
-    rocblas_double_complex* V,
-    const int64_t ldv,
-    rocblas_double_complex* tau )
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st_64(rocblas_handle handle,
+                                                    rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    rocblas_double_complex* Aband,
+                                                    const int64_t ldab,
+                                                    double* D,
+                                                    double* E,
+                                                    rocblas_double_complex* V,
+                                                    const int64_t ldv,
+                                                    rocblas_double_complex* tau)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex, int64_t>(
-        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
