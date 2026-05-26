@@ -3,7 +3,7 @@
 
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
-#include "hip/HipKernelCompileOptions.hpp"
+#include "BatchnormHipKernelCompileOptions.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
@@ -381,13 +381,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
         ldsgcn = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize / 64);
     }
 
-    // Detect GPU architecture
-    const std::string archName(deviceProperties.gcnArchName);
-    const bool isGfx103X = (archName.find("gfx103") == 0);
-    const bool isGfx110X = (archName.find("gfx110") == 0);
-    const bool isGfx120X = (archName.find("gfx120") == 0);
-    const bool isGfx115X = (archName.find("gfx115") == 0);
-
     // Get activation mode
     auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
@@ -396,39 +389,36 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Prepare compilation options
-    HipKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
-    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
-    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    BatchnormHipKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
+    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
     options.update("HIP_PLUGIN_USE_FP16", 0);
     options.update("HIP_PLUGIN_USE_BFP16", 0);
-    options.add("HIP_PLUGIN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
-    options.add("HIP_PLUGIN_RUNNING_RESULT", _trainingParams.hasRunningStats());
-    options.add("HIP_PLUGIN_BN_VARIANT", variant);
-    options.add("HIP_PLUGIN_BN_LDS_SIZE", ldsnogcn);
-    options.add("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
-    options.add("HIP_PLUGIN_BN_N", n);
-    options.add("HIP_PLUGIN_BN_C", c);
-    options.add("HIP_PLUGIN_BN_HW", inCstride);
-    options.add("HIP_PLUGIN_BN_NHW", inNhw);
-    options.add("HIP_PLUGIN_BN_CHW", c * inCstride);
-    options.add("HIP_PLUGIN_BN_NCHW", c * inNhw);
+    options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
+    options.update("HIP_PLUGIN_BN_RUNNING_RESULT", _trainingParams.hasRunningStats());
+    options.update("HIP_PLUGIN_BN_VARIANT", variant);
+    options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsnogcn);
+    options.update("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
+    options.update("HIP_PLUGIN_BN_N", n);
+    options.update("HIP_PLUGIN_BN_C", c);
+    options.update("HIP_PLUGIN_BN_HW", inCstride);
+    options.update("HIP_PLUGIN_BN_NHW", inNhw);
+    options.update("HIP_PLUGIN_BN_CHW", c * inCstride);
+    options.update("HIP_PLUGIN_BN_NCHW", c * inNhw);
+    options.update("HIP_PLUGIN_BN_N_ELEMENTS", nelements);
+    options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.update("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
+    options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
+    options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
+
     options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
     options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
-    options.add("HIP_PLUGIN_BN_N_ELEMENTS", nelements);
-    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
-    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
-    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
     options.add("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
     options.add("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
     options.add("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
-    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103X);
-    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110X);
-    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120X);
-    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115X);
-    options.add("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
-    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
-    options.add("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
 
     // Compile the kernel and configure launch parameters based on the selected variant
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);
