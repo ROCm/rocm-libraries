@@ -309,6 +309,7 @@ EnginePluginResourceManager::~EnginePluginResourceManager()
         {
             safeDestroyHandle(plugin, handle);
         }
+        // NOLINTNEXTLINE(bugprone-empty-catch): re-logging here would recurse into the same throw
         catch(...)
         {
         }
