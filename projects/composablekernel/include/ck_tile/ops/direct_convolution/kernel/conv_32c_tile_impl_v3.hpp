@@ -502,11 +502,15 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         const int wave_group = wave;
         const int c8_pos = wave_group * TC::GROUP_SIZE_8 + lane_c8;
 
+        // The DRAM cyclic-shift swizzle is applied to the global wi_padded
+        // coordinate (block_q + spatial_pos), so the inverse used to find the
+        // LDS slot must also include block_q. Otherwise the inverse is wrong
+        // whenever block_q is not a multiple of BLOCK_C8.
         static_for<cfg.kw>(
             [&]<int S>()
             {
                 int spatial_pos = lane_q + S;
-                int c8_lds = swizzle_c8_inverse<cfg>(spatial_pos, c8_pos);
+                int c8_lds = swizzle_c8_inverse<cfg>(bc.block_q + spatial_pos, c8_pos);
                 base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_lds * 8;
             });
 
@@ -528,7 +532,10 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             // DRAM offset: input_x = block_q + ov_spatial - px (padding offset).
             const int input_x = bc.block_q + ov_spatial - px;
             overflow_is_valid = (input_x >= 0 && input_x < wi) ? 1 : 0;
-            int ov_c8_dram = swizzle_c8_forward<cfg>(ov_spatial, ov_c8);
+            // Match the DRAM descriptor's global-coordinate swizzle so the
+            // overflow DRAM read is consistent with the main load path when
+            // block_q is not a multiple of BLOCK_C8.
+            int ov_c8_dram = swizzle_c8_forward<cfg>(bc.block_q + ov_spatial, ov_c8);
             overflow_voffset = static_cast<ck_tile::index_t>(
                 (input_x * bc.C + ov_c8_dram * 8) * static_cast<int>(sizeof(ElementType)));
         }
