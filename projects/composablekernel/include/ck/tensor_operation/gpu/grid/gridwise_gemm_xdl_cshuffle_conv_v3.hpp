@@ -880,10 +880,6 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
                                                     IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
-        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
-                                              AmdBufferCoherenceEnum::DefaultCoherence,
-                                              IndexType>(
-            p_c_grid, c_grid_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize());
 
         const AElementwiseOperation a_element_op{};
         const BElementwiseOperation b_element_op{};

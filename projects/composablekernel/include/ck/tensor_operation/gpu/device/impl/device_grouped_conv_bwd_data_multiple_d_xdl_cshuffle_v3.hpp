@@ -273,9 +273,15 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     static_assert(NDimSpatial == 2 || NDimSpatial == 3,
                   "wrong! only implemented for 2D and 3D now");
 
-    static_assert(std::is_same_v<ALayout, tensor_layout::convolution::NHWGK>, "A not NGHWC");
-    static_assert(std::is_same_v<BLayout, tensor_layout::convolution::GKYXC>, "B not GKYXC");
-    static_assert(std::is_same_v<ELayout, tensor_layout::convolution::NHWGC>, "C not NGHWK");
+    static_assert(std::is_same_v<ALayout, tensor_layout::convolution::NHWGK> ||
+                      std::is_same_v<ALayout, tensor_layout::convolution::NDHWGK>,
+                  "A not NGHWC");
+    static_assert(std::is_same_v<BLayout, tensor_layout::convolution::GKYXC> ||
+                      std::is_same_v<BLayout, tensor_layout::convolution::GKZYXC>,
+                  "B not GKYXC");
+    static_assert(std::is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
+                      std::is_same_v<ELayout, tensor_layout::convolution::NDHWGC>,
+                  "C not NGHWK");
 
     // MaxGroupedGemmGroupsNum  is used to specify number of gemm args in compile time. With this
     // implementation we can avoid copy data to workspace before kernel launch since number of
@@ -401,8 +407,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         AComputeType,
         BComputeType,
         DirectLoad,
-        ALdsScalarLoadToVgpr,
-        BLdsScalarLoadToVgpr,
+        DirectLoad && ALdsScalarLoadToVgpr,
+        DirectLoad && BLdsScalarLoadToVgpr,
         LargeTensors>;
 
     template <typename Desc_K0_M_K1>
