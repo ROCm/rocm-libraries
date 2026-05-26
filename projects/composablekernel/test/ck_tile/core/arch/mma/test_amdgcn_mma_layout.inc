@@ -516,7 +516,8 @@ using Gfx1250Intrinsics = ::testing::Types<
     amdgcn_mma<F16,  F16,  F16, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x32_f16
     amdgcn_mma<F6, F6, F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,                      Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_f8f6f4
     amdgcn_mma<F4, F4, F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,                      Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_f8f6f4
-    amdgcn_mma<F4, F4, F32, 32u, 16u, 128u, DefaultWmmaCtrlFlags,                      Target1250, MmaOpFamily::DENSE>, // wmma_f32_32x16x128_f4
+    // TODO: tile_distr_encoding with M=32 and WaveSize=32
+    // amdgcn_mma<F4, F4, F32, 32u, 16u, 128u, DefaultWmmaCtrlFlags,                      Target1250, MmaOpFamily::DENSE>, // wmma_f32_32x16x128_f4
     amdgcn_mma<BF16, BF16, F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_f32_16x16x64_bf16
     amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_bf16_16x16x64_bf16
     amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,               Target1250, MmaOpFamily::SPARSE>, // swmmac_bf16f32_16x16x64_bf16

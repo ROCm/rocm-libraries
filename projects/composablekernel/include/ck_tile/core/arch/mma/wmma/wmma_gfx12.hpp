@@ -12,6 +12,7 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/bfloat16.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/int8.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
@@ -807,8 +808,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
 template <typename CtrlFlags, typename CompilerTarget>
 // clang-format off
 //               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
-struct amdgcn_mma<pk_fp6x16_t_t, pk_fp6x16_t_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx1250_t<CompilerTarget>>
-: amdgcn_mma_base<pk_fp6x16_t_t, pk_fp6x16_t_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
+struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx1250_t<CompilerTarget>>
+: amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
     CK_TILE_DEVICE static CVecType
