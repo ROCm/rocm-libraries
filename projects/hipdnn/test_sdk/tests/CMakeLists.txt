@@ -15,18 +15,18 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_test_sdk_tests
     main.cpp
-    utilities/TestCpuFpReferenceBatchnorm.cpp
-    utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
-    utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
-    utilities/TestCpuFpReferenceRMSNorm.cpp
-    utilities/TestCpuFpReferenceSdpa.cpp
-    utilities/TestCpuFpReferenceConvolution.cpp
-    utilities/TestCpuFpReferenceLayernorm.cpp
-    utilities/TestCpuFpReferenceMatmul.cpp
-    utilities/TestCpuFpReferenceReduction.cpp
-    utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
-    utilities/TestCpuFpReferenceUtilities.cpp
-    utilities/TestCpuFpReferenceValidation.cpp
+    utilities/TestCpuReferenceBatchnorm.cpp
+    utilities/TestCpuReferenceBatchnormWithVariance.cpp
+    utilities/TestCpuReferenceBlockScaleDequantize.cpp
+    utilities/TestCpuReferenceRMSNorm.cpp
+    utilities/TestCpuReferenceSdpa.cpp
+    utilities/TestCpuReferenceConvolution.cpp
+    utilities/TestCpuReferenceLayernorm.cpp
+    utilities/TestCpuReferenceMatmul.cpp
+    utilities/TestCpuReferenceReduction.cpp
+    utilities/TestCpuReferenceMiopenRmsValidation.cpp
+    utilities/TestCpuReferenceUtilities.cpp
+    utilities/TestCpuReferenceValidation.cpp
     utilities/TestCpuTypeUtilities.cpp
     utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp

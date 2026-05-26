@@ -13,7 +13,7 @@
 
 using namespace hipdnn_test_sdk::detail;
 
-class TestCpuFpReferenceUtilities : public ::testing::Test
+class TestCpuReferenceUtilities : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -27,7 +27,7 @@ protected:
     }
 };
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculation)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculation)
 {
     // Test 1D tensor index calculation
     auto functor = makeParallelTensorFunctor(
@@ -46,7 +46,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculati
     EXPECT_EQ(indices9[0], 9);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculation)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculation)
 {
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{3, 4});
@@ -73,7 +73,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculati
     EXPECT_EQ(indices11[1], 3);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculation)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculation)
 {
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{2, 3, 4});
@@ -95,7 +95,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculati
     EXPECT_EQ(indices23[2], 3);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculation)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculation)
 {
     auto functor
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
@@ -121,7 +121,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculati
     EXPECT_EQ(indices15[3], 1);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleThreadExecution)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicSingleThreadExecution)
 {
     std::atomic<int> sum{0};
 
@@ -134,7 +134,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleThreadExec
     EXPECT_EQ(sum.load(), 45);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicMultiThreadExecution)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicMultiThreadExecution)
 {
     std::atomic<int> sum{0};
 
@@ -148,7 +148,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicMultiThreadExecu
     EXPECT_EQ(sum.load(), 4950);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicElementCoverage)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicElementCoverage)
 {
     constexpr size_t TENSOR_SIZE = 50;
     std::vector<std::atomic<int>> counts(TENSOR_SIZE);
@@ -171,7 +171,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicElementCoverage)
     }
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DElementCoverage)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamic2DElementCoverage)
 {
     constexpr size_t HEIGHT = 5;
     constexpr size_t WIDTH = 6;
@@ -199,7 +199,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DElementCoverag
     }
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStrideSizesValidation)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicStrideSizesValidation)
 {
     // 2D tensor (3x4)
     auto functor2D = makeParallelTensorFunctor(
@@ -227,7 +227,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStrideSizesValid
     EXPECT_EQ(functor4D.strides[3], 1); // stride for fourth dimension
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
 {
     std::atomic<int> count{0};
     auto countFunction = [&count](const std::vector<int64_t>& indices) {
@@ -260,7 +260,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
     EXPECT_EQ(count.load(), 3);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicZeroThreads)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicZeroThreads)
 {
     std::atomic<int> count{0};
     auto countFunction = [&count](const std::vector<int64_t>& indices) {
@@ -275,7 +275,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicZeroThreads)
     EXPECT_EQ(count.load(), 0);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargerTensorPerformance)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicLargerTensorPerformance)
 {
     constexpr size_t TENSOR_SIZE = 10000;
     std::atomic<size_t> sum{0};
@@ -300,7 +300,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargerTensorPerf
 }
 
 // Additional edge case tests for ParallelTensorFunctorDynamic
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEmptyTensor)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicEmptyTensor)
 {
     std::atomic<int> count{0};
     auto countFunction = [&count](const std::vector<int64_t>& indices) {
@@ -320,7 +320,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEmptyTensor)
     EXPECT_EQ(count.load(), 0); // No elements to process
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculation)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculation)
 {
     // Test 5D tensor to ensure we support higher dimensions
     auto functor
@@ -350,7 +350,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculati
     EXPECT_EQ(indices31[4], 1);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargeDimensions)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicLargeDimensions)
 {
     // Test with large dimension sizes
     std::atomic<int> count{0};
@@ -372,7 +372,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargeDimensions)
     EXPECT_EQ(count.load(), 1000);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicIrregularShapes)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicIrregularShapes)
 {
     // Test with irregular tensor shapes (different dimension sizes)
     std::set<std::tuple<size_t, size_t, size_t>> processedElements;
@@ -404,7 +404,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicIrregularShapes)
     }
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleElementDimensions)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicSingleElementDimensions)
 {
     // Test with dimensions that have size 1 (broadcasting-like scenarios)
     std::atomic<int> count{0};
@@ -432,7 +432,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleElementDim
     EXPECT_EQ(indices7[3], 1);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicThreadSafety)
+TEST_F(TestCpuReferenceUtilities, ParallelTensorFunctorDynamicThreadSafety)
 {
     // Test thread safety with concurrent access to shared data
     constexpr size_t TENSOR_SIZE = 1000;
