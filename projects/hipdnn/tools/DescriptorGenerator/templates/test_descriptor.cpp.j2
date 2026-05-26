@@ -100,7 +100,7 @@ protected:
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
 {% for uid in taf.test_uids %}
-    std::unique_ptr<HipdnnBackendDescriptor> _{{ taf.name }}Desc{{ loop.index0 }} = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _{{ taf.camel_name }}Desc{{ loop.index0 }} = nullptr;
 {% endfor %}
 {% endfor %}
     std::unique_ptr<HipdnnBackendDescriptor> _unfinalizedTensor = nullptr;
@@ -123,7 +123,7 @@ protected:
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
 {% for uid in taf.test_uids %}
-        _{{ taf.name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
+        _{{ taf.camel_name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
 {% endfor %}
 {% endfor %}
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
@@ -137,7 +137,7 @@ protected:
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
 {% for uid in taf.test_uids %}
-        _{{ taf.name }}Desc{{ loop.index0 }}.reset();
+        _{{ taf.camel_name }}Desc{{ loop.index0 }}.reset();
 {% endfor %}
 {% endfor %}
         _unfinalizedTensor.reset();
@@ -868,7 +868,7 @@ TEST_F(Test{{ op.class_name }}, TryAsInterfaceReturnsNullForWrongType)
 TEST_F(Test{{ op.class_name }}, Set{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArray)
 {
     auto desc = getDescriptor();
-    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> descs = {{ '{' }}{% for uid in taf.test_uids %}_{{ taf.name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> descs = {{ '{' }}{% for uid in taf.test_uids %}_{{ taf.camel_name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
 
     ASSERT_NO_THROW(desc->setAttribute(
         {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, {{ taf.test_uids | length }}, descs.data()));
@@ -906,7 +906,7 @@ TEST_F(Test{{ op.class_name }}, Set{{ taf.test_label or taf.name | replace('_', 
 TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArray)
 {
     auto desc = getDescriptor();
-    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> descs = {{ '{' }}{% for uid in taf.test_uids %}_{{ taf.name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> descs = {{ '{' }}{% for uid in taf.test_uids %}_{{ taf.camel_name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
     desc->setAttribute(
         {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, {{ taf.test_uids | length }}, descs.data());
     setRequiredAttributes();

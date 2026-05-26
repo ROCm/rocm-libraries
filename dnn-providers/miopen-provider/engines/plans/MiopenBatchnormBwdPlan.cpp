@@ -160,13 +160,14 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
                                [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     float alphaDataDiff = 1.0f;
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
     float betaParamDiff = 0.0f;
-    double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
+    const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);

@@ -64,6 +64,14 @@ if(HIPBLASLT_ENABLE_ASAN)
     hipblaslt_target_configure_sanitizers(tensilelite-client-common PUBLIC)
 endif()
 
+# f16c gives the validator hot loop hardware Half<->float conversion, which is
+# what lets the auto-vectorizer turn the per-element comparison into AVX2 code.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-mf16c HIPBLASLT_CXX_HAS_MF16C)
+if(HIPBLASLT_CXX_HAS_MF16C)
+    target_compile_options(tensilelite-client-common PRIVATE -mf16c)
+endif()
+
 option(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK "Enable in-process ROCprofiler-SDK counters" OFF)
 target_compile_definitions(tensilelite-client-common
     PUBLIC

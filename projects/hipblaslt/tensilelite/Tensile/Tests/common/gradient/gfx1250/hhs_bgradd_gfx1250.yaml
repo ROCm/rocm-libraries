@@ -15,7 +15,7 @@ GlobalParameters:
   DataInitTypeB: 3
   DataInitTypeC: 0
   DataInitTypeD: 0
-  DataInitTypeE: 3
+  DataInitTypeE: 0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   # Tensor printing controls:

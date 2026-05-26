@@ -205,15 +205,32 @@ def validateMIParameters(
         else ptype["F32XdlMathOp"]
     )
 
-    # For MFMA validation, determine the key based on MAC data types
-    macDataTypeA = ptype.get("MacDataTypeA", miDataType) if not isX else miDataType
-    macDataTypeB = ptype.get("MacDataTypeB", miDataType) if not isX else miDataType
+    # For MFMA validation, determine the key based on MAC data types.
+    # Library logic YAML often stores MacDataTypeA/B as raw enum integers; coerce to DataType.
+    def _as_mac_dtype(value):
+        return value if isinstance(value, DataType) else DataType(value)
 
-    # If both MAC types are the same, use doubled character key; otherwise use combined key
-    if macDataTypeA == macDataTypeB:
-      miDataTypeKey = macDataTypeA.toChar() + macDataTypeA.toChar()
-    else:
-      miDataTypeKey = macDataTypeA.toChar() + macDataTypeB.toChar()
+    macDataTypeA = _as_mac_dtype(ptype.get("MacDataTypeA", miDataType) if not isX else miDataType)
+    macDataTypeB = _as_mac_dtype(ptype.get("MacDataTypeB", miDataType) if not isX else miDataType)
+
+    # MFMA / SMFMA tables use keys like "F8F8", "B8B8", "B8F8", "4xi84xi8", or composite "B8F8"
+    # (not "B8F8B8F8"). Prefer ca+cb; for same MAC type fall back to doubled token only if listed,
+    # else single composite token (e.g. BFloat8Float8 -> "B8F8"). Check both MFMA and SMFMA maps
+    # (sparse path uses validSMFMA with the same key).
+    def _dtype_key_in_tables(k: str) -> bool:
+        return k in validMFMA or k in validSMFMA
+
+    ca, cb = macDataTypeA.toChar(), macDataTypeB.toChar()
+    miDataTypeKey = ca + cb
+    if not _dtype_key_in_tables(miDataTypeKey):
+        if macDataTypeA == macDataTypeB:
+            doubled = ca + ca
+            if _dtype_key_in_tables(doubled):
+                miDataTypeKey = doubled
+            elif _dtype_key_in_tables(ca):
+                miDataTypeKey = ca
+        elif _dtype_key_in_tables(cb + ca):
+            miDataTypeKey = cb + ca
 
     mi4 = solution[MI_KEY]
     miEnabled = solution[MI_ENABLED_KEY]

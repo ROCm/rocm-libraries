@@ -49,9 +49,15 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(scope="module", autouse=True)
 def _isa_context():
     import os
+    import shutil
 
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    rocisa.rocIsa.getInstance().init(_ISA, rocm_path + "/bin/amdclang++", False)
+    search_path = os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])
+    assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
+    rocisa.rocIsa.getInstance().init(_ISA, assembler, False)
     rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
 
 
@@ -84,7 +90,7 @@ def _mubuf_off_asm() -> str:
         sgprWorkGroup=(1, 1, 0),
         vgprWorkItem=0,
         flatWorkGroupSize=64,
-        preloadKernArgs=False,
+        numSgprPreload=0,
     )
 
     stinky_module_options = {"OptLevel": 0}
@@ -129,7 +135,7 @@ def _mubuf_scope_asm() -> str:
         sgprWorkGroup=(1, 1, 0),
         vgprWorkItem=0,
         flatWorkGroupSize=64,
-        preloadKernArgs=False,
+        numSgprPreload=0,
     )
 
     st = rocisa.toStinkyTofuModule(
@@ -236,7 +242,7 @@ def _mubuf_zero_soffset_asm() -> str:
         sgprWorkGroup=(1, 1, 0),
         vgprWorkItem=0,
         flatWorkGroupSize=64,
-        preloadKernArgs=False,
+        numSgprPreload=0,
     )
 
     st = rocisa.toStinkyTofuModule(

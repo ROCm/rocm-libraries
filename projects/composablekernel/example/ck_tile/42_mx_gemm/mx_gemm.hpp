@@ -9,6 +9,7 @@
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
+#include "ck_tile/ops/gemm_mx.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/scale_pointer.hpp"
 
 template <typename ScaleM, typename ScaleN>
@@ -79,21 +80,53 @@ struct MxGemmConfig
     static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr bool DoubleSmemBuffer          = false; // comp_async uses double buffer
     static constexpr bool Preshuffle                = false;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess = 16;
 
     static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
     static constexpr bool TiledMMAPermuteN = false;
 };
-struct MXfp4_GemmConfig16 : MxGemmConfig
+
+struct MX_GemmConfigEightWaves : MxGemmConfig
+{
+    static constexpr ck_tile::index_t M_Warp = 4;
+    static constexpr ck_tile::index_t N_Warp = 2; // NWarps == 2 for ping-pong!
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 128 * N_Warp;
+    static constexpr ck_tile::index_t K_Tile = 128 * K_Warp;
+
+    static constexpr int kBlockPerCu = 2;
+};
+
+struct MX_GemmConfig16 : MxGemmConfig
 {
     static constexpr ck_tile::index_t M_Tile = 64;
-    static constexpr ck_tile::index_t N_Tile = 64;
+    static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 256;
 };
 
-// GEMM config with 16x16 warp tile
-struct MXfp8_GemmConfig16 : MxGemmConfig
+struct MXfp4_GemmConfig16_Preshuffle : MxGemmConfig
 {
-    static constexpr ck_tile::index_t M_Tile = 64;
-    static constexpr ck_tile::index_t N_Tile = 64;
+    // Smallest possible N_Tile is 512 for fp4 preshuffle
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 512;
     static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess = 32;
+};
+
+struct MXfp8_GemmConfig16_Preshuffle : MxGemmConfig
+{
+    // For FP8 Preshuffle:
+    // The theoretical functional minimum is N_Tile =  N_Warp * N_Warp_Tile * NXdlPack = 4*16*2 =
+    // 128 . For better performance, we would choose N_Repeat = 2 which would yield N_Tile = 128 * 2
+    // = 256 . Note: If we use fewer waves, the minimum theoretical N_Tile can be even smaller,
+    // reduced to N_Tile = 32 for 1 single wave.
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 256;
+    static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
 };
