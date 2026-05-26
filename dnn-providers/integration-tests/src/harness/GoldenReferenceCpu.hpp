@@ -6,6 +6,7 @@
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 #include <gtest/gtest.h>
+#include <iostream>
 #include <unordered_map>
 #include <vector>
 
@@ -66,12 +67,15 @@ inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
     {
         for(const auto& entry : std::filesystem::recursive_directory_iterator(dir))
         {
-            if(entry.path().extension() == ".json")
+            if(entry.path().extension() == ".json"
+               && entry.path().filename() != "meta.json")
                 paths.push_back(entry.path());
         }
     }
-    catch(...)
+    catch(const std::exception& e)
     {
+        std::cerr << "Warning: failed to scan golden reference data in " << dir
+                  << ": " << e.what() << std::endl;
         return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
 

@@ -65,9 +65,9 @@ TEST(TestFillTensorFromFile, Valid)
     }
 }
 
-TEST(TestFillTensorFromFile, SizeMismatch)
+TEST(TestFillTensorFromFile, SizeMismatchSmaller)
 {
-    const std::filesystem::path filename = "SizeMismatchTensor.bin";
+    const std::filesystem::path filename = "SizeMismatchSmallerTensor.bin";
     const ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
 
     // Write 3 ints to file but create a tensor expecting 4
@@ -78,6 +78,33 @@ TEST(TestFillTensorFromFile, SizeMismatch)
     EXPECT_THROW(fillTensorFromFile(tensor, filename), std::runtime_error);
 }
 
+TEST(TestFillTensorFromFile, SizeMismatchLarger)
+{
+    const std::filesystem::path filename = "SizeMismatchLargerTensor.bin";
+    const ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
+
+    // Write 5 ints to file but create a tensor expecting 4
+    const std::vector<int> values{0, 1, 2, 3, 4};
+    writeVectorToFile(filename, values);
+
+    Tensor<int> tensor({4});
+    EXPECT_THROW(fillTensorFromFile(tensor, filename), std::runtime_error);
+}
+
+TEST(TestFillTensorFromFile, NonPackedTensor)
+{
+    const std::filesystem::path filename = "NonPackedTensor.bin";
+    const ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
+
+    // dims={2,3}, strides={4,1} -> elementCount=6, elementSpace=7
+    // File must have exactly 7 ints (elementSpace * elementSize)
+    const std::vector<int> values{0, 1, 2, 0, 3, 4, 5};
+    writeVectorToFile(filename, values);
+
+    Tensor<int> tensor({2, 3}, {4, 1});
+    ASSERT_NO_THROW(fillTensorFromFile(tensor, filename));
+}
+
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 TEST(TestLoadGraphAndTensors, Valid)
@@ -86,7 +113,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     const std::filesystem::path filepath
         = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
@@ -129,7 +156,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     const std::filesystem::path filepath
         = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
