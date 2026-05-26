@@ -9,26 +9,27 @@ namespace tensor_operation {
 namespace device {
 namespace instance {
 
-// Compilation parameters for in[n, hi, wi, g, c] * wei[g, k, y, x, c] = out[n, ho, wo, g, k]
-void add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_f16_pipev2_large_tensors_instances(
-    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
-                                                           NHWGC,
-                                                           GKYXC,
-                                                           NHWGK,
-                                                           F16,
-                                                           F16,
-                                                           F16,
+// Compilation parameters for in[n, di, hi, wi, g, c] * wei[g, k, z, y, x, c] = out[n, do, ho, wo,
+// g, k]
+void add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_large_tensors_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<3,
+                                                           NDHWGC,
+                                                           GKZYXC,
+                                                           NDHWGK,
+                                                           BF16,
+                                                           BF16,
+                                                           BF16,
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances)
 {
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_two_stage_nhwgc_xdl_c_shuffle_f16_large_tensor_instances<
-            2,
-            NHWGC,
-            GKYXC,
-            NHWGK,
+        device_grouped_conv_bwd_weight_two_stage_nhwgc_xdl_c_shuffle_bf16_large_tensor_instances<
+            3,
+            NDHWGC,
+            GKZYXC,
+            NDHWGK,
             ConvBwdWeightDefault,
             BlockGemmPipelineScheduler::Intrawave,
             BlockGemmPipelineVersion::v2>{});

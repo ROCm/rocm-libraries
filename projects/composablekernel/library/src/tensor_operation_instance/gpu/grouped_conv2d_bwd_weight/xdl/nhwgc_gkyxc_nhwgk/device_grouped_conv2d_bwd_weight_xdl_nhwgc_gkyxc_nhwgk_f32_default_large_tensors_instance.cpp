@@ -10,28 +10,26 @@ namespace device {
 namespace instance {
 
 // Compilation parameters for in[n, hi, wi, g, c] * wei[g, k, y, x, c] = out[n, ho, wo, g, k]
-void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_default_pipev2_large_tensors_instances(
+void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
                                                            NHWGC,
                                                            GKYXC,
                                                            NHWGK,
-                                                           BF16,
-                                                           BF16,
-                                                           BF16,
+                                                           F32,
+                                                           F32,
+                                                           F32,
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances)
 {
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_tensor_instances<
+        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_f32_large_tensor_instances<
             2,
             NHWGC,
             GKYXC,
             NHWGK,
-            ConvBwdWeightDefault,
-            BlockGemmPipelineScheduler::Intrawave,
-            BlockGemmPipelineVersion::v2>{});
+            ConvBwdWeightDefault>{});
 }
 
 } // namespace instance
