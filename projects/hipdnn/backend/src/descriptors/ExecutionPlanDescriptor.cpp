@@ -72,6 +72,7 @@ void ExecutionPlanDescriptor::finalize()
     _pluginResourceManager = pluginResourceManager;
     _engineId = engineId;
     _tensorUids = collectTensorUids(*graph);
+    _isOverrideShapeEnabled = graph->isOverrideShapeEnabled();
 
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContext(
         pluginResourceManager, engineId, &engineConfigPluginData, graph.get());
@@ -332,6 +333,15 @@ const std::vector<int64_t>& ExecutionPlanDescriptor::getTensorUids() const
     return _tensorUids;
 }
 
+bool ExecutionPlanDescriptor::isOverrideShapeEnabled() const
+{
+    THROW_IF_FALSE(isFinalized(),
+                   HIPDNN_STATUS_INTERNAL_ERROR,
+                   "ExecutionPlanDescriptor::isOverrideShapeEnabled() failed: Not finalized.");
+
+    return _isOverrideShapeEnabled;
+}
+
 hipdnnEnginePluginExecutionContext_t ExecutionPlanDescriptor::getExecutionContext() const
 {
     THROW_IF_FALSE(isFinalized(),
@@ -369,7 +379,8 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
         _engineId,
         _workspaceSize,
         serializedTensorUids,
-        serializedPluginPayload);
+        serializedPluginPayload,
+        _isOverrideShapeEnabled);
     builder.Finish(executionPlan);
 
     *planByteSize = builder.GetSize();
@@ -427,6 +438,7 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
                   "Serialized execution plan contains no tensor UIDs.");
     _engineId = executionPlan->engine_id();
     _workspaceSize = executionPlan->workspace_size();
+    _isOverrideShapeEnabled = executionPlan->is_override_shape_enabled();
     THROW_IF_LT(_workspaceSize,
                 0,
                 HIPDNN_STATUS_BAD_PARAM,
