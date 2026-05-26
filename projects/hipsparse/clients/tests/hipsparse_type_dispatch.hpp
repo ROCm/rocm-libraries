@@ -102,6 +102,62 @@ auto hipsparse_it_dispatch(const Arguments& arg)
     return TEST<void>{}(arg);
 }
 
+// Dispatch for hipsparseGather. Gather supports uniform precisions only, so X,
+// Y and the compute type are identical: we only need the index type I and the
+// element type T. The set of valid element types is wider than the default
+// hipsparse_it_dispatch (adds int8, fp16, and bf16).
+template <template <typename...> class TEST>
+auto hipsparse_gather_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        switch(arg.compute_type)
+        {
+        case HIP_R_8I:
+            return TEST<int32_t, int8_t>{}(arg);
+        case HIP_R_16F:
+            return TEST<int32_t, hipsparseFloat16>{}(arg);
+        case HIP_R_16BF:
+            return TEST<int32_t, hipsparseBfloat16>{}(arg);
+        case HIP_R_32F:
+            return TEST<int32_t, float>{}(arg);
+        case HIP_R_64F:
+            return TEST<int32_t, double>{}(arg);
+        case HIP_C_32F:
+            return TEST<int32_t, hipComplex>{}(arg);
+        case HIP_C_64F:
+            return TEST<int32_t, hipDoubleComplex>{}(arg);
+        default:
+            return TEST<void>{}(arg);
+        }
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        switch(arg.compute_type)
+        {
+        case HIP_R_8I:
+            return TEST<int64_t, int8_t>{}(arg);
+        case HIP_R_16F:
+            return TEST<int64_t, hipsparseFloat16>{}(arg);
+        case HIP_R_16BF:
+            return TEST<int64_t, hipsparseBfloat16>{}(arg);
+        case HIP_R_32F:
+            return TEST<int64_t, float>{}(arg);
+        case HIP_R_64F:
+            return TEST<int64_t, double>{}(arg);
+        case HIP_C_32F:
+            return TEST<int64_t, hipComplex>{}(arg);
+        case HIP_C_64F:
+            return TEST<int64_t, hipDoubleComplex>{}(arg);
+        default:
+            return TEST<void>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
 template <template <typename...> class TEST>
 auto hipsparse_ijt_dispatch(const Arguments& arg)
 {

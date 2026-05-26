@@ -160,6 +160,7 @@ def _rmtree(path: Path):
         "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "reconfigure": "Delete CMake cache to force a fresh configure (keeps compiled objects).",
         "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
@@ -173,6 +174,7 @@ def build(
     static=False,
     jobs=None,
     clean=False,
+    reconfigure=False,
     gcc=False,
     rocm_path=None,
 ):
@@ -180,6 +182,11 @@ def build(
 
     if clean and bld.exists():
         _rmtree(bld)
+    elif reconfigure and bld.exists():
+        for name in ("CMakeCache.txt",):
+            p = bld / name
+            if p.exists():
+                p.unlink()
 
     bld.mkdir(parents=True, exist_ok=True)
 
@@ -190,6 +197,7 @@ def build(
 
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
@@ -296,6 +304,9 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
+        if shutil.which("ninja"):
+            cmake_opts.append("-G Ninja")
+
         if gcc:
             _cxx = shutil.which("g++") or "g++"
             _cc = shutil.which("gcc") or "gcc"
@@ -312,3 +323,16 @@ def build(
     print(f"cmake command: {cmake_cmd}")
     c.run(cmake_cmd)
     c.run(f'cmake --build "{bld.as_posix()}" -j {jobs}')
+
+
+@task
+def tidy(c, build_dir=None):
+    """Run clang-tidy on all source files. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not (bld / "compile_commands.json").exists():
+        print("No compile_commands.json found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(
+        f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
+    )
+    c.run(f'cmake --build "{bld.as_posix()}" --target tidy')

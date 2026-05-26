@@ -65,7 +65,7 @@
     X(DebugPass, std::string)             \
     X(PassOrderSnapshotJson, std::string) \
     X(EnableWaitCntInsertion, bool)       \
-    X(HasVgprMSB16, bool)                 \
+    X(VgprMsbMode, int)                   \
     X(EnableSwPrefetchInsertion, bool)    \
     X(SwPrefetchScratchSgpr, int)
 
