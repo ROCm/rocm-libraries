@@ -40,3 +40,8 @@ dev = [
 [tool.scikit-build]
 cmake.build-type = "Release"
 wheel.packages = []
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: test requires a ROCm-capable GPU",
+]
