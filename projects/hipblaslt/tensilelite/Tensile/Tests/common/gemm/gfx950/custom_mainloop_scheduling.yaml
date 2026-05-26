@@ -841,6 +841,40 @@ BenchmarkProblems:
           - Range: [[96], [256], [1], [1, 17, 64]]
           - Range: [[96], [256], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - 192x320x64 NN (CMS) - rocm-libraries-gz0k
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ActivationFuncCall: [false]
+        - MatrixInstruction:
+           - [16, 16, 32, 1, 1, 6, 10, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - LDSTrInst: [1]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [5]
+        - SourceSwap: [1]
+        - ClusterLocalRead: [0]
+        - StoreSyncOpt: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[192], [320], [1], [1, 17, 64]]
+          - Range: [[192], [320], [1], [32, 64, 256]]
 
   ########################################
   # BBS TT - standard
@@ -1827,6 +1861,59 @@ BenchmarkProblems:
         - BiasTypeArgs: ['b']
 
   ########################################
+  # F8BS TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - 256x256x128 8bit TN (CMS) - rocm-libraries-v01w
+      # Restored after rocm-libraries-2bww deleted this group. The original group
+      # had PrefetchLocalRead=[1] which mismatched the schedule's TileConfig PLR=0
+      # and would have failed the dispatcher's equality check. Set PLR=[0] to
+      # match _256x256x128_8bit's TileConfig, and restrict UseCMS to [1] (was
+      # [0,1], the non-CMS leg is out of scope for this YAML).
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,128, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [32] #[-1]
+        - LdsPadB: [32] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[17, 235, 750], [2, 127, 400], [1], [4, 4, 400]]
+          - Range: [[613], [612], [1], [1, 1, 128]]
+
+  ########################################
   # HHS TN - standard
   ########################################
   -
@@ -1872,6 +1959,32 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+    - # BenchmarkProblemSizeGroup - 192x320x64 TN (CMS) - rocm-libraries-gz0k
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - ActivationFuncCall: [false]
+      - ClusterLocalRead: [0]
+      - DepthU: [64]
+      - DirectToLds: [true]
+      - ExpandPointerSwap: [0]
+      - GlobalReadVectorWidthA: [8]
+      - GlobalReadVectorWidthB: [8]
+      - LdsPadA: [-1]
+      - LdsPadB: [-1]
+      - LocalReadVectorWidth: [8]
+      - MatrixInstruction:
+        - [16, 16, 32, 1, 1, 6, 10, 2, 2]
+      - PrefetchGlobalRead: [2]
+      - SourceSwap: [1]
+      - TransposeLDS: [1]
+      - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Range: [[192], [320], [1], [1, 17, 64]]
+        - Range: [[192], [320], [1], [32, 64, 256]]
 
   ########################################
   # F8BS TN - standard
@@ -2639,3 +2752,36 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+    - # BenchmarkProblemSizeGroup - 192x320x64 NT (CMS) - rocm-libraries-gz0k
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ActivationFuncCall: [false]
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 6, 10, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [0]
+        - LDSTrInst: [true]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [1]
+        - ClusterLocalRead: [0]
+        - StoreSyncOpt: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[192], [320], [1], [1, 17, 64]]
+          - Range: [[192], [320], [1], [32, 64, 256]]
