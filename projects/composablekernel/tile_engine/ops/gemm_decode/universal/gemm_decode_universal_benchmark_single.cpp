@@ -58,32 +58,79 @@ void RunBenchmark(const gemm_decode_tile_engine::DecodeProblem& p,
                   int init,
                   int metric_kind)
 {
-    using Kernel = SelectedGemmDecodeUniversalKernel;
+    using Kernel  = SelectedGemmDecodeUniversalKernel;
+    using Problem = typename Kernel::Problem;
+    constexpr bool kIsPerTensor = Kernel::kIsPerTensor;
+    constexpr bool kHasBias     = Problem::kHasBias;
 
     HostTensor<ADataType> a({p.M, p.K});
     HostTensor<BDataType> b({p.N, p.K});
     HostTensor<CDataType> c_dev({p.M, p.N});
+    HostTensor<CDataType> bias_host({p.N});
 
     FillRandom<ADataType, BDataType, CDataType>(a, b, init);
+    if constexpr(kHasBias)
+    {
+        FillUniformDistribution<CDataType>{-1.0f, 1.0f}(bias_host);
+    }
 
     DeviceMem a_buf(a.get_element_space_size_in_bytes());
     DeviceMem b_buf(b.get_element_space_size_in_bytes());
     DeviceMem c_buf(c_dev.get_element_space_size_in_bytes());
+    DeviceMem sa_buf(sizeof(float));
+    DeviceMem sb_buf(sizeof(float));
+    DeviceMem bias_buf(bias_host.get_element_space_size_in_bytes());
 
     a_buf.ToDevice(a.mData.data());
     b_buf.ToDevice(b.mData.data());
     c_buf.SetZero();
 
-    auto kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
-                                        b_buf.GetDeviceBuffer(),
-                                        c_buf.GetDeviceBuffer(),
-                                        p.M,
-                                        p.N,
-                                        p.K,
-                                        p.stride_a == 0 ? p.K : p.stride_a,
-                                        p.stride_b == 0 ? p.K : p.stride_b,
-                                        p.stride_c == 0 ? p.N : p.stride_c,
-                                        p.k_batch);
+    // Hard-coded scales for the PerTensor benchmark match the test suite so
+    // any verify run cross-checks the kernel against the same numerical
+    // contract used in test_gemm_decode.cpp.
+    const float sA = 0.125f;
+    const float sB = 0.0625f;
+    if constexpr(kIsPerTensor)
+    {
+        sa_buf.ToDevice(&sA);
+        sb_buf.ToDevice(&sB);
+    }
+    if constexpr(kHasBias)
+    {
+        bias_buf.ToDevice(bias_host.mData.data());
+    }
+
+    typename Kernel::Kargs kargs;
+    if constexpr(kIsPerTensor || kHasBias)
+    {
+        kargs = Kernel::MakeKernelArgs(
+            a_buf.GetDeviceBuffer(),
+            b_buf.GetDeviceBuffer(),
+            c_buf.GetDeviceBuffer(),
+            kIsPerTensor ? sa_buf.GetDeviceBuffer() : nullptr,
+            kIsPerTensor ? sb_buf.GetDeviceBuffer() : nullptr,
+            kHasBias ? bias_buf.GetDeviceBuffer() : nullptr,
+            p.M,
+            p.N,
+            p.K,
+            p.stride_a == 0 ? p.K : p.stride_a,
+            p.stride_b == 0 ? p.K : p.stride_b,
+            p.stride_c == 0 ? p.N : p.stride_c,
+            p.k_batch);
+    }
+    else
+    {
+        kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
+                                       b_buf.GetDeviceBuffer(),
+                                       c_buf.GetDeviceBuffer(),
+                                       p.M,
+                                       p.N,
+                                       p.K,
+                                       p.stride_a == 0 ? p.K : p.stride_a,
+                                       p.stride_b == 0 ? p.K : p.stride_b,
+                                       p.stride_c == 0 ? p.N : p.stride_c,
+                                       p.k_batch);
+    }
 
     if(!Kernel::IsSupportedArgument(kargs))
     {
@@ -129,6 +176,14 @@ void RunBenchmark(const gemm_decode_tile_engine::DecodeProblem& p,
                 {
                     acc += type_convert<float>(a(m, k)) * type_convert<float>(b(n, k));
                 }
+                if constexpr(kIsPerTensor)
+                {
+                    acc *= sA * sB;
+                }
+                if constexpr(kHasBias)
+                {
+                    acc += type_convert<float>(bias_host(n));
+                }
                 c_host(m, n) = type_convert<CDataType>(acc);
             }
         }
@@ -143,7 +198,7 @@ void RunBenchmark(const gemm_decode_tile_engine::DecodeProblem& p,
             const float d = type_convert<float>(c_dev.mData[i]);
             max_diff      = std::max(max_diff, std::abs(h - d));
         }
-        const float atol = 0.5f * std::sqrt(static_cast<float>(p.K));
+        const float atol = (kIsPerTensor ? 1.5f : 0.5f) * std::sqrt(static_cast<float>(p.K));
         std::cout << "verify: max_abs_diff = " << max_diff << " (atol = " << atol << ")"
                   << ((max_diff > atol) ? " FAIL" : " PASS") << std::endl;
     }
