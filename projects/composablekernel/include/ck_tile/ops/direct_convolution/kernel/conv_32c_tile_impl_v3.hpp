@@ -242,7 +242,8 @@ struct Config
             swizzle_type_str = "_xor_swizzle";
         }
 
-        std::string base = "mfma_" + mfma_str + "_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
+        std::string filter_str = (kh == 1 && kw == 1) ? "_filter_1x1" : "_filter_3x3";
+        std::string base = "mfma_" + mfma_str + filter_str + "_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
 
         if (epilogue == EpilogueType::RegistersToGlobalMemory)
         {
@@ -329,6 +330,30 @@ static constexpr Config<DT> configs[] = {
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 41
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 42
     {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 43
+
+    // --- CyclicShift 8-wave 3x3 (indices 44-47) ---
+    // 16x16x32, block_c=256, block_size=512
+    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                 // 44
+    {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift},                                                                // 45
+    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 46
+    {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 47
+
+    // --- CyclicShift 1x1 filter (indices 48-59) ---
+    // 2-wave 1x1: block_c=64, block_size=128
+    {.waves_per_wg = 2, .kh = 1, .kw = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                 // 48
+    {.waves_per_wg = 2, .kh = 1, .kw = 1, .swizzle_type = SwizzleType::CyclicShift},                                                                // 49
+    {.waves_per_wg = 2, .kh = 1, .kw = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 50
+    {.waves_per_wg = 2, .kh = 1, .kw = 1, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 51
+    // 8-wave 1x1: block_c=256, block_size=512
+    {.waves_per_wg = 8, .kh = 1, .kw = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                 // 52
+    {.waves_per_wg = 8, .kh = 1, .kw = 1, .swizzle_type = SwizzleType::CyclicShift},                                                                // 53
+    {.waves_per_wg = 8, .kh = 1, .kw = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 54
+    {.waves_per_wg = 8, .kh = 1, .kw = 1, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 55
+    // 16-wave 1x1: block_c=512, block_size=1024
+    {.waves_per_wg = 16, .kh = 1, .kw = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                 // 56
+    {.waves_per_wg = 16, .kh = 1, .kw = 1, .swizzle_type = SwizzleType::CyclicShift},                                                                // 57
+    {.waves_per_wg = 16, .kh = 1, .kw = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 58
+    {.waves_per_wg = 16, .kh = 1, .kw = 1, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 59
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -340,6 +365,8 @@ template <DataType DT = DataType::fp16>
 inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
 {
     if(par.direction != cfg.direction)
+        return false;
+    if(par.kh != cfg.kh || par.kw != cfg.kw)
         return false;
     // C_in must equal block_c (= waves_per_wg * channels_per_group).
     const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
@@ -1154,7 +1181,15 @@ constexpr KernelVariant make_variant()
         .is_applicable =
             [](const Conv2dParams& par)
         {
-            if(!is_applicable_base(par))
+            if(par.order != TensorOrder::NHWC)
+                return false;
+            if(par.direction != Direction::Fprop && par.direction != Direction::Dgrad)
+                return false;
+            if(!((par.kh == 3 && par.kw == 3) || (par.kh == 1 && par.kw == 1)))
+                return false;
+            if(par.stride_h != 1 || par.stride_w != 1)
+                return false;
+            if(par.dilation_h != 1 || par.dilation_w != 1)
                 return false;
             if(par.in_type != DT || par.wei_type != DT || par.out_type != DT)
                 return false;

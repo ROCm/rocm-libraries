@@ -97,3 +97,21 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<38, dir
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<39, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<42, direct_conv::Version::v3>, SIGNATURE>);
 
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — CyclicShift 8-wave 3x3
+// Dgrad configs 44 (DRAM), 46 (LDS)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<44, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<46, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — CyclicShift 1x1 filter
+// Dgrad configs 48,50 (2-wave), 52,54 (8-wave), 56,58 (16-wave)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<48, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<50, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<52, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<54, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<56, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<58, direct_conv::Version::v3>, SIGNATURE>);
+
