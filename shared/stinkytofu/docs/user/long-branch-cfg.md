@@ -1,6 +1,6 @@
 # Long-Branch CFG Construction
 
-This document describes how StinkyTofu builds correct Control-Flow Graphs (CFGs) for AMDGPU kernels that contain `s_setpc_b64` and `s_swappc_b64` instructions (long branches and function-style call dispatch).
+This document describes how StinkyTofu builds correct Control-Flow Graphs (CFGs) for AMDGPU kernels that use the **`s_setpc_b64` long-branch idiom** (runtime PC fixup to a distant label). **`s_swappc_b64`** shares `IF_IndirectBranch` but is used for function-style dispatch.
 
 ## Why this matters
 
@@ -15,10 +15,8 @@ s_addc_u32   sD+1, sD+1, 0             // 64-bit add (carry)
 s_setpc_b64  s[D:D+1]                  // jump to label_target
 ```
 
-`s_swappc_b64` plays the analogous role for function-style call dispatch (saving the return PC into a destination SGPR pair).
-
-Because both `s_setpc_b64` and `s_swappc_b64` take their target from a **register**, they are *indirect* branches as far as the assembler is concerned.
-Without extra metadata the CFG builder cannot know which label the branch actually targets, and the basic block containing the long branch ends up with no statically-known successor. That broke:
+Because `s_setpc_b64` takes its target from a **register**, it is an *indirect* branch as far as the assembler is concerned.
+Without `LabelData` the CFG builder cannot know which label it targets, and the basic block containing the long branch ends up with no statically-known successor edge. That broke:
 
 - dominator analysis (the long-branch target appeared unreachable),
 - DAG scheduling at region boundaries that crossed long branches,
@@ -43,25 +41,37 @@ instruction carrying a `LabelData{X}` modifier whose `label` is the target.
 Downstream passes only need to read `getBranchTargets()` — they do not need
 to know which path produced the metadata.
 
+### Quick IR example
+
+```
+st.func @kernel() {
+^bb_before:
+  "st.s_getpc_b64"(s[62:63]) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_add_i32"(s64, label_PrefetchEnd, 4) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_add_u32"(s62, s62, s64) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_addc_u32"(s63, s63, 0) { issueCycles = 1, latencyCycles = 1 }
+  // Metadata only — emitted asm is still s_setpc_b64 s[62:63]
+  "st.s_setpc_b64"(s[62:63]) {
+    issueCycles = 1, latencyCycles = 1,
+    mod.label = { label = "label_PrefetchEnd", alignment = 1 }
+  }
+
+^label_PrefetchEnd:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+```
+
+`getBranchTargets` on the `s_setpc_b64` returns `{"label_PrefetchEnd"}`; `CFGBuilderPass`
+adds a successor edge `bb_before → label_PrefetchEnd`. Without `mod.label`, the same
+`s_setpc_b64` would return `{}` and the CFG would not know the target block.
+
 ## Branch vocabulary
 
-"Branch vocabulary" is the small set of flags, modifiers, and helper predicates that the CFG builder and every branch-aware pass agree to speak in. Adding it does not, by itself, change any CFG: it just gives producers (the converter, `LongBranchLoweringPass`, function-call dispatch) a uniform place to record what an indirect branch is and where it goes, and gives consumers a single API (`isBranch` / `isCall` / `isReturn` / `getBranchTargets`) to read it back.
+"Branch vocabulary" is the small set of flags, modifiers, and helper predicates that the CFG builder and every branch-aware pass agree to speak in. Adding it does not, by itself, change any CFG: it gives producers (the converter, `LongBranchLoweringPass`) a uniform place to record **`LabelData` on `s_setpc_b64`** for long branches, and gives consumers a single API (`isBranch` / `isIndirectBranch` / `getBranchTargets`) to read it back.
 
 ### Instruction flags (`InstFlag`)
 
-Three new flags in `include/stinkytofu/hardware/Flags.def` classify non-direct branches:
-
-```
-MACRO(IF_IndirectBranch)   // target PC computed from a register
-MACRO(IF_Call)             // call-style transfer (saves return address)
-MACRO(IF_Return)           // hardware-level return
-```
-
-Conventions:
-
-- `IF_IndirectBranch` is always set together with `IF_Branch`.
-- `IF_Call` is always set together with `IF_Branch + IF_IndirectBranch` on current AMDGPU hardware (only `s_swappc_b64` is a call).
-- `IF_Return` is reserved for true hardware returns. No AMDGPU instruction sets it today; activation-style "return via `s_setpc_b64`" is conveyed by the `ReturnTerminatorData` modifier instead, which `isReturn()` also honours. The flag exists now so `isReturn()` has a stable shape; there is no producer for it yet.
+`IF_IndirectBranch` in `include/stinkytofu/hardware/Flags.def` marks branches whose target PC comes from a register (`s_setpc_b64`, `s_swappc_b64`). It is always set together with `IF_Branch`.
 
 ### Branch helpers (`StinkyAsmIR.hpp`)
 
@@ -69,37 +79,18 @@ Conventions:
 
 | Helper | Returns true for |
 |--------|------------------|
-| `isBranch(inst)` | Any branch (direct, conditional, indirect, call). |
+| `isBranch(inst)` | Any branch (direct, conditional, indirect). |
 | `isConditionalBranch(inst)` | `s_cbranch_*` family. |
 | `isUnconditionalBranch(inst)` | `isBranch && !isConditionalBranch`. |
 | `isIndirectBranch(inst)` | `IF_IndirectBranch` set (e.g. `s_setpc_b64`, `s_swappc_b64`). |
-| `isCall(inst)` | `IF_Call` set (e.g. `s_swappc_b64`). |
-| `isReturn(inst)` | `IF_Return` set **or** `ReturnTerminatorData` modifier present. |
 
-The CFG-relevant query is `getBranchTargets(inst) -> std::vector<std::string>`. It returns every intra-`Function` successor label in source order, applying the following resolution order:
+The CFG-relevant query is `getBranchTargets(inst) -> std::vector<std::string>`. It returns label names that `CFGBuilderPass` may wire as successor edges within the current `Function`, in source order:
 
-1. **`CallTargetData` / `ReturnTerminatorData` modifiers → `{}`**. Calls and returns transfer control to / from a *different* `Function`; their edges are inter-`Function` and not represented in the local CFG. The current code does not stamp these modifiers anywhere; the helper handles them defensively so that function-call dispatch can wire them up later without re-touching the helpers.
-2. **`LabelData` modifier → `{label}`**. Set by the converter for normal rocisa branches and for `SSetPCB64.longBranchLabel`; also set by `LongBranchLoweringPass` after pattern-matching the raw-asm idiom.
-3. **`isIndirectBranch(inst)` → `{}`**. Without metadata an indirect branch has no statically-known successor.
-4. **Legacy `LiteralString` first src operand → `{src0_string}`**. This is the path used by `s_branch` / `s_cbranch_*` parsed from raw `.s`, where the parser stores the label as the literal-string operand.
+1. **`LabelData` modifier → `{label}`**. Set by the converter for normal rocisa branches and for `SSetPCB64.longBranchLabel`; also set by `LongBranchLoweringPass` after pattern-matching the raw-asm idiom.
+2. **`isIndirectBranch(inst)` → `{}`**. Without `LabelData` an indirect branch has no statically-known successor.
+3. **Legacy `LiteralString` first src operand → `{src0_string}`**. This is the path used by `s_branch` / `s_cbranch_*` parsed from raw `.s`, where the parser stores the label as the literal-string operand.
 
 A single-target shim, `getBranchTarget(inst)`, returns the first element of `getBranchTargets(inst)` (or `""` if empty) for callers that pre-date the multi-target form.
-
-### Inter-function modifiers (`StinkyModifiers.hpp`)
-
-Two modifier types are defined alongside `LabelData` as forward-compatible scaffolding:
-
-```cpp
-struct CallTargetData : public TypedModifier<CallTargetData> {
-    std::vector<std::string> calleeNames;
-};
-
-struct ReturnTerminatorData : public TypedModifier<ReturnTerminatorData> {};
-```
-
-The branch helpers above already understand them — `getBranchTargets` returns `{}` when either is present (resolution rule 1), and `ReturnTerminatorData` also forces `isReturn()` to be true. No production code stamps these modifiers yet; they exist so the helpers, the CFG fall-through rules, and the test scaffolding reach a stable contract that function-call dispatch can plug into without re-touching shared code.
-
-When the producers do land, the modifiers always **win over** `LabelData`: an instruction may carry both for documentation, but a call/return wins for CFG purposes.
 
 ### ISA reclassification and CFG fall-through rules
 
@@ -107,31 +98,22 @@ The Gfx1250 instruction table (`hardware/src/gfx/Gfx1250/Gfx1250Instructions.def
 now reflects the actual hardware semantics:
 
 ```
-SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, Call, IndirectBranch, HasSideEffect}, ...
-SSetpcB64Inst,  "s_setpc_b64",  .flags = {Branch,       IndirectBranch, HasSideEffect}, ...
+SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, ...
+SSetpcB64Inst,  "s_setpc_b64",  .flags = {Branch, IndirectBranch, HasSideEffect}, ...
 ```
 
-`CFGBuilderPass` (in `src/transforms/asm/CFGBuilderPass.cpp`) now decides
-fall-through based on the new flags:
+`CFGBuilderPass` (in `src/transforms/asm/CFGBuilderPass.cpp`) adds successor edges
+from `getBranchTargets` and fall-through only for **conditional** branches.
+**Unconditional** branches (including `s_setpc_b64` and `s_swappc_b64`) do not
+fall through.
 
-- **Return** (`isReturn`) → no fall-through.
-- **Conditional branch** (`isConditionalBranch`) → fall-through (else arm).
-- **Call** (`isCall`) → fall-through (control returns after the callee).
-- **Other unconditional branch** (incl. indirect branches like `s_setpc_b64`
-  with no metadata) → no fall-through.
-
-Combined with the `getBranchTargets` resolution order above, this gives the
-CFG these properties for the two new opcodes when they appear without
-metadata:
-
-| Instruction | Successors | Fall-through |
-|-------------|------------|--------------|
+| Instruction | Successor edges (`getBranchTargets`) | Fall-through |
+|-------------|--------------------------------------|--------------|
 | `s_setpc_b64` (no `LabelData`) | none | no — block after is unreachable |
 | `s_setpc_b64` with `LabelData{X}` | block labelled `X` | no |
-| `s_swappc_b64` (no metadata) | next block (fall-through only) | yes — return-after-call |
-| `s_swappc_b64` with `CallTargetData` | next block (fall-through only) | yes |
+| `s_swappc_b64` | none | no — not modeled |
 
-These rules are exercised end-to-end by `tests/unit/asm/SetpcSwappcCfgTest.cpp`.
+`tests/unit/asm/SetpcSwappcCfgTest.cpp` exercises `s_setpc_b64` and `s_swappc_b64` CFG behaviour.
 
 ## Long-branch lowering
 
@@ -143,7 +125,7 @@ These rules are exercised end-to-end by `tests/unit/asm/SetpcSwappcCfgTest.cpp`.
 - Source: `src/transforms/asm/LongBranchLoweringPass.cpp`
 - Tests:  `tests/unit/asm/LongBranchLoweringTest.cpp`, `tests/filecheck/cfg_long_branch.s`
 
-The pass walks each basic block and, for every `s_setpc_b64` that carries no `LabelData` / `CallTargetData` / `ReturnTerminatorData`, scans **backward within the same block** for the rocisa long-branch fingerprint:
+The pass walks each basic block and, for every `s_setpc_b64` that carries no `LabelData`, scans **backward within the same block** for the rocisa long-branch fingerprint:
 
 ```
 s_getpc_b64                  s[D:D+1]              (optional anchor)
@@ -159,7 +141,7 @@ The label "LBL" comes from the `s_add_i32 ?, LBL, ±4` anchor (its first src ope
 
 Defensive properties:
 
-- **Idempotent**: skips any `s_setpc_b64` that already has `LabelData`, `CallTargetData`, or `ReturnTerminatorData`.
+- **Idempotent**: skips any `s_setpc_b64` that already has `LabelData`.
 - **No instruction rewriting**: only attaches a `LabelData` modifier; the emitted assembly is byte-identical.
 - **Preserves CFG analyses** (`return preserveCFGAnalyses();`): subsequent CFG construction picks up the new modifier automatically.
 
@@ -251,20 +233,6 @@ The last two rows are not a regression: hardware semantics really do
 say the target is unknown statically. Code that needs a successor edge
 must either stamp `LabelData` itself or arrange for `LongBranchLoweringPass`
 to run before the CFG it depends on is built.
-
-## Quick reference — choosing the right helper
-
-When writing a new pass that touches branches, prefer the high-level helpers in `StinkyAsmIR.hpp` over poking at flags directly:
-
-| If you want to ask… | Use this |
-|---------------------|----------|
-| "Is this any kind of branch?" | `isBranch(inst)` |
-| "Is this a terminator that falls through to the next block?" | `!isReturn(inst) && (!isBranch(inst) \|\| isConditionalBranch(inst) \|\| isCall(inst))` (this is exactly the rule `CFGBuilderPass` uses) |
-| "Does this leave the local CFG?" | `isCall(inst) \|\| isReturn(inst)` |
-| "Where does this branch go (intra-`Function`)?" | `getBranchTargets(inst)` (preferred) or `getBranchTarget(inst)` (single-target shim) |
-| "Is the target statically known?" | `!getBranchTargets(inst).empty()` |
-
-Do **not** read `LabelData` directly from a branch instruction — go through `getBranchTargets`. The resolution order (call/return modifiers → `LabelData` → indirect-branch fallback → legacy `LiteralString`) is intentionally centralised so passes stay consistent across input paths.
 
 ## See also
 

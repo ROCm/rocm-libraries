@@ -215,11 +215,8 @@ class LongBranchLoweringPassImpl : public Pass {
                 if (!inst) continue;
                 if (inst->getUnifiedOpcode() != GFX::s_setpc_b64) continue;
 
-                // Skip if the converter or a prior pass already stamped a
-                // statically-known target / call / return semantic.
+                // Skip if the converter or a prior pass already stamped a target.
                 if (inst->getModifier<LabelData>() != nullptr) continue;
-                if (inst->getModifier<CallTargetData>() != nullptr) continue;
-                if (inst->getModifier<ReturnTerminatorData>() != nullptr) continue;
 
                 std::optional<std::string> label = matchLongBranchIdiom(bb, it);
                 if (!label) continue;

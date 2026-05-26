@@ -449,35 +449,19 @@ inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
-inline bool isCall(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_Call);
-}
-
-// Returns true for a return-style transfer of control. Considers both the
-// IF_Return hardware flag and the ReturnTerminatorData modifier (the latter is
-// stamped by the converter on activation-style "setpc as return" instructions).
-inline bool isReturn(const StinkyInstruction& inst) {
-    if (inst.is(InstFlag::IF_Return)) return true;
-    return inst.getModifier<ReturnTerminatorData>() != nullptr;
-}
-
-// Returns every intra-Function CFG successor label of \p inst, in source order.
+// Label names of basic-block targets for \p given branch instruction.
 //
-// Resolution order:
-//   1. CallTargetData / ReturnTerminatorData modifiers yield {}: those are
-//      inter-Function transfers, modelled by CallGraphAnalysis rather than the
-//      local CFG.
-//   2. LabelData modifier (set by the converter for rocisa branches and by
-//      LongBranchLoweringPass for the s_setpc_b64 long-branch idiom).
-//   3. Indirect branches without metadata yield {} (target unknown statically).
-//   4. Legacy fallback: a LiteralString first src operand (raw .s direct branches).
+// At most one target is returned today. Switch / multi-way branch semantics
+// (several labels from one terminator) are not modeled.
 //
-// For non-branch instructions returns {}.
+// Resolution (first match wins):
+//   - Not a branch → {}
+//   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
+//   - IF_IndirectBranch without LabelData → {}
+//   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
+//   - Otherwise → {}
 inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
     if (!isBranch(inst)) return {};
-
-    if (inst.getModifier<CallTargetData>() != nullptr) return {};
-    if (inst.getModifier<ReturnTerminatorData>() != nullptr) return {};
 
     if (const auto* label = inst.getModifier<LabelData>()) {
         return {label->label};
@@ -492,7 +476,7 @@ inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) 
 }
 
 // Single-target shim. Returns the first label from getBranchTargets(), or "" if
-// the instruction has no statically-known intra-Function successor.
+// the instruction has no statically-known branch target label.
 inline std::string getBranchTarget(const StinkyInstruction& inst) {
     auto targets = getBranchTargets(inst);
     return targets.empty() ? std::string{} : targets.front();

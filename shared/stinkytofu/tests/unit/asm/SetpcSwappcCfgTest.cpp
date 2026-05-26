@@ -94,64 +94,8 @@ class SetpcSwappcCfgTest : public ::testing::Test {
     }
 };
 
-// After Commit 3, s_setpc_b64 is classified as IF_Branch + IF_IndirectBranch.
-// With no LabelData/CallTargetData modifier, it is an unknown indirect branch:
-// no intra-Function successor, no fall-through. The block AFTER the setpc must
-// therefore be unreachable (no predecessor).
-TEST_F(SetpcSwappcCfgTest, SetpcWithoutMetadataHasNoSuccessorAndDoesNotFallThrough) {
-    createSetpc(entry, /*srcSGPR=*/0);
-    createLabelInst(entry, "after_setpc");
-    createNop(entry);
-
-    runCFGBuilder();
-
-    BasicBlock* setpcBlock = func->getEntryBlock();
-    BasicBlock* afterBlock = findBlock("after_setpc");
-    ASSERT_NE(setpcBlock, nullptr);
-    ASSERT_NE(afterBlock, nullptr);
-    ASSERT_NE(setpcBlock, afterBlock) << "CFG builder must split at the label";
-
-    EXPECT_TRUE(setpcBlock->getSuccessors().empty())
-        << "Indirect branch with no metadata has no statically-known successor.";
-    EXPECT_TRUE(afterBlock->getPredecessors().empty())
-        << "Block after s_setpc_b64 must be unreachable: setpc is unconditional "
-           "and has no fall-through.";
-}
-
-// s_swappc_b64 is a call (IF_Branch + IF_Call + IF_IndirectBranch). Even though
-// its callee target is not visible inside this Function, control returns to the
-// instruction after the call; the local CFG must keep the fall-through edge.
-TEST_F(SetpcSwappcCfgTest, SwappcFallsThroughToNextBlock) {
-    createSwappc(entry, /*dstSGPR=*/2, /*srcSGPR=*/0);
-    createLabelInst(entry, "after_call");
-    createNop(entry);
-
-    runCFGBuilder();
-
-    BasicBlock* callBlock = func->getEntryBlock();
-    BasicBlock* afterBlock = findBlock("after_call");
-    ASSERT_NE(callBlock, nullptr);
-    ASSERT_NE(afterBlock, nullptr);
-    ASSERT_NE(callBlock, afterBlock);
-
-    // The callee target lives in another Function (modelled later by
-    // CallGraphAnalysis), so the local successor list does NOT include it.
-    EXPECT_TRUE(callBlock->getSuccessors().empty() ||
-                std::find(callBlock->getSuccessors().begin(), callBlock->getSuccessors().end(),
-                          afterBlock) != callBlock->getSuccessors().end())
-        << "Call block may only have a fall-through successor (no inter-Function edges).";
-
-    const auto& succs = callBlock->getSuccessors();
-    ASSERT_EQ(succs.size(), 1u) << "Call must keep exactly one fall-through CFG successor.";
-    EXPECT_EQ(succs.front(), afterBlock);
-
-    const auto& preds = afterBlock->getPredecessors();
-    ASSERT_EQ(preds.size(), 1u);
-    EXPECT_EQ(preds.front(), callBlock);
-}
-
-// Commit 6 contract: when the rocisa->StinkyTofu converter encounters an
-// SSetPCB64 with non-empty longBranchLabel, it stamps a LabelData{...} modifier
+// when the rocisa->StinkyTofu converter encounters an SSetPCB64 with non-empty
+// longBranchLabel, it stamps a LabelData{...} modifier
 // on the s_setpc_b64. This test verifies the StinkyTofu-side behaviour the
 // converter relies on: an s_setpc_b64 carrying LabelData{X} must produce a CFG
 // edge to the basic block labelled X, with no fall-through and no other

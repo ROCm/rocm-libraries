@@ -54,8 +54,6 @@ TEST_F(BranchHelpersTest, SBranchIsUnconditionalDirectBranch) {
     EXPECT_TRUE(isBranch(*inst));
     EXPECT_FALSE(isConditionalBranch(*inst));
     EXPECT_TRUE(isUnconditionalBranch(*inst));
-    EXPECT_FALSE(isCall(*inst));
-    EXPECT_FALSE(isReturn(*inst));
     EXPECT_FALSE(isIndirectBranch(*inst));
 
     auto targets = getBranchTargets(*inst);
@@ -73,8 +71,6 @@ TEST_F(BranchHelpersTest, SCbranchIsConditionalBranch) {
     EXPECT_TRUE(isBranch(*inst));
     EXPECT_TRUE(isConditionalBranch(*inst));
     EXPECT_FALSE(isUnconditionalBranch(*inst));
-    EXPECT_FALSE(isCall(*inst));
-    EXPECT_FALSE(isReturn(*inst));
 
     auto targets = getBranchTargets(*inst);
     ASSERT_EQ(targets.size(), 1u);
@@ -93,17 +89,28 @@ TEST_F(BranchHelpersTest, LabelDataModifierIsPreferred) {
     EXPECT_EQ(targets[0], "preferred_label");
 }
 
-// A non-branch instruction yields no targets and is not a call/return/indirect.
+// A non-branch instruction yields no targets and is not an indirect branch.
 TEST_F(BranchHelpersTest, NonBranchHasNoTargets) {
     StinkyInstruction* inst = createVAddInBlock(bb, arch, 0, 1, 2);
 
     EXPECT_FALSE(isBranch(*inst));
     EXPECT_FALSE(isConditionalBranch(*inst));
-    EXPECT_FALSE(isCall(*inst));
-    EXPECT_FALSE(isReturn(*inst));
     EXPECT_FALSE(isIndirectBranch(*inst));
     EXPECT_TRUE(getBranchTargets(*inst).empty());
     EXPECT_EQ(getBranchTarget(*inst), "");
+}
+
+// s_swappc_b64 is an indirect unconditional branch with no static target.
+TEST_F(BranchHelpersTest, SwappcIsIndirectBranch) {
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, arch));
+    inst->addDestReg(StinkyRegister("s", 2, 2));
+    inst->addSrcReg(StinkyRegister("s", 0, 2));
+
+    EXPECT_TRUE(isBranch(*inst));
+    EXPECT_TRUE(isUnconditionalBranch(*inst));
+    EXPECT_TRUE(isIndirectBranch(*inst));
+    EXPECT_TRUE(getBranchTargets(*inst).empty());
 }
 
 }  // namespace

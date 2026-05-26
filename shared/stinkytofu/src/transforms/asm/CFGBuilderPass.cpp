@@ -174,9 +174,10 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // A single instruction may carry multiple intra-Function targets
-                    // (e.g. an indirect jump table); add an edge for each one we know.
-                    for (const std::string& targetLabel : getBranchTargets(*termInst)) {
+                    // assert for branches with no statically-known target labels
+                    const auto targets = getBranchTargets(*termInst);
+                    assert(!targets.empty() && "branch should have statically-known target labels");
+                    for (const std::string& targetLabel : targets) {
                         auto targetIt = labelMap.find(targetLabel);
                         if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
                     }
@@ -193,25 +194,15 @@ class CFGBuilderPassImpl : public Pass {
                     }
                 }
 
-                // Check if prevBB should fall through to current bb. This holds
-                // when prevBB has no terminator, or its terminator is a
-                // conditional branch (control may fall through when the
-                // condition is false), or its terminator is a call (control
-                // returns to the instruction after the call site).
-                //
-                // Unconditional branches and returns do not fall through. For
-                // calls we still emit a fall-through edge inside the local CFG
-                // even though the call's target lives in another Function;
-                // CallGraphAnalysis is responsible for the inter-Function
-                // call/return edges.
+                // Fall-through when prevBB has no terminator, or when its terminator
+                // is a conditional branch (may not be taken). Unconditional branches
+                // do not fall through, including register-target branches such as
+                // s_setpc_b64 (without LabelData) and s_swappc_b64.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
-                    if (isReturn(*prevTermInst)) {
+                    if (isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) {
                         shouldFallThrough = false;
-                    } else if (isBranch(*prevTermInst)) {
-                        shouldFallThrough =
-                            isConditionalBranch(*prevTermInst) || isCall(*prevTermInst);
                     }
                 }
 
