@@ -509,7 +509,9 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     // Initialize desc buffers to zero:
     for(const auto igpu : gpus)
     {
-        //const auto device = mydesc->descriptor->GPUs[igpu];
+        const auto device = mydesc->descriptor->GPUs[igpu];
+        rocfft_scoped_device dev(device);
+
         const auto bufsize = mydesc->descriptor->size[igpu];
         auto       devbuf  = mydesc->descriptor->data[igpu];
         auto       hipret  = hipMemset(devbuf, 0, bufsize);
