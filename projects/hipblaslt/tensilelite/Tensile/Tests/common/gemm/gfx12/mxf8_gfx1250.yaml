@@ -137,6 +137,8 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - HalfPLR: [0,1,2,3]
         - DepthU: [256]
         - TDMInst: [3]
         - TransposeLDS: [-1]
@@ -149,7 +151,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1,2]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -173,6 +175,10 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [256, 256, 1, 128]
+          - Exact: [256, 256, 1, 384]
+          - Exact: [256, 256, 1, 640]
+          - Exact: [256, 256, 1, 896]
           - Exact: [256, 256, 1, 2048]
           - Exact: [256, 256, 1, 2080] #tail
           - Exact: [257, 256, 1, 2048] #edge-m

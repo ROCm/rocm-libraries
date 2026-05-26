@@ -109,6 +109,7 @@ def getRequiredParametersMin() -> set:
         "MXScaleFormat",
         "MXLoadInst",
         'SwInstructionPrefetch',
+        'HalfPLR',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'Use64bShadowLimitMX',
