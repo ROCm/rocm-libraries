@@ -157,9 +157,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
 
-        // Step B2 (h hybrid): V goes back to async_load + ds_load_tr (B1 path).
-        // V dram window keeps the original (kN1, kK1) transposed view shape.
-        // K stays on TDM trivial tile-major (step 1 of λ).
+        // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
+        // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -259,17 +258,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
-        // Step B2 (β')-Q-fix + Q desc cleanup — Q LDS write/read view both
-        // use plain row-major desc. Mirrors the (β) K fix journey:
-        // - Pre-fix: TDM writer (plain bytes) + Xor=true reader (XOR'd byte
-        //   access) → mismatch on every n!=0 row → systematic XOR chunk-swap
-        //   pattern. Smoking gun: B2 Q dump 0/32 thread match B1, tid 1 全
-        //   sentinel-like -23.203 (uninit LDS). reviewer trace + Q dump
-        //   confirmed K↔Q analogy 100%.
-        // - Post-fix: both Xor=false plain row-major aligned. The `Xor`
-        //   template parameter on MakeQLdsBlockDescriptor was removed entirely
-        //   (TDM can't produce XOR'd LDS, dead code).
-        // See swe-status-K-LDS-dump-disambig.md + reviewer smoking-gun finding.
+        // Q LDS writer (TDM) and reader share plain row-major desc; TDM
+        // box-major write cannot produce XOR'd layout, so no swizzle here.
         auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<QDataType*>(smem_ptr), Policy::template MakeQLdsBlockDescriptor<Problem>());
 
@@ -299,11 +289,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {physical_seqlen_k_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem>());
 
-        // Step B2 (β + Task A cleanup) — K LDS write/read view both use plain
-        // row-major desc. The `Xor` template parameter on MakeKLdsBlockDescriptor
-        // was removed (TDM box-major write can't produce XOR'd LDS layout, so
-        // the XOR'd branch was unreachable dead code). Both writer + reader
-        // align on plain row-major byte layout. See swe-status-K-LDS-dump-disambig.md.
+        // K LDS writer (TDM) and reader share plain row-major desc; see Q
+        // comment above for the no-swizzle rationale.
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType*>(smem_ptr), Policy::template MakeKLdsBlockDescriptor<Problem>());
         auto k_lds_read_view = make_tensor_view<address_space_enum::lds>(
@@ -702,8 +689,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
 
-        // Step B2 (h hybrid): V goes back to async_load + ds_load_tr (B1 path).
-        // Group path mirrors batch path change above.
+        // Hybrid loaders: Q/K via TDM, V via async_load + ds_load_tr (same
+        // as the single-buffer overload above; see notes there).
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -804,7 +791,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
-        // Step B2 (β')-Q-fix + cleanup — drop trailing Xor=true (group path).
         auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<QDataType*>(smem_ptrk0),
             Policy::template MakeQLdsBlockDescriptor<Problem>());
@@ -838,7 +824,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {physical_seqlen_k_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem, true>());
 
-        // Step B2 Task A cleanup — drop trailing `Xor=true` template arg (param removed).
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
             Policy::template MakeKLdsBlockDescriptor<Problem, true>());

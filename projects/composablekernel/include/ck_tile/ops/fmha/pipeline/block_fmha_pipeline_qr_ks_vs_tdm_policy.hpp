@@ -77,25 +77,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return MaxLoadSizeInBytes * numeric_traits<VDataType>::PackedSize / sizeof(VDataType);
     }
 
-    // Step B2 (λ-Q) — trivial tile-major Q dram dist, mirrors (λ-K) at L168-190.
-    // Reviewer trace finding: Q LDS dump shows tid 1 全 -23.203 sentinel
-    // (uninit fp16 LDS) = TDM box doesn't cover plain row-major LDS
-    // because old 5D async-style dist was tailored for per-thread scatter
-    // writes (async_load_tile design). Under TDM box-major write, that
-    // mismatches the row-major Q LDS desc, leaving sentinel patches.
+    // Trivial tile-major Q dram dist (mirror of MakeKDramTileDistribution).
+    // TDM writes LDS in box-major order; the Q LDS desc is plain row-major.
+    // This distribution makes each thread's per-call footprint exactly one
+    // contiguous (kMPerBlock/warpNum × kKPerBlock) tile, so the box-major
+    // write lands on the row-major strip the reader expects. The QK GEMM
+    // (Q as A operand) register distribution is unchanged.
     //
-    // The trivial tile-major form (mirror K λ) makes each thread's
-    // per-call footprint exactly one contiguous (kMPerBlock/warpNum × kKPerBlock)
-    // tile, so:
-    //   * box-major TDM write lands at the row-major LDS strip the reader
-    //     expects;
-    //   * BlockGemm 0 (QK GEMM, Q is A operand) reg dist remains unchanged.
-    //
-    // Combined with (β')-Q-fix (reader Xor=false plain) — full K-side recipe
-    // applied to Q. See B2 reviewer pivot post-(β')-Q-fail report for context.
-    //
-    // Keep the `BypassLDS` template param to preserve existing call sites
-    // that bypass LDS (not used by TDM path but kept for symmetry).
+    // `BypassLDS` is kept for non-TDM call sites that bypass LDS entirely.
     template <typename Problem, bool BypassLDS = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQDramTileDistribution()
     {
@@ -152,32 +141,20 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         }
     }
 
-    // Step B2 (λ-1) — trivial tile-major K dram dist, mirrors GEMM v1
-    // ColMajor-B `MakeBDramTileDistribution`
-    // (gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp:117-126).
+    // Trivial tile-major K dram dist, mirrors the ColMajor-B path in
+    // gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp (MakeBDramTileDistribution).
     //
-    // Why this is needed: TDM hardware writes to LDS in **box-major order**
-    // (each thread writes a contiguous box of shape `box_dim` starting at
-    // `lds_coord`). Our K LDS descriptor is naive 2D (kN0, kK0) row-major
-    // (MakeKLdsBlockDescriptor). The ds_load reader (MakeKRegTileDistribution)
-    // is built from `WarpGemm::BWarpDstrEncoding` and assumes that
-    // contiguous-row interface.
+    // TDM writes LDS in box-major order (each thread writes a contiguous box
+    // of shape `box_dim`). The K LDS descriptor (MakeKLdsBlockDescriptor) is
+    // plain row-major (kN0, kK0); the ds_load reader (MakeKRegTileDistribution)
+    // is built from WarpGemm::BWarpDstrEncoding and assumes that contiguous-row
+    // interface. The distribution below makes thread-i's per-call footprint
+    // exactly one contiguous (kN0/warpNum × kK0) tile so the box-major write
+    // lands on the row-major strip the reader expects. The QK GEMM (K as B
+    // operand) register distribution is unchanged.
     //
-    // The B1 distribution was tailored for `async_load_tile` (per-thread
-    // scatter writes), so each thread's per-call footprint was *not* a
-    // contiguous LDS row. Under TDM, that mismatched the box-major writer
-    // and the row-major reader, producing 100%-wrong but deterministic
-    // garbage (B2 H3 root cause).
-    //
-    // The trivial tile-major form below makes thread-i's per-call footprint
-    // exactly one contiguous (kN0/warpNum × kK0) tile, so:
-    //   * box-major TDM write lands at the row-major LDS strip the reader
-    //     expects;
-    //   * BlockGemm 0 (QK GEMM, K is B operand) reg dist remains unchanged.
-    //
-    // Keep the `LoadOnce` template param to preserve the existing
-    // `MakeKDramTileDistribution<Problem, true>` call site (which uses
-    // kSubQKHeaddim instead of kK0).
+    // `LoadOnce` selects kSubQKHeaddim instead of kK0 for the K-axis length,
+    // matching the single-load (decode) variant of the kernel.
     template <typename Problem, bool LoadOnce = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
@@ -244,16 +221,9 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return static_cast<index_t>(16 / sizeof(QDataType));
     }
 
-    // Step B2 (β')-Q + Task A cleanup extension: Q LDS desc `Xor` template
-    // parameter removed. Same reasoning as K desc cleanup (TDM box-major
-    // write doesn't support swizzle, so XOR'd Q LDS layout was unreachable
-    // from TDM path, the only Q writer in this tdm pipeline). Old
-    // `if constexpr(Xor) { ... } else { ... }` branch had only the `else`
-    // (plain row-major) executed by TDM-compatible call sites; XOR'd branch
-    // was dead code that caused (β')-Q-fix bug (smoking gun: B2 Q dump
-    // 0/32 thread match B1 + tid 1 全 sentinel-like -23.203 = uninit LDS
-    // pattern, because Xor=true reader expected XOR'd bytes that TDM
-    // writer never wrote). Fix = align reader with writer (both plain).
+    // Plain row-major Q LDS desc. TDM box-major write cannot produce an XOR'd
+    // layout, so the Xor template param on the original generic descriptor
+    // was unreachable from this pipeline and has been removed.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
     {
@@ -268,13 +238,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                             number<1>{});
     }
 
-    // Step B2 cleanup (Task A): K LDS desc `Xor` template parameter removed.
-    // Rationale: TDM box-major write doesn't support swizzle, so XOR'd K LDS
-    // layout was unreachable from TDM path (the only K writer in this tdm
-    // pipeline). Old `if constexpr(Xor) { ... } else { ... }` branch had only
-    // the `else` (plain row-major) executed; XOR'd branch was dead code.
-    // Removing the param cuts ~80 lines of unreachable code and simplifies
-    // the call site signature for readability. Runtime equivalent.
+    // Plain row-major K LDS desc; same no-swizzle rationale as Q above.
     template <typename Problem, bool LoadOnce = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
     {
@@ -719,7 +683,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     }
 
     // -------------------------------------------------------------------------
-    // TDM LDS padding config (Step B2)
+    // TDM LDS padding config
     //
     // Mirrors the formula in
     //   gemm_universal_pipeline_ag_bg_cr_policy.hpp:1131 GetLdsPaddingConfig
@@ -738,38 +702,19 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
     {
-        // Step B2 (λ-Q) disambig: Q padding temporarily DISABLED.
-        // Same rationale as GetLdsPaddingConfigK/V (L781-802): H4' verified
-        // swizzle/padding is not the root cause of B2 garbage. K/V padding
-        // were disabled in (λ-1)/(λ-2) phases but Q padding was NOT
-        // synchronously disabled — historical asymmetry uncovered by
-        // mentor's Q4 padding hypothesis + QA Q dump sentinel signal
-        // (tid 1 全 -23.203 fp16 uninit).
-        //
-        // Mechanism: Q TDM writes WITH padding (every pad_interval dwords
-        // skip pad_amount dwords) into a Q LDS desc that is plain row-major
-        // (no padding) — writer/reader byte-position mismatch + skipped
-        // bytes hold sentinel.
-        //
-        // (λ-Q) trivial tile-major Q dram dist alone improved max_err
-        // 0.36→0.12 (3x improvement, tid 0 fully fixed) but tid 1 sentinel
-        // remained — confirming padding is independent root cause #2.
-        // This Q padding disable mirrors K/V pattern → expects max_err < 0.001.
-        //
-        // Re-enable after (λ-Q)+padding-disable+ABC pass during perf phase.
+        // Q LDS padding DISABLED. Enabling the writer-side padding alone
+        // misaligns the plain row-major Q LDS reader; padding is a
+        // bank-conflict perf optimization, not a correctness requirement,
+        // and is deferred to a follow-up perf pass (same as K/V below).
         return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
     {
-        // Step B2 (λ-1) disambig: K padding temporarily DISABLED.
-        // Rationale: H4' already verified swizzle/padding is not the root
-        // cause of B2 garbage. Disabling here narrows the variable set for
-        // step-1 verify (only K dram dist changes, not padding).
-        // Re-enable after (λ-1)+(λ-2) ABC pass. Original implementation
-        // mirrors gemm_universal_pipeline_ag_bg_cr_policy.hpp:1131; restore
-        // by reverting this hunk.
+        // K LDS padding DISABLED. Same rationale as Q above; original
+        // padded implementation mirrors
+        // gemm_universal_pipeline_ag_bg_cr_policy.hpp:1131.
         return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
 
