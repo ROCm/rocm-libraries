@@ -98,24 +98,24 @@ protected:
 // Test cases
 // ============================================================================
 
+// "Pure" = input, output, scale, compute all matching (scale/compute always FP32);
+// "Upcast" = input is FP16/BFP16 but output widens to FP32.
+
 // 1. Input: FP32, Scale: FP32, Output: FP32, Compute: FP32
-using IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32
-    = RMSNormForwardTraining<float, float, float, float>;
+using IntegrationGpuRMSnormForwardPureFp32 = RMSNormForwardTraining<float, float, float, float>;
 
 // 2. Input: FP16, Scale: FP32, Output: FP16, Compute: FP32
-using IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32
-    = RMSNormForwardTraining<half, float, half, float>;
+using IntegrationGpuRMSnormForwardPureFp16 = RMSNormForwardTraining<half, float, half, float>;
 
 // 3. Input: BFP16, Scale: FP32, Output: BFP16, Compute: FP32
-using IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32
+using IntegrationGpuRMSnormForwardPureBfp16
     = RMSNormForwardTraining<bfloat16, float, bfloat16, float>;
 
 // 4. Input: FP16, Scale: FP32, Output: FP32, Compute: FP32
-using IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32
-    = RMSNormForwardTraining<half, float, float, float>;
+using IntegrationGpuRMSnormForwardUpcastFp16 = RMSNormForwardTraining<half, float, float, float>;
 
 // 5. Input: BFP16, Scale: FP32, Output: FP32, Compute: FP32
-using IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32
+using IntegrationGpuRMSnormForwardUpcastBfp16
     = RMSNormForwardTraining<bfloat16, float, float, float>;
 }
 
@@ -123,28 +123,119 @@ using IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32
 // Test Registrations
 // ============================================================================
 
-// Register tests with different data types and layouts
-#define REGISTER_RMS_TEST(TestCase)                                                               \
-    /* --- NCHW --- */                                                                            \
-    using TestCase##NCHW = TestCase;                                                              \
-    TEST_P(TestCase##NCHW, Correctness)                                                           \
-    {                                                                                             \
-        runGraphTest(TensorLayout::NCHW);                                                         \
-    }                                                                                             \
-    INSTANTIATE_TEST_SUITE_P(Smoke, TestCase##NCHW, testing::ValuesIn(getRMSnormTestCases()));    \
-    INSTANTIATE_TEST_SUITE_P(Full, TestCase##NCHW, testing::ValuesIn(getRMSnormFullTestCases())); \
-    /* --- NCDHW --- */                                                                           \
-    using TestCase##NCDHW = TestCase;                                                             \
-    TEST_P(TestCase##NCDHW, Correctness)                                                          \
-    {                                                                                             \
-        runGraphTest(TensorLayout::NCDHW);                                                        \
-    }                                                                                             \
-    INSTANTIATE_TEST_SUITE_P(Smoke, TestCase##NCDHW, testing::ValuesIn(getRMSnorm3dTestCases()));
+// Pure Fp32 -----------------------------------------------------------------
 
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32);
+using IntegrationGpuRMSnormForwardPureNchwFp32 = IntegrationGpuRMSnormForwardPureFp32;
+TEST_P(IntegrationGpuRMSnormForwardPureNchwFp32, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardPureNchwFp32,
+                         testing::ValuesIn(getRMSnormTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuRMSnormForwardPureNchwFp32,
+                         testing::ValuesIn(getRMSnormFullTestCases()));
+
+using IntegrationGpuRMSnormForwardPureNcdhwFp32 = IntegrationGpuRMSnormForwardPureFp32;
+TEST_P(IntegrationGpuRMSnormForwardPureNcdhwFp32, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardPureNcdhwFp32,
+                         testing::ValuesIn(getRMSnorm3dTestCases()));
+
+// Pure Fp16 -----------------------------------------------------------------
+
+using IntegrationGpuRMSnormForwardPureNchwFp16 = IntegrationGpuRMSnormForwardPureFp16;
+TEST_P(IntegrationGpuRMSnormForwardPureNchwFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardPureNchwFp16,
+                         testing::ValuesIn(getRMSnormTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuRMSnormForwardPureNchwFp16,
+                         testing::ValuesIn(getRMSnormFullTestCases()));
+
+using IntegrationGpuRMSnormForwardPureNcdhwFp16 = IntegrationGpuRMSnormForwardPureFp16;
+TEST_P(IntegrationGpuRMSnormForwardPureNcdhwFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardPureNcdhwFp16,
+                         testing::ValuesIn(getRMSnorm3dTestCases()));
+
+// Pure Bfp16 ----------------------------------------------------------------
+
+using IntegrationGpuRMSnormForwardPureNchwBfp16 = IntegrationGpuRMSnormForwardPureBfp16;
+TEST_P(IntegrationGpuRMSnormForwardPureNchwBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardPureNchwBfp16,
+                         testing::ValuesIn(getRMSnormTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuRMSnormForwardPureNchwBfp16,
+                         testing::ValuesIn(getRMSnormFullTestCases()));
+
+using IntegrationGpuRMSnormForwardPureNcdhwBfp16 = IntegrationGpuRMSnormForwardPureBfp16;
+TEST_P(IntegrationGpuRMSnormForwardPureNcdhwBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardPureNcdhwBfp16,
+                         testing::ValuesIn(getRMSnorm3dTestCases()));
+
+// Upcast Fp16 ---------------------------------------------------------------
+
+using IntegrationGpuRMSnormForwardUpcastNchwFp16 = IntegrationGpuRMSnormForwardUpcastFp16;
+TEST_P(IntegrationGpuRMSnormForwardUpcastNchwFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardUpcastNchwFp16,
+                         testing::ValuesIn(getRMSnormTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuRMSnormForwardUpcastNchwFp16,
+                         testing::ValuesIn(getRMSnormFullTestCases()));
+
+using IntegrationGpuRMSnormForwardUpcastNcdhwFp16 = IntegrationGpuRMSnormForwardUpcastFp16;
+TEST_P(IntegrationGpuRMSnormForwardUpcastNcdhwFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardUpcastNcdhwFp16,
+                         testing::ValuesIn(getRMSnorm3dTestCases()));
+
+// Upcast Bfp16 --------------------------------------------------------------
+
+using IntegrationGpuRMSnormForwardUpcastNchwBfp16 = IntegrationGpuRMSnormForwardUpcastBfp16;
+TEST_P(IntegrationGpuRMSnormForwardUpcastNchwBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardUpcastNchwBfp16,
+                         testing::ValuesIn(getRMSnormTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuRMSnormForwardUpcastNchwBfp16,
+                         testing::ValuesIn(getRMSnormFullTestCases()));
+
+using IntegrationGpuRMSnormForwardUpcastNcdhwBfp16 = IntegrationGpuRMSnormForwardUpcastBfp16;
+TEST_P(IntegrationGpuRMSnormForwardUpcastNcdhwBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuRMSnormForwardUpcastNcdhwBfp16,
+                         testing::ValuesIn(getRMSnorm3dTestCases()));
 
 } // namespace hip_kernel_provider::rmsnorm::test
