@@ -35,6 +35,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
@@ -632,6 +633,7 @@ int main(int argc, char** argv) {
             }
             passManager.setPassFeatureConfig(passFeatureConfig);
             setKernelConfig(passManager, arch);
+            passManager.setAsmCapsConfig(stinkytofu::ToolchainCaps::probe(archID));
 
             for (const auto& passName : requestedPasses) {
                 auto pass = createPassByName(passName);
