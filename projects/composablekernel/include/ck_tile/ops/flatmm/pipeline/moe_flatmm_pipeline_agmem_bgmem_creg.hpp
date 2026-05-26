@@ -131,7 +131,8 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        return PipelinePolicy::template GetSmemSize<Problem>();
+        // operator() ping/pongs the A-LDS buffer, so allocate 2x.
+        return 2 * PipelinePolicy::template GetSmemSize<Problem>();
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto

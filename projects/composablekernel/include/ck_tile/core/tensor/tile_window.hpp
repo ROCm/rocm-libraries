@@ -351,6 +351,7 @@ struct tile_window_with_static_distribution
         }();
 
         // this is an optimization used in gfx125 where lds descriptor don't include xor swizzle
+#if defined(__gfx125__)
         if constexpr((Base::BottomTensorView::buffer_view::get_address_space() ==
                       address_space_enum::lds) &&
                      (!remove_cvref_t<
@@ -416,6 +417,7 @@ struct tile_window_with_static_distribution
             });
         }
         else
+#endif
         {
             // loop over thread tensor space [y0, y1, ...]
             static_for<0, NumCoord, 1>{}([&](auto iCoord) {
