@@ -1315,16 +1315,13 @@ inline void sort_keys_large_sizes()
         }
 
         // Generate data
+        if(!memcheck.alloc_host<key_type>(size))
         {
-            if (!memcheck.alloc_host<key_type>(size))
-            {
-                break;
-            }
-            std::vector<key_type> keys_input(size);
-            std::iota(keys_input.begin(), keys_input.end(), 0);
-            d_keys.store(keys_input);
-            memcheck.free_host<key_type>(size);
+            break;
         }
+        std::vector<key_type> keys_input(size);
+        std::iota(keys_input.begin(), keys_input.end(), 0);
+        d_keys.store(keys_input);
 
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(rocprim::radix_sort_keys(nullptr,

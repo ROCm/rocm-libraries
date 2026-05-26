@@ -83,16 +83,14 @@ inline unsigned long long get_total_system_memory(bool is_apu)
 }
 
 
-// MemCheck tracks host and device memory usage to skip test sizes that would
-// exceed available memory. This is needed on APU systems where CPU and GPU share
-// a single memory pool, making it easy to exhaust memory with large test inputs.
+// MemCheck checks whether a prospective allocation would exceed currently available
+// memory, querying the OS on every call to account for other processes. This is
+// needed on APU systems where CPU and GPU share a single memory pool, making it
+// easy to exhaust memory with large test inputs.
 //
-// The MemCheck alloc() functions are called before the actual memory allocation
-// so the code can gracefully handle an out-of-memory situation.
+// The alloc() functions are called before the actual memory allocation so the
+// code can gracefully handle an out-of-memory situation.
 //
-// The MemCheck free() functions must be called when memory is freed before the
-// end of the MemCheck object's scope.
-// 
 // For tests with a single input size (skip the whole test):
 //
 //   MemCheck mem_check;
@@ -112,280 +110,112 @@ inline unsigned long long get_total_system_memory(bool is_apu)
 //       HIP_CHECK(hipFree(d_ptr));
 //   }
 //
-//  It is possible to create one MemCheck object outside of the size loop, but
-//  that introduces the possibility of forgetting to call free() on something
-//  allocated inside the loop, and thus incorrect memory tracking for subsequent
-//  loop iterations.  Creating a new MemCheck object each time ensures correct
-//  tracking for the current size.
-//
 // Set the ROCPRIM_MEMCHECK_LOGGING environment variable to enable diagnostic output.
 
 class MemCheck
 {
 public:
-	// padding_factor is a value in [0, 1] that indicates how much of a buffer we should leave below
-	// the calculated memory limits.
-	// i.e when allocations are >= actual_limit * (1 - padding_factor), then assume we're out of memory.
-	MemCheck(const hipStream_t stream = 0, const float padding_factor = 0.1f) :
-		padding_factor(padding_factor)
+    // padding_factor is a value in [0, 1] that indicates how much of a buffer we should leave
+    // below the available memory.
+    // i.e. when a prospective allocation >= free_memory * (1 - padding_factor), assume OOM.
+    MemCheck(const hipStream_t stream = 0, const float padding_factor = 0.1f)
+        : padding_factor(padding_factor)
     {
-        // Some of this information could be queried once and stored as static data
-        // to be shared across multiple instances of MemCheck.
-        // This constructor is not meant to be in performance critical code so it's OK
-        // if we end up repeatedly querying the same data to keep things simpler.
-
         char* env = common::__get_env("ROCPRIM_MEMCHECK_LOGGING");
         logging_enabled = (env != nullptr) && (strcmp(env, "1") == 0);
         common::clean_env(env);
-
-        size_t free_dev_mem;
-        HIP_CHECK(hipMemGetInfo(&free_dev_mem, &dev_limit));
-        dev_usage = dev_limit - free_dev_mem;
-
-#ifdef _WIN32
-        MEMORYSTATUSEX mem_status;
-        mem_status.dwLength = sizeof(mem_status);
-        GlobalMemoryStatusEx(&mem_status);
-        host_limit = mem_status.ullTotalPhys;
-        host_usage = mem_status.ullTotalPhys - mem_status.ullAvailPhys;
-#else
-        host_limit = sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
-
-        // MemAvailable accounts for reclaimable page cache and slab memory,
-        // so it more accurately reflects what the OS can give to a new allocation
-        // than MemFree alone.
-        size_t mem_available = 0;
-        {
-            std::ifstream meminfo("/proc/meminfo");
-            std::string label;
-            size_t value;
-            std::string unit;
-            while(meminfo >> label >> value >> unit)
-            {
-                if(label == "MemAvailable:")
-                {
-                    mem_available = value * 1024; // kB → bytes
-                    break;
-                }
-            }
-        }
-        host_usage = host_limit - mem_available;
-#endif
 
         rocprim::detail::target_arch arch;
         HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
         is_apu = test_utils::is_apu(arch);
 
-        if (is_apu) {
-            // For APUs, OS will share up to half of system memory, not exceeding the
-            // amount of reported device memory.
-            dev_shared = std::min(dev_limit, host_limit / 2);
-            // The carved memory is the difference between the total memory and shared.
-            dev_carved = dev_limit - dev_shared;
-        }
-
-        if (logging_enabled)
+        if(logging_enabled)
         {
-            std::cout << "MemCheck: device " << toMB(dev_usage) << "/" << toMB(dev_limit)
-                    << " MiB, host " << toMB(host_usage) << "/" << toMB(host_limit)
-                    << " MiB, dev_shared: " << toMB(dev_shared) << " MiB, dev_carved: " << toMB(dev_carved)
-                    << " MiB, is_apu=" << is_apu << std::endl;
+            std::cout << "MemCheck: is_apu=" << is_apu << std::endl;
         }
     }
 
-	// Call this before host allocs
     template<typename T>
     inline bool alloc_host(const size_t size)
     {
-        size_t bytes = sizeof(T) * size;
-        return alloc_host_bytes(bytes);
+        return alloc_host_bytes(sizeof(T) * size);
     }
 
     inline bool alloc_host_bytes(const size_t bytes)
     {
-        if (logging_enabled)
+        size_t free_host = get_free_host_bytes();
+        bool   success   = bytes <= static_cast<size_t>(free_host * (1.0f - padding_factor));
+
+        if(logging_enabled)
         {
-            std::cout << "alloc host: " << toMB(bytes) << " MiB" << std::endl;
+            std::cout << "alloc_host_bytes: " << toMB(bytes) << " MiB, free_host="
+                      << toMB(free_host) << " MiB"
+                      << (success ? "" : " -- out of memory") << std::endl;
         }
-        host_usage += bytes;
-        return mem_check_host();
+        return success;
     }
 
-    // Call this before host frees
-    template<typename T>
-    inline void free_host(const size_t size)
-    {
-        size_t bytes = sizeof(T) * size;
-        return free_host_bytes(bytes);
-    }
-
-    inline void free_host_bytes(const size_t bytes)
-    {
-        if (logging_enabled)
-        {
-            std::cout << "free host: " << toMB(bytes) << " MiB" << std::endl;
-        }
-        host_usage -= bytes;
-    }
-
-	// Call this before dev allocs
     template<typename T>
     inline bool alloc_device(const size_t size)
     {
-        size_t bytes = sizeof(T) * size;
-        return alloc_device_bytes(bytes);
+        return alloc_device_bytes(sizeof(T) * size);
     }
 
     inline bool alloc_device_bytes(const size_t bytes)
     {
-        if (logging_enabled)
-        {
-            std::cout << "alloc device: " << toMB(bytes) << " MiB" << std::endl;
-        }
-        dev_usage += bytes;
-        return mem_check_device();
-    }
+        size_t free_dev = get_free_device_bytes();
+        bool   success  = bytes <= static_cast<size_t>(free_dev * (1.0f - padding_factor));
 
-    // Call this before dev frees
-    template<typename T>
-    inline void free_device(const size_t size)
-    {
-        size_t bytes = sizeof(T) * size;
-        free_device_bytes(bytes);
-    }
-
-    inline void free_device_bytes(const size_t bytes)
-    {
-        if (logging_enabled)
+        if(logging_enabled)
         {
-            std::cout << "free device: " << toMB(bytes) << " MiB" << std::endl;
+            std::cout << "alloc_device_bytes: " << toMB(bytes) << " MiB, free_dev="
+                      << toMB(free_dev) << " MiB" << std::endl;
         }
-        dev_usage -= bytes;
+
+        if(logging_enabled && !success)
+        {
+            std::cout << "alloc_device_bytes: out of memory" << std::endl;
+        }
+        return success;
     }
 
 private:
-
     static size_t toMB(size_t bytes) { return bytes >> 20; }
 
-    // Returns true if there is enough memory, false if the caller should skip.
-    // GTEST_SKIP() cannot be called here because it only exits the immediate
-    // function, not the enclosing test body.  The caller must act on the
-    // return value directly from within the test.
-    // Making the function inline does not enable GTEST_SKIP() to work, because
-    // inline functions are still functions and not macros.
-    bool mem_check_host()
+    static size_t get_free_device_bytes()
     {
-        // Reduce the host_limit by a padding factor as a safety margin.
-        size_t host_limit_padded = static_cast<size_t>(host_limit * (1 - padding_factor));
-
-        bool success;
-        if (is_apu)
-        {
-            // The spill into shared memory is the device memory used that exceeds
-            // the device's carved memory.
-            size_t spill = 0;
-            if (dev_usage > dev_carved) spill = dev_usage - dev_carved;
-
-            if (host_limit_padded > spill)
-            {
-                // reduce the host limit by the amount of spill into shared memory
-                host_limit_padded -= spill;
-            }
-            else
-            {
-                // The amount we're spilling exceeds the total padded host memory,
-                //  something is likely wrong but we need to handle it cleanly.
-                host_limit_padded = 0;
-            }
-
-            success = host_usage <= host_limit_padded;
-
-            if (logging_enabled)
-            {
-                std::cout << "mem_check_host: host=" << toMB(host_usage) << "/" << toMB(host_limit_padded)
-                          << " MiB, device=" << toMB(dev_usage) << " MiB, spill=" << toMB(spill)
-                          << " MiB" << std::endl;
-            }
-        }
-        else
-        {
-            success = host_usage <= host_limit_padded;
-            if (logging_enabled)
-            {
-                std::cout << "mem_check_host: host=" << toMB(host_usage) << "/" << toMB(host_limit_padded)
-                          << " MiB" << std::endl;
-            }
-        }
-        if (logging_enabled)
-        {
-            if (!success)
-                std::cout << "mem_check_host: out of memory" << std::endl;
-        }
-        return success;
+        size_t free_dev, total_dev;
+        HIP_CHECK(hipMemGetInfo(&free_dev, &total_dev));
+        return free_dev;
     }
 
-    bool mem_check_device()
+    static size_t get_free_host_bytes()
     {
-        // Reduce the dev_limit by a padding factor as a safety margin.
-        size_t dev_limit_padded = static_cast<size_t>(dev_limit * (1 - padding_factor));
-
-        bool success;
-        if (is_apu)
+#ifdef _WIN32
+        MEMORYSTATUSEX mem_status;
+        mem_status.dwLength = sizeof(mem_status);
+        GlobalMemoryStatusEx(&mem_status);
+        return static_cast<size_t>(mem_status.ullAvailPhys);
+#else
+        // MemAvailable accounts for reclaimable page cache and slab memory,
+        // so it more accurately reflects what the OS can give to a new allocation
+        // than MemFree alone.
+        std::ifstream meminfo("/proc/meminfo");
+        std::string   label;
+        size_t        value;
+        std::string   unit;
+        while(meminfo >> label >> value >> unit)
         {
-            size_t host_unshared = host_limit - dev_shared;
-
-            // The spill into shared memory is the amount of memory used that exceeds the host's
-            //  unshared memory.
-            size_t spill = 0;
-            if (host_usage > host_unshared) spill = host_usage - host_unshared; 
-
-            if (dev_limit_padded > spill)
-            {
-                // reduce the device limit by the amount of spill into shared memory
-                dev_limit_padded -= spill;
-            }
-            else
-            {
-                // The amount we're spilling exceeds the total device padded memory,
-                //  something is likely wrong but we need to handle it cleanly.
-                dev_limit_padded = 0;
-            }
-
-            success = dev_usage <= dev_limit_padded;
-
-            if (logging_enabled)
-            {
-                std::cout << "mem_check_device: device=" << toMB(dev_usage) << "/" << toMB(dev_limit_padded)
-                          << " MiB, host=" << toMB(host_usage) << " MiB, spill=" << toMB(spill)
-                          << " MiB" << std::endl;
-            }
+            if(label == "MemAvailable:")
+                return value * 1024; // kB → bytes
         }
-        else
-        {
-            success = dev_usage <= dev_limit_padded;
-            if (logging_enabled)
-            {
-                std::cout << "mem_check_device: device=" << toMB(dev_usage) << "/" << toMB(dev_limit_padded)
-                          << " MiB" << std::endl;
-            }
-        }
-        if (logging_enabled)
-        {
-            if (!success)
-                std::cout << "mem_check_device: out of memory" << std::endl;
-        }
-        return success;
+        return 0;
+#endif
     }
 
-    bool logging_enabled = false;
-    bool is_apu = false;
-    size_t host_limit = 0;
-    size_t dev_limit = 0;
-    size_t dev_shared = 0;
-    size_t dev_carved = 0;
+    bool  logging_enabled = false;
+    bool  is_apu          = false;
     float padding_factor;
-    size_t host_usage = 0;
-    size_t dev_usage = 0;
 };
 
 }
