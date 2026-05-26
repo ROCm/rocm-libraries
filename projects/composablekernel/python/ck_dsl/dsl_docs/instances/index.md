@@ -29,7 +29,7 @@ ABI: `(A, B, D, A_bytes, B_bytes, D_bytes)` for implicit-GEMM / direct grouped c
 
 Layouts: NHWC input, KRSC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
-Bake-off results (per `RUNBOOK_COMPLIANCE.md`):
+Bake-off results (per `runbook_compliance.md`):
 
 ```text
 Implicit-GEMM conv (N=8 H=W=56 C=K=64 R=S=3):

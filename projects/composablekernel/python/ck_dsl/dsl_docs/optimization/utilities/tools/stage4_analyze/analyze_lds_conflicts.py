@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Analyze LDS bank conflicts and recommend swizzle strategies.
 
 Deep analysis of LDS (Local Data Share) bank conflicts based on:
@@ -20,12 +21,13 @@ import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 
 @dataclass
 class LDSCounters:
     """LDS-related hardware performance counters from rocprof."""
+
     bank_conflict: int = 0
     idx_active: int = 0
     unaligned_stall: int = 0
@@ -39,6 +41,7 @@ class LDSCounters:
 @dataclass
 class LDSInstructionStats:
     """Statistics from ISA disassembly."""
+
     ds_read_b32: int = 0
     ds_read_b64: int = 0
     ds_read_b96: int = 0
@@ -50,13 +53,22 @@ class LDSInstructionStats:
 
     @property
     def total_ds_ops(self) -> int:
-        return (self.ds_read_b32 + self.ds_read_b64 + self.ds_read_b96 + self.ds_read_b128 +
-                self.ds_write_b32 + self.ds_write_b64 + self.ds_write_b96 + self.ds_write_b128)
+        return (
+            self.ds_read_b32
+            + self.ds_read_b64
+            + self.ds_read_b96
+            + self.ds_read_b128
+            + self.ds_write_b32
+            + self.ds_write_b64
+            + self.ds_write_b96
+            + self.ds_write_b128
+        )
 
 
 @dataclass
 class LDSConflictAnalysis:
     """Complete LDS conflict analysis report."""
+
     arch: str
     bank_count: int
     counters: LDSCounters
@@ -83,7 +95,7 @@ def parse_rocprof_csv(csv_path: Path) -> LDSCounters:
     if not csv_path.exists():
         raise FileNotFoundError(f"rocprof CSV not found: {csv_path}")
 
-    with open(csv_path, 'r') as f:
+    with open(csv_path, "r") as f:
         # Try to detect CSV format (kernel_stats vs domain_stats)
         reader = csv.DictReader(f)
         for row in reader:
@@ -94,7 +106,7 @@ def parse_rocprof_csv(csv_path: Path) -> LDSCounters:
             # For now, we'll look for specific counter values in any column
             row_str = str(row).lower()
 
-            if 'sq_lds_bank_conflict' in row_str or 'lds_bank_conflict' in row_str:
+            if "sq_lds_bank_conflict" in row_str or "lds_bank_conflict" in row_str:
                 # Try to extract numeric value
                 for val in row.values():
                     try:
@@ -103,7 +115,7 @@ def parse_rocprof_csv(csv_path: Path) -> LDSCounters:
                     except (ValueError, TypeError):
                         continue
 
-            if 'sq_lds_idx_active' in row_str or 'lds_idx_active' in row_str:
+            if "sq_lds_idx_active" in row_str or "lds_idx_active" in row_str:
                 for val in row.values():
                     try:
                         counters.idx_active = int(float(val))
@@ -111,7 +123,7 @@ def parse_rocprof_csv(csv_path: Path) -> LDSCounters:
                     except (ValueError, TypeError):
                         continue
 
-            if 'sq_lds_unaligned_stall' in row_str or 'lds_unaligned' in row_str:
+            if "sq_lds_unaligned_stall" in row_str or "lds_unaligned" in row_str:
                 for val in row.values():
                     try:
                         counters.unaligned_stall = int(float(val))
@@ -139,7 +151,7 @@ def parse_isa_for_lds(isa_path: Path) -> Tuple[LDSInstructionStats, bool, bool, 
     has_padding = False
     power_of_2_stride = False
 
-    with open(isa_path, 'r') as f:
+    with open(isa_path, "r") as f:
         lines = f.readlines()
 
     # Count LDS operations by size
@@ -147,32 +159,36 @@ def parse_isa_for_lds(isa_path: Path) -> Tuple[LDSInstructionStats, bool, bool, 
         line_lower = line.lower().strip()
 
         # Count ds_read/ds_write by size
-        if 'ds_read_b128' in line_lower:
+        if "ds_read_b128" in line_lower:
             stats.ds_read_b128 += 1
-        elif 'ds_read_b96' in line_lower:
+        elif "ds_read_b96" in line_lower:
             stats.ds_read_b96 += 1
-        elif 'ds_read_b64' in line_lower:
+        elif "ds_read_b64" in line_lower:
             stats.ds_read_b64 += 1
-        elif 'ds_read_b32' in line_lower or 'ds_read_' in line_lower:
+        elif "ds_read_b32" in line_lower or "ds_read_" in line_lower:
             stats.ds_read_b32 += 1
 
-        if 'ds_write_b128' in line_lower:
+        if "ds_write_b128" in line_lower:
             stats.ds_write_b128 += 1
-        elif 'ds_write_b96' in line_lower:
+        elif "ds_write_b96" in line_lower:
             stats.ds_write_b96 += 1
-        elif 'ds_write_b64' in line_lower:
+        elif "ds_write_b64" in line_lower:
             stats.ds_write_b64 += 1
-        elif 'ds_write_b32' in line_lower or 'ds_write_' in line_lower:
+        elif "ds_write_b32" in line_lower or "ds_write_" in line_lower:
             stats.ds_write_b32 += 1
 
         # Detect XOR swizzle (v_xor_b32 used in LDS address computation)
-        if 'v_xor_b32' in line_lower and ('offset' in line_lower or 'addr' in line_lower):
+        if "v_xor_b32" in line_lower and (
+            "offset" in line_lower or "addr" in line_lower
+        ):
             has_xor = True
 
         # Detect padding (irregular offset patterns, non-power-of-2 strides)
         # Look for ds_read/write with offsets like offset:288, offset:640 (not 256, 512)
-        if ('ds_read' in line_lower or 'ds_write' in line_lower) and 'offset:' in line_lower:
-            match = re.search(r'offset:(\d+)', line_lower)
+        if (
+            "ds_read" in line_lower or "ds_write" in line_lower
+        ) and "offset:" in line_lower:
+            match = re.search(r"offset:(\d+)", line_lower)
             if match:
                 offset = int(match.group(1))
                 # Check if offset is NOT a power of 2 (indicates padding)
@@ -184,8 +200,8 @@ def parse_isa_for_lds(isa_path: Path) -> Tuple[LDSInstructionStats, bool, bool, 
     power_of_2_count = 0
     total_offset_count = 0
     for line in lines:
-        if ('ds_read' in line or 'ds_write' in line) and 'offset:' in line:
-            match = re.search(r'offset:(\d+)', line)
+        if ("ds_read" in line or "ds_write" in line) and "offset:" in line:
+            match = re.search(r"offset:(\d+)", line)
             if match:
                 offset = int(match.group(1))
                 total_offset_count += 1
@@ -232,9 +248,9 @@ def estimate_performance_gain(severity: str, has_swizzle: bool, arch: str) -> fl
 
     # Conservative estimates based on empirical data
     gain_map = {
-        "low": 1.0,     # 1% gain
+        "low": 1.0,  # 1% gain
         "medium": 3.0,  # 3% gain
-        "high": 8.0,    # 8% gain (can be 5-15% in practice)
+        "high": 8.0,  # 8% gain (can be 5-15% in practice)
     }
 
     base_gain = gain_map.get(severity, 0.0)
@@ -253,7 +269,7 @@ def generate_recommendations(
     has_xor: bool,
     has_padding: bool,
     power_of_2_stride: bool,
-    arch: str
+    arch: str,
 ) -> List[str]:
     """Generate actionable recommendations for LDS conflict optimization.
 
@@ -275,9 +291,13 @@ def generate_recommendations(
     if severity == "low":
         recs.append("✅ LDS bank conflicts are low - no immediate action needed")
     elif severity == "medium":
-        recs.append(f"⚠️ Moderate LDS bank conflicts ({counters.conflict_rate:.1f} per 1000 ops)")
+        recs.append(
+            f"⚠️ Moderate LDS bank conflicts ({counters.conflict_rate:.1f} per 1000 ops)"
+        )
     else:
-        recs.append(f"🔴 HIGH LDS bank conflicts ({counters.conflict_rate:.1f} per 1000 ops) - optimization needed!")
+        recs.append(
+            f"🔴 HIGH LDS bank conflicts ({counters.conflict_rate:.1f} per 1000 ops) - optimization needed!"
+        )
 
     # Architecture-specific guidance
     bank_count = 64 if "gfx950" in arch.lower() else 32
@@ -324,7 +344,9 @@ def generate_recommendations(
     # Estimated gain
     estimated_gain = estimate_performance_gain(severity, has_xor, arch)
     if estimated_gain > 0:
-        recs.append(f"📈 Estimated performance gain: ~{estimated_gain:.1f}% from conflict elimination")
+        recs.append(
+            f"📈 Estimated performance gain: ~{estimated_gain:.1f}% from conflict elimination"
+        )
 
     return recs
 
@@ -335,9 +357,9 @@ def print_analysis(analysis: LDSConflictAnalysis):
     Args:
         analysis: LDS conflict analysis report
     """
-    print(f"\n{'='*90}")
+    print(f"\n{'=' * 90}")
     print(f"  LDS Bank Conflict Analysis - {analysis.arch}")
-    print(f"{'='*90}")
+    print(f"{'=' * 90}")
     print()
 
     # Hardware counters
@@ -346,7 +368,9 @@ def print_analysis(analysis: LDSConflictAnalysis):
     print(f"  SQ_LDS_IDX_ACTIVE:     {analysis.counters.idx_active:,}")
     if analysis.counters.unaligned_stall > 0:
         print(f"  SQ_LDS_UNALIGNED:      {analysis.counters.unaligned_stall:,}")
-    print(f"  Conflict rate:         {analysis.counters.conflict_rate:.2f} per 1000 LDS ops")
+    print(
+        f"  Conflict rate:         {analysis.counters.conflict_rate:.2f} per 1000 LDS ops"
+    )
     print(f"  Severity:              {analysis.conflict_severity.upper()}")
     print()
 
@@ -364,9 +388,15 @@ def print_analysis(analysis: LDSConflictAnalysis):
 
     # Pattern detection
     print("Pattern Detection:")
-    print(f"  XOR swizzle detected:      {'✅ Yes' if analysis.has_xor_swizzle else '❌ No'}")
-    print(f"  Padding detected:          {'✅ Yes' if analysis.has_padding else '❌ No'}")
-    print(f"  Power-of-2 stride pattern: {'⚠️ Yes (high risk)' if analysis.detected_power_of_2_stride else '✅ No'}")
+    print(
+        f"  XOR swizzle detected:      {'✅ Yes' if analysis.has_xor_swizzle else '❌ No'}"
+    )
+    print(
+        f"  Padding detected:          {'✅ Yes' if analysis.has_padding else '❌ No'}"
+    )
+    print(
+        f"  Power-of-2 stride pattern: {'⚠️ Yes (high risk)' if analysis.detected_power_of_2_stride else '✅ No'}"
+    )
     print()
 
     # Recommendations
@@ -379,7 +409,7 @@ def print_analysis(analysis: LDSConflictAnalysis):
 def main():
     """Command-line interface for LDS conflict analysis."""
     parser = argparse.ArgumentParser(
-        description='Analyze LDS bank conflicts and recommend optimizations',
+        description="Analyze LDS bank conflicts and recommend optimizations",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -391,17 +421,27 @@ Examples:
 
   # Analyze without ISA (counters only)
   %(prog)s --rocprof kernel_stats.csv --arch gfx950
-        """
+        """,
     )
 
-    parser.add_argument('--rocprof', type=Path, required=True,
-                       help='Path to rocprof kernel_stats.csv or domain_stats.csv')
-    parser.add_argument('--isa', type=Path,
-                       help='Path to ISA assembly file (.s) for pattern analysis')
-    parser.add_argument('--arch', choices=['gfx942', 'gfx950'], default='gfx950',
-                       help='GPU architecture (default: gfx950)')
-    parser.add_argument('--output', '-o', type=Path,
-                       help='Output JSON file (default: print to console)')
+    parser.add_argument(
+        "--rocprof",
+        type=Path,
+        required=True,
+        help="Path to rocprof kernel_stats.csv or domain_stats.csv",
+    )
+    parser.add_argument(
+        "--isa", type=Path, help="Path to ISA assembly file (.s) for pattern analysis"
+    )
+    parser.add_argument(
+        "--arch",
+        choices=["gfx942", "gfx950"],
+        default="gfx950",
+        help="GPU architecture (default: gfx950)",
+    )
+    parser.add_argument(
+        "--output", "-o", type=Path, help="Output JSON file (default: print to console)"
+    )
 
     args = parser.parse_args()
 
@@ -411,20 +451,31 @@ Examples:
 
         # Parse ISA if provided
         if args.isa:
-            isa_stats, has_xor, has_padding, power_of_2_stride = parse_isa_for_lds(args.isa)
+            isa_stats, has_xor, has_padding, power_of_2_stride = parse_isa_for_lds(
+                args.isa
+            )
         else:
             isa_stats = LDSInstructionStats()
             has_xor = False
             has_padding = False
             power_of_2_stride = False
-            print("Warning: No ISA file provided - pattern detection will be limited", file=sys.stderr)
+            print(
+                "Warning: No ISA file provided - pattern detection will be limited",
+                file=sys.stderr,
+            )
 
         # Calculate severity
         severity = calculate_conflict_severity(counters.conflict_rate)
 
         # Generate recommendations
         recommendations = generate_recommendations(
-            counters, isa_stats, severity, has_xor, has_padding, power_of_2_stride, args.arch
+            counters,
+            isa_stats,
+            severity,
+            has_xor,
+            has_padding,
+            power_of_2_stride,
+            args.arch,
         )
 
         # Estimate gain
@@ -447,7 +498,7 @@ Examples:
 
         # Output
         if args.output:
-            with open(args.output, 'w') as f:
+            with open(args.output, "w") as f:
                 json.dump(asdict(analysis), f, indent=2)
             print(f"Analysis saved to {args.output}")
         else:
@@ -458,9 +509,10 @@ Examples:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

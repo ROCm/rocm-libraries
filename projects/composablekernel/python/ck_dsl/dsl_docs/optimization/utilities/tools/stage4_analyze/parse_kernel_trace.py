@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Parse ATT kernel traces and extract structured stall breakdown.
 
 Parses rocprof-compute ATT trace output (code.json, snapshots.json) and provides:
@@ -13,17 +14,17 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 @dataclass
 class Instruction:
     """Single instruction with stall metrics."""
+
     asm: str
     pc_index: int
     source_loc: str
@@ -35,7 +36,9 @@ class Instruction:
 
     @property
     def stall_pct(self) -> float:
-        return 100.0 * self.stall_cycles / self.total_cycles if self.total_cycles else 0.0
+        return (
+            100.0 * self.stall_cycles / self.total_cycles if self.total_cycles else 0.0
+        )
 
     @property
     def stall_type(self) -> str:
@@ -44,9 +47,12 @@ class Instruction:
 
         # Memory wait instructions (dominant stall source)
         if "s_waitcnt" in asm:
-            if "vmcnt" in asm:   return "vmem_wait"
-            if "lgkmcnt" in asm: return "lds_wait"
-            if "expcnt" in asm:  return "exp_wait"
+            if "vmcnt" in asm:
+                return "vmem_wait"
+            if "lgkmcnt" in asm:
+                return "lds_wait"
+            if "expcnt" in asm:
+                return "exp_wait"
             return "waitcnt"
 
         # Synchronization barriers
@@ -77,6 +83,7 @@ class Instruction:
 @dataclass
 class SourceLineHotspot:
     """Aggregated stall hotspot for a source line."""
+
     source_loc: str
     total_stall_cycles: int = 0
     total_cycles: int = 0
@@ -85,12 +92,17 @@ class SourceLineHotspot:
 
     @property
     def stall_pct(self) -> float:
-        return 100.0 * self.total_stall_cycles / self.total_cycles if self.total_cycles else 0.0
+        return (
+            100.0 * self.total_stall_cycles / self.total_cycles
+            if self.total_cycles
+            else 0.0
+        )
 
 
 @dataclass
 class StallBreakdown:
     """Overall kernel stall breakdown."""
+
     total_cycles: int
     total_stall_cycles: int
     vmem_wait_pct: float = 0.0
@@ -103,12 +115,17 @@ class StallBreakdown:
 
     @property
     def overall_stall_pct(self) -> float:
-        return 100.0 * self.total_stall_cycles / self.total_cycles if self.total_cycles else 0.0
+        return (
+            100.0 * self.total_stall_cycles / self.total_cycles
+            if self.total_cycles
+            else 0.0
+        )
 
 
 @dataclass
 class KernelTraceReport:
     """Complete kernel trace analysis report."""
+
     dispatch_dir: str
     kernel_name: str
     instruction_count: int
@@ -139,16 +156,18 @@ def load_instructions(dispatch_dir: Path) -> List[Instruction]:
         if not isinstance(row[2], int) or row[2] == 0:
             continue
 
-        instructions.append(Instruction(
-            asm=row[0],
-            pc_index=row[2],
-            source_loc=row[3] if row[3] else "<unknown>",
-            pc_addr=row[5] if len(row) > 5 else 0,
-            exec_count=row[6] if len(row) > 6 and isinstance(row[6], int) else 0,
-            total_cycles=row[7] if len(row) > 7 and isinstance(row[7], int) else 0,
-            stall_cycles=row[8] if len(row) > 8 and isinstance(row[8], int) else 0,
-            issue_cycles=row[9] if len(row) > 9 and isinstance(row[9], int) else 0,
-        ))
+        instructions.append(
+            Instruction(
+                asm=row[0],
+                pc_index=row[2],
+                source_loc=row[3] if row[3] else "<unknown>",
+                pc_addr=row[5] if len(row) > 5 else 0,
+                exec_count=row[6] if len(row) > 6 and isinstance(row[6], int) else 0,
+                total_cycles=row[7] if len(row) > 7 and isinstance(row[7], int) else 0,
+                stall_cycles=row[8] if len(row) > 8 and isinstance(row[8], int) else 0,
+                issue_cycles=row[9] if len(row) > 9 and isinstance(row[9], int) else 0,
+            )
+        )
 
     return instructions
 
@@ -182,8 +201,21 @@ def compute_stall_breakdown(instructions: List[Instruction]) -> StallBreakdown:
         lds_stall_pct=pct(stalls_by_type.get("lds_stall", 0)),
         barrier_stall_pct=pct(stalls_by_type.get("barrier_stall", 0)),
         mfma_stall_pct=pct(stalls_by_type.get("mfma_stall", 0)),
-        other_pct=pct(sum(v for k, v in stalls_by_type.items()
-                         if k not in {"vmem_wait", "vmem_load", "lds_wait", "lds_stall", "barrier_stall", "mfma_stall"})),
+        other_pct=pct(
+            sum(
+                v
+                for k, v in stalls_by_type.items()
+                if k
+                not in {
+                    "vmem_wait",
+                    "vmem_load",
+                    "lds_wait",
+                    "lds_stall",
+                    "barrier_stall",
+                    "mfma_stall",
+                }
+            )
+        ),
     )
 
 
@@ -224,12 +256,18 @@ def aggregate_by_source(instructions: List[Instruction], topk: int = 15) -> List
         else:
             hs["dominant_type"] = "other"
 
-        hs["stall_pct"] = 100.0 * hs["total_stall_cycles"] / hs["total_cycles"] if hs["total_cycles"] else 0.0
+        hs["stall_pct"] = (
+            100.0 * hs["total_stall_cycles"] / hs["total_cycles"]
+            if hs["total_cycles"]
+            else 0.0
+        )
         # Convert defaultdict to regular dict for JSON serialization
         hs["stall_types"] = dict(hs["stall_types"])
 
     # Sort by total_stall_cycles and return top-K
-    hotspots = sorted(by_source.values(), key=lambda x: x["total_stall_cycles"], reverse=True)
+    hotspots = sorted(
+        by_source.values(), key=lambda x: x["total_stall_cycles"], reverse=True
+    )
     return hotspots[:topk]
 
 
@@ -294,7 +332,9 @@ def generate_recommendations(breakdown: StallBreakdown) -> List[str]:
         )
 
     if not recommendations:
-        recommendations.append("✅ No major bottlenecks detected - stall profile looks healthy")
+        recommendations.append(
+            "✅ No major bottlenecks detected - stall profile looks healthy"
+        )
 
     return recommendations
 
@@ -306,20 +346,22 @@ def print_report(report: KernelTraceReport, detail: bool = False):
         report: Parsed kernel trace report
         detail: Whether to show detailed hotspot breakdown
     """
-    print(f"\n{'='*90}")
+    print(f"\n{'=' * 90}")
     print(f"  Kernel Trace Analysis: {report.kernel_name}")
-    print(f"{'='*90}")
+    print(f"{'=' * 90}")
     print(f"  Source: {report.dispatch_dir}")
     print(f"  Instructions: {report.instruction_count:,}")
     print(f"  Total cycles: {report.stall_breakdown.total_cycles:,}")
-    print(f"  Stall cycles: {report.stall_breakdown.total_stall_cycles:,} "
-          f"({report.stall_breakdown.overall_stall_pct:.1f}%)")
+    print(
+        f"  Stall cycles: {report.stall_breakdown.total_stall_cycles:,} "
+        f"({report.stall_breakdown.overall_stall_pct:.1f}%)"
+    )
     print()
 
     # Stall breakdown
     print("Stall Breakdown by Type:")
     print(f"  {'Type':<18} {'Percentage':>10}")
-    print(f"  {'-'*18} {'-'*10}")
+    print(f"  {'-' * 18} {'-' * 10}")
     bd = report.stall_breakdown
     print(f"  {'VMEM-wait':<18} {bd.vmem_wait_pct:>9.1f}%")
     print(f"  {'VMEM-load':<18} {bd.vmem_load_pct:>9.1f}%")
@@ -333,13 +375,17 @@ def print_report(report: KernelTraceReport, detail: bool = False):
     # Hotspots
     print(f"Top-{len(report.hotspots)} Stall Hotspots:")
     print(f"  {'#':>3}  {'Stall Cycles':>12}  {'% of Total':>10}  {'Type':<14}  Source")
-    print(f"  {'-'*3}  {'-'*12}  {'-'*10}  {'-'*14}  {'-'*50}")
+    print(f"  {'-' * 3}  {'-' * 12}  {'-' * 10}  {'-' * 14}  {'-' * 50}")
 
     total_stall = report.stall_breakdown.total_stall_cycles
     for i, hs in enumerate(report.hotspots, 1):
         pct = 100.0 * hs["total_stall_cycles"] / total_stall if total_stall else 0.0
-        src_short = hs["source_loc"][-50:] if len(hs["source_loc"]) > 50 else hs["source_loc"]
-        print(f"  {i:>3}  {hs['total_stall_cycles']:>12,}  {pct:>9.1f}%  {hs['dominant_type']:<14}  {src_short}")
+        src_short = (
+            hs["source_loc"][-50:] if len(hs["source_loc"]) > 50 else hs["source_loc"]
+        )
+        print(
+            f"  {i:>3}  {hs['total_stall_cycles']:>12,}  {pct:>9.1f}%  {hs['dominant_type']:<14}  {src_short}"
+        )
 
         if detail and i <= 5:
             # Show stall type breakdown for top 5
@@ -357,7 +403,7 @@ def print_report(report: KernelTraceReport, detail: bool = False):
 def main():
     """Command-line interface for kernel trace parsing."""
     parser = argparse.ArgumentParser(
-        description='Parse ATT kernel traces and extract stall breakdown',
+        description="Parse ATT kernel traces and extract stall breakdown",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -369,17 +415,28 @@ Examples:
 
   # Show detailed hotspot breakdown
   %(prog)s ui_output_agent_0_dispatch_1234 --detail --topk 20
-        """
+        """,
     )
 
-    parser.add_argument('dispatch_dir', type=Path,
-                       help='Path to ATT dispatch output directory (contains code.json)')
-    parser.add_argument('--output', '-o', type=Path,
-                       help='Output JSON file (default: print to console)')
-    parser.add_argument('--topk', type=int, default=15,
-                       help='Number of top hotspots to report (default: 15)')
-    parser.add_argument('--detail', action='store_true',
-                       help='Show detailed stall type breakdown for top hotspots')
+    parser.add_argument(
+        "dispatch_dir",
+        type=Path,
+        help="Path to ATT dispatch output directory (contains code.json)",
+    )
+    parser.add_argument(
+        "--output", "-o", type=Path, help="Output JSON file (default: print to console)"
+    )
+    parser.add_argument(
+        "--topk",
+        type=int,
+        default=15,
+        help="Number of top hotspots to report (default: 15)",
+    )
+    parser.add_argument(
+        "--detail",
+        action="store_true",
+        help="Show detailed stall type breakdown for top hotspots",
+    )
 
     args = parser.parse_args()
 
@@ -391,7 +448,10 @@ Examples:
         # Load and parse trace
         instructions = load_instructions(args.dispatch_dir)
         if not instructions:
-            print(f"Warning: No instructions found in {args.dispatch_dir}/code.json", file=sys.stderr)
+            print(
+                f"Warning: No instructions found in {args.dispatch_dir}/code.json",
+                file=sys.stderr,
+            )
             return 1
 
         # Compute metrics
@@ -411,7 +471,7 @@ Examples:
 
         # Output
         if args.output:
-            with open(args.output, 'w') as f:
+            with open(args.output, "w") as f:
                 # Convert dataclass to dict for JSON serialization
                 report_dict = asdict(report)
                 json.dump(report_dict, f, indent=2)
@@ -424,9 +484,10 @@ Examples:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

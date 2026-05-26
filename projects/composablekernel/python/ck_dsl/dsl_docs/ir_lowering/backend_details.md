@@ -174,7 +174,7 @@ A new primitive should be added in layers:
 6. Add analysis hooks (`analysis/ir.py`, `analysis/isa.py`) if the primitive should be counted in generated IR / ISA.
 7. Add a minimal instance / example / test that emits and verifies it.
 
-For performance primitives, document the mapping in `primitives/intrinsics_and_primitives.md` and add a `RUNBOOK_COMPLIANCE.md` row.
+For performance primitives, document the mapping in `primitives/intrinsics_and_primitives.md` and add a `runbook_compliance.md` row.
 
 ## Debugging Backend Problems
 
