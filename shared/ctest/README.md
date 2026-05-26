@@ -128,23 +128,6 @@ execution_settings:
 
 **Environment (optional):** Under `execution_settings`, an `environment` map sets env vars for all category tests (e.g. `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`). Keys and values are strings; they are passed to CTest as `ENVIRONMENT "VAR1=val1;VAR2=val2"`.
 
-**Extra arguments (optional, per-category):** A category may set `extra_args` to a list (or single string) of additional command-line arguments that the parser appends to the test command after `--gtest_filter=...`. Useful for projects whose test binary has runtime flags beyond gtest filtering (e.g. rocFFT's `--smoketest` and `--test_prob`). Each entry is shell-quoted with `shlex.quote`, so values with spaces or shell metacharacters are preserved as a single argument by CTest.
-
-```yaml
-test_categories:
-  quick:
-    test_patterns: ["*"]
-    extra_args: ["--smoketest"]            # rocfft-test --gtest_filter=* --smoketest
-    labels: ["quick"]
-  standard:
-    test_patterns: ["*"]
-    exclude: ["*multi_gpu*"]
-    extra_args: ["--test_prob", "0.02"]    # rocfft-test --gtest_filter=*-*multi_gpu* --test_prob 0.02
-    labels: ["standard"]
-```
-
-`extra_args` flow through identically to category tests and to GPU-exclusion test variants, in both the build-tree CTest definitions and the install-tree `CTestTestfile.cmake`.
-
 ### **Enhanced Structure (Optional Fields)**
 
 All fields below are **optional** and can be added incrementally. Teams can use them for richer test documentation and enable future capabilities like AI-assisted test selection:
