@@ -166,8 +166,8 @@ struct SelectedKernel {{
             using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
 
             using GemmEpilogue = ck_tile::CShuffleEpilogue<
-                ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::ComputeDataType,
-                                                 typename PipelineProblem::ComputeDataType,
+                ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::AComputeDataType,
+                                                 typename PipelineProblem::BComputeDataType,
                                                  ck_tile::tuple<>,
                                                  AccDataType,
                                                  CDataType,
@@ -245,6 +245,28 @@ def main():
         action="store_true",
         help="List kernel configurations without generating files",
     )
+    parser.add_argument(
+        "--max-instances",
+        type=int,
+        default=None,
+        help="Cap on number of kernel instances per (dtype, layout) combo",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for deterministic sampling; if omitted, derived from today's date",
+    )
+    parser.add_argument(
+        "--tier",
+        default=None,
+        help="Sampling tier (daily/weekly)",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Directory for chosen_instances.json",
+    )
 
     args = parser.parse_args()
 
@@ -255,6 +277,10 @@ def main():
         args.datatype,
         args.layout,
         args.config_json,
+        max_instances=args.max_instances,
+        seed=args.seed,
+        tier=args.tier,
+        manifest_path=args.manifest_path,
     )
 
     if args.list_kernels:

@@ -4,6 +4,7 @@
 set(GEMM_TENSOR_QUANT_DATATYPE "fp8;bf8" CACHE STRING "List of datatypes for GEMM Tensor Quant (semicolon-separated)")
 set(GEMM_TENSOR_QUANT_LAYOUT "rcr" CACHE STRING "List of layouts for GEMM Tensor Quant (semicolon-separated)")
 set(GEMM_TENSOR_QUANT_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(GEMM_TENSOR_QUANT_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_GEMM_TENSOR_QUANT "Enable ccache for GEMM Tensor Quant ops compilation" OFF)
 
 set(GEMM_TENSOR_QUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -73,6 +74,19 @@ function(build_individual_gemm_tensor_quant_targets datatype layout)
 
     file(MAKE_DIRECTORY ${working_path})
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${GEMM_TENSOR_QUANT_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_TENSOR_QUANT_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -u ${CMAKE_CURRENT_LIST_DIR}/gemm_tensor_quant_instance_builder.py
                 --working_path ${working_path}
@@ -81,13 +95,23 @@ function(build_individual_gemm_tensor_quant_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${GEMM_TENSOR_QUANT_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
+        OUTPUT_VARIABLE list_output
         ERROR_VARIABLE list_error
     )
 
     if(NOT ret EQUAL 0)
         message(FATAL_ERROR "Failed to list kernels for ${datatype} ${layout}: ${list_error}")
+    endif()
+
+    if(EXISTS ${working_path}/gemm_tensor_quant_kernel_count.txt)
+        file(READ ${working_path}/gemm_tensor_quant_kernel_count.txt kernel_count)
+        string(STRIP "${kernel_count}" kernel_count)
+        message(VERBOSE "  Found ${kernel_count} kernel configurations")
+    else()
+        message(FATAL_ERROR "Kernel count file not found for GEMM Tensor Quant")
     endif()
 
     if(EXISTS ${working_path}/gemm_tensor_quant_kernel_list.txt)
@@ -148,6 +172,25 @@ else()
     foreach(datatype ${GEMM_TENSOR_QUANT_DATATYPE})
         foreach(layout ${GEMM_TENSOR_QUANT_LAYOUT})
             add_custom_target(benchmark_gemm_tensor_quant_${datatype}_${layout})
+        endforeach()
+    endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set.
+    if(NOT "${GEMM_TENSOR_QUANT_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_TENSOR_QUANT_DATATYPE _gtq_n_dt)
+        list(LENGTH GEMM_TENSOR_QUANT_LAYOUT _gtq_n_lay)
+        math(EXPR _gtq_n_combos "${_gtq_n_dt} * ${_gtq_n_lay}")
+        if(_gtq_n_combos GREATER 0)
+            math(EXPR GEMM_TENSOR_QUANT_MAX_INSTANCES
+                "${GEMM_TENSOR_QUANT_MAX_INSTANCES} / ${_gtq_n_combos}")
+            message(STATUS "  gemm_tensor_quant: per-combo budget = ${GEMM_TENSOR_QUANT_MAX_INSTANCES} (${_gtq_n_combos} combos)")
+        endif()
+    endif()
+
+    foreach(datatype ${GEMM_TENSOR_QUANT_DATATYPE})
+        foreach(layout ${GEMM_TENSOR_QUANT_LAYOUT})
             build_individual_gemm_tensor_quant_targets(${datatype} ${layout})
         endforeach()
     endforeach()
