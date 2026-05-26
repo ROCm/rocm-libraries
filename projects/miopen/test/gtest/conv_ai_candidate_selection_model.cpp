@@ -450,37 +450,50 @@ TEST_P(GPU_CandidateSelection_FP32, CandidateSelectionRamCache_Test)
               << " ms\n";
 }
 
-// Kernel-config embeddings are cached per individual kernel row. Encoding a
-// subset of previously-seen kernels must return identical embeddings to the
-// original call, confirming per-row reuse is correct and not corrupted.
+// Kernel-config embeddings are cached per row via GetOrComputeKernelEmbeddings,
+// which is exercised through ModelSelectBestCandidate. Two calls with identical
+// features and kernel params but different problems bypass the B-RAM cache yet
+// share the per-row embedding cache. Because both inputs to the scorer are then
+// identical (same Tower 1 output, same cached Tower 2 embeddings), the rankings
+// must be deterministically the same.
 TEST_P(GPU_CandidateSelection_FP32, KernelEmbeddingCache_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
 
-    // Generate a set of 3 kernel candidates.
-    auto valid_kernel_params_full = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    const auto& encoded_full      = EncodeKernelParams(valid_kernel_params_full, meta);
-    if(encoded_full.size() < 2)
-        GTEST_SKIP() << "Need at least 2 valid kernel candidates for this test";
+    // Call 1: populates the B-RAM cache (keyed on problem_a) and the per-row
+    // embedding cache for all kernel rows.
+    auto problem_a = MakeTestProblem(1, 4, 8, 8, 8, 3, 3);
+    auto result_a  = ModelSelectBestCandidate(params.arch,
+                                             params.solver,
+                                             problem_a,
+                                             features,
+                                             valid_kernel_params,
+                                             /*use_split_k=*/false,
+                                             accept_all_combinations);
 
-    const CandidateSelectionModel& model = GetCandidateSelectionModel(params.arch, params.solver);
+    // Call 2: different N → different B-RAM key → B-RAM cache miss.
+    // Same features and same kernel params → embedding cache hit for all rows.
+    // Identical scorer inputs must produce identical rankings.
+    auto problem_b = MakeTestProblem(2, 4, 8, 8, 8, 3, 3);
+    auto result_b  = ModelSelectBestCandidate(params.arch,
+                                             params.solver,
+                                             problem_b,
+                                             features,
+                                             valid_kernel_params,
+                                             /*use_split_k=*/false,
+                                             accept_all_combinations);
 
-    // First call: encode all 3 kernels — populates the per-row cache.
-    auto embeddings_full = model.EncodeKernelConfigs(encoded_full);
-    ASSERT_EQ(embeddings_full.size(), encoded_full.size());
-
-    // Second call: encode only the first 2 rows — should hit the per-row cache
-    // for both and return embeddings identical to the first call.
-    std::vector<std::vector<float>> encoded_subset(encoded_full.begin(), encoded_full.begin() + 2);
-    auto embeddings_subset = model.EncodeKernelConfigs(encoded_subset);
-    ASSERT_EQ(embeddings_subset.size(), 2u);
-
-    // The embeddings for the shared rows must be identical.
-    ASSERT_EQ(embeddings_subset[0], embeddings_full[0])
-        << "Kernel 0 embedding differs between full and subset call";
-    ASSERT_EQ(embeddings_subset[1], embeddings_full[1])
-        << "Kernel 1 embedding differs between full and subset call";
+    ASSERT_FALSE(result_a.IsEmpty()) << "First call returned empty result";
+    ASSERT_FALSE(result_b.IsEmpty())
+        << "Second call returned empty result (embedding cache may be corrupt)";
+    ASSERT_EQ(result_a.kernel_indices, result_b.kernel_indices)
+        << "Rankings differ despite identical features and kernel set";
+    ASSERT_EQ(result_a.split_k_values, result_b.split_k_values);
 }
 
 // use_split_k=false and use_split_k=true must produce independent cache entries.

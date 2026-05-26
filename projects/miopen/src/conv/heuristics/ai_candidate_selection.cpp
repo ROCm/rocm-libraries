@@ -34,6 +34,7 @@
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <algorithm>
 #include <vector>
 #include <string>
@@ -43,6 +44,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <cstring>
 #include <numeric>
 #include <sstream>
 
@@ -684,12 +686,20 @@ struct KernelEmbeddingCache
 };
 
 std::string
-HashKernelRow(const std::string& arch, const std::string& solver, const std::vector<float>& row)
+KernelRowKey(const std::string& arch, const std::string& solver, const std::vector<float>& row)
 {
-    std::size_t h = row.size();
+    // Use the exact bit pattern of each float so the key is collision-free.
+    // Encoded candidate rows contain small integer values from EncodeKernelParams;
+    // a hash-only approach risks structured collisions for such inputs.
+    std::ostringstream ss;
+    ss << arch << '|' << solver << '|' << row.size();
     for(float v : row)
-        h ^= std::hash<float>{}(v) + 0x9e3779b9u + (h << 6) + (h >> 2);
-    return arch + "|" + solver + "|" + std::to_string(h);
+    {
+        uint32_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        ss << '|' << std::hex << bits;
+    }
+    return ss.str();
 }
 
 std::vector<std::vector<float>>
@@ -709,7 +719,7 @@ GetOrComputeKernelEmbeddings(const std::string& arch,
         std::lock_guard<std::mutex> lk(cache.mtx);
         for(size_t i = 0; i < encoded_candidates.size(); ++i)
         {
-            auto key = HashKernelRow(arch, solver, encoded_candidates[i]);
+            auto key = KernelRowKey(arch, solver, encoded_candidates[i]);
             auto it  = cache.map.find(key);
             if(it != cache.map.end())
             {

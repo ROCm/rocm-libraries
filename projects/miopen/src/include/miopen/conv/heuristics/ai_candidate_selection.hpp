@@ -32,9 +32,11 @@
 #include <map>
 #include <functional>
 #include <miopen/config.hpp>
-#include <miopen/conv/problem_description.hpp>
 
 namespace miopen {
+namespace conv {
+class ProblemDescription;
+} // namespace conv
 namespace ai {
 namespace tuning {
 namespace candidate_selection {
