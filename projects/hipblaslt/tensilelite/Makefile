@@ -52,7 +52,7 @@ WAVE ?= 64
 WAVEFRONTSIZE ?= $(if $(WAVE:32=),-mwavefrontsize64, -mno-wavefrontsize64)
 
 TRUE16_FEATURE :=
-ifneq ($(filter gfx1250,$(TARGET_ARCH)),)
+ifneq ($(filter gfx1250 gfx1310,$(TARGET_ARCH)),)
 	TRUE16_FEATURE += -Xclangas -target-feature -Xclangas +real-true16
 endif
 

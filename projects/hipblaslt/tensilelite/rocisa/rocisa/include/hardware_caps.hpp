@@ -498,13 +498,13 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {}); //TODO: https://github.com/ROCm/rocm-libraries/issues/3211
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
-    rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
-    rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
-    rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
-    rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12}) && !(isaVersion[0] == 12 && isaVersion[1] == 5) ;
+    rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
+    rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
+    rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
+    rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
     rv["DSLow16NotPreserve"] = checkInList(isaVersion[0], {12, 13});
     rv["WorkGroupIdFromTTM"] = checkInList(isaVersion[0], {12, 13});
-    rv["NoSDWA"]             = checkInList(isaVersion[0], {12, 13});
+    rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12, 13});
     rv["VOP3ByteSel"]        = checkInList(isaVersion[0], {12, 13});
     rv["HasFP8_OCP"]         = checkInList(isaVersion[0], {12, 13});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
