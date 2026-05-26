@@ -401,14 +401,13 @@ DEF_T(SSleepInst, "s_sleep", .format = SOPP, .flags = {HasSideEffect}, .logical 
 DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logical = "SClause",
     .operand_fields = { {S0, simm16, simm16, 16} })
 
-// Global memory fences — used by the StreamK partial-tile handshake on
+// Global memory fences (ENC_VGLOBAL) — used by the StreamK partial-tile handshake on
 // gfx1250 where L2 is partitioned across CUs/XCDs and SMEM is not
-// coherent with the VMEM flag store. They have no register operands;
-// the only encoded modifier is the cache scope (typically SCOPE_DEV),
-// carried through stinkytofu as a MUBUFModifiers with scope set and all
-// other flags clear so the emitter only prints " scope:SCOPE_DEV".
-DEF_T(GlobalWbInst, "global_wb", .format = SOPP, .flags = {HasSideEffect}, .logical = "GlobalWb")
-DEF_T(GlobalInvInst, "global_inv", .format = SOPP, .flags = {HasSideEffect}, .logical = "GlobalInv")
+// coherent with the VMEM flag store. Source has no explicit register operands;
+// the only modifier is cache scope (typically SCOPE_DEV), carried as
+// CacheScopeModifiers so the emitter prints " scope:SCOPE_DEV".
+DEF_T(GlobalWbInst, "global_wb", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalWb")
+DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalInv")
 
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
