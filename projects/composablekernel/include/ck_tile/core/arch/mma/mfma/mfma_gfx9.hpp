@@ -5,10 +5,11 @@
 
 #include "mfma_traits.hpp"
 
-#include "ck_tile/core/config.hpp"
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
+#include "ck_tile/core/arch/mma/mma_op_family.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 
 namespace ck_tile::core::arch::mma {
@@ -36,6 +37,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 32u, 64u, 1u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 32u, 64u, 1u, 64u, 1, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x1f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -64,6 +67,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 32u, 1u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 32u, 1u, 64u, 1, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x1f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -92,6 +97,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 64u, 1u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 16u, 64u, 1u, 64u, 1, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x1f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -120,6 +127,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 16u, 1u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 16u, 1u, 64u, 1, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x1f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -148,6 +157,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 4u, 64u, 1u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 4u, 64u, 1u, 64u, 1, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x1f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -176,6 +187,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 64u, 4u, 1u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 64u, 4u, 1u, 64u, 1, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x1f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -204,6 +217,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 32u, 32u, 2u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 32u, 32u, 2u, 64u, 1, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x2f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -232,6 +247,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, 64u, 1, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f32";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -260,6 +277,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 64u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 64u, 4u, 64u, 4, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -288,6 +307,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 64u, 32u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 64u, 32u, 4u, 64u, 4, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -316,6 +337,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 64u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 64u, 4u, 64u, 4, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -344,6 +367,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 64u, 16u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 64u, 16u, 4u, 64u, 4, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -372,6 +397,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 4u, 64u, 4u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 4u, 64u, 4u, 64u, 4, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x4f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -400,6 +427,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 64u, 4u, 4u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 64u, 4u, 4u, 64u, 4, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x4f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -428,6 +457,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 32u, 8u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 32u, 8u, 64u, 4, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x8f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -456,6 +487,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 16u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 16u, 16u, 64u, 4, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x16f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -484,6 +517,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 64u, 4u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 32u, 64u, 4u, 64u, 4, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x4i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -512,6 +547,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 64u, 32u, 4u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 64u, 32u, 4u, 64u, 4, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x4i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -540,6 +577,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 64u, 4u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 16u, 64u, 4u, 64u, 4, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x4i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -568,6 +607,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 64u, 16u, 4u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 64u, 16u, 4u, 64u, 4, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x4i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -596,6 +637,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 4u, 64u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 4u, 64u, 4u, 64u, 4, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_4x4x4i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -624,6 +667,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 64u, 4u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 64u, 4u, 4u, 64u, 4, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_4x4x4i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -652,6 +697,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 8u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 32u, 32u, 8u, 64u, 4, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x8i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -680,6 +727,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 16u, CtrlFlags, CompilerTar
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 16u, 16u, 16u, 64u, 4, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x16i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -708,6 +757,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 64u, 2u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 64u, 2u, 64u, 2, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x2bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -736,6 +787,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 32u, 2u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 64u, 32u, 2u, 64u, 2, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x2bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -764,6 +817,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 64u, 2u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 64u, 2u, 64u, 2, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x2bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -792,6 +847,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 16u, 2u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 64u, 16u, 2u, 64u, 2, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x2bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -820,6 +877,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 4u, 64u, 2u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 4u, 64u, 2u, 64u, 2, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x2bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -848,6 +907,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 4u, 2u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 64u, 4u, 2u, 64u, 2, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x2bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -876,6 +937,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 32u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 32u, 4u, 64u, 2, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -904,6 +967,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 8u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 16u, 8u, 64u, 2, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x8bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -932,6 +997,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 64u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 64u, 4u, 64u, 4, 1, 2, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -960,6 +1027,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 32u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 64u, 32u, 4u, 64u, 4, 1, 1, 1, 2, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x4bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -988,6 +1057,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 64u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 64u, 4u, 64u, 4, 1, 4, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1016,6 +1087,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 16u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 64u, 16u, 4u, 64u, 4, 1, 1, 1, 4, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x4bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1044,6 +1117,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 4u, 64u, 4u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 4u, 64u, 4u, 64u, 4, 1, 16, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1072,6 +1147,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 4u, 4u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 64u, 4u, 4u, 64u, 4, 1, 1, 1, 16, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1100,6 +1177,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 32u, 8u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 32u, 8u, 64u, 4, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x8bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1128,6 +1207,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 16u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 16u, 16u, 64u, 4, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x16bf16_1k";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1156,6 +1237,8 @@ struct amdgcn_mma<fp64_t, fp64_t, fp64_t, 16u, 16u, 4u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp64_t, fp64_t, fp64_t, 16u, 16u, 4u, 64u, 1, 1, 1, 1, 1, 4, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f64_16x16x4f64";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1186,6 +1269,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 32u, CtrlFlags, CompilerTar
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x32_i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1214,6 +1299,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 16u, CtrlFlags, CompilerTar
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x16_i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1242,6 +1329,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1270,6 +1359,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf8_t, fp8_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1298,6 +1389,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp8_t, bf8_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1326,6 +1419,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1354,6 +1449,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1382,6 +1479,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf8_t, fp8_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1410,6 +1509,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp8_t, bf8_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1438,6 +1539,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1466,6 +1569,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1494,6 +1599,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1522,6 +1629,8 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_f16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1550,6 +1659,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 32u, 16u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<bf16_t, bf16_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_bf16";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1578,6 +1689,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 64u, CtrlFlags, CompilerTar
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 16u, 16u, 64u, 64u, 16, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_16x16x64_i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1606,6 +1719,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 32u, CtrlFlags, CompilerTar
 : amdgcn_mma_base<int8_t, int8_t, int32_t, 32u, 32u, 32u, 64u, 16, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_i32_32x32x32_i8";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {

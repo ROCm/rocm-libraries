@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 @dataclass
@@ -121,6 +121,79 @@ class ValidationConfig:
 
 
 @dataclass
+class MetricsConfig:
+    """Controls which metric sources are collected during benchmarking.
+
+    Two collection modes:
+
+    * Always-on (``tier``) — zero-overhead probes wrapped around the
+      timed loop: analytical FLOPs/IO, workspace, host rusage + RAM,
+      amdsmi GPU snapshot, machine metadata.
+    * Opt-in profiling pass (``emit_trace``, ``perf``) — each runs the
+      workload again under an external profiling tool. Kept separate
+      from the timed pass so the profiler's overhead doesn't pollute
+      the headline timing.
+
+    Attributes:
+        tier: ``basic`` enables always-on probes. ``off`` disables all
+            metric collection — useful for clean A/B timing comparisons.
+        emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
+            ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
+            trace file. ``kineto`` falls back to pftrace if the rocpd
+            Python module is not importable.
+        perf: Re-run wrapped in ``perf stat -x,`` to collect CPU cycles
+            and instructions. Kernel-space events are dropped silently
+            when ``/proc/sys/kernel/perf_event_paranoid > 1``.
+        profiling_output_dir: Root directory for profiling artefacts.
+            ``None`` until the orchestrator resolves a default
+            (``./profiling-output/<utc-timestamp>/``) at suite start.
+    """
+
+    tier: Literal["basic", "off"] = "basic"
+    emit_trace: Optional[Literal["pftrace", "kineto"]] = None
+    perf: bool = False
+    profiling_output_dir: Optional[Path] = None
+
+    def __post_init__(self) -> None:
+        valid_tiers = {"basic", "off"}
+        if self.tier not in valid_tiers:
+            raise ValueError(
+                f"Invalid metrics tier: '{self.tier}'. " f"Valid options: {valid_tiers}"
+            )
+        if self.emit_trace is not None and self.emit_trace not in {
+            "pftrace",
+            "kineto",
+        }:
+            raise ValueError(
+                f"Invalid emit_trace: '{self.emit_trace}'. "
+                "Valid options: pftrace, kineto"
+            )
+        if isinstance(self.profiling_output_dir, str):
+            self.profiling_output_dir = Path(self.profiling_output_dir)
+
+    @property
+    def basic_enabled(self) -> bool:
+        """True when always-on probes should run."""
+        return self.tier == "basic"
+
+    @property
+    def opt_in_pass_requested(self) -> bool:
+        """True when any opt-in profiling source was requested."""
+        return bool(self.emit_trace or self.perf)
+
+    @property
+    def extra_runs_per_engine(self) -> int:
+        """How many additional workload runs each opt-in source contributes.
+
+        Each opt-in profiling source re-runs the workload once under its
+        external tool. The basic always-on tier wraps the timed pass and
+        does not add a run. Used by the reporter to give the user an
+        upfront cost estimate.
+        """
+        return int(self.emit_trace is not None) + int(self.perf)
+
+
+@dataclass
 class SuiteConfig:
     """Configuration for suite execution mode.
 
@@ -137,6 +210,8 @@ class SuiteConfig:
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
+        metrics: Metric collection configuration. Defaults to ``basic`` tier
+            (always-on probes, no extra runs).
     """
 
     warmup_iters: int = 10
@@ -148,6 +223,11 @@ class SuiteConfig:
     gpu_backend: str = "auto"
     reference_provider: str = "none"
     verbose: bool = False
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    # Forwarded to the orchestrator's inner subprocess so the child
+    # picks up the same plugin .so directory the parent loaded. Not used
+    # outside of the opt-in profiling path.
+    plugin_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
         """Validate configuration values."""

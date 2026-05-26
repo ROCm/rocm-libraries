@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -19,8 +20,13 @@ class IntegrationGraphSupportCheck : public ::testing::Test
 protected:
     void SetUp() override
     {
+        // is_supported_ext drives finalize(), which reads the device from the
+        // handle's stream — bind a real one and skip on no-GPU runners.
+        SKIP_IF_NO_DEVICES();
         loadPlugins({hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()});
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
     }
 
     void TearDown() override
@@ -28,6 +34,11 @@ protected:
         if(_handle != nullptr)
         {
             ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_stream != nullptr)
+        {
+            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+            _stream = nullptr;
         }
     }
 
@@ -46,9 +57,11 @@ protected:
 
         loadPlugins(pluginPaths);
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
     }
 
     hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
 };
 
 TEST_F(IntegrationGraphSupportCheck, SupportedWithGoodPlugin)

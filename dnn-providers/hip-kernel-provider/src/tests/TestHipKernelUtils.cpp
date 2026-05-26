@@ -34,7 +34,7 @@ flatbuffers::FlatBufferBuilder createSingleTensorGraph(const std::vector<int64_t
         &strides,
         &dims));
 
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
@@ -115,8 +115,8 @@ TEST(TestFindDeviceBuffer, FindsFirstMatchWhenDuplicateUidsExist)
 TEST(TestFindTensorAttributes, FindsTensorWithMatchingUid)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
 
@@ -128,8 +128,8 @@ TEST(TestFindTensorAttributes, FindsTensorWithMatchingUid)
 TEST(TestFindTensorAttributes, ThrowsWhenUidNotFound)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
 
@@ -138,7 +138,7 @@ TEST(TestFindTensorAttributes, ThrowsWhenUidNotFound)
 
 TEST(TestFindTensorAttributes, ThrowsWhenMapIsEmpty)
 {
-    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+    const std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
         emptyMap;
 
     EXPECT_THROW(findTensorAttributes(emptyMap, 1), hipdnn_plugin_sdk::HipdnnPluginException);
@@ -150,26 +150,26 @@ TEST(TestFindTensorAttributes, ThrowsWhenMapIsEmpty)
 
 TEST(TestIsChannelLastLayout, ReturnsTrueForNhwc4D)
 {
-    std::vector<int64_t> dims = {1, 3, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NHWC.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(isChannelLastLayout(getTensor(graph)));
 }
 
 TEST(TestIsChannelLastLayout, ReturnsFalseForNchw4D)
 {
-    std::vector<int64_t> dims = {1, 3, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NCHW.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(isChannelLastLayout(getTensor(graph)));
 }
@@ -180,26 +180,26 @@ TEST(TestIsChannelLastLayout, ReturnsFalseForNchw4D)
 
 TEST(TestIsChannelLastLayout, ReturnsTrueForNdhwc5D)
 {
-    std::vector<int64_t> dims = {1, 3, 8, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 8, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NDHWC.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(isChannelLastLayout(getTensor(graph)));
 }
 
 TEST(TestIsChannelLastLayout, ReturnsFalseForNcdhw5D)
 {
-    std::vector<int64_t> dims = {1, 3, 8, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 8, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NCDHW.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(isChannelLastLayout(getTensor(graph)));
 }
@@ -210,24 +210,24 @@ TEST(TestIsChannelLastLayout, ReturnsFalseForNcdhw5D)
 
 TEST(TestIsChannelLastLayout, ThrowsFor3DTensor)
 {
-    std::vector<int64_t> dims = {1, 3, 224};
-    std::vector<int64_t> strides = {672, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 224};
+    const std::vector<int64_t> strides = {672, 224, 1};
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(isChannelLastLayout(getTensor(graph)), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestIsChannelLastLayout, ThrowsFor6DTensor)
 {
-    std::vector<int64_t> dims = {1, 3, 4, 8, 224, 224};
-    std::vector<int64_t> strides = {4816896, 1605632, 401408, 50176, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 4, 8, 224, 224};
+    const std::vector<int64_t> strides = {4816896, 1605632, 401408, 50176, 224, 1};
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(isChannelLastLayout(getTensor(graph)), hipdnn_plugin_sdk::HipdnnPluginException);
 }

@@ -219,7 +219,9 @@ function(_fetch_spdlog VERSION HASH)
         TRUE
     )
 
+    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
     fetchcontent_makeavailable(spdlog)
+    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
 
     set(HIP_DNN_SPDLOG_INCLUDE_DIR ${spdlog_SOURCE_DIR}/include CACHE PATH "Path to spdlog include")
 

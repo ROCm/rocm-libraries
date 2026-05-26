@@ -97,7 +97,7 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
         std::vector<int64_t>(xStrides->begin(), xStrides->end()));
 
-    size_t normalizedDim
+    const size_t normalizedDim
         = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
     long outerSize = 1;
     long innerSize = 1;
@@ -126,12 +126,12 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
         }
     }
 
-    long xlocalsize = 1024;
-    long xgridsize = outerSize * stride;
-    long ylocalsize = 1;
-    long ygridsize = 1;
-    long zlocalsize = 1;
-    long zgridsize = 1;
+    const long xlocalsize = 1024;
+    const long xgridsize = outerSize * stride;
+    const long ylocalsize = 1;
+    const long ygridsize = 1;
+    const long zlocalsize = 1;
+    const long zgridsize = 1;
 
     // Prepare compilation options
     std::vector<std::string> options;

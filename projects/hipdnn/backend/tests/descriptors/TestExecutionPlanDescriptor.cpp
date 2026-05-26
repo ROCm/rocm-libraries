@@ -84,6 +84,7 @@ public:
         EXPECT_CALL(*getMockGraph(), getSerializedGraph()).WillRepeatedly(Invoke([this]() {
             return hipdnnPluginConstData_t{_serializedGraph.data(), _serializedGraph.size()};
         }));
+        EXPECT_CALL(*getMockGraph(), isOverrideShapeEnabled()).WillRepeatedly(Return(false));
         EXPECT_CALL(*getMockEngine(), getEngineId()).WillOnce(Return(ENGINE_ID));
         EXPECT_CALL(*getMockEngine(), getGraph()).WillOnce(Return(getMockGraph()));
 
@@ -109,27 +110,19 @@ public:
     flatbuffers::DetachedBuffer makeSerializedPlan(uint32_t version = 1,
                                                    int64_t workspaceSize = 1024,
                                                    bool includeTensorUids = true,
-                                                   bool includeEngineConfig = true,
                                                    bool includePluginPayload = true,
                                                    bool emptyTensorUids = false,
-                                                   bool emptyEngineConfig = false,
-                                                   bool emptyPluginPayload = false) const
+                                                   bool emptyPluginPayload = false,
+                                                   bool isOverrideShapeEnabled = false) const
     {
         flatbuffers::FlatBufferBuilder builder;
         flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensorUids;
-        flatbuffers::Offset<flatbuffers::Vector<uint8_t>> engineConfig;
         flatbuffers::Offset<flatbuffers::Vector<uint8_t>> pluginPayload;
 
         if(includeTensorUids)
         {
             tensorUids = emptyTensorUids ? builder.CreateVector(std::vector<int64_t>{})
                                          : builder.CreateVector(_tensorUids);
-        }
-        if(includeEngineConfig)
-        {
-            auto engineConfigBytes
-                = emptyEngineConfig ? std::vector<uint8_t>{} : std::vector<uint8_t>{1, 2, 3};
-            engineConfig = builder.CreateVector(engineConfigBytes);
         }
         if(includePluginPayload)
         {
@@ -139,7 +132,13 @@ public:
         }
 
         auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
-            builder, version, ENGINE_ID, workspaceSize, tensorUids, engineConfig, pluginPayload);
+            builder,
+            version,
+            ENGINE_ID,
+            workspaceSize,
+            tensorUids,
+            pluginPayload,
+            isOverrideShapeEnabled);
         builder.Finish(plan);
         return builder.Release();
     }
@@ -398,29 +397,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorUids)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyTensorUids)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true, true);
-
-    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
-                                                            serializedPlan.data(),
-                                                            serializedPlan.size()),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingEngineConfig)
-{
-    auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, false);
-
-    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
-                                                            serializedPlan.data(),
-                                                            serializedPlan.size()),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyEngineConfig)
-{
-    auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true, false, true);
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -431,7 +408,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyEngineConfig)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false);
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, false);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -442,7 +419,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyPluginPayload)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true, false, false, true);
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -467,11 +444,8 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
-        .WillOnce([](int64_t,
-                     const hipdnnPluginConstData_t* engineConfig,
-                     const hipdnnPluginConstData_t* serializedContext) {
-            EXPECT_EQ(engineConfig->size, 3);
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce([](int64_t, const hipdnnPluginConstData_t* serializedContext) {
             EXPECT_EQ(serializedContext->size, 3);
             return getExecutionContext();
         });
@@ -482,6 +456,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
 
     ASSERT_TRUE(plan->isFinalized());
     ASSERT_EQ(plan->getTensorUids(), _tensorUids);
+    ASSERT_FALSE(plan->isOverrideShapeEnabled());
     ASSERT_EQ(plan->getExecutionContext(), getExecutionContext());
 
     int64_t workspaceSize = 0;
@@ -515,7 +490,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
+                createExecutionContextFromSerialized(ENGINE_ID, _))
         .WillOnce(Return(getExecutionContext()));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
@@ -548,12 +523,49 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     ASSERT_EQ(executionPlan->version(), 1);
     ASSERT_EQ(executionPlan->engine_id(), ENGINE_ID);
     ASSERT_EQ(executionPlan->workspace_size(), 1024);
+    ASSERT_FALSE(executionPlan->is_override_shape_enabled());
     ASSERT_EQ(std::vector<int64_t>(executionPlan->tensor_uids()->begin(),
                                    executionPlan->tensor_uids()->end()),
               _tensorUids);
     ASSERT_EQ(std::vector<uint8_t>(executionPlan->plugin_payload()->begin(),
                                    executionPlan->plugin_payload()->end()),
               pluginPayload);
+}
+
+TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsOverrideShapeEnabledFlag)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan
+        = makeSerializedPlan(1, 1024, true, true, false, false, /*isOverrideShapeEnabled=*/true);
+    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce(Return(getExecutionContext()));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+    ASSERT_TRUE(plan->isOverrideShapeEnabled());
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
+        .Times(2)
+        .WillRepeatedly([&pluginPayload](int64_t,
+                                         hipdnnEnginePluginExecutionContext_t,
+                                         std::vector<uint8_t>& serializedContext) {
+            serializedContext = pluginPayload;
+        });
+
+    size_t planByteSize = 0;
+    ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
+
+    std::vector<uint8_t> serializedOutput(planByteSize);
+    ASSERT_NO_THROW(
+        plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
+
+    auto executionPlan
+        = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
+    EXPECT_TRUE(executionPlan->is_override_shape_enabled());
 }
 
 TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
@@ -563,7 +575,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
+                createExecutionContextFromSerialized(ENGINE_ID, _))
         .WillOnce(Return(getExecutionContext()));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
