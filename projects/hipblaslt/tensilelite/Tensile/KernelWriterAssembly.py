@@ -4708,106 +4708,126 @@ class KernelWriterAssembly(KernelWriter):
                            comment="- soffset (per-lane vaddr space)"))
 
       # Per-chunk emission. For numGR==1 the loop body runs once with the
-      # original semantics. For numGR>1 each chunk has its own per-lane vaddr
-      # VGPR (sharedVgprGROffset[chunkIdx], row-base pre-bumped by chunkIdx *
-      # mPerGRLoad rows) and its own LDS region (+chunkIdx*subtileOffsetBytes).
-      # We scalar-branch around non-selected chunks; chunkSel is wave-uniform
-      # because it is derived from WG/tile constants in stmp+9.
+      # original semantics. For numGR>1 we merge sharedVgprGROffset[0..numGR-1]
+      # into a single VGPR via v_cndmask chained on a per-chunk uniform mask
+      # built from sChunkSel, then issue ONE v_cmp/ff1/readlane block. The m0
+      # per-chunk LDS step is selected with s_cselect_b32. No unrolled chunks.
       sCmpLo    = stmp + 4
       sCmpHi    = stmp + 5
       sLaneId   = stmp + 0   # reuse stmp+0 after sTarget is consumed
-      sAnyMatch = stmp + 10  # outside [0..9] so it doesn't clobber sChunkSel(=stmp+9)
+      sAnyMatch = stmp + 10
+      sMask     = stmp + 4   # reused for cndmask lane mask BEFORE v_cmp clobbers sCmpLo/Hi
+      sM0Step   = stmp + 9   # reuse sChunkSel slot (dead after cndmask merge); lives past ff1 chain
+      laneMaskCount = self.states.laneSGPRCount   # 2 for wave64, 1 for wave32
       mubuf = MUBUFModifiers(offen=True, offset12=0, glc=False, slc=False, nt=False, lds=True)
       ldSoffset = sgpr(soffsetSgprIdx) if hasSoffsetSgpr else 0
 
       vTmp = self.vgprPool.checkOut(1, "tailBoundaryVTmp")
 
-      for chunkIdx in range(numGR):
-        chunkVaddrVgpr = tileInfo.sharedVgprGROffset[chunkIdx]
-        skipChunkLabel = Label(self.labels.getNameInc("tailBoundarySkipChunk%s_%d" % (tc, chunkIdx)), "")
+      # --- Build vMerged: lane values of the selected chunk's vaddr VGPR ----
+      if numGR == 1:
+        vaddrVgpr = tileInfo.sharedVgprGROffset[0]
+      else:
+        vMerged = self.vgprPool.checkOut(1, "tailBoundaryVMerged")
+        # Seed with chunk 0, then for i in 1..numGR-1 overwrite when sChunkSel == i.
+        module.add(VMovB32(dst=vgpr(vMerged),
+                           src=vgpr(tileInfo.sharedVgprGROffset[0]),
+                           comment="vMerged = chunk-0 vaddrs (default)"))
+        for i in range(1, numGR):
+          module.add(SCmpEQU32(src0=sgpr(sChunkSel), src1=hex(i),
+                               comment="chunkSel == %d ?" % i))
+          module.add(SCSelectB64(dst=sgpr(sMask, laneMaskCount), src0=-1, src1=0,
+                                 comment="sMask = all-ones if chunk %d selected" % i))
+          module.add(VCndMaskB32(dst=vgpr(vMerged),
+                                 src0=vgpr(vMerged),
+                                 src1=vgpr(tileInfo.sharedVgprGROffset[i]),
+                                 src2=sgpr(sMask, laneMaskCount),
+                                 comment="vMerged = chunk %d vaddrs when selected" % i))
+        vaddrVgpr = vMerged
 
-        if numGR > 1:
-          module.add(SCmpEQU32(src0=sgpr(sChunkSel), src1=hex(chunkIdx),
-                               comment="select chunk %d ?" % chunkIdx))
-          module.add(SCBranchSCC0(labelName=skipChunkLabel.getLabelName(),
-                                  comment="skip chunk %d if not selected" % chunkIdx))
+      # --- m0 chunk-step: chunkIdx * subtileOffsetBytes (0 when numGR==1) ----
+      if numGR == 1:
+        sM0StepIsZero = True
+      else:
+        sM0StepIsZero = False
+        # Build sM0Step = sChunkSel * subtileOffsetBytes via shift (pow2).
+        module.add(SLShiftLeftB32(dst=sgpr(sM0Step),
+                                  shiftHex=log2(subtileOffsetBytes),
+                                  src=sgpr(sChunkSel),
+                                  comment="sM0Step = chunkSel * subtileOffsetBytes"))
 
-        module.add(Label("seblane%s_%d" % (tc, chunkIdx), ""))
+      module.add(Label("seblane%s" % tc, ""))
 
-        # --- v_cmp + ff1 -> sLaneId on this chunk's per-lane vaddr VGPR.
-        if waveSize == 64:
-          module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
-                               src1=vgpr(chunkVaddrVgpr),
-                               comment="find lane whose vaddr == sTarget (chunk %d)" % chunkIdx))
-          module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
-                            comment="sAnyMatch = vcc_lo | vcc_hi (per-wave match)"))
-          module.add(SFf1B32(dst=sgpr(stmp+1), src=sgpr(sCmpHi),
-                             comment="ff1(vcc_hi)"))
-          module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=32,
-                             comment="+ 32 (hi-half lane offset)"))
-          module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
-                             comment="ff1(vcc_lo) -- -1 if no bit in lo"))
-          module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
-                               comment="SCC=1 if lo had no match"))
-          module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+1), src1=sgpr(sLaneId),
-                                 comment="sLaneId = lo==-1 ? hi+32 : lo"))
-        else:
-          module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
-                               src1=vgpr(chunkVaddrVgpr),
-                               comment="find lane whose vaddr == sTarget (chunk %d)" % chunkIdx))
-          module.add(SMovB32(dst=sgpr(sAnyMatch), src=sgpr(sCmpLo),
-                             comment="sAnyMatch = vcc (per-wave match)"))
-          module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
-                             comment="sLaneId = ff1(vcc)"))
+      # --- v_cmp + ff1 -> sLaneId on the merged vaddr VGPR -------------------
+      if waveSize == 64:
+        module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
+                             src1=vgpr(vaddrVgpr),
+                             comment="find lane whose vaddr == sTarget"))
+        module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
+                          comment="sAnyMatch = vcc_lo | vcc_hi (per-wave match)"))
+        module.add(SFf1B32(dst=sgpr(stmp+1), src=sgpr(sCmpHi), comment="ff1(vcc_hi)"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=32,
+                           comment="+ 32 (hi-half lane offset)"))
+        module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                           comment="ff1(vcc_lo) -- -1 if no bit in lo"))
+        module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
+                             comment="SCC=1 if lo had no match"))
+        module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+1), src1=sgpr(sLaneId),
+                               comment="sLaneId = lo==-1 ? hi+32 : lo"))
+      else:
+        module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
+                             src1=vgpr(vaddrVgpr),
+                             comment="find lane whose vaddr == sTarget"))
+        module.add(SMovB32(dst=sgpr(sAnyMatch), src=sgpr(sCmpLo),
+                           comment="sAnyMatch = vcc (per-wave match)"))
+        module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                           comment="sLaneId = ff1(vcc)"))
 
-        # --- m0 = LocalWriteBaseAddr + laneId*16 + intra_K_byte
-        #         + offsetK_bytes + offsetM_lds_bytes (+ per-chunk LDS step)
-        module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(16), src=sgpr(sLaneId),
-                                  comment="sLaneId * 16 (per-lane LDS stride)"))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
-                           comment="+ intra_K_byte"))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
-                           comment="+ offsetK_bytes"))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+8),
-                           comment="+ offsetM_lds_bytes"))
-        if chunkIdx > 0:
-          module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1),
-                             src1=hex(chunkIdx * subtileOffsetBytes),
-                             comment="+ chunk %d LDS subtileOffset" % chunkIdx))
-        module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
-                           src1=sgpr(stmp+1),
-                           comment="m0 = LocalWriteBaseAddr%s + ... (chunk %d)" % (tc, chunkIdx)))
+      # --- m0 = LocalWriteBaseAddr + laneId*16 + intra + offsetK + offsetM_lds
+      #         (+ sM0Step for the selected chunk) --------------------------
+      module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(16), src=sgpr(sLaneId),
+                                comment="sLaneId * 16 (per-lane LDS stride)"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
+                         comment="+ intra_K_byte"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
+                         comment="+ offsetK_bytes"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+8),
+                         comment="+ offsetM_lds_bytes"))
+      if not sM0StepIsZero:
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(sM0Step),
+                           comment="+ sM0Step (selected chunk LDS offset)"))
+      module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
+                         src1=sgpr(stmp+1),
+                         comment="m0 = LocalWriteBaseAddr%s + ..." % tc))
 
-        # --- vaddr = v[chunkVaddrVgpr][sLaneId] + intra + offsetK + offsetM(glb)
-        module.add(VReadlaneB32(dst=sgpr(stmp+1), src0=vgpr(chunkVaddrVgpr),
-                                src1=sgpr(sLaneId),
-                                comment="sTarget = v[vaddr][sLaneId] (chunk %d)" % chunkIdx))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
-                           comment="+ intra_K_byte"))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
-                           comment="+ offsetK_bytes"))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+7),
-                           comment="+ offsetM_glb_bytes"))
-        module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1),
-                           comment="vaddr"))
+      # --- vaddr = v[vaddrVgpr][sLaneId] + intra + offsetK + offsetM_glb ----
+      module.add(VReadlaneB32(dst=sgpr(stmp+1), src0=vgpr(vaddrVgpr),
+                              src1=sgpr(sLaneId),
+                              comment="sTarget = v[vaddr][sLaneId]"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
+                         comment="+ intra_K_byte"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
+                         comment="+ offsetK_bytes"))
+      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+7),
+                         comment="+ offsetM_glb_bytes"))
+      module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1), comment="vaddr"))
 
-        # --- EXEC gate, emit DTL load, wait, restore EXEC ------------------
-        module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
-                             comment="SCC=1 if this wave had no matching lane"))
-        module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
-                               comment="EXEC = match ? 1 (lane 0 only) : 0"))
-        module.add(Label("sebLoad%s_%d" % (tc, chunkIdx), ""))
-        module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
-                                 saddr=sgpr("Srd%s" % tc, 4),
-                                 soffset=ldSoffset, mubuf=mubuf,
-                                 comment="boundary 16-bit DTL load (chunk %d) -> LDS@m0" % chunkIdx))
-        module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
-        module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
-
-        if numGR > 1:
-          module.add(skipChunkLabel)
-
+      # --- EXEC gate, emit DTL load, wait, restore EXEC ---------------------
+      module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
+                           comment="SCC=1 if this wave had no matching lane"))
+      module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
+                             comment="EXEC = match ? 1 (lane 0 only) : 0"))
+      module.add(Label("sebLoad%s" % tc, ""))
+      module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
+                               saddr=sgpr("Srd%s" % tc, 4),
+                               soffset=ldSoffset, mubuf=mubuf,
+                               comment="boundary 16-bit DTL load -> LDS@m0"))
+      module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
+      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
       module.add(SBarrier())
+
+      if numGR > 1:
+        self.vgprPool.checkIn(vMerged)
       self.vgprPool.checkIn(vTmp)
 
     module.add(skipLabel)
