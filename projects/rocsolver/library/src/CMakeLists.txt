@@ -437,7 +437,6 @@ if(BUILD_WITH_SPARSE)
   )
 endif()
 
-target_link_libraries(rocsolver PRIVATE rocsolver-common)
 if(USE_FMT_LIB)
    if(ROCSOLVER_EMBED_FMT)
       target_link_libraries(rocsolver PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)

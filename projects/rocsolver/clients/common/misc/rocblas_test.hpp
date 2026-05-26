@@ -40,6 +40,8 @@
 
 #include <rocblas/rocblas.h>
 
+#include "rocsolver_utility.hpp"
+
 // Suppress warnings about hipMalloc(), hipFree() except in rocblas-test and
 // rocblas-bench
 #if !defined(ROCSOLVER_CLIENTS_TEST) && !defined(ROCBLAS_BENCH)
