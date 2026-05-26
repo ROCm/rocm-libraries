@@ -600,7 +600,7 @@ inline void unit_check_general(int64_t                     M,
                                const hipsparselt_fp8_e4m3* const hGPU[],
                                int64_t                     batch_count)
 {
-    unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_FP8_EQ);
 }
 
 template <>
@@ -611,7 +611,7 @@ inline void unit_check_general(int64_t                     M,
                                const hipsparselt_fp8_e5m2* const hGPU[],
                                int64_t                     batch_count)
 {
-    unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
 #endif
 
@@ -624,7 +624,7 @@ inline void unit_check_general(int64_t                          M,
                                const hipsparselt_fp8_e4m3_fnuz* const hGPU[],
                                int64_t                          batch_count)
 {
-    unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_FP8_EQ);
 }
 
 template <>
@@ -635,7 +635,7 @@ inline void unit_check_general(int64_t                          M,
                                const hipsparselt_fp8_e5m2_fnuz* const hGPU[],
                                int64_t                          batch_count)
 {
-    unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
 #endif
 
