@@ -167,16 +167,9 @@ try
     // Only the last call to rocfft_cleanup does the cleanup
     if(rocfft_usage_count == 0)
     {
-        if(LOG_TRACE_ENABLED())
-        {
-            // Note: this would never log to a user-defined file (if ROCFFT_LOG_TRACE_PATH
-            // is not empty), as "rocfft_usage_count == 0" implies that such a file was
-            // already closed or never opened in the first place: rocfft_cerr is used.
-            (*LogSingleton::GetInstance().GetTraceOS())
-                << "rocfft_setup was called fewer times than rocfft_cleanup: invalid usage of "
-                   "rocfft."
-                << std::endl;
-        }
+        // Note: "rocfft_usage_count == 0" implies that logging layers (and files)
+        // were already reset (and closed) or never set (nor opened) in the first
+        // place, so logging cannot be done however desirable it may be.
         return rocfft_status_failure;
     }
     if(--rocfft_usage_count > 0)
