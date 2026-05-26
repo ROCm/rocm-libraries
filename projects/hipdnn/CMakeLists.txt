@@ -108,25 +108,6 @@ set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Install directory for test plugins"
 )
 
-set(HIPDNN_TEST_REFERENCE_DIR "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
-    CACHE INTERNAL "Directory for test reference data"
-)
-set(HIPDNN_TEST_REFERENCE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}"
-    CACHE INTERNAL "Install directory for test reference data"
-)
-set(_hipdnn_ref_data_src
-    "${CMAKE_SOURCE_DIR}/dnn-providers/integration-tests/hipdnn_reference_data")
-if(EXISTS "${_hipdnn_ref_data_src}")
-    file(COPY "${_hipdnn_ref_data_src}/"
-         DESTINATION ${HIPDNN_TEST_REFERENCE_DIR}
-    )
-endif()
-if(EXISTS "${HIPDNN_TEST_REFERENCE_DIR}")
-    install(DIRECTORY "${HIPDNN_TEST_REFERENCE_DIR}"
-            DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR}
-    )
-endif()
-
 # Migrate HIP_DNN_BUILD_BACKEND -> HIPDNN_BUILD_BACKEND
 if(DEFINED HIP_DNN_BUILD_BACKEND)
     set(HIPDNN_BUILD_BACKEND ${HIP_DNN_BUILD_BACKEND} CACHE BOOL "Build the backend code" FORCE)
