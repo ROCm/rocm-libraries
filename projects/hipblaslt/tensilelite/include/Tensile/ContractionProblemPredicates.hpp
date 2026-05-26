@@ -3028,6 +3028,68 @@ namespace TensileLite
                 }
             };
 
+            struct ClusterDimCheck
+                : public Predicate_CRTP<ClusterDimCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                size_t             index;
+                std::array<int, 5> value;
+
+                ClusterDimCheck() = default;
+                ClusterDimCheck(size_t index, std::array<int, 5> value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ClusterDimCheck";
+                }
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
+                    gsu     = gsu > 1 ? gsu : 1;
+                    int numWG_x = static_cast<int>(
+                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                                  );
+                    int numWG_y = static_cast<int>(
+                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
+                                  ) * gsu;
+
+                    bool divisible_x = (numWG_x % value[3]) == 0;
+                    bool divisible_y = (numWG_y % value[4]) == 0;
+
+                    return (divisible_x and divisible_y);
+                }
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
+                    gsu     = gsu > 1 ? gsu : 1;
+                    int numWG_x = static_cast<int>(
+                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                                  );
+                    int numWG_y = static_cast<int>(
+                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
+                                  ) * gsu;
+
+                    std::vector<int> numWG = {numWG_x, numWG_y};
+                    std::vector<int> clusterDim = {value[3], value[4]};
+
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob's workgroup number [x, y]",
+                                        numWG,
+                                        "%",
+                                        "cluster dimension [x, y]",
+                                        clusterDim);
+                }
+            };
         } // namespace Contraction
 
         /**
