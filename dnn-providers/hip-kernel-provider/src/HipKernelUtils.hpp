@@ -12,13 +12,18 @@
 /**
  * @brief Macro that returns and prints info log on passing provided condition.
  * Arguments after first are passed into std::format().
- * Requires a HIP_KERNEL_LOG_PREFIX in scope which will prefix the log
+ * Requires a HIP_KERNEL_LOG_PREFIX in scope which will prefix the log.
+ *
+ * `message` is intentionally substituted without enclosing parentheses so call
+ * sites can pass `+`-chained expressions like `"foo " + EnumName(...)` that
+ * rely on left-to-right associativity to fold into a std::string.
  */
 #define HIP_KERNEL_RETURN_FALSE_IF(condition, message)                            \
     do                                                                            \
     {                                                                             \
         if(condition)                                                             \
         {                                                                         \
+            /* NOLINTNEXTLINE(bugprone-macro-parentheses) */                      \
             HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + message); \
             return false;                                                         \
         }                                                                         \

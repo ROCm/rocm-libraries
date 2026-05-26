@@ -491,6 +491,34 @@ HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);
 
 /*! \ingroup library_module
+ *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.
+ *
+ *  \details
+ *  When \c HIPBLASLT_CHECK_NUMERICS is set, this function performs a
+ *  device-wide synchronize, reads the persistent NaN flag, and resets it.
+ *  The matmul \c call_id of the FIRST scanned NaN observed since the
+ *  previous drain (or handle creation) is written to \p first_nan_call_id
+ *  if non-null. Zero means no NaN was observed in that window. Frameworks
+ *  (e.g. PyTorch) call this to obtain a result without relying on the
+ *  handle destructor (which may not run if the process is killed).
+ *
+ *  When the env var is not set, the function is a no-op and returns
+ *  \c HIPBLAS_STATUS_SUCCESS with \p *first_nan_call_id set to 0.
+ *
+ *  @param[in]
+ *  handle Pointer to the allocated hipBLASLt handle.
+ *  @param[out]
+ *  first_nan_call_id Optional. If non-null, receives the call_id of the
+ *  first NaN seen in this drain window (0 = none).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS Drain completed (or scanning disabled).
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
+                                            uint32_t*         first_nan_call_id);
+
+/*! \ingroup library_module
  *  \brief Create a matrix layout descriptor.
  *
  *  \details

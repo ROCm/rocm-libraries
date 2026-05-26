@@ -85,6 +85,26 @@ typedef enum
     /** @brief Find first mode: stop after finding any applicable engine (bool, extension) */
     HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT = 105,
 
+    /**
+     * @brief Ordered list of heuristic policy IDs for engine selection (array of int64, extension)
+     *
+     * Specifies the policy order for the heuristic outer loop. Each element is an int64_t
+     * policy ID, produced by hashing a policy name (e.g., "SelectionHeuristic::StaticOrdering")
+     * with hipdnn_data_sdk::utilities::policyNameToId.
+     * Hashing is performed by the caller before the C ABI; the backend stores and dispatches
+     * by ID only.
+     *
+     * Resolution priority at finalize time (highest first):
+     *   1. HIPDNN_HEUR_POLICY_ORDER env var (comma-separated tokens; each token is
+     *      either a policy name, which is hashed via policyNameToId, or a raw
+     *      decimal int64 policy ID).
+     *   2. This descriptor attribute, if set.
+     *   3. Built-in default: [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering].
+     *
+     * Type: HIPDNN_TYPE_INT64
+     */
+    HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT = 106,
+
     /** @} */
 
     /**
@@ -1144,6 +1164,38 @@ typedef enum
 
     /** @brief Compute data type for resample */
     HIPDNN_ATTR_RESAMPLE_COMP_TYPE = 3407,
+
+    /** @} */
+
+    /**
+     * @name RMSNorm Backward Operation Attributes (3500-3599)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Gradient input tensor (dy) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT = 3500,
+
+    /** @brief Input tensor (x) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT = 3501,
+
+    /** @brief Scale tensor for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT = 3502,
+
+    /** @brief Inverse RMS tensor for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT = 3503,
+
+    /** @brief Gradient output tensor (dx) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT = 3504,
+
+    /** @brief Scale gradient tensor (dscale) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT = 3505,
+
+    /** @brief Bias gradient tensor (dbias) for rmsnorm backward (optional) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT = 3506,
+
+    /** @brief Compute data type for rmsnorm backward */
+    HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT = 3507,
 
     /** @} */
 
