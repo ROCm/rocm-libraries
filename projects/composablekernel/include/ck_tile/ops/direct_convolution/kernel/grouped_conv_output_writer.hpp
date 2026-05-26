@@ -79,11 +79,11 @@ struct OutputWriter
                     {0, bc.block_q, 0, 0},
                     out_dist);
 
-                output_elem_offset = tmp_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                    [ck_tile::number<1>{}].get_offset();
+                output_elem_offset = tmp_window.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                         [ck_tile::number<1>{}].get_offset();
                 store_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                    out_desc, tmp_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                            [ck_tile::number<1>{}]);
+                    out_desc, tmp_window.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                  [ck_tile::number<1>{}]);
             };
 
             if constexpr(Padded)
@@ -246,8 +246,8 @@ struct OutputWriterLds
                 {0, 0, 0},
                 TC::Mfma::MakeAccTileDistribution());
 
-            lds_write_offset = tmp_write.pre_computed_coords_[ck_tile::number<0>{}]
-                                                             [ck_tile::number<1>{}].get_offset();
+            lds_write_offset = tmp_write.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                  [ck_tile::number<1>{}].get_offset();
         }
 
         // LDS read offset (store distribution → swizzled LDS layout).
@@ -266,8 +266,8 @@ struct OutputWriterLds
                 {0, 0, 0},
                 store_dist);
 
-            lds_read_offset = tmp_read.pre_computed_coords_[ck_tile::number<0>{}]
-                                                           [ck_tile::number<1>{}].get_offset();
+            lds_read_offset = tmp_read.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                [ck_tile::number<1>{}].get_offset();
         }
 
         // DRAM store offset and validity (store distribution → padded DRAM layout).
@@ -291,12 +291,12 @@ struct OutputWriterLds
                     {bc.block_q, 0, 0},
                     store_dist);
 
-                output_elem_offset = tmp_dram.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                  [ck_tile::number<1>{}].get_offset();
+                output_elem_offset = tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                       [ck_tile::number<1>{}].get_offset();
                 store_valid = store_dist.is_thread_active()
                     && ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                           out_desc, tmp_dram.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                  [ck_tile::number<1>{}]);
+                           out_desc, tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                       [ck_tile::number<1>{}]);
             };
 
             if constexpr(Padded)

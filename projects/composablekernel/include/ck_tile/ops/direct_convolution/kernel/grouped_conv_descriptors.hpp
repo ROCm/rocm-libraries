@@ -256,7 +256,8 @@ struct SharedDescriptors
                 ck_tile::number<4>{},
                 ck_tile::number<1>{});
 
-            auto make_desc = [](auto desc_3d) constexpr {
+            auto make_desc = []<typename Desc3d>(Desc3d) constexpr {
+                constexpr Desc3d desc_3d{};
                 constexpr auto desc_merged = ck_tile::transform_tensor_descriptor(
                     desc_3d,
                     ck_tile::make_tuple(
@@ -516,7 +517,8 @@ struct SharedDescriptors
                 ck_tile::number<4>{},
                 ck_tile::number<1>{});
 
-            auto make_desc = [](auto desc_3d) constexpr {
+            auto make_desc = []<typename Desc3d>(Desc3d) constexpr {
+                constexpr Desc3d desc_3d{};
                 constexpr auto desc_merged = ck_tile::transform_tensor_descriptor(
                     desc_3d,
                     ck_tile::make_tuple(

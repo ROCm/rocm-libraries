@@ -115,8 +115,8 @@ struct InputLoader
         auto compute_load_active = [&](const auto& dram_window) {
             constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
             auto warp_bottom_idx =
-                dram_window.pre_computed_warp_coords_[ck_tile::number<0>{}]
-                                                     [ck_tile::number<0>{}].get_bottom_index();
+                dram_window.get_pre_computed_warp_coords()[ck_tile::number<0>{}]
+                                                          [ck_tile::number<0>{}].get_bottom_index();
             auto lds_offset = ck_tile::make_tensor_coordinate(lds_store_desc, warp_bottom_idx).get_offset();
             const int lane_id = ck_tile::get_lane_id();
             return lds_offset + lane_id * 8 < TC::BLOCK_W * TC::BLOCK_C8 * 8;
@@ -137,13 +137,13 @@ struct InputLoader
             load_active = compute_load_active(tmp_dram_window);
 
             // Extract per-thread DRAM source element offset.
-            auto dram_elem_offset = tmp_dram_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                        [ck_tile::number<1>{}].get_offset();
+            auto dram_elem_offset = tmp_dram_window.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                             [ck_tile::number<1>{}].get_offset();
 
             // Extract per-thread pad-transform validity flag.
             is_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                input_dram_desc, tmp_dram_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                     [ck_tile::number<1>{}]);
+                input_dram_desc, tmp_dram_window.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                          [ck_tile::number<1>{}]);
 
             // Create buffer resource.
             auto elem_space_size = input_dram_desc.get_element_space_size();
@@ -157,8 +157,8 @@ struct InputLoader
             // LDS destination pointer.
             constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
             auto warp_adaptor_bottom_idx =
-                tmp_dram_window.pre_computed_warp_coords_[ck_tile::number<0>{}]
-                                                         [ck_tile::number<0>{}].get_bottom_index();
+                tmp_dram_window.get_pre_computed_warp_coords()[ck_tile::number<0>{}]
+                                                              [ck_tile::number<0>{}].get_bottom_index();
             auto warp_lds_offset = ck_tile::make_tensor_coordinate(
                 lds_store_desc, warp_adaptor_bottom_idx).get_offset();
             auto* lds_elem_base = reinterpret_cast<CK_TILE_LDS_ADDR ElementType*>(
@@ -239,8 +239,8 @@ struct InputLoader
             for(int s = 0; s < cfg.kw; s++)
             {
                 mfma_lds_offsets[s] =
-                    mfma_window_tmp.pre_computed_coords_[ck_tile::number<0>{}]
-                                                       [ck_tile::number<1>{}].get_offset();
+                    mfma_window_tmp.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                             [ck_tile::number<1>{}].get_offset();
                 if(s < cfg.kw - 1)
                     ck_tile::move_tile_window(mfma_window_tmp, {1, 0, 0});
             }
