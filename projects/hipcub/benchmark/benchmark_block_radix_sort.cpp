@@ -276,10 +276,6 @@ class block_radix_sort_benchmark : public primbench::benchmark_interface
     CREATE_BENCHMARK(type, block, 8)
 // clang-format on
 
-using custom_int_t = benchmark_utils::custom_type<int>;
-
-PRIMBENCH_REGISTER_TYPE(custom_int_t, "custom<i32>");
-
 template<typename Helper, benchmark_kinds BenchmarkKind>
 void add_benchmarks(primbench::executor& executor)
 {
