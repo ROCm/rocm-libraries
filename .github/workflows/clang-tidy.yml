@@ -44,7 +44,9 @@ jobs:
           # Required fields: name, path_filters (array), checkout_paths (array)
           # Optional fields: (all build config is handled in the per-library run step)
           # path_filters controls which file changes trigger clang-tidy for this library;
-          # use specific globs (e.g. *.[ch]p?p?) rather than /** to avoid false triggers.
+          # use specific globs rather than /** to avoid false triggers.
+          # NOTE: dorny/paths-filter uses picomatch where '?' means "any single char",
+          # NOT GitHub Actions' "zero or one of preceding char". Use explicit extensions.
           # checkout_paths lists all repo paths needed for sparse checkout.
           LIBS=()
 
@@ -52,7 +54,7 @@ jobs:
           LIBS+=($(jq -cn '{
             name:           "hipdnn",
             path_filters:   [
-              "projects/hipdnn/**/*.[ch]p?p?",
+              "projects/hipdnn/**/*.{c,h,cpp,hpp,cxx,hxx}",
               "projects/hipdnn/cmake/ClangTidy.cmake",
               "projects/hipdnn/.clang-tidy"
             ],
@@ -63,7 +65,7 @@ jobs:
           LIBS+=($(jq -cn '{
             name:           "stinkytofu",
             path_filters:   [
-              "shared/stinkytofu/**/*.[ch]p?p?",
+              "shared/stinkytofu/**/*.{c,h,cpp,hpp,cxx,hxx,def}",
               "shared/stinkytofu/.clang-tidy",
               "cmake/modules/ClangTidy.cmake",
               "cmake/modules/CheckToolVersion.cmake"
@@ -75,7 +77,7 @@ jobs:
           # LIBS+=($(jq -cn '{
           #   name:           "miopen-provider",
           #   path_filters:   [
-          #     "dnn-providers/miopen-provider/**/*.[ch]p?p?",
+          #     "dnn-providers/miopen-provider/**/*.{c,h,cpp,hpp,cxx,hxx}",
           #     "dnn-providers/miopen-provider/cmake/ClangTidy.cmake",
           #     "dnn-providers/miopen-provider/.clang-tidy"
           #   ],

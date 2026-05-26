@@ -40,6 +40,8 @@
 namespace {
 using namespace stinkytofu;
 
+enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
+
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
@@ -242,15 +244,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getMaxDsLatency(DAGNode* node);
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
-    bool findSmallestPickableNonWmma(DAGNode** outNode, int* kindOut) const;
-    bool findOldestFallbackNonWmma(DAGNode** outNode, int* kindOut) const;
-    DAGNode* popFallbackNonWmmaByKind(DAGNode* node, int pickKind);
+    bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
+    bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
     DAGNode* extractForcedBarrier();
     void computeBarrierAfterThresholds(IRList::iterator regionStart, IRList::iterator regionEnd);
     std::unordered_map<StinkyInstruction*, int> computeBarrierBeforeThresholds(
         IRList::iterator regionStart, IRList::iterator regionEnd);
     bool isValuPickable() const;
-    DAGNode* popNonWmmaByKind(int pickKind);
+    DAGNode* popNonWmma(DAGNode* node, int pickKind);
 
     void restoreCrossBBStateFromLoop();
 
@@ -317,22 +318,16 @@ bool CDNA5ReadyQueue::isValuPickable() const {
     return (activeCoIssueWindow_ >> coIssueCyclePos_) & 1;
 }
 
-// Pop a non-WMMA node by kind (0=global, 1=local, 2=other, 3=valu),
-// update state, and return the node.
-DAGNode* CDNA5ReadyQueue::popNonWmmaByKind(int pickKind) {
-    DAGNode* node = nullptr;
-    if (pickKind == 0) {
-        node = globalReadQueue.top();
-        globalReadQueue.pop();
+// Remove a specific non-WMMA node from its queue by kind (0=global, 1=local,
+// 2=other, 3=valu), update all scheduling counters, and return the node.
+DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
+    assert(node != nullptr);
+    if (pickKind == kGlobalRead) {
+        globalReadQueue.erase(node);
         globalReadCounter++;
         consecutiveDsCount_ = 0;
-    } else if (pickKind == 1) {
-        DAGNode* best = nullptr;
-        for (DAGNode* n : localReadQueue) {
-            if (!best || n->dsReadPriority < best->dsReadPriority) best = n;
-        }
-        node = best;
-        localReadQueue.erase(best);
+    } else if (pickKind == kLocalRead) {
+        localReadQueue.erase(node);
         for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
             if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
             for (unsigned off = 0; off < dstReg.reg.num; ++off)
@@ -344,14 +339,12 @@ DAGNode* CDNA5ReadyQueue::popNonWmmaByKind(int pickKind) {
                             ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
                             : 0;
         consecutiveDsCount_++;
-    } else if (pickKind == 2) {
-        node = otherQueue.top();
-        otherQueue.pop();
+    } else if (pickKind == kOther) {
+        otherQueue.erase(node);
         consecutiveDsCount_ = 0;
     } else {
-        assert(pickKind == 3);
-        node = valuQueue.top();
-        valuQueue.pop();
+        assert(pickKind == kValu);
+        valuQueue.erase(node);
         consecutiveDsCount_ = 0;
     }
     updateWMMAStatus(node);
@@ -429,7 +422,8 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 // Pick minimum DAG id among ready non-WMMA nodes.
 // Queues: globalReadQueue (throttled), localReadQueue, valuQueue (co-issue gated), otherQueue.
 // kind: 0=global, 1=local, 2=other, 3=valu.
-bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode** outNode, int* kindOut) const {
+bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode,
+                                                  int* kindOut) const {
     *outNode = nullptr;
     *kindOut = -1;
     DAGNode* best = nullptr;
@@ -439,30 +433,27 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode** outNode, int* kindOu
 
     if (!globalReadQueue.empty() && (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
         best = globalReadQueue.top();
-        kind = 0;
+        kind = kGlobalRead;
     }
-    if (!localReadQueue.empty() && dsBurstOk) {
-        DAGNode* t = localReadQueue.top();
-        if (!best || t->id < best->id) {
-            best = t;
-            kind = 1;
+    if (pickedDS && dsBurstOk) {
+        if (!best || pickedDS->id < best->id) {
+            best = pickedDS;
+            kind = kLocalRead;
         }
     }
     if (!otherQueue.empty()) {
         DAGNode* t = otherQueue.top();
         if (!best || t->id < best->id) {
             best = t;
-            kind = 2;
+            kind = kOther;
         }
     }
     if (!valuQueue.empty() && isValuPickable()) {
         DAGNode* t = valuQueue.top();
-        // DS reads have higher priority than VALU: only pick VALU when no
-        // ds_load is available (or burst limit reached).
-        bool dsAvailable = !localReadQueue.empty() && dsBurstOk;
+        bool dsAvailable = pickedDS != nullptr && dsBurstOk;
         if (!dsAvailable && (!best || t->id < best->id)) {
             best = t;
-            kind = 3;
+            kind = kValu;
         }
     }
 
@@ -474,7 +465,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode** outNode, int* kindOu
 
 // Final-fallback candidate search across non-WMMA queues.
 // kind: 0=global, 1=local, 2=other, 3=valu.
-bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode** outNode, int* kindOut) const {
+bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode,
+                                                int* kindOut) const {
     *outNode = nullptr;
     *kindOut = -1;
     DAGNode* best = nullptr;
@@ -488,44 +480,15 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode** outNode, int* kindOut)
         }
     };
 
-    if (!globalReadQueue.empty()) consider(globalReadQueue.top(), 0);
-    if (!localReadQueue.empty()) consider(localReadQueue.top(), 1);
-    if (!otherQueue.empty()) consider(otherQueue.top(), 2);
-    if (!valuQueue.empty()) consider(valuQueue.top(), 3);
+    if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
+    consider(pickedDS, kLocalRead);
+    if (!otherQueue.empty()) consider(otherQueue.top(), kOther);
+    if (!valuQueue.empty()) consider(valuQueue.top(), kValu);
 
     if (best == nullptr) return false;
     *outNode = best;
     *kindOut = kind;
     return true;
-}
-
-DAGNode* CDNA5ReadyQueue::popFallbackNonWmmaByKind(DAGNode* node, int pickKind) {
-    assert(node != nullptr && "fallback node must not be null");
-    if (pickKind == 0) {
-        globalReadQueue.erase(node);
-        globalReadCounter++;
-    } else if (pickKind == 1) {
-        localReadQueue.erase(node);
-        for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
-            if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-            for (unsigned off = 0; off < dstReg.reg.num; ++off)
-                wmmaRegisterLatencyCounters[dstReg.reg.idx + off] = node->inst->latencyCycles;
-        }
-        dsInsertedSinceLastWmma_++;
-        totalDsRemaining_--;
-        minDsPerWmma_ = (totalWmmaRemaining_ > 0)
-                            ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
-                            : 0;
-    } else if (pickKind == 2) {
-        otherQueue.erase(node);
-    } else {
-        assert(pickKind == 3 && "fallback kind must be global/local/other/valu");
-        valuQueue.erase(node);
-    }
-
-    updateWMMAStatus(node);
-    if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
-    return node;
 }
 
 // Drain barrierQueue to find the lowest-id barrier whose WMMA threshold is met,
@@ -704,6 +667,12 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return rememberPick(forced);
     }
 
+    // Pre-compute the best DS read by dsReadPriority once for all phases.
+    DAGNode* pickedDS = nullptr;
+    for (DAGNode* n : localReadQueue) {
+        if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
+    }
+
     // Phase B — try WMMA if all gates pass.
     bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
                                !otherQueue.empty() || !valuQueue.empty();
@@ -713,12 +682,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(&smallestPickable, &pickKind);
+        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
 
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
-        // Hard gate: while the previous WMMA latency window is still active,
-        // do not issue another WMMA if any non-WMMA work is pickable.
         const bool blockWmmaForActiveWindow =
             (coIssueCyclePos_ < activeWmmaLatency_) && (smallestPickable != nullptr);
 
@@ -747,17 +714,14 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     }
 
     // Phase C — inside WMMA latency window: fill with non-WMMA work.
-    // If nothing non-WMMA is pickable, fast-forward past the window so
-    // Phase D/E can pick the next WMMA. Barriers are deferred until all
-    // compute queues (including wmmaQueue) are empty.
     if (coIssueCyclePos_ < activeWmmaLatency_) {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(&smallestPickable, &pickKind);
+        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
         if (smallestPickable != nullptr) {
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
                                  << smallestPickable->id << " kind=" << pickKind << "\n");
-            return rememberPick(popNonWmmaByKind(pickKind));
+            return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
 
         advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
@@ -767,9 +731,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(&smallestPickable, &pickKind);
+        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
         if (smallestPickable != nullptr) {
-            return rememberPick(popNonWmmaByKind(pickKind));
+            return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
     }
 
@@ -792,15 +756,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return rememberPick(barrier);
     }
 
-    // Phase G — final safety net: if any bucket still has ready nodes but all
-    // policy gates rejected them, force-pick the oldest DAG node to guarantee
-    // progress and avoid scheduler starvation.
+    // Phase G — final safety net: force-pick the oldest DAG node to guarantee progress.
     DAGNode* fallback = nullptr;
     int fallbackKind = -1;
-    if (findOldestFallbackNonWmma(&fallback, &fallbackKind)) {
+    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind)) {
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << "\n");
-        return rememberPick(popFallbackNonWmmaByKind(fallback, fallbackKind));
+        return rememberPick(popNonWmma(fallback, fallbackKind));
     }
 
     assert(false && "CDNA5ReadyQueue::pickOne: all buckets empty");

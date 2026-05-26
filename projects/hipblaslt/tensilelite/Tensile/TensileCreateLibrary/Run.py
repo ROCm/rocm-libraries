@@ -70,6 +70,7 @@ from Tensile.KernelWriterBase import (
 from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Solution import mergeTypeMismatchCollector, printTypeMismatchSummary
+from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -113,6 +114,66 @@ class KernelMinResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+
+
+def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
+    """Return True if asm/.o Stinky size check should run for this kernel.
+
+    Requires ``CheckASMCodeSize`` and gfx1250. When True, callers should avoid joblib for
+    write+assemble so logs stay on one process.
+    """
+    return bool(globalParameters["CheckASMCodeSize"]) and isaToGfx(isa) == "gfx1250"
+
+
+def _stinky_out(msg: str) -> None:
+    """Emit one user-visible log line for Stinky verify.
+
+    Writes to stderr via ``os.write(2, ...)``. Under pytest-xdist, worker stdout may be
+    hidden; stderr often still appears in the terminal.
+    """
+    try:
+        os.write(2, (msg + "\n").encode("utf-8", errors="replace"))
+    except OSError:
+        pass
+
+
+def _verify_stinky_asm_comment_vs_elf_text(s_path: Path, o_path: Path, kernel_base: str) -> None:
+    """After assembling ``s_path`` → ``o_path``, verify Stinky vs ELF ``.text``.
+
+    Call only when ``_stinky_asm_verify_wanted(isa)`` is True. Uses ``verify_stinky_comment_vs_elf_text``
+    (``readelf`` / ``llvm-readelf``; ``ROCM_PATH``, ``LLVM_BIN``, or ``PATH``). Forwards messages
+    through ``_stinky_out``. Exits via ``printExit`` on mismatch (1) or tool/readelf error (2).
+
+    Args:
+        s_path: Path to the generated ``.s`` file.
+        o_path: Path to the assembled ``.o`` file.
+        kernel_base: Short name for messages (usually the asm stem).
+    """
+    _stinky_out(f"CheckASMCodeSize: running verify for {kernel_base}")
+    try:
+        code, out_s, err_s = verify_stinky_paths(s_path, o_path)
+    except Exception as ex:
+        printExit(f"CheckASMCodeSize: could not run verifier for {kernel_base}: {ex}")
+    if out_s:
+        for line in out_s.splitlines():
+            _stinky_out(line)
+    if err_s:
+        for line in err_s.splitlines():
+            _stinky_out(line)
+    if code == 2:
+        printExit(f"CheckASMCodeSize: verifier error for {kernel_base}")
+    if code == 1:
+        printExit(
+            f"CheckASMCodeSize: STINKY_TOTAL_INST_BYTES vs ELF .text mismatch for {kernel_base}"
+        )
+    if code == 0:
+        out = (out_s or "") + (err_s or "")
+        matched = "OK STINKY" in out
+        if matched:
+            _stinky_out(
+                f"CheckASMCodeSize: OK STINKY_TOTAL_INST_BYTES vs ELF .text match for {kernel_base}"
+            )
+
 
 def memCompress(obj):
     return zlib.compress(pickle.dumps(obj))
@@ -391,7 +452,10 @@ def writeSolutionsAndKernels(
 
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        o_path = p.with_suffix(".o")
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+        if _stinky_asm_verify_wanted(isa):
+            _verify_stinky_asm_comment_vs_elf_text(p, o_path, p.stem)
         if removeTemporaries:
             p.unlink()
 
@@ -490,7 +554,10 @@ def writeSolutionsAndKernelsTCL(
 
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(asmPath.with_suffix(".o")))
+        o_path = asmPath.with_suffix(".o")
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(o_path))
+        if _stinky_asm_verify_wanted(isa):
+            _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
         if removeTemporaries:
             asmPath.unlink()
         return result
