@@ -4559,7 +4559,6 @@ class KernelWriterAssembly(KernelWriter):
     tileIdx = tP["tileIdx"]
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
     waveSize = kernel["WavefrontSize"]
-    vaddrVgprIdx   = tileInfo.sharedVgprGROffset[0]
     soffsetSgprIdx = regList.indices[0] if hasSoffsetSgpr else None
     depthU = kernel["DepthU"]
     matrixInstK = kernel["MatrixInstK"]
@@ -4580,12 +4579,28 @@ class KernelWriterAssembly(KernelWriter):
     # drop the lowest log2(elemsPerLane) bits (those go into intra_K_byte).
     withinSubMask = (subtileKElems - 1) & ~(elemsPerLane - 1)
 
+    # numGRPerSubtile > 1 (e.g. loadRatioGR=0.5) splits a subtile across
+    # multiple dwordx4 loads along M. Each chunk's per-lane vaddr lives in its
+    # own sharedVgprGROffset[i] and its LDS region sits at +i*subtileOffsetBytes.
+    # We mirror that bookkeeping in the boundary load by emitting one gated
+    # block per chunk and selecting at runtime based on which 8-row half of
+    # the subtile owns M_rem_m1.
+    numGR = int(tileInfo.numGRPerSubtile)
+    assert numGR >= 1 and _isPow2(numGR), \
+      "tail boundary load requires power-of-2 numGRPerSubtile (got %d)" % numGR
+    assert mElemsPerSubtileRow % numGR == 0, \
+      "tail boundary load requires mEPSR divisible by numGRPerSubtile"
+    mPerGRLoad = mElemsPerSubtileRow // numGR
+    # Per-chunk LDS byte step (matches emitSingleBufferLoad's m0Offset = i*subtileOffset).
+    subtileSizeBytes   = int(mElemsPerSubtileRow) * int(subtileKElems) * bpe
+    subtileOffsetBytes = subtileSizeBytes // numGR
+
     module.add(Label("sebB%s"%tc,""))
     module.addComment1("Tail-loop boundary DTL load for %s (Option C1: v_cmp + readlane)" % tc)
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkip%s" % tc), "")
 
-    with self.allocTmpSgpr(10, 2) as tmpSgprInfo:
+    with self.allocTmpSgpr(11, 2) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
       # --- Runtime gate: skip boundary load when K_rem is even ------------
       # For even K_rem the regular dwordx4 + boundaryMask path is complete;
@@ -4655,9 +4670,30 @@ class KernelWriterAssembly(KernelWriter):
                                 comment="offsetM_lds_bytes = offsetM_floor * DepthU * bpe"))
 
       # --- numLine_within_subtile = numLine & (mEPSR - 1) -> stmp+2 --------
+      # Keep the full subtile-relative M first so we can derive chunkSel from
+      # its high bits before clipping to within-chunk.
       module.add(SAndB32(dst=sgpr(stmp+2), src0=sgpr(stmp+2),
                          src1=hex(mElemsPerSubtileRow - 1),
                          comment="numLine_within_subtile = numLine & (mEPSR-1)"))
+
+      # --- chunkSel: which GR chunk inside the subtile owns the boundary M.
+      # For numGR == 1 there's only chunk 0, so skip the compute entirely.
+      sChunkSel = stmp + 9
+      if numGR > 1:
+        module.add(SLShiftRightB32(dst=sgpr(sChunkSel),
+                                   shiftHex=log2(mPerGRLoad),
+                                   src=sgpr(stmp+2),
+                                   comment="chunkSel = numLine_within_subtile >> log2(mPerGRLoad)"))
+        module.add(SAndB32(dst=sgpr(sChunkSel), src0=sgpr(sChunkSel),
+                           src1=hex(numGR - 1),
+                           comment="chunkSel &= (numGR-1)"))
+
+      # NOTE: do NOT clip stmp+2 to within-chunk here. The per-chunk vaddr
+      # VGPR (sharedVgprGROffset[chunkIdx]) already encodes the chunk's
+      # row-base bump (SubtileGREmit advance = mEPSR // numGR), so its lane
+      # values are full-subtile-relative. sTarget must use the full
+      # numLine_within_subtile (rows 0..mEPSR-1) to match a v2 lane in the
+      # upper-half chunk. The chunk gate is driven solely by sChunkSel.
 
       # --- sTarget = numLine_within_subtile * strideF * bpe
       #               + alignedK_within_subtile - soffset_subtile0 ----------
@@ -4671,90 +4707,106 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(soffsetSgprIdx),
                            comment="- soffset (per-lane vaddr space)"))
 
-      # --- Find the lane: v_cmp_eq_u32 vccPair, sTarget, v[vaddr_vgpr] -----
-      # Intra_K_byte lives in stmp+3 across the v_cmp/ff1 (we use stmp+4,+5 for
-      # the cmp pair and reuse stmp+0 for sLaneId after sTarget is no longer
-      # needed in scalar form).
-      sCmpLo = stmp + 4
-      sCmpHi = stmp + 5
-      sLaneId = stmp + 0   # reuse stmp+0 after we no longer need sTarget
-      # sAnyMatch: per-wave gate. Only the wave whose subtile-0 per-lane vaddr
-      # matches sTarget owns the trailing element; the other waves must not
-      # fire the boundary load (otherwise they corrupt their LDS region with
-      # a ff1=-1 → sLaneId=31 garbage write). We leave barrier execution to
-      # every wave and only gate EXEC (and thus the buffer_load + waitcnt).
-      sAnyMatch = stmp + 9
-      if waveSize == 64:
-        module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
-                             src1=vgpr(vaddrVgprIdx),
-                             comment="find lane whose vaddr == sTarget"))
-        module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
-                          comment="sAnyMatch = vcc_lo | vcc_hi (per-wave match indicator)"))
-        # 64-bit ff1: lo half first; if lo == -1, use ff1(hi)+32.
-        module.add(SFf1B32(dst=sgpr(stmp+1), src=sgpr(sCmpHi),
-                           comment="ff1(vcc_hi)"))
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=32,
-                           comment="+ 32 (hi-half lane offset)"))
-        module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
-                           comment="ff1(vcc_lo) — -1 if no bit in lo"))
-        module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
-                             comment="SCC=1 if lo had no match"))
-        module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+1), src1=sgpr(sLaneId),
-                               comment="sLaneId = lo_match==-1 ? hi+32 : lo"))
-      else:
-        module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
-                             src1=vgpr(vaddrVgprIdx),
-                             comment="find lane whose vaddr == sTarget"))
-        module.add(SMovB32(dst=sgpr(sAnyMatch), src=sgpr(sCmpLo),
-                           comment="sAnyMatch = vcc (per-wave match indicator)"))
-        module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
-                           comment="sLaneId = ff1(vcc)"))
-
-      # --- m0 = LocalWriteBaseAddr + laneId*16 + intra_K_byte
-      #         + offsetK_bytes + offsetM_lds_bytes -------------------------
-      module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(16), src=sgpr(sLaneId),
-                                comment="sLaneId * 16 (per-lane LDS stride)"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
-                         comment="+ intra_K_byte"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
-                         comment="+ offsetK_bytes"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+8),
-                         comment="+ offsetM_lds_bytes"))
-      module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
-                         src1=sgpr(stmp+1),
-                         comment="m0 = LocalWriteBaseAddr%s + laneId*16 + intra_K_byte + offsetK + offsetM(lds)" % tc))
-
-      # --- vaddr = (per-lane vaddr at lane sLaneId) + intra_K_byte
-      #             + offsetK_bytes + offsetM_glb_bytes --------------------
-      vTmp = self.vgprPool.checkOut(1, "tailBoundaryVTmp")
-      module.add(VReadlaneB32(dst=sgpr(stmp+1), src0=vgpr(vaddrVgprIdx),
-                              src1=sgpr(sLaneId),
-                              comment="sTarget = v[vaddr][sLaneId] (subtile-0 per-lane vaddr)"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
-                         comment="+ intra_K_byte (within 16B chunk)"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
-                         comment="+ offsetK_bytes (K-subtile bump)"))
-      module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+7),
-                         comment="+ offsetM_glb_bytes (M-subtile bump)"))
-      module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1),
-                         comment="vaddr = subtile-0 lane vaddr + intra + offsetK + offsetM(glb)"))
-
-      # --- EXEC = (lane 0 on matching wave, else 0), emit DTL load, wait, restore
-      # Per-wave gate: non-matching waves get EXEC=0 so their buffer_load is a
-      # no-op; matching wave gets EXEC=1 (lane 0) and writes the trailing 16b
-      # to its LDS slot. All waves still reach the surrounding barriers.
-      module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
-                           comment="SCC=1 if this wave had no matching lane"))
-      module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
-                             comment="EXEC = match ? 1 (lane 0 only) : 0"))
+      # Per-chunk emission. For numGR==1 the loop body runs once with the
+      # original semantics. For numGR>1 each chunk has its own per-lane vaddr
+      # VGPR (sharedVgprGROffset[chunkIdx], row-base pre-bumped by chunkIdx *
+      # mPerGRLoad rows) and its own LDS region (+chunkIdx*subtileOffsetBytes).
+      # We scalar-branch around non-selected chunks; chunkSel is wave-uniform
+      # because it is derived from WG/tile constants in stmp+9.
+      sCmpLo    = stmp + 4
+      sCmpHi    = stmp + 5
+      sLaneId   = stmp + 0   # reuse stmp+0 after sTarget is consumed
+      sAnyMatch = stmp + 10  # outside [0..9] so it doesn't clobber sChunkSel(=stmp+9)
       mubuf = MUBUFModifiers(offen=True, offset12=0, glc=False, slc=False, nt=False, lds=True)
       ldSoffset = sgpr(soffsetSgprIdx) if hasSoffsetSgpr else 0
-      module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
-                               saddr=sgpr("Srd%s" % tc, 4),
-                               soffset=ldSoffset, mubuf=mubuf,
-                               comment="boundary 16-bit DTL load -> LDS@m0"))
-      module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
-      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
+
+      vTmp = self.vgprPool.checkOut(1, "tailBoundaryVTmp")
+
+      for chunkIdx in range(numGR):
+        chunkVaddrVgpr = tileInfo.sharedVgprGROffset[chunkIdx]
+        skipChunkLabel = Label(self.labels.getNameInc("tailBoundarySkipChunk%s_%d" % (tc, chunkIdx)), "")
+
+        if numGR > 1:
+          module.add(SCmpEQU32(src0=sgpr(sChunkSel), src1=hex(chunkIdx),
+                               comment="select chunk %d ?" % chunkIdx))
+          module.add(SCBranchSCC0(labelName=skipChunkLabel.getLabelName(),
+                                  comment="skip chunk %d if not selected" % chunkIdx))
+
+        module.add(Label("seblane%s_%d" % (tc, chunkIdx), ""))
+
+        # --- v_cmp + ff1 -> sLaneId on this chunk's per-lane vaddr VGPR.
+        if waveSize == 64:
+          module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
+                               src1=vgpr(chunkVaddrVgpr),
+                               comment="find lane whose vaddr == sTarget (chunk %d)" % chunkIdx))
+          module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
+                            comment="sAnyMatch = vcc_lo | vcc_hi (per-wave match)"))
+          module.add(SFf1B32(dst=sgpr(stmp+1), src=sgpr(sCmpHi),
+                             comment="ff1(vcc_hi)"))
+          module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=32,
+                             comment="+ 32 (hi-half lane offset)"))
+          module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                             comment="ff1(vcc_lo) -- -1 if no bit in lo"))
+          module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
+                               comment="SCC=1 if lo had no match"))
+          module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+1), src1=sgpr(sLaneId),
+                                 comment="sLaneId = lo==-1 ? hi+32 : lo"))
+        else:
+          module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
+                               src1=vgpr(chunkVaddrVgpr),
+                               comment="find lane whose vaddr == sTarget (chunk %d)" % chunkIdx))
+          module.add(SMovB32(dst=sgpr(sAnyMatch), src=sgpr(sCmpLo),
+                             comment="sAnyMatch = vcc (per-wave match)"))
+          module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                             comment="sLaneId = ff1(vcc)"))
+
+        # --- m0 = LocalWriteBaseAddr + laneId*16 + intra_K_byte
+        #         + offsetK_bytes + offsetM_lds_bytes (+ per-chunk LDS step)
+        module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(16), src=sgpr(sLaneId),
+                                  comment="sLaneId * 16 (per-lane LDS stride)"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
+                           comment="+ intra_K_byte"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
+                           comment="+ offsetK_bytes"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+8),
+                           comment="+ offsetM_lds_bytes"))
+        if chunkIdx > 0:
+          module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1),
+                             src1=hex(chunkIdx * subtileOffsetBytes),
+                             comment="+ chunk %d LDS subtileOffset" % chunkIdx))
+        module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
+                           src1=sgpr(stmp+1),
+                           comment="m0 = LocalWriteBaseAddr%s + ... (chunk %d)" % (tc, chunkIdx)))
+
+        # --- vaddr = v[chunkVaddrVgpr][sLaneId] + intra + offsetK + offsetM(glb)
+        module.add(VReadlaneB32(dst=sgpr(stmp+1), src0=vgpr(chunkVaddrVgpr),
+                                src1=sgpr(sLaneId),
+                                comment="sTarget = v[vaddr][sLaneId] (chunk %d)" % chunkIdx))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+3),
+                           comment="+ intra_K_byte"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+6),
+                           comment="+ offsetK_bytes"))
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=sgpr(stmp+7),
+                           comment="+ offsetM_glb_bytes"))
+        module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(stmp+1),
+                           comment="vaddr"))
+
+        # --- EXEC gate, emit DTL load, wait, restore EXEC ------------------
+        module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
+                             comment="SCC=1 if this wave had no matching lane"))
+        module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
+                               comment="EXEC = match ? 1 (lane 0 only) : 0"))
+        module.add(Label("sebLoad%s_%d" % (tc, chunkIdx), ""))
+        module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
+                                 saddr=sgpr("Srd%s" % tc, 4),
+                                 soffset=ldSoffset, mubuf=mubuf,
+                                 comment="boundary 16-bit DTL load (chunk %d) -> LDS@m0" % chunkIdx))
+        module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
+        module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
+
+        if numGR > 1:
+          module.add(skipChunkLabel)
+
       module.add(SBarrier())
       self.vgprPool.checkIn(vTmp)
 
