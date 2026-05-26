@@ -276,7 +276,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileIncludesOffloadArchOption)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
+TEST(TestBatchnormFwdInferencePlanFp32, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -308,7 +308,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
+TEST(TestBatchnormFwdInferencePlanFp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -343,7 +343,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=1"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
+TEST(TestBatchnormFwdInferencePlanBfp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 

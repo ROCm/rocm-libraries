@@ -65,7 +65,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <unordered_set>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -95,12 +97,14 @@
 #include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
+#include <hipdnn_frontend/detail/GraphOverrideValidation.hpp>
 #include <hipdnn_frontend/detail/GraphPacker.hpp>
 #include <hipdnn_frontend/detail/GraphUnpacker.hpp>
 #include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/detail/KnobUnpacker.hpp>
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/VariantPackHelpers.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
@@ -132,6 +136,17 @@
 
 namespace hipdnn_frontend::graph
 {
+
+#ifdef HIPDNN_ENABLE_SDPA
+/// Runtime shape/stride override for one tensor in the map execute overload.
+struct OverrideEntry
+{
+    /// Runtime shape values.
+    std::vector<int64_t> shape;
+    /// Runtime strides.
+    std::vector<int64_t> stride;
+};
+#endif // HIPDNN_ENABLE_SDPA
 
 /**
  * @class Graph
@@ -169,6 +184,8 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
     std::optional<int64_t> _preferredEngineId;
+
+    bool _isOverrideShapeEnabled = false;
 
     /// Apply validated knob settings to the engine config descriptor via
     /// the descriptor-based C API path.
@@ -355,6 +372,7 @@ private:
                 toHipdnnDataType(graph_attributes.get_intermediate_data_type()),
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
+                _isOverrideShapeEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), true);
@@ -367,6 +385,7 @@ private:
                 toHipdnnDataType(graph_attributes.get_intermediate_data_type()),
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
+                _isOverrideShapeEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), false);
@@ -876,13 +895,15 @@ protected:
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
         graph::GraphAttributes tempAttrs;
         std::optional<int64_t> tempEngineId;
+        bool tempOverrideShapeEnabled = false;
 
-        HIPDNN_CHECK_ERROR(
-            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
+        HIPDNN_CHECK_ERROR(detail::unpackGraphDescriptor(
+            graphDesc, tempNodes, tempAttrs, tempEngineId, tempOverrideShapeEnabled));
 
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        _isOverrideShapeEnabled = tempOverrideShapeEnabled;
 
         // The frontend state has been fully replaced from the backend descriptor.
         // Any cached backend descriptors are stale and must be cleared. The caller
@@ -1318,9 +1339,10 @@ public:
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
         graph::GraphAttributes tempAttrs;
         std::optional<int64_t> tempEngineId;
+        bool tempOverrideShapeEnabled = false;
 
-        auto [graphDesc, err]
-            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
+        auto [graphDesc, err] = detail::deserializeAndUnpackGraph(
+            handle, data, tempNodes, tempAttrs, tempEngineId, tempOverrideShapeEnabled);
         if(err.is_bad())
         {
             return err;
@@ -1329,6 +1351,7 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
@@ -1394,8 +1417,12 @@ public:
 
     /** @brief Deserialize a compiled backend execution plan for execution.
      *
-     * This restores only the compiled plan. It does not restore the frontend
-     * operation graph structure; execute using UID-based variant packs.
+     * This restores enough backend state to execute the compiled plan, but it
+     * does not restore frontend graph details such as tensor attributes,
+     * declared shapes, or declared strides. UID-based override execution is
+     * allowed on this lightweight plan-only object; graph-aware override
+     * validation is skipped, so callers must supply overrides that are
+     * consistent with the deserialized plan.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -1410,11 +1437,20 @@ public:
         _engineConfigDesc.reset();
         resetGraphDesc();
         _sub_nodes.clear();
+        _isOverrideShapeEnabled = false;
 
         return {};
     }
 
-    /** @brief Deserialize a compiled backend execution plan for execution. */
+    /** @brief Deserialize a compiled backend execution plan for execution.
+     *
+     * This restores enough backend state to execute the compiled plan, but it
+     * does not restore frontend graph details such as tensor attributes,
+     * declared shapes, or declared strides. UID-based override execution is
+     * allowed on this lightweight plan-only object; graph-aware override
+     * validation is skipped, so callers must supply overrides that are
+     * consistent with the deserialized plan.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error from_compiled_plan_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
@@ -1545,9 +1581,10 @@ public:
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
         graph::GraphAttributes tempAttrs;
         std::optional<int64_t> tempEngineId;
+        bool tempOverrideShapeEnabled = false;
 
         auto [graphDesc, err] = detail::deserializeAndUnpackJsonGraph(
-            handle, jsonData, tempNodes, tempAttrs, tempEngineId);
+            handle, jsonData, tempNodes, tempAttrs, tempEngineId, tempOverrideShapeEnabled);
         if(err.is_bad())
         {
             return err;
@@ -1556,6 +1593,7 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
@@ -1816,40 +1854,8 @@ public:
             return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create variant pack descriptor."};
         }
 
-        //split variant_pack into vector of keys and vector of values
-        std::vector<int64_t> variantPackKeys;
-        std::vector<void*> variantPackValues;
-        variantPackKeys.reserve(variantPack.size());
-        variantPackValues.reserve(variantPack.size());
-        for(const auto& [key, value] : variantPack)
-        {
-            variantPackKeys.push_back(key);
-            variantPackValues.push_back(value);
-        }
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                             variantPackDesc->get(),
-                                             HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
-                                             HIPDNN_TYPE_VOID_PTR,
-                                             static_cast<int64_t>(variantPackValues.size()),
-                                             static_cast<const void*>(variantPackValues.data())),
-                                         "failed to set the variant pack data pointers.");
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                             variantPackDesc->get(),
-                                             HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
-                                             HIPDNN_TYPE_INT64,
-                                             static_cast<int64_t>(variantPackKeys.size()),
-                                             variantPackKeys.data()),
-                                         "failed to set the variant pack unique ids.");
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendSetAttribute(variantPackDesc->get(),
-                                                         HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
-                                                         HIPDNN_TYPE_VOID_PTR,
-                                                         1,
-                                                         static_cast<const void*>(&workspace)),
-            "failed to set the variant pack unique ids.");
+        HIPDNN_CHECK_ERROR(
+            detail::populateBaseVariantPackDescriptor(*variantPackDesc, variantPack, workspace));
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendFinalize(variantPackDesc->get()),
@@ -1862,6 +1868,123 @@ public:
 
         return {ErrorCode::OK, ""};
     }
+
+#ifdef HIPDNN_ENABLE_SDPA
+    /**
+     * @brief Execute with per-tensor runtime shape/stride overrides.
+     *
+     * Graph-backed objects require `set_override_shape_enabled(true)`. Objects
+     * restored from compiled-plan bytes receive structural validation only.
+     * Empty override arrays dispatch through the non-override path.
+     */
+    Error execute(hipdnnHandle_t handle,
+                  std::unordered_map<int64_t, void*>& variantPack,
+                  void* workspace,
+                  const std::vector<int64_t>& overrideUids,
+                  const std::vector<std::vector<int64_t>>& overrideShapes,
+                  const std::vector<std::vector<int64_t>>& overrideStrides) const
+    {
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or "
+                    "from_compiled_plan_binary() first."};
+        }
+
+        if(overrideUids.empty() && overrideShapes.empty() && overrideStrides.empty())
+        {
+            HIPDNN_FE_LOG_INFO("Override execute called on graph "
+                               << graph_attributes.get_name()
+                               << " with empty override vectors; falling through to "
+                                  "non-override entry.");
+            return execute(handle, variantPack, workspace);
+        }
+
+        const bool planOnly = _sub_nodes.empty();
+        if(planOnly)
+        {
+            HIPDNN_CHECK_ERROR(detail::validatePlanOnlyOverrideArguments(
+                overrideUids, overrideShapes, overrideStrides));
+        }
+        else
+        {
+            if(!_isOverrideShapeEnabled)
+            {
+                HIPDNN_FE_LOG_INFO("Override execute called on graph "
+                                   << graph_attributes.get_name()
+                                   << " without set_override_shape_enabled(true).");
+                return {ErrorCode::INVALID_VALUE,
+                        "Graph::execute override overload called on a graph that did "
+                        "not call set_override_shape_enabled(true). The override flag "
+                        "must be set at build time before per-execute overrides are "
+                        "supplied."};
+            }
+
+            HIPDNN_CHECK_ERROR(detail::validateGraphBackedOverrideArguments(
+                getTensorsByUid(), overrideUids, overrideShapes, overrideStrides));
+        }
+
+        for(const auto uid : overrideUids)
+        {
+            if(variantPack.find(uid) == variantPack.end())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Override UID " + std::to_string(uid)
+                            + " is not present in the variant pack."};
+            }
+        }
+
+        HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "
+                                              << overrideUids.size() << " override entries.");
+
+        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
+        if(!variantPackDesc || !variantPackDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create variant pack descriptor."};
+        }
+
+        HIPDNN_CHECK_ERROR(
+            detail::populateBaseVariantPackDescriptor(*variantPackDesc, variantPack, workspace));
+
+        HIPDNN_CHECK_ERROR(detail::populateOverrideVariantPackDescriptor(
+            *variantPackDesc, overrideUids, overrideShapes, overrideStrides));
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendFinalize(variantPackDesc->get()),
+            "Failed to finalize variant pack descriptor");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendExecute(
+                handle, _executionPlanDesc->get(), variantPackDesc->get()),
+            "Execute failed.");
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Execute with map-keyed runtime shape/stride overrides.
+    Error execute(hipdnnHandle_t handle,
+                  std::unordered_map<int64_t, void*>& variantPack,
+                  void* workspace,
+                  const std::unordered_map<int64_t, OverrideEntry>& overrides) const
+    {
+        std::vector<int64_t> overrideUids;
+        std::vector<std::vector<int64_t>> overrideShapes;
+        std::vector<std::vector<int64_t>> overrideStrides;
+        overrideUids.reserve(overrides.size());
+        overrideShapes.reserve(overrides.size());
+        overrideStrides.reserve(overrides.size());
+        for(const auto& [uid, entry] : overrides)
+        {
+            overrideUids.push_back(uid);
+            overrideShapes.push_back(entry.shape);
+            overrideStrides.push_back(entry.stride);
+        }
+
+        return execute(
+            handle, variantPack, workspace, overrideUids, overrideShapes, overrideStrides);
+    }
+#endif // HIPDNN_ENABLE_SDPA
 
     /// @brief Get the graph name
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
@@ -3108,6 +3231,29 @@ public:
         HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);
         return *this;
     }
+
+#ifdef HIPDNN_ENABLE_SDPA
+    /// Enable or disable runtime tensor-shape overrides for this graph.
+    Graph& set_override_shape_enabled(bool enabled) // NOLINT(readability-identifier-naming)
+    {
+        if((_graphDesc && _graphDesc->valid())
+           || (_executionPlanDesc && _executionPlanDesc->valid()))
+        {
+            HIPDNN_FE_LOG_WARN(
+                "set_override_shape_enabled() called after graph descriptors or execution plans "
+                "were created. Rebuild the graph for this flag to affect backend plugin "
+                "selection and execution-plan override eligibility.");
+        }
+        _isOverrideShapeEnabled = enabled;
+        return *this;
+    }
+
+    /// Whether this graph has opted into runtime tensor-shape overrides.
+    bool is_override_shape_enabled() const // NOLINT(readability-identifier-naming)
+    {
+        return _isOverrideShapeEnabled;
+    }
+#endif // HIPDNN_ENABLE_SDPA
 
     /**
      * @brief Create a new tensor with similar properties to an existing tensor
