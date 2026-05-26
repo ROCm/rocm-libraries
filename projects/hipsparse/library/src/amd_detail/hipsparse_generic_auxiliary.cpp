@@ -55,7 +55,7 @@ hipsparseSpMVDescr_st::Entry::~Entry()
     // Destructors cannot propagate status codes, so the rocsparse / hip
     // return values are intentionally discarded here. Entries are only
     // destroyed at sparse-matrix-descriptor tear-down time (via
-    // m_entries.clear() in reset() or the implicit destructor), so failures
+    // m_entries.clear() in the implicit destructor), so failures
     // here would only mean a leaked rocsparse descriptor or hip buffer
     // (already on the tear-down path).
     if(this->spmv_descr != nullptr)
@@ -143,15 +143,6 @@ hipsparseStatus_t hipsparseSpMVDescr_st::add_entry(hipsparseHandle_t   handle,
     this->m_entries.push_back(std::move(entry));
     *out_entry = &this->m_entries.back();
 
-    return HIPSPARSE_STATUS_SUCCESS;
-}
-
-hipsparseStatus_t hipsparseSpMVDescr_st::reset()
-{
-    // Each Entry's destructor releases its rocsparse_spmv_descr and its
-    // compute-stage buffer, so simply clearing the vector tears everything
-    // down.
-    this->m_entries.clear();
     return HIPSPARSE_STATUS_SUCCESS;
 }
 

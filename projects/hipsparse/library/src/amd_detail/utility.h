@@ -740,9 +740,6 @@ public:
                                 rocsparse_datatype  compute_datatype,
                                 Entry**             out_entry);
 
-    // Tear down all entries (destroy descriptors, free compute buffers).
-    hipsparseStatus_t reset();
-
     hipsparseSpMVDescr_st()  = default;
     ~hipsparseSpMVDescr_st() = default;
 };
