@@ -847,3 +847,5 @@ inline void run(int argc, const char* argv[])
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
+
+#endif
