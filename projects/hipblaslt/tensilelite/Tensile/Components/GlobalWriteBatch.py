@@ -343,6 +343,173 @@ class GlobalWriteBatchWriter:
 
     return module
 
+  def _emitLdsBarrierIfNeeded(self, targetModule: Module, isSingleKernel: bool):
+    """Emit the LDS write barrier once per batch; idempotent via
+    self.isLocalBarrierInit so repeat callers (preamble/body) are no-ops.
+    """
+    if isSingleKernel and (not self.isLocalBarrierInit):
+      targetModule.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
+      targetModule.add(SBarrier(comment="LDS write barrier"))
+      self.isLocalBarrierInit = True
+
+  def _emitElt0EpilogueLoads(self, module: Module, addrCalc: 'AddrCalculation',
+                             mask, elementIdx: int, bufferOOB,
+                             loadInputCode: Module, factor_gwvw: int,
+                             preamble: bool = False):
+    """Emit one element's epilogue LDS loads (Bias -> ScaleAlphaVec ->
+    ScaleAVec/ScaleBVec, then reorder). Shared by the CLS preamble
+    (preamble=True: address compute only) and the per-element loop
+    (preamble=False: also ds_load). xxxLoadIssued lists are appended in the
+    body only, so the preamble adds no extra entry.
+    """
+    addrBiasVgpr          = addrCalc.addrBiasVgpr
+    addrScaleAVecVgpr     = addrCalc.addrScaleAVecVgpr
+    addrScaleBVecVgpr     = addrCalc.addrScaleBVecVgpr
+    addrScaleAlphaVecVgpr = addrCalc.addrScaleAlphaVecVgpr
+    dataBias              = self.ss.elementDataBias[elementIdx]
+    dataScaleAVec         = self.ss.elementDataScaleAVec[elementIdx]
+    dataScaleBVec         = self.ss.elementDataScaleBVec[elementIdx]
+    dataScaleAlphaVec     = self.ss.elementDataScaleAlphaVec[elementIdx]
+    skipLoad = True if self.factorDim else False
+    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
+
+    def addEpilogueLoad(modGwvw, ldName: str, addrVecVgpr, addrVec, dataVec, loadedDataVec,
+                        vecOffset, gwvw, referenceVgpr, dim, referenceDim,
+                        skipLoad: bool = False, comment: str = "") -> int:
+      """One vector's epilogue load: emitLdChange (address compute) always runs;
+      captured `preamble` gates ONLY the ds_load (preamble=True = address only).
+      """
+      loadsIssued = 0
+      module.add(addrCalc.emitLdChange(self.kernel, self.ss, ldName, self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrVecVgpr, addrVec, dim))
+      ldsAddrVgpr = referenceVgpr if (referenceVgpr and (dim == referenceDim)) else addrVecVgpr
+      if dataVec not in loadedDataVec:
+        # GroupLoadStore routes barrier+ds_load into `loadInputCode` so they
+        # are grouped with the C input; otherwise both go into `module`.
+        targetModule = loadInputCode if self.kernel["GroupLoadStore"] else module
+        self._emitLdsBarrierIfNeeded(targetModule, isSingleKernel)
+        if not preamble:
+          targetModule.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
+          loadedDataVec[dataVec] = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
+          loadsIssued = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
+          if (self.ss.cfg.gwvw != gwvw) and (not skipLoad):
+            remain_load = self.ss.cfg.gwvw - 1
+            bpl = self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
+            bpr = ceil(bpl / self.parentWriter.states.bpr)
+            #For below ds_read instruction do not add bias issued , because of all ds_load instructions need to be completed at the same time in this batch.
+            for r in range(remain_load):
+              modGwvw.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, factor_gwvw, comment=comment))
+      return loadsIssued
+
+    modGwvwScale = []
+    localReferenceVgpr = None
+    if self.parentWriter.states.useBias == DataDirection.READ:
+      modGwvwBias = Module("GwvwBias")
+      self.localLoadsBiasIssued += addEpilogueLoad(modGwvwBias, 'Bias', addrBiasVgpr, self.addrBias, dataBias, self.loadedDataBias, addrCalc.biasOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load Bias")
+      localReferenceVgpr = addrBiasVgpr
+      modGwvwScale.append(modGwvwBias)
+    if not preamble:
+      self.biasLoadIssued.append(len(self.loadedDataBias) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
+
+    if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+      modGwvwScaleAlpha = Module("GwvwScaleAlpha")
+      self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, self.loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
+      if localReferenceVgpr == None:
+        localReferenceVgpr = addrScaleAlphaVecVgpr
+      modGwvwScale.append(modGwvwScaleAlpha)
+    if not preamble:
+      self.scaleAlphaVecLoadIssued.append(len(self.loadedDataScaleAlphaVec) if self.factorDim else len(self.loadedDataScaleAlphaVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
+
+    if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
+      modGwvwScaleA = Module("GwvwScaleA")
+      modGwvwScaleB = Module("GwvwScaleB")
+      self.loadsScaleAVecIssued += addEpilogueLoad(modGwvwScaleA, "ScaleAVec", addrScaleAVecVgpr, self.addrScaleAVec, dataScaleAVec, self.loadedDataScaleAVec, addrCalc.scaleAVecOffset, self.ss.cfg.gwvw, localReferenceVgpr, 0, self.factorDim, comment="load scaleA")
+      self.loadsScaleBVecIssued += addEpilogueLoad(modGwvwScaleB, "ScaleBVec", addrScaleBVecVgpr, self.addrScaleBVec, dataScaleBVec, self.loadedDataScaleBVec, addrCalc.scaleBVecOffset, 1, localReferenceVgpr, 1, self.factorDim, skipLoad=True, comment="load scaleB")
+      if localReferenceVgpr == None:
+        localReferenceVgpr = addrScaleAVecVgpr if self.factorDim == 0 else addrScaleBVecVgpr
+      modGwvwScale.append(modGwvwScaleA)
+      modGwvwScale.append(modGwvwScaleB)
+    if not preamble:
+      self.scaleAVecLoadIssued.append(len(self.loadedDataScaleAVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.scaleBVecLoadIssued.append(len(self.loadedDataScaleBVec))
+
+    # Reorder scale
+    length = 0
+    for mod in modGwvwScale:
+      length = max(length, len(mod.items()))
+
+    for index in range(0, length):
+      for mod in modGwvwScale:
+        if len(mod.items()) > index:
+          module.add(mod.items()[index])
+
+  def _emitElt0LdsPreambleBeforeBanner(self, module: Module, bufferOOB,
+                                       loadInputCode: Module, factor_gwvw: int):
+    """CompactLoopStore preamble (batch 0): hoist elt-0 LDS setup out of the
+    per-element loop so the CLS countdown loop need not re-emit it each iter. The
+    body dedups via state flags (ss.singleCol*AddrUpdated, isLocalBarrierInit).
+    Per-section gating (addr compute only if optSingleColVgpr; D scaleToBpe /
+    sgpr-offset init / MSB prewarm NonEdge-only) is documented inline below.
+    """
+    elementIdx = 0
+    addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
+    addrBiasVgpr          = addrCalc.addrBiasVgpr
+    addrDVgpr             = addrCalc.addrDVgpr
+    addrScaleAlphaVecVgpr = addrCalc.addrScaleAlphaVecVgpr
+    addrScaleAVecVgpr     = addrCalc.addrScaleAVecVgpr
+    addrScaleBVecVgpr     = addrCalc.addrScaleBVecVgpr
+    mask                  = self.ss.elementMask[elementIdx]
+    bufferOOB             = None
+
+    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or \
+                      self.kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel") or \
+                     self.kernel["StreamK"] > 0
+
+    # emitAddressSetupCode for elt 0 is safe: coordOffset0=0 and rowInc=0, so it
+    # only emits the (d1,vc1,d0,vc0) comment + sets coord0Vgpr state -- no real
+    # instructions. The body re-runs it for elt 0 (just re-emits the comment).
+    module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, \
+        self.tmpS01, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+
+    # elt-0 epilogue hoist: optSingleColVgpr -> hoist the address compute
+    # (preamble=True; body folds it via ss.singleCol*AddrUpdated). Else (Edge /
+    # non-optSingleCol) -> hoist only the LDS barrier.
+    if self.ss.optSingleColVgpr:
+      self._emitElt0EpilogueLoads(module, addrCalc, mask, elementIdx, bufferOOB,
+                                   loadInputCode, factor_gwvw,
+                                   True)
+    else:
+      targetModule = loadInputCode if self.kernel["GroupLoadStore"] else module
+      self._emitLdsBarrierIfNeeded(targetModule, isSingleKernel)
+
+    # D scaleToBpe -- NonEdge only (Edge has its own per-elt path that is not
+    # safe to hoist).
+    if not self.edge:
+      if self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel"):
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, \
+            mask, bufferOOB, True, self.tmpVgpr, self.tmpSgpr, addrDVgpr, self.addrD, 0))
+
+    # Init sgpr offset -- NonEdge only. Needed for the delayed-pattern
+    # incrementToNextRow when optSrdIncForRow=1 (NonEdge). Edge path
+    # (optSrdIncForRow=0) skips the delayed pattern entirely so these inits
+    # are not needed.
+
+    module.add(SMovB32(dst=sgpr(self.tmpS01),   src=0, comment="Init sgpr offset"))
+    module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
+
+    # Prewarm VGPR MSB bank -- NonEdge only. Forces the upper-bank toggle
+    # for the upcoming ds_load to settle ahead of time so the loop body
+    # avoids a stall on first use.
+    prewarmVgpr = None
+    if self.parentWriter.states.useBias == DataDirection.READ and addrBiasVgpr is not None:
+      prewarmVgpr = addrBiasVgpr
+    elif self.kernel["ProblemType"]["UseScaleAlphaVec"] and addrScaleAlphaVecVgpr is not None:
+      prewarmVgpr = addrScaleAlphaVecVgpr
+    elif (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and addrScaleAVecVgpr is not None:
+      prewarmVgpr = addrScaleAVecVgpr
+    if prewarmVgpr is not None:
+      module.add(VMovB32(dst=vgpr(prewarmVgpr), src=vgpr(prewarmVgpr),
+                          comment="prewarm VGPR MSB bank for upcoming ds_load"))
+
   def _prolog(self, module: Module):
     module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u factorDim=%u" % \
               (self.ss.optSingleColVgpr, self.ss.optSharedColVgpr, self.ss.optSGPRUsage, self.ss.optSrdIncForRow, self.factorDim))
@@ -361,7 +528,6 @@ class GlobalWriteBatchWriter:
                                ":vaw:%u"%self.atomicW if self.atomic else "",
                                "" if idx == len(self.batchElements) -1 else "; ")
                                for idx, element in enumerate(self.batchElements)])
-    module.addComment2(commentStr)
 
     if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
       self.ss.setupStoreElementsForBatch(self.kernel, self.gwvw, self.batchElements, self.batchElementSgprs, isOptNLL=False, factorDim=self.factorDim)
@@ -378,7 +544,6 @@ class GlobalWriteBatchWriter:
 
     ########################################
     # calculate addr and masks
-    module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
     # On input, coord0 and coord1 are VGPRs computed in the pre-batch code, based
     # on the thread and tid number.  These are ELEMENT offsets from start of tensor C
     # for the top-left corner this thread will write.  These are not changed
@@ -426,20 +591,36 @@ class GlobalWriteBatchWriter:
     self.scaleAVecLoadIssued = []
     self.scaleBVecLoadIssued = []
     self.scaleAlphaVecLoadIssued = []
-    loadedDataBeta = {}
-    loadedDataE = {}
-    loadedDataBias = {}
-    loadedDataScaleAVec = {}
-    loadedDataScaleBVec = {}
-    loadedDataScaleAlphaVec = {}
+
+    self.loadedDataBeta = {}
+    self.loadedDataE = {}
+    self.loadedDataBias = {}
+    self.loadedDataScaleAVec = {}
+    self.loadedDataScaleBVec = {}
+    self.loadedDataScaleAlphaVec = {}
+
+    #when factorDim = 1 the bias's gwvw is alwasy be 1.
+    factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
+
+    # CompactLoopStore preamble: hoist the elt-0 LDS barrier + addr-calc out of
+    # the per-element loop so the CLS countdown loop avoids redundant per-iter
+    # LDS work. Gated on the parameter so non-CLS codegen is bit-for-bit
+    # unchanged.
+    if self.kernel["CompactLoopStore"] and self.batchIdx == 0:
+      self._emitElt0LdsPreambleBeforeBanner(module, None, #bufferOOB,
+                                             loadInputCode,
+                                             factor_gwvw)
+
+    module.addComment2(commentStr)
+
+    module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 
     if self.kernel["BufferStore"] and (self.edge or (self.kernel["NumWaveSplitK"] > 1)):
       bufferOOB = self.tmpVgpr + self.tmpVgprSize - 1
       module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
     else:
       bufferOOB = None
-    #when factorDim = 1 the bias's gwvw is alwasy be 1.
-    factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
+
     for elementIdx, element in enumerate(self.batchElements):
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
       addrCVgpr    = addrCalc.addrCVgpr
@@ -469,7 +650,7 @@ class GlobalWriteBatchWriter:
       # create code Module to push mov vgpr,acc instructions
       if self.beta:
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrCVgpr, self.addrC, 0))
-        if dataBeta not in loadedDataBeta:
+        if dataBeta not in self.loadedDataBeta:
           # In the UseSubtileImpl NonEdge path the workgroup-level edge check is relaxed
           # (subtile-aligned remainder is allowed into NonEdge), so individual waves may
           # own rows/columns beyond the valid output region.  Gate each C load by writing
@@ -506,98 +687,30 @@ class GlobalWriteBatchWriter:
             loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
           else:
             module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
-          loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
+          self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
-      self.betaLoadIssued.append(len(loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
 
       if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrEVgpr, self.addrE, 0))
-        if dataE not in loadedDataE:
+        if dataE not in self.loadedDataE:
           loadOffset = int((self.kernel["ProblemType"]["ComputeDataType"].numRegisters() - self.kernel["ProblemType"]["DataTypeE"].numRegisters()) * self.ss.cfg.gwvw)
           if self.kernel["GroupLoadStore"]:
             loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'E', self.kernel["ProblemType"]["DataTypeE"], addrCalc, vc0, dataE + loadOffset, self.gwvw, addrEVgpr, self.tmpS01))
           else:
             module.add(self.parentWriter.readInput(self.kernel, self.ss, 'E', self.kernel["ProblemType"]["DataTypeE"], addrCalc, vc0, dataE + loadOffset, self.gwvw, addrEVgpr, self.tmpS01))
-          loadedDataE[dataE] = ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16)
+          self.loadedDataE[dataE] = ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsEIssued += ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.gwvw / 16)
         self.loadE = True
       else:
         self.loadE = False
-      self.eLoadIssued.append(len(loadedDataE) * ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.eLoadIssued.append(len(self.loadedDataE) * ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16))
 
-      def addEpilogueLoad(modGwvw, ldName: str, addrVecVgpr, addrVec, dataVec, loadedDataVec, vecOffset, gwvw, referenceVgpr, dim, referenceDim, skipLoad=False, comment=""):
-        loadsIssued = 0
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, ldName, self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrVecVgpr, addrVec, dim))
-        ldsAddrVgpr = referenceVgpr if (referenceVgpr and (dim == referenceDim)) else addrVecVgpr
-        isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
-        if dataVec not in loadedDataVec:
-          if self.kernel["GroupLoadStore"]:
-            # Group bias load with C input to
-            if isSingleKernel and (not self.isLocalBarrierInit):
-              loadInputCode.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-              loadInputCode.add(SBarrier(comment="LDS write barrier"))
-              self.isLocalBarrierInit = True
-            loadInputCode.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
-          else:
-            if isSingleKernel and (not self.isLocalBarrierInit):
-              module.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-              module.add(SBarrier(comment="LDS write barrier"))
-              self.isLocalBarrierInit = True
-            module.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
-          loadedDataVec[dataVec] = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
-          loadsIssued = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
-          if (self.ss.cfg.gwvw != gwvw) and (not skipLoad):
-            remain_load = self.ss.cfg.gwvw - 1
-            bpl = self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
-            bpr = ceil(bpl / self.parentWriter.states.bpr)
-            #For below ds_read instruction do not add bias issued , because of all ds_load instructions need to be completed at the same time in this batch.
-            for r in range(remain_load):
-              modGwvw.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, factor_gwvw, comment=comment))
-        return loadsIssued
-
-      skipLoad = True if self.factorDim else False
-
-      modGwvwScale = []
-      localReferenceVgpr = None
-      if self.parentWriter.states.useBias == DataDirection.READ:
-        modGwvwBias = Module("GwvwBias")
-        self.localLoadsBiasIssued += addEpilogueLoad(modGwvwBias, 'Bias', addrBiasVgpr, self.addrBias, dataBias, loadedDataBias, addrCalc.biasOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load Bias")
-        localReferenceVgpr = addrBiasVgpr
-        modGwvwScale.append(modGwvwBias)
-
-      self.biasLoadIssued.append(len(loadedDataBias) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
-
-      isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
-
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-        modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-        self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
-        if localReferenceVgpr == None:
-          localReferenceVgpr = addrScaleAlphaVecVgpr
-        modGwvwScale.append(modGwvwScaleAlpha)
-      self.scaleAlphaVecLoadIssued.append(len(loadedDataScaleAlphaVec) if self.factorDim else len(loadedDataScaleAlphaVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
-
-      if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
-        modGwvwScaleA = Module("GwvwScaleA")
-        modGwvwScaleB = Module("GwvwScaleB")
-        self.loadsScaleAVecIssued += addEpilogueLoad(modGwvwScaleA, "ScaleAVec", addrScaleAVecVgpr, self.addrScaleAVec, dataScaleAVec, loadedDataScaleAVec, addrCalc.scaleAVecOffset, self.ss.cfg.gwvw, localReferenceVgpr, 0, self.factorDim, comment="load scaleA")
-        self.loadsScaleBVecIssued += addEpilogueLoad(modGwvwScaleB, "ScaleBVec", addrScaleBVecVgpr, self.addrScaleBVec, dataScaleBVec, loadedDataScaleBVec, addrCalc.scaleBVecOffset, 1, localReferenceVgpr, 1, self.factorDim, skipLoad=True, comment="load scaleB")
-        if localReferenceVgpr == None:
-          localReferenceVgpr = addrScaleAVecVgpr if self.factorDim == 0 else addrScaleBVecVgpr
-        modGwvwScale.append(modGwvwScaleA)
-        modGwvwScale.append(modGwvwScaleB)
-      self.scaleAVecLoadIssued.append(len(loadedDataScaleAVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * self.ss.cfg.gwvw / 16))
-      self.scaleBVecLoadIssued.append(len(loadedDataScaleBVec))
-
-      # Reorder scale
-      length = 0
-      for mod in modGwvwScale:
-        length = max(length, len(mod.items()))
-
-      for index in range(0, length):
-        for mod in modGwvwScale:
-          if len(mod.items()) > index:
-            module.add(mod.items()[index])
+      # Per-element epilogue LDS loads (same helper the CLS preamble used for
+      # elt 0); if the preamble already loaded it, the ds_load is skipped here.
+      self._emitElt0EpilogueLoads(module, addrCalc, mask, elementIdx, bufferOOB,
+                                   loadInputCode, factor_gwvw,
+                                   False)
 
       if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrEVgpr, self.addrE, 0))
