@@ -35,10 +35,33 @@
 
 test_categories:
   quick:
-    description: "Fast sanity checks (target: < 5 min) - subset of checkin tests"
+    description: "Fast sanity checks (target: < 5 min) - matches test_rocsolver.py quick subset"
+    # Mirrors quick_tests in
+    # TheRock/build_tools/github_actions/test_executable_scripts/test_rocsolver.py,
+    # which itself was lifted from projects/rocsolver/rtest.xml.
+    # Keep this list in sync with that script until the legacy path is removed.
     test_patterns:
-      - "checkin_*"
+      - "checkin*BDSQR*"
+      - "checkin*STEBZ*"
+      - "checkin*STEIN*"
+      - "checkin*STERF*"
+      - "checkin*STEQR*"
+      - "checkin*SYEVJ*"
+      - "checkin*HEEVJ*"
+      - "checkin*LARFG*"
+      - "checkin*LARF*"
+      - "checkin*LARFT*"
+      - "checkin*GETF2*"
+      - "checkin*POTF2*"
+      - "checkin*GEQR2*"
+      - "checkin*GELQ2*"
+      - "checkin*SPLITLU*"
+      - "checkin*REFACTLU*"
+      - "checkin*REFACTCHOL*"
     exclude:
+      # From test_rocsolver.py: gtest_filter trailing "-*LARFB*:*known_bug*"
+      - "*LARFB*"
+      - "*known_bug*"
       - "*DISABLED*"
     labels:
       - "quick"
