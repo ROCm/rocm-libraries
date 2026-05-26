@@ -46,7 +46,7 @@ int main()
     // model requires that we provide a real device pointer, this microbench
     // will return early via miopenSetTensor's status check; the wrapper
     // overhead is still the same.
-    float dummy = 0.0f;
+    float dummy      = 0.0f;
     void* device_ptr = static_cast<void*>(&dummy);
 
     auto t0 = std::chrono::steady_clock::now();
@@ -59,7 +59,7 @@ int main()
     }
     auto t1 = std::chrono::steady_clock::now();
 
-    auto ns_total = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    auto ns_total         = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
     long long per_call_ns = ns_total / ITERATIONS;
 
     miopenDestroyTensorDescriptor(tensorDesc);

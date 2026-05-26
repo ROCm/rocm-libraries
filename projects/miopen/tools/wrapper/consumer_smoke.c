@@ -18,7 +18,7 @@
 int main(void)
 {
     miopenHandle_t handle = NULL;
-    miopenStatus_t s = miopenCreate(&handle);
+    miopenStatus_t s      = miopenCreate(&handle);
     if(s != miopenStatusSuccess)
     {
         /* Not a real failure for this build-time smoke: a missing GPU is fine. */
