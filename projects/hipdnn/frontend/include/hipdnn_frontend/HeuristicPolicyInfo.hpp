@@ -21,8 +21,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_frontend/Error.hpp>
@@ -41,7 +43,7 @@ namespace hipdnn_frontend
  */
 struct HeuristicPolicyInfo
 {
-    /// Policy ID (int64_t hash of policy name using engineNameToId)
+    /// Policy ID (int64_t hash of policy name using policyNameToId)
     int64_t policyId = -1;
 
     /// Canonical policy name (e.g., "SelectionHeuristic::Config")
@@ -130,9 +132,10 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
         size_t pluginVersionLen = 0;
         size_t apiVersionLen = 0;
 
+        // Size-query call: pass nullptr for every output to make the intent explicit.
         status = backend->getHeuristicPolicyInfo(handle,
                                                  i,
-                                                 &info.policyId,
+                                                 nullptr,
                                                  nullptr,
                                                  &policyNameLen,
                                                  nullptr,
@@ -150,11 +153,14 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
                          + backend->getErrorString(status)}};
         }
 
-        // Allocate buffers
-        std::vector<char> policyNameBuf(policyNameLen);
-        std::vector<char> pluginNameBuf(pluginNameLen);
-        std::vector<char> pluginVersionBuf(pluginVersionLen);
-        std::vector<char> apiVersionBuf(apiVersionLen);
+        // Allocate buffers. Use max(len, 1) so .data() is never null: passing a
+        // null buffer to the second call would re-trigger "query mode" per the
+        // hipdnnGetHeuristicPolicyInfo_ext contract, silently re-reading sizes
+        // instead of filling the buffer.
+        std::vector<char> policyNameBuf(std::max<size_t>(policyNameLen, 1));
+        std::vector<char> pluginNameBuf(std::max<size_t>(pluginNameLen, 1));
+        std::vector<char> pluginVersionBuf(std::max<size_t>(pluginVersionLen, 1));
+        std::vector<char> apiVersionBuf(std::max<size_t>(apiVersionLen, 1));
 
         // Second call: retrieve actual strings
         status = backend->getHeuristicPolicyInfo(handle,
@@ -182,7 +188,7 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
         info.pluginVersion = bufferToString(pluginVersionBuf, pluginVersionLen);
         info.apiVersion = bufferToString(apiVersionBuf, apiVersionLen);
 
-        infos.push_back(info);
+        infos.emplace_back(std::move(info));
     }
 
     return {infos, {}};
@@ -191,7 +197,12 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
 /// @brief snake_case alias for HeuristicPolicyInfo
 using heuristic_policy_info = HeuristicPolicyInfo;
 
-/// @brief snake_case alias for getLoadedHeuristicPolicyInfos()
+/**
+ * @brief snake_case alias for getLoadedHeuristicPolicyInfos()
+ *
+ * @param h The hipDNN handle to query.
+ * @return Pair of (policy info vector, error); vector is empty on failure.
+ */
 inline auto
     get_loaded_heuristic_policy_infos(hipdnnHandle_t h) // NOLINT(readability-identifier-naming)
 {

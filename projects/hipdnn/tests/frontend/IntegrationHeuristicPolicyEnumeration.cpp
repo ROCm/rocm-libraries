@@ -11,12 +11,17 @@
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/Handle.hpp>
 #include <hipdnn_frontend/HeuristicPolicyInfo.hpp>
+#include <test_plugins/TestPluginConstants.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <set>
+#include <sstream>
+
 using namespace hipdnn_frontend;
 
-class IntegrationGpuHeuristicPolicyEnumeration : public ::testing::Test
+class IntegrationHeuristicPolicyEnumeration : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -31,7 +36,7 @@ protected:
 
 // ========== Basic Enumeration Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, GetLoadedPoliciesReturnsNonEmpty)
+TEST_F(IntegrationHeuristicPolicyEnumeration, GetLoadedPoliciesReturnsNonEmpty)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -39,7 +44,7 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, GetLoadedPoliciesReturnsNonEmpt
     EXPECT_GE(policies.size(), 2u) << "Expected at least Config and StaticOrdering policies";
 }
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
+TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -59,7 +64,29 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
     }
 }
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, DefaultPoliciesAreLoaded)
+TEST_F(IntegrationHeuristicPolicyEnumeration, TestGoodHeuristicPluginPolicyIsEnumerated)
+{
+    // main.cpp wires test_good_heuristic_plugin in additively before any test
+    // runs. Its policy must appear in the enumeration; if it does not, either
+    // the plugin failed to load or the enumeration is dropping additive plugins.
+    auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
+
+    ASSERT_FALSE(err.is_bad());
+
+    const std::string expectedPolicyName
+        = hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName();
+
+    const bool found = std::any_of(policies.begin(),
+                                   policies.end(),
+                                   [&](const HeuristicPolicyInfo& p) {
+                                       return p.policyName == expectedPolicyName;
+                                   });
+
+    EXPECT_TRUE(found) << "Expected test_good_heuristic_plugin policy '" << expectedPolicyName
+                       << "' to appear in enumeration of " << policies.size() << " policies";
+}
+
+TEST_F(IntegrationHeuristicPolicyEnumeration, DefaultPoliciesAreLoaded)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -87,7 +114,7 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, DefaultPoliciesAreLoaded)
 
 // ========== Error Handling Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, NullHandleReturnsError)
+TEST_F(IntegrationHeuristicPolicyEnumeration, NullHandleReturnsError)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(nullptr);
 
@@ -99,7 +126,7 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, NullHandleReturnsError)
 
 // ========== snake_case Alias Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, SnakeCaseAliasWorks)
+TEST_F(IntegrationHeuristicPolicyEnumeration, SnakeCaseAliasWorks)
 {
     auto [policies, err] = get_loaded_heuristic_policy_infos(*_handle);
 
@@ -109,7 +136,7 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, SnakeCaseAliasWorks)
 
 // ========== Multiple Query Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, MultipleQueriesReturnSameResults)
+TEST_F(IntegrationHeuristicPolicyEnumeration, MultipleQueriesReturnSameResults)
 {
     auto [policies1, err1] = getLoadedHeuristicPolicyInfos(*_handle);
     auto [policies2, err2] = getLoadedHeuristicPolicyInfos(*_handle);
@@ -117,19 +144,21 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, MultipleQueriesReturnSameResult
     ASSERT_FALSE(err1.is_bad());
     ASSERT_FALSE(err2.is_bad());
 
-    EXPECT_EQ(policies1.size(), policies2.size());
-
-    // Check that policy IDs match
-    for(size_t i = 0; i < policies1.size(); ++i)
-    {
-        EXPECT_EQ(policies1[i].policyId, policies2[i].policyId);
-        EXPECT_EQ(policies1[i].policyName, policies2[i].policyName);
-    }
+    // Enumeration order is unspecified (backed by unordered_map); compare as sets.
+    const auto toIdSet = [](const std::vector<HeuristicPolicyInfo>& policies) {
+        std::set<int64_t> ids;
+        for(const auto& p : policies)
+        {
+            ids.insert(p.policyId);
+        }
+        return ids;
+    };
+    EXPECT_EQ(toIdSet(policies1), toIdSet(policies2));
 }
 
 // ========== Handle Independence Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicies)
+TEST_F(IntegrationHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicies)
 {
     auto [handle2, err] = createHipdnnHandle();
     ASSERT_FALSE(err.is_bad());
@@ -140,13 +169,24 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicie
     ASSERT_FALSE(err1.is_bad());
     ASSERT_FALSE(err2.is_bad());
 
-    // Both handles should see the same loaded policies
-    EXPECT_EQ(policies1.size(), policies2.size());
+    // Both handles should see the same loaded policies. Enumeration order is
+    // unspecified, so compare the set of policy IDs.
+    std::set<int64_t> ids1;
+    std::set<int64_t> ids2;
+    for(const auto& p : policies1)
+    {
+        ids1.insert(p.policyId);
+    }
+    for(const auto& p : policies2)
+    {
+        ids2.insert(p.policyId);
+    }
+    EXPECT_EQ(ids1, ids2);
 }
 
 // ========== Content Validation Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, PolicyNamesAreUTF8)
+TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyNamesAreUTF8)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -160,7 +200,7 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, PolicyNamesAreUTF8)
     }
 }
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, VersionStringsAreValid)
+TEST_F(IntegrationHeuristicPolicyEnumeration, VersionStringsAreValid)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -179,7 +219,7 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, VersionStringsAreValid)
 
 // ========== Integration with Graph Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, CanQueryPoliciesBeforeGraphCreation)
+TEST_F(IntegrationHeuristicPolicyEnumeration, CanQueryPoliciesBeforeGraphCreation)
 {
     // Should be able to query policies before creating any graphs
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
@@ -190,20 +230,27 @@ TEST_F(IntegrationGpuHeuristicPolicyEnumeration, CanQueryPoliciesBeforeGraphCrea
 
 // ========== Logging Tests ==========
 
-TEST_F(IntegrationGpuHeuristicPolicyEnumeration, EnumerationCanBeLogged)
+TEST_F(IntegrationHeuristicPolicyEnumeration, EnumerationFormatsAllFields)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
     ASSERT_FALSE(err.is_bad());
+    ASSERT_GT(policies.size(), 0u);
 
-    // Log all policies (visual check in test output)
-    std::cout << "Loaded " << policies.size() << " heuristic policies:\n";
+    // Format every policy through ostringstream; assert each rendered line
+    // contains every field. Catches regressions where a field is empty,
+    // unformattable, or accidentally dropped from the struct.
     for(const auto& policy : policies)
     {
-        std::cout << "  - " << policy.policyName << " (ID: " << policy.policyId
-                  << ", Plugin: " << policy.pluginName << ", Version: " << policy.pluginVersion
-                  << ", API: " << policy.apiVersion << ")" << '\n';
-    }
+        std::ostringstream oss;
+        oss << policy.policyName << " (ID: " << policy.policyId << ", Plugin: " << policy.pluginName
+            << ", Version: " << policy.pluginVersion << ", API: " << policy.apiVersion << ")";
+        const std::string rendered = oss.str();
 
-    SUCCEED();
+        EXPECT_NE(rendered.find(policy.policyName), std::string::npos);
+        EXPECT_NE(rendered.find(policy.pluginName), std::string::npos);
+        EXPECT_NE(rendered.find(policy.pluginVersion), std::string::npos);
+        EXPECT_NE(rendered.find(policy.apiVersion), std::string::npos);
+        EXPECT_NE(rendered.find(std::to_string(policy.policyId)), std::string::npos);
+    }
 }

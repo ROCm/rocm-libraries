@@ -17,6 +17,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "HipdnnException.hpp"
+
 using namespace hipdnn_backend::heuristics;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -35,6 +37,25 @@ protected:
         props.total_global_mem = 16ULL * 1024 * 1024 * 1024; // 16GB
         props.architecture_name = "gfx90a";
         return props;
+    }
+
+    // Deserialize a serialized DevicePropertiesT from a buffer and assert every
+    // scalar field round-trips. architecture_name is checked separately when the
+    // caller cares about the empty/null distinction.
+    static void expectMatchesProps(const void* buf, const DevicePropertiesT& expected)
+    {
+        const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(buf);
+        ASSERT_NE(deviceProps, nullptr);
+
+        EXPECT_EQ(deviceProps->device_id(), expected.device_id);
+        EXPECT_EQ(deviceProps->multi_processor_count(), expected.multi_processor_count);
+        EXPECT_EQ(deviceProps->total_global_mem(), expected.total_global_mem);
+
+        if(!expected.architecture_name.empty())
+        {
+            ASSERT_NE(deviceProps->architecture_name(), nullptr);
+            EXPECT_EQ(deviceProps->architecture_name()->str(), expected.architecture_name);
+        }
     }
 };
 
@@ -76,15 +97,7 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesCanBeDeserialized)
 
     const auto serialized = serializeDeviceProperties(props);
 
-    // Verify we can deserialize back
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(serialized.data());
-    ASSERT_NE(deviceProps, nullptr);
-
-    // Verify deserialized values match original
-    EXPECT_EQ(deviceProps->device_id(), props.device_id);
-    EXPECT_EQ(deviceProps->multi_processor_count(), props.multi_processor_count);
-    EXPECT_EQ(deviceProps->total_global_mem(), props.total_global_mem);
-    EXPECT_EQ(deviceProps->architecture_name()->str(), props.architecture_name);
+    expectMatchesProps(serialized.data(), props);
 }
 
 TEST_F(TestDeviceProperties, SerializeDevicePropertiesHandlesEmptyArchitecture)
@@ -99,11 +112,11 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesHandlesEmptyArchitecture)
     // Should be deserializable even with empty architecture
     const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(serialized.data());
     ASSERT_NE(deviceProps, nullptr);
-    // Check if architecture_name is null or empty
-    if(deviceProps->architecture_name() != nullptr)
-    {
-        EXPECT_TRUE(deviceProps->architecture_name()->str().empty());
-    }
+    // FlatBuffers may omit empty strings (null pointer) or store them as empty
+    // strings; both are valid round-trips of the empty input.
+    const auto* arch = deviceProps->architecture_name();
+    EXPECT_TRUE(arch == nullptr || arch->str().empty())
+        << "Expected null or empty architecture, got '" << (arch ? arch->str() : "<null>") << "'";
 }
 
 TEST_F(TestDeviceProperties, SerializeDevicePropertiesHandlesLargeValues)
@@ -114,11 +127,7 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesHandlesLargeValues)
 
     const auto serialized = serializeDeviceProperties(props);
 
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(serialized.data());
-    ASSERT_NE(deviceProps, nullptr);
-
-    EXPECT_EQ(deviceProps->multi_processor_count(), 65536);
-    EXPECT_EQ(deviceProps->total_global_mem(), 128ULL * 1024 * 1024 * 1024);
+    expectMatchesProps(serialized.data(), props);
 }
 
 TEST_F(TestDeviceProperties, SerializeDevicePropertiesIsDeterministic)
@@ -200,14 +209,7 @@ TEST_F(TestDeviceProperties, CompleteWorkflowWithCustomProperties)
     const auto serialized = serializeDeviceProperties(props);
     const auto wrapper = wrapSerializedDeviceProperties(serialized);
 
-    // Verify round-trip
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(wrapper.ptr);
-    ASSERT_NE(deviceProps, nullptr);
-
-    EXPECT_EQ(deviceProps->device_id(), 1);
-    EXPECT_EQ(deviceProps->multi_processor_count(), 240);
-    EXPECT_EQ(deviceProps->total_global_mem(), 32ULL * 1024 * 1024 * 1024);
-    EXPECT_EQ(deviceProps->architecture_name()->str(), "gfx942");
+    expectMatchesProps(wrapper.ptr, props);
 }
 
 // ========== Edge Case Tests ==========
@@ -223,13 +225,7 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesWithZeroValues)
     const auto serialized = serializeDeviceProperties(props);
 
     EXPECT_FALSE(serialized.empty());
-
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(serialized.data());
-    ASSERT_NE(deviceProps, nullptr);
-
-    EXPECT_EQ(deviceProps->device_id(), 0);
-    EXPECT_EQ(deviceProps->multi_processor_count(), 0);
-    EXPECT_EQ(deviceProps->total_global_mem(), 0ULL);
+    expectMatchesProps(serialized.data(), props);
 }
 
 TEST_F(TestDeviceProperties, SerializeDevicePropertiesWithLongArchitectureName)
@@ -239,11 +235,7 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesWithLongArchitectureName)
 
     const auto serialized = serializeDeviceProperties(props);
 
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(serialized.data());
-    ASSERT_NE(deviceProps, nullptr);
-
-    EXPECT_EQ(deviceProps->architecture_name()->str(),
-              "gfx90a-very-long-architecture-name-for-testing-purposes");
+    expectMatchesProps(serialized.data(), props);
 }
 
 // ========== queryDeviceProperties Tests (GPU required) ==========
@@ -274,11 +266,10 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesHasValidArchitecture)
 {
     const auto props = queryDeviceProperties();
 
-    // Architecture name should be a valid GCN/CDNA architecture
-    // Common formats: gfx908, gfx90a, gfx942, etc.
-    EXPECT_TRUE(props.architecture_name.find("gfx") == 0
-                || props.architecture_name.find("CDNA") == 0 || !props.architecture_name.empty())
-        << "Architecture name: " << props.architecture_name;
+    // hipDeviceProp_t::gcnArchName always reports an AMD GPU architecture name
+    // starting with "gfx" (e.g. gfx908, gfx90a, gfx942).
+    EXPECT_EQ(props.architecture_name.rfind("gfx", 0), 0u)
+        << "Architecture name should start with 'gfx', got: " << props.architecture_name;
 }
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesIsConsistent)
@@ -292,6 +283,33 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesIsConsistent)
     EXPECT_EQ(props1.architecture_name, props2.architecture_name);
 }
 
+// Pins the documented "throws HipdnnException on HIP failure" contract for the
+// int overload. Requires the HIP runtime, so it lives in the GPU fixture even
+// though it only exercises an error path.
+TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesInvalidDeviceIdThrows)
+{
+    constexpr int kInvalidDeviceId = 99999;
+    EXPECT_THROW(queryDeviceProperties(kInvalidDeviceId), hipdnn_backend::HipdnnException);
+}
+
+TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesExplicitDeviceIdMatchesCurrent)
+{
+    // The no-arg overload resolves the current device through hipGetDevice and
+    // delegates to the int overload. Both forms must produce identical results
+    // for the same device.
+    int currentDevice = 0;
+    ASSERT_EQ(hipGetDevice(&currentDevice), hipSuccess);
+
+    const auto fromNoArg = queryDeviceProperties();
+    const auto fromExplicit = queryDeviceProperties(currentDevice);
+
+    EXPECT_EQ(fromNoArg.device_id, fromExplicit.device_id);
+    EXPECT_EQ(fromNoArg.multi_processor_count, fromExplicit.multi_processor_count);
+    EXPECT_EQ(fromNoArg.total_global_mem, fromExplicit.total_global_mem);
+    EXPECT_EQ(fromNoArg.architecture_name, fromExplicit.architecture_name);
+    EXPECT_EQ(fromExplicit.device_id, currentDevice);
+}
+
 TEST_F(TestGpuDeviceProperties, CompleteWorkflowQuerySerializeWrap)
 {
     // Complete workflow: query -> serialize -> wrap
@@ -302,11 +320,5 @@ TEST_F(TestGpuDeviceProperties, CompleteWorkflowQuerySerializeWrap)
     EXPECT_NE(wrapper.ptr, nullptr);
     EXPECT_GT(wrapper.size, 0u);
 
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(wrapper.ptr);
-    ASSERT_NE(deviceProps, nullptr);
-
-    EXPECT_EQ(deviceProps->device_id(), props.device_id);
-    EXPECT_EQ(deviceProps->multi_processor_count(), props.multi_processor_count);
-    EXPECT_EQ(deviceProps->total_global_mem(), props.total_global_mem);
-    EXPECT_EQ(deviceProps->architecture_name()->str(), props.architecture_name);
+    expectMatchesProps(wrapper.ptr, props);
 }

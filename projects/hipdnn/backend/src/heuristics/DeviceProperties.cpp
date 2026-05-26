@@ -6,6 +6,8 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hip/hip_runtime.h>
 
+#include <string>
+
 #include "HipdnnException.hpp"
 
 namespace hipdnn_backend::heuristics
@@ -17,7 +19,9 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(in
     auto status = hipGetDeviceProperties(&hipProps, deviceId);
     if(status != hipSuccess)
     {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get device properties");
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Failed to get properties for device " + std::to_string(deviceId)
+                                  + ": " + hipGetErrorString(status));
     }
 
     hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT devProps;
@@ -35,7 +39,9 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties()
     auto status = hipGetDevice(&currentDevice);
     if(status != hipSuccess)
     {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get current device");
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              std::string{"Failed to get current device: "}
+                                  + hipGetErrorString(status));
     }
     return queryDeviceProperties(currentDevice);
 }
