@@ -215,6 +215,7 @@ globalParameters["PrintTensorRef"] = (
     0  # Print reference tensor.  0x1=after init; 0x2=after copy-back; 0x3=both
 )
 globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
+globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest

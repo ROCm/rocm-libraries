@@ -691,7 +691,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           param("dump-tensors",           1)
         if globalParameters["ExitOnFails"] > 1:
           param("exit-on-error", 1)
-        if globalParameters["PrintTensorGateResidual"]:
+        if globalParameters["PrintTensorGate"]:
           param("print-tensor-gate",      1)          
 
         param('prune-mode',               pruneModeName(int(globalParameters["PruneSparseMode"])))

@@ -259,6 +259,7 @@ class StateValues:
   d: MatrixInfo                          = field(default_factory=MatrixInfo)
   e: MatrixInfo                          = field(default_factory=MatrixInfo)
   bias: MatrixInfo                       = field(default_factory=MatrixInfo)
+  gate: MatrixInfo                       = field(default_factory=MatrixInfo)
   m: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)       # For Sparse Metadata
   startMXDummyValuVgpr: int              = 0
   totalAgprs: int                        = 0
@@ -8078,6 +8079,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.e.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.d.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.c.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
+    self.states.gate.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.a.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsA"])
     self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
     if kernel["ProblemType"]["MXBlockA"]:
@@ -8088,6 +8090,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.e.numSgprStrides -= 1
       self.states.d.numSgprStrides -= 1
       self.states.c.numSgprStrides -= 1
+      self.states.gate.numSgprStrides -= 1
     if not kernel["ProblemType"]["UseInitialStridesAB"]:
       self.states.a.numSgprStrides -= 1
       self.states.b.numSgprStrides -= 1
@@ -8782,7 +8785,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numStoreSgprNames.append("AddressGate")
       self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
       self.states.GateType   = 1
-      self.states.GateStride = 2
+      self.states.GateStride = self.states.gate.numSgprStrides
       self.states.numStoreSgprNames.append("GateType")
       self.states.numStoreSgprNameSizes.append(self.states.GateType)
       self.states.numStoreSgprNames.append("GateStride")

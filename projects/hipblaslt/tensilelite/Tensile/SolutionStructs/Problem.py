@@ -1295,6 +1295,10 @@ class ProblemType(Mapping):
       name.append("SABV")
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
+    if self["UseGateResidual"]:
+      name.append("GateRes")
+      if self["GateResidualDataTypeList"] != getGateResidualDataTypeListDefault(self):
+        name.append("".join(i.toChar() for i in self["GateResidualDataTypeList"]))
 
     if self["SupportUserArgs"]: name.append("UserArgs")
 
