@@ -4951,7 +4951,7 @@ class Solution(collections.abc.Mapping):
       return
 
     # Reject SIA3 + PLR>0 + PGR2 + BufferLoad=0 when LoopIters <= 1.
-    # With flat addressing the prefetch scheduling duplicates a load (see analysis.txt).
+    # With flat addressing the prefetch scheduling duplicates a load.
     # BufferLoad=1 is unaffected because SRD-based offsets avoid the duplication.
     if not state["BufferLoad"] \
        and state["ScheduleIterAlg"] == 3 and state["PrefetchLocalRead"] > 0 \
