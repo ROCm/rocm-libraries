@@ -22,41 +22,45 @@
 using namespace hipdnn_backend::heuristics;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
+namespace
+{
+
+DevicePropertiesT createTestProperties()
+{
+    DevicePropertiesT props;
+    props.device_id = 0;
+    props.multi_processor_count = 120;
+    props.total_global_mem = 16ULL * 1024 * 1024 * 1024; // 16GB
+    props.architecture_name = "gfx90a";
+    return props;
+}
+
+// Deserialize a serialized DevicePropertiesT from a buffer and assert every
+// scalar field round-trips. architecture_name is checked separately when the
+// caller cares about the empty/null distinction.
+void expectMatchesProps(const void* buf, const DevicePropertiesT& expected)
+{
+    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(buf);
+    ASSERT_NE(deviceProps, nullptr);
+
+    EXPECT_EQ(deviceProps->device_id(), expected.device_id);
+    EXPECT_EQ(deviceProps->multi_processor_count(), expected.multi_processor_count);
+    EXPECT_EQ(deviceProps->total_global_mem(), expected.total_global_mem);
+
+    if(!expected.architecture_name.empty())
+    {
+        ASSERT_NE(deviceProps->architecture_name(), nullptr);
+        EXPECT_EQ(deviceProps->architecture_name()->str(), expected.architecture_name);
+    }
+}
+
+} // namespace
+
 // Serialize/wrap tests build DevicePropertiesT in-memory and don't touch HIP,
 // so they can run on CPU-only CI runners. GPU-requiring tests that call
 // queryDeviceProperties() live in TestGpuDeviceProperties below.
 class TestDeviceProperties : public ::testing::Test
 {
-protected:
-    // Helper to create test device properties
-    static DevicePropertiesT createTestProperties()
-    {
-        DevicePropertiesT props;
-        props.device_id = 0;
-        props.multi_processor_count = 120;
-        props.total_global_mem = 16ULL * 1024 * 1024 * 1024; // 16GB
-        props.architecture_name = "gfx90a";
-        return props;
-    }
-
-    // Deserialize a serialized DevicePropertiesT from a buffer and assert every
-    // scalar field round-trips. architecture_name is checked separately when the
-    // caller cares about the empty/null distinction.
-    static void expectMatchesProps(const void* buf, const DevicePropertiesT& expected)
-    {
-        const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(buf);
-        ASSERT_NE(deviceProps, nullptr);
-
-        EXPECT_EQ(deviceProps->device_id(), expected.device_id);
-        EXPECT_EQ(deviceProps->multi_processor_count(), expected.multi_processor_count);
-        EXPECT_EQ(deviceProps->total_global_mem(), expected.total_global_mem);
-
-        if(!expected.architecture_name.empty())
-        {
-            ASSERT_NE(deviceProps->architecture_name(), nullptr);
-            EXPECT_EQ(deviceProps->architecture_name()->str(), expected.architecture_name);
-        }
-    }
 };
 
 // ========== serializeDeviceProperties Tests ==========
