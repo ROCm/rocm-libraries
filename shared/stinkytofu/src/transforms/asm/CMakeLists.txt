@@ -22,6 +22,7 @@ target_sources(stinkytofu PRIVATE
     StinkyBuildImplicitDependencyPass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
+    RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     InsertDelayAluPass.cpp
     EstimateAsmCyclesPass.cpp

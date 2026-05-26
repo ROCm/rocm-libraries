@@ -886,8 +886,8 @@ install_client_dependencies( )
     # Build googletest from source, installs into cmake default /usr/local
     printf "\033[32mBuilding \033[33mgoogletest; installing into \033[33m/usr/local\033[0m\n"
     CXX=${cxx} CC=${cc} FC=${fc} ${cmake_executable} ${ROCBLAS_SRC_PATH}/deps
-    make build_deps
-    elevate_if_not_root make install_deps
+    ${cmake_executable} --build . --target build_deps
+    elevate_if_not_root ${cmake_executable} --build . --target install_deps
     popd
 }
 
