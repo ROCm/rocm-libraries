@@ -113,8 +113,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Copy golden reference data into the build tree so tests can find it at
 # <exe_dir>/../lib/golden_reference_data/
+# NOTE: file(COPY) runs at configure time only. If you add or modify files
+# under golden_reference_data/, re-run cmake to pick up the changes.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/golden_reference_data/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/golden_reference_data")
+
+# Install golden reference data so installed tests can find it at
+# <exe_dir>/../lib/golden_reference_data/
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/golden_reference_data"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
@@ -175,6 +183,12 @@ set_target_properties(
 install(TARGETS ${INTEGRATION_TESTS_EXE}
     EXPORT ${INTEGRATION_TESTS_EXE}_targets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# Install golden reference data so installed tests can find it at
+# <exe_dir>/../lib/hipdnn_reference_data/
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
 # --- Package export infrastructure ---
