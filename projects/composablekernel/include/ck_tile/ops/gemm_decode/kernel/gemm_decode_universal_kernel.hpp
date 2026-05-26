@@ -70,8 +70,6 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                   "GemmDecodeBlockscaleKernel.");
     static_assert(!Problem::kBPreshuffle,
                   "GemmDecodeUniversalKernel: preshuffled-B path lands in P4.");
-    static_assert(!kHasBias,
-                  "GemmDecodeUniversalKernel: bias epilogue lands in the next commit.");
 
     struct Kargs
     {
@@ -220,6 +218,14 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                             "kVector divisible by 4.");
             }
         }
+        if constexpr(kHasBias)
+        {
+            if(kargs.p_bias == nullptr)
+            {
+                return fail("GemmDecodeUniversalKernel kHasBias requires a non-null bias "
+                            "pointer.");
+            }
+        }
         return true;
     }
 
@@ -349,6 +355,25 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
             if constexpr(kIsPerTensor)
             {
                 acc = acc * x_scale_val * w_scale_val;
+            }
+
+            // Bias: add bias[n] to the first split-K shard only so that the
+            // atomicAdd partials sum to (bias + sum_k a*b). Mirrors
+            // wvSplitK*'s in-kernel bias add. Bias dtype follows CDataType.
+            //
+            // Implementation note: this is a single scalar load by lane 0, in
+            // the same lane-0-only block that does the scalar store / atomic-
+            // add to C. Using a tile_window over a [N] vector for a single
+            // element would be pure overhead, so we read the pointer directly
+            // - matching the style of the C epilogue below.
+            if constexpr(kHasBias)
+            {
+                if(k_id == 0)
+                {
+                    const auto* p_bias  = static_cast<const CDataType*>(kargs.p_bias);
+                    const auto bias_val = type_convert<ComputeDataType>(p_bias[n]);
+                    acc += bias_val;
+                }
             }
 
             auto* p_c            = static_cast<CDataType*>(kargs.p_c);

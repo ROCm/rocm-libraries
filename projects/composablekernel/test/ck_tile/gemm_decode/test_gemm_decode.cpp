@@ -97,10 +97,13 @@ float AbsoluteTolerance(index_t K)
     }
 }
 
-template <typename ADataType, typename BDataType, typename CDataType>
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          bool kHasBias = false>
 ::testing::AssertionResult RunUnscaledCase(const std::string& test_name,
                                            const DecodeShape& shape,
-                                           index_t k_batch)
+                                           index_t            k_batch)
 {
     using ComputeDataType = float;
     using Problem         = GemmDecodeProblem<ADataType,
@@ -117,26 +120,47 @@ template <typename ADataType, typename BDataType, typename CDataType>
                                               /*kMPerWarp=*/1,
                                               /*kNPerWarp=*/1,
                                               GemmDecodeOutputAxis::SmallM,
-                                              /*kHasBias=*/false,
+                                              kHasBias,
                                               /*kWarpsPerBlock=*/1>;
     using Kernel  = GemmDecodeUniversalKernel<Problem, GemmDecodePolicy>;
 
     HostTensor<ADataType> a({shape.M, shape.K});
     HostTensor<BDataType> b({shape.N, shape.K});
+    HostTensor<CDataType> bias_host({shape.N});
     HostTensor<CDataType> c_host({shape.M, shape.N});
     HostTensor<CDataType> c_dev({shape.M, shape.N});
 
     FillRandom(a, -1.0f, 1.0f, 0xA1u);
     FillRandom(b, -1.0f, 1.0f, 0xB2u);
+    if constexpr(kHasBias)
+    {
+        FillRandom(bias_host, -2.0f, 2.0f, 0xC3u);
+    }
 
     ReferenceGemm<ADataType, BDataType, CDataType>(a, b, c_host, shape.M, shape.N, shape.K);
+    if constexpr(kHasBias)
+    {
+        for(index_t m = 0; m < shape.M; ++m)
+        {
+            for(index_t n = 0; n < shape.N; ++n)
+            {
+                c_host(m, n) = type_convert<CDataType>(type_convert<float>(c_host(m, n)) +
+                                                       type_convert<float>(bias_host(n)));
+            }
+        }
+    }
 
     DeviceMem a_buf(a.get_element_space_size_in_bytes());
     DeviceMem b_buf(b.get_element_space_size_in_bytes());
     DeviceMem c_buf(c_dev.get_element_space_size_in_bytes());
+    DeviceMem bias_buf(bias_host.get_element_space_size_in_bytes());
 
     a_buf.ToDevice(a.mData.data());
     b_buf.ToDevice(b.mData.data());
+    if constexpr(kHasBias)
+    {
+        bias_buf.ToDevice(bias_host.mData.data());
+    }
 
     // AtomicAdd split-K accumulates partials, so the destination must start at
     // zero. For k_batch == 1 the kernel does a plain store so the zero-init is
@@ -144,16 +168,36 @@ template <typename ADataType, typename BDataType, typename CDataType>
     // bookkeeping.
     c_buf.SetZero();
 
-    auto kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
-                                        b_buf.GetDeviceBuffer(),
-                                        c_buf.GetDeviceBuffer(),
-                                        shape.M,
-                                        shape.N,
-                                        shape.K,
-                                        /*stride_a=*/shape.K,
-                                        /*stride_b=*/shape.K,
-                                        /*stride_c=*/shape.N,
-                                        /*k_batch=*/k_batch);
+    typename Kernel::Kargs kargs;
+    if constexpr(kHasBias)
+    {
+        kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
+                                       b_buf.GetDeviceBuffer(),
+                                       c_buf.GetDeviceBuffer(),
+                                       /*p_x_scale=*/nullptr,
+                                       /*p_w_scale=*/nullptr,
+                                       bias_buf.GetDeviceBuffer(),
+                                       shape.M,
+                                       shape.N,
+                                       shape.K,
+                                       /*stride_a=*/shape.K,
+                                       /*stride_b=*/shape.K,
+                                       /*stride_c=*/shape.N,
+                                       /*k_batch=*/k_batch);
+    }
+    else
+    {
+        kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
+                                       b_buf.GetDeviceBuffer(),
+                                       c_buf.GetDeviceBuffer(),
+                                       shape.M,
+                                       shape.N,
+                                       shape.K,
+                                       /*stride_a=*/shape.K,
+                                       /*stride_b=*/shape.K,
+                                       /*stride_c=*/shape.N,
+                                       /*k_batch=*/k_batch);
+    }
 
     if(!Kernel::IsSupportedArgument(kargs))
     {
@@ -200,7 +244,10 @@ template <typename ADataType, typename BDataType, typename CDataType>
     return ::testing::AssertionSuccess();
 }
 
-template <typename ADataType, typename BDataType, typename CDataType>
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          bool kHasBias = false>
 void RunMatrix(const std::string& dtype_name)
 {
     constexpr index_t K = 7168;
@@ -218,7 +265,8 @@ void RunMatrix(const std::string& dtype_name)
                 const std::string name = dtype_name + " M=" + std::to_string(M) + " N=" +
                                          std::to_string(N) + " K=" + std::to_string(K) +
                                          " kb=" + std::to_string(kb);
-                EXPECT_TRUE((RunUnscaledCase<ADataType, BDataType, CDataType>(name, shape, kb)));
+                EXPECT_TRUE((RunUnscaledCase<ADataType, BDataType, CDataType, kHasBias>(
+                    name, shape, kb)));
             }
         }
     }
@@ -251,7 +299,10 @@ void ReferenceGemmPerTensor(const HostTensor<ADataType>& a,
     }
 }
 
-template <typename ADataType, typename BDataType, typename CDataType>
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          bool kHasBias = false>
 ::testing::AssertionResult RunFp8PerTensorCase(const std::string& test_name,
                                                const DecodeShape& shape,
                                                index_t            k_batch)
@@ -271,50 +322,72 @@ template <typename ADataType, typename BDataType, typename CDataType>
                                               /*kMPerWarp=*/1,
                                               /*kNPerWarp=*/1,
                                               GemmDecodeOutputAxis::SmallM,
-                                              /*kHasBias=*/false,
+                                              kHasBias,
                                               /*kWarpsPerBlock=*/1>;
     using Kernel  = GemmDecodeUniversalKernel<Problem, GemmDecodePolicy>;
 
     HostTensor<ADataType> a({shape.M, shape.K});
     HostTensor<BDataType> b({shape.N, shape.K});
+    HostTensor<CDataType> bias_host({shape.N});
     HostTensor<CDataType> c_host({shape.M, shape.N});
     HostTensor<CDataType> c_dev({shape.M, shape.N});
 
     // FP8 has limited dynamic range; keep inputs in [-1, 1].
     FillRandom(a, -1.0f, 1.0f, 0xA1u);
     FillRandom(b, -1.0f, 1.0f, 0xB2u);
+    if constexpr(kHasBias)
+    {
+        FillRandom(bias_host, -1.0f, 1.0f, 0xC3u);
+    }
 
     const float sA = 0.125f; // arbitrary non-trivial scales
     const float sB = 0.0625f;
 
     ReferenceGemmPerTensor<ADataType, BDataType, CDataType>(a, b, sA, sB, c_host,
                                                             shape.M, shape.N, shape.K);
+    if constexpr(kHasBias)
+    {
+        for(index_t m = 0; m < shape.M; ++m)
+        {
+            for(index_t n = 0; n < shape.N; ++n)
+            {
+                c_host(m, n) = type_convert<CDataType>(type_convert<float>(c_host(m, n)) +
+                                                       type_convert<float>(bias_host(n)));
+            }
+        }
+    }
 
     DeviceMem a_buf(a.get_element_space_size_in_bytes());
     DeviceMem b_buf(b.get_element_space_size_in_bytes());
     DeviceMem c_buf(c_dev.get_element_space_size_in_bytes());
     DeviceMem sa_buf(sizeof(float));
     DeviceMem sb_buf(sizeof(float));
+    DeviceMem bias_buf(bias_host.get_element_space_size_in_bytes());
 
     a_buf.ToDevice(a.mData.data());
     b_buf.ToDevice(b.mData.data());
     sa_buf.ToDevice(&sA);
     sb_buf.ToDevice(&sB);
+    if constexpr(kHasBias)
+    {
+        bias_buf.ToDevice(bias_host.mData.data());
+    }
     c_buf.SetZero();
 
-    auto kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
-                                        b_buf.GetDeviceBuffer(),
-                                        c_buf.GetDeviceBuffer(),
-                                        sa_buf.GetDeviceBuffer(),
-                                        sb_buf.GetDeviceBuffer(),
-                                        /*p_bias=*/nullptr,
-                                        shape.M,
-                                        shape.N,
-                                        shape.K,
-                                        /*stride_a=*/shape.K,
-                                        /*stride_b=*/shape.K,
-                                        /*stride_c=*/shape.N,
-                                        /*k_batch=*/k_batch);
+    auto kargs = Kernel::MakeKernelArgs(
+        a_buf.GetDeviceBuffer(),
+        b_buf.GetDeviceBuffer(),
+        c_buf.GetDeviceBuffer(),
+        sa_buf.GetDeviceBuffer(),
+        sb_buf.GetDeviceBuffer(),
+        kHasBias ? bias_buf.GetDeviceBuffer() : nullptr,
+        shape.M,
+        shape.N,
+        shape.K,
+        /*stride_a=*/shape.K,
+        /*stride_b=*/shape.K,
+        /*stride_c=*/shape.N,
+        /*k_batch=*/k_batch);
 
     if(!Kernel::IsSupportedArgument(kargs))
     {
@@ -361,7 +434,10 @@ template <typename ADataType, typename BDataType, typename CDataType>
     return ::testing::AssertionSuccess();
 }
 
-template <typename ADataType, typename BDataType, typename CDataType>
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          bool kHasBias = false>
 void RunFp8PerTensorMatrix(const std::string& dtype_name)
 {
     constexpr index_t K = 7168;
@@ -379,8 +455,8 @@ void RunFp8PerTensorMatrix(const std::string& dtype_name)
                 const std::string name = dtype_name + " M=" + std::to_string(M) +
                                          " N=" + std::to_string(N) + " K=" + std::to_string(K) +
                                          " kb=" + std::to_string(kb);
-                EXPECT_TRUE(
-                    (RunFp8PerTensorCase<ADataType, BDataType, CDataType>(name, shape, kb)));
+                EXPECT_TRUE((RunFp8PerTensorCase<ADataType, BDataType, CDataType, kHasBias>(
+                    name, shape, kb)));
             }
         }
     }
@@ -432,6 +508,16 @@ TEST(GemmDecodeUniversalUnscaled, AtomicAddSplitKVariety)
     EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t>("BF16 split=4", shape, 4)));
 }
 
+TEST(GemmDecodeUniversalUnscaled, Bf16Bf16BiasMatrix)
+{
+    RunMatrix<bf16_t, bf16_t, bf16_t, /*kHasBias=*/true>("BF16/BF16+bias");
+}
+
+TEST(GemmDecodeUniversalUnscaled, Fp16Fp16BiasMatrix)
+{
+    RunMatrix<fp16_t, fp16_t, fp16_t, /*kHasBias=*/true>("FP16/FP16+bias");
+}
+
 #ifdef CK_TILE_USE_OCP_FP8
 TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorMatrix)
 {
@@ -441,6 +527,11 @@ TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorMatrix)
 TEST(GemmDecodeUniversalFp8, Fp8Fp8ToFp16PerTensorMatrix)
 {
     RunFp8PerTensorMatrix<fp8_t, fp8_t, fp16_t>("FP8/FP8/FP16");
+}
+
+TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorBiasMatrix)
+{
+    RunFp8PerTensorMatrix<fp8_t, fp8_t, bf16_t, /*kHasBias=*/true>("FP8/FP8/BF16+bias");
 }
 #endif // CK_TILE_USE_OCP_FP8
 
