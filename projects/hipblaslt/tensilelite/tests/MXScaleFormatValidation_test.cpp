@@ -12,7 +12,17 @@
 #include <tuple>
 #include <vector>
 
-using namespace TensileLite;
+// We deliberately do NOT `using namespace TensileLite;` here: `TensileLite::E8`
+// and `TensileLite::E5M3` are FP8-byte struct types and would shadow the
+// `rocisa::DataType::E8` / `E5M3` scale-format enumerators we use to build
+// the spec table below. Pull in only the validator surface we exercise.
+using TensileLite::ContractionProblemGemm;
+using TensileLite::formatMXScaleFormatCombination;
+using TensileLite::isFP4MatrixDataType;
+using TensileLite::isMXMatrixDataType;
+using TensileLite::isValidMXScaleFormatCombination;
+using TensileLite::isValidMXScaleFormatForDataType;
+using TensileLite::mxScaleFormatCombinationError;
 
 // ============================================================================
 // MX Scale Format Validation Tests
