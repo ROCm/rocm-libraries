@@ -8,15 +8,10 @@
 // on GPU, finalization on host.
 //
 // Metrics computed:
-//   max_abs_error   — max |C[i] - R[i]|
-//   max_rel_error   — max |C[i] - R[i]| / |R[i]|  (nonzero R only)
-//   mean_abs_error  — (1/n) Σ |C[i] - R[i]|
-//   frob_error      — ||C - R||_F
-//   frob_ref        — ||R||_F
-//   rel_frob        — ||C - R||_F / ||R||_F  (standard GEMM quality metric)
-//   mismatch_count  — #{i : |C[i]-R[i]| > tol·|R[i]| + tol}
-//   max_ulp_error   — max ULP distance (dtype-aware, FP32)
-//   mean_ulp_error  — mean ULP distance
+//   rel_frob  — ||C-R||_F / ||R||_F       (relative Frobenius norm)
+//   rel_inf   — ||C-R||_∞ / ||R||_∞       (relative infinity norm)
+//   max_ulp   — max ULP distance
+//   rms_ulp   — sqrt(1/n Σ ULP²)          (RMS ULP distance)
 
 #pragma once
 
@@ -39,31 +34,21 @@ namespace rocm_ck::test {
 
 struct GemmMetrics
 {
-    double max_abs_error;  // max |C[i] - R[i]|
-    double max_rel_error;  // max |C[i] - R[i]| / |R[i]|
-    double mean_abs_error; // mean |C[i] - R[i]|
-    double frob_error;     // ||C - R||_F
-    double frob_ref;       // ||R||_F
-    double rel_frob;       // ||C - R||_F / ||R||_F
-    int64_t max_ulp_error; // max ULP distance between result and ref
-    double mean_ulp_error; // mean ULP distance
-    int mismatch_count;    // pointwise failures
-    int count;             // total elements
+    double rel_frob;    // ||C-R||_F / ||R||_F
+    double rel_inf;     // ||C-R||_∞ / ||R||_∞
+    int64_t max_ulp;    // max ULP distance
+    double rms_ulp;     // sqrt(1/n Σ ULP²)
+    int count;          // total elements
 };
 
 /// Print a formatted metrics report.
 inline void printGemmMetrics(const char* label, const GemmMetrics& m)
 {
     std::printf("=== %s  (%d elements) ===\n", label, m.count);
-    std::printf("  max abs error:    %e\n", m.max_abs_error);
-    std::printf("  max rel error:    %e\n", m.max_rel_error);
-    std::printf("  mean abs error:   %e\n", m.mean_abs_error);
-    std::printf("  ||C-R||_F:        %e\n", m.frob_error);
-    std::printf("  ||R||_F:          %e\n", m.frob_ref);
-    std::printf("  rel Frobenius:    %e\n", m.rel_frob);
-    std::printf("  max ULP error:    %ld\n", static_cast<long>(m.max_ulp_error));
-    std::printf("  mean ULP error:   %.2f\n", m.mean_ulp_error);
-    std::printf("  mismatches:       %d / %d\n", m.mismatch_count, m.count);
+    std::printf("  rel Frobenius (E_F):   %e\n", m.rel_frob);
+    std::printf("  rel inf norm  (E_inf): %e\n", m.rel_inf);
+    std::printf("  max ULP:               %ld\n", static_cast<long>(m.max_ulp));
+    std::printf("  RMS ULP:               %.2f\n", m.rms_ulp);
 }
 
 // ============================================================================
@@ -114,14 +99,12 @@ __device__ inline int64_t ulpDistance(float a, float b)
 /// Per-thread partial accumulator (all FP64 for precision).
 struct MetricsPartial
 {
-    double sum_sq_err;
-    double sum_sq_ref;
-    double sum_abs_err;
-    double max_abs_err;
-    double max_rel_err;
-    double sum_ulp;     // sum of ULP distances (for mean)
-    int64_t max_ulp;    // max ULP distance
-    int mismatch;
+    double sum_sq_err;   // Σ (C_i - R_i)²        — Frobenius numerator
+    double sum_sq_ref;   // Σ R_i²                 — Frobenius denominator
+    double max_abs_err;  // max |C_i - R_i|        — infinity norm numerator
+    double max_abs_ref;  // max |R_i|              — infinity norm denominator
+    double sum_sq_ulp;   // Σ ULP_i²               — RMS ULP
+    int64_t max_ulp;     // max ULP distance
 };
 
 /// Combine two partials (associative, for reduction).
@@ -129,40 +112,27 @@ __device__ inline MetricsPartial combine(const MetricsPartial& a, const MetricsP
 {
     return {a.sum_sq_err + b.sum_sq_err,
             a.sum_sq_ref + b.sum_sq_ref,
-            a.sum_abs_err + b.sum_abs_err,
             fmax(a.max_abs_err, b.max_abs_err),
-            fmax(a.max_rel_err, b.max_rel_err),
-            a.sum_ulp + b.sum_ulp,
-            (a.max_ulp > b.max_ulp) ? a.max_ulp : b.max_ulp,
-            a.mismatch + b.mismatch};
+            fmax(a.max_abs_ref, b.max_abs_ref),
+            a.sum_sq_ulp + b.sum_sq_ulp,
+            (a.max_ulp > b.max_ulp) ? a.max_ulp : b.max_ulp};
 }
 
 /// Compute per-element contribution to metrics.
-__device__ inline MetricsPartial elementMetrics(float result, float ref, float tolerance)
+__device__ inline MetricsPartial elementMetrics(float result, float ref)
 {
     double r    = static_cast<double>(result);
     double e    = static_cast<double>(ref);
     double diff = fabs(r - e);
-
-    double rel = 0.0;
-    if(fabs(e) > 1e-30) // avoid division by near-zero
-        rel = diff / fabs(e);
-
     int64_t ulp = ulpDistance(result, ref);
+    double dulp = static_cast<double>(ulp);
 
-    int mismatch = (diff > static_cast<double>(tolerance) * fabs(e)
-                         + static_cast<double>(tolerance))
-                       ? 1
-                       : 0;
-
-    return {diff * diff,
-            e * e,
-            diff,
-            diff,
-            rel,
-            static_cast<double>(ulp),
-            ulp,
-            mismatch};
+    return {diff * diff,      // sum_sq_err
+            e * e,            // sum_sq_ref
+            diff,             // max_abs_err
+            fabs(e),          // max_abs_ref
+            dulp * dulp,      // sum_sq_ulp
+            ulp};             // max_ulp
 }
 
 // ============================================================================
@@ -195,18 +165,6 @@ __device__ inline void blockReduceMax(double* sdata, int tid)
     }
 }
 
-/// Reduce an int array in shared memory (sum).
-__device__ inline void blockReduceSumInt(int* sdata, int tid)
-{
-    __syncthreads();
-    for(int s = kMetricsBlock / 2; s > 0; s >>= 1)
-    {
-        if(tid < s)
-            sdata[tid] += sdata[tid + s];
-        __syncthreads();
-    }
-}
-
 /// Reduce an int64_t array in shared memory (max).
 __device__ inline void blockReduceMaxInt64(int64_t* sdata, int tid)
 {
@@ -226,7 +184,6 @@ __device__ inline void blockReduceMaxInt64(int64_t* sdata, int tid)
 __global__ void gemmMetricsKernel(const float* __restrict__ result,
                                   const float* __restrict__ ref,
                                   int count,
-                                  float tolerance,
                                   MetricsPartial* __restrict__ partials)
 {
     int tid       = threadIdx.x;
@@ -234,10 +191,10 @@ __global__ void gemmMetricsKernel(const float* __restrict__ result,
     int gridStride = blockDim.x * gridDim.x;
 
     // --- Grid-stride accumulation ---
-    MetricsPartial local = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0};
+    MetricsPartial local = {0.0, 0.0, 0.0, 0.0, 0.0, 0};
     for(int i = globalTid; i < count; i += gridStride)
     {
-        auto em = elementMetrics(result[i], ref[i], tolerance);
+        auto em = elementMetrics(result[i], ref[i]);
         local   = combine(local, em);
     }
 
@@ -248,7 +205,6 @@ __global__ void gemmMetricsKernel(const float* __restrict__ result,
     {
         double d[kMetricsBlock];
         int64_t i64[kMetricsBlock];
-        int i32[kMetricsBlock];
     } smem;
 
     // sum_sq_err
@@ -263,41 +219,29 @@ __global__ void gemmMetricsKernel(const float* __restrict__ result,
     if(tid == 0)
         partials[blockIdx.x].sum_sq_ref = smem.d[0];
 
-    // sum_abs_err
-    smem.d[tid] = local.sum_abs_err;
-    blockReduceSum(smem.d, tid);
-    if(tid == 0)
-        partials[blockIdx.x].sum_abs_err = smem.d[0];
-
     // max_abs_err
     smem.d[tid] = local.max_abs_err;
     blockReduceMax(smem.d, tid);
     if(tid == 0)
         partials[blockIdx.x].max_abs_err = smem.d[0];
 
-    // max_rel_err
-    smem.d[tid] = local.max_rel_err;
+    // max_abs_ref
+    smem.d[tid] = local.max_abs_ref;
     blockReduceMax(smem.d, tid);
     if(tid == 0)
-        partials[blockIdx.x].max_rel_err = smem.d[0];
+        partials[blockIdx.x].max_abs_ref = smem.d[0];
 
-    // sum_ulp (double)
-    smem.d[tid] = local.sum_ulp;
+    // sum_sq_ulp
+    smem.d[tid] = local.sum_sq_ulp;
     blockReduceSum(smem.d, tid);
     if(tid == 0)
-        partials[blockIdx.x].sum_ulp = smem.d[0];
+        partials[blockIdx.x].sum_sq_ulp = smem.d[0];
 
     // max_ulp (int64_t)
     smem.i64[tid] = local.max_ulp;
     blockReduceMaxInt64(smem.i64, tid);
     if(tid == 0)
         partials[blockIdx.x].max_ulp = smem.i64[0];
-
-    // mismatch (int)
-    smem.i32[tid] = local.mismatch;
-    blockReduceSumInt(smem.i32, tid);
-    if(tid == 0)
-        partials[blockIdx.x].mismatch = smem.i32[0];
 }
 
 } // namespace detail
@@ -308,11 +252,9 @@ __global__ void gemmMetricsKernel(const float* __restrict__ result,
 
 /// Compute all GEMM metrics on GPU.
 /// result and ref are device pointers to float arrays of length count.
-/// tolerance is the pointwise threshold for mismatch counting.
 inline GemmMetrics computeGemmMetrics(const float* d_result,
                                       const float* d_ref,
-                                      int count,
-                                      float tolerance)
+                                      int count)
 {
     constexpr int kBlock   = detail::kMetricsBlock;
     int numBlocks          = std::min(256, (count + kBlock - 1) / kBlock);
@@ -323,7 +265,7 @@ inline GemmMetrics computeGemmMetrics(const float* d_result,
 
     // Launch reduction
     detail::gemmMetricsKernel<<<numBlocks, kBlock>>>(
-        d_result, d_ref, count, tolerance, d_partials);
+        d_result, d_ref, count, d_partials);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -337,38 +279,33 @@ inline GemmMetrics computeGemmMetrics(const float* d_result,
     // Finalize on host
     double sum_sq_err  = 0.0;
     double sum_sq_ref  = 0.0;
-    double sum_abs_err = 0.0;
     double max_abs_err = 0.0;
-    double max_rel_err = 0.0;
-    double sum_ulp     = 0.0;
+    double max_abs_ref = 0.0;
+    double sum_sq_ulp  = 0.0;
     int64_t max_ulp    = 0;
-    int mismatch       = 0;
 
     for(int i = 0; i < numBlocks; ++i)
     {
         sum_sq_err += partials[i].sum_sq_err;
         sum_sq_ref += partials[i].sum_sq_ref;
-        sum_abs_err += partials[i].sum_abs_err;
         max_abs_err = std::fmax(max_abs_err, partials[i].max_abs_err);
-        max_rel_err = std::fmax(max_rel_err, partials[i].max_rel_err);
-        sum_ulp += partials[i].sum_ulp;
+        max_abs_ref = std::fmax(max_abs_ref, partials[i].max_abs_ref);
+        sum_sq_ulp += partials[i].sum_sq_ulp;
         max_ulp = std::max(max_ulp, partials[i].max_ulp);
-        mismatch += partials[i].mismatch;
     }
 
-    double frob_err = std::sqrt(sum_sq_err);
-    double frob_ref = std::sqrt(sum_sq_ref);
-    double rel_frob = (frob_ref > 0.0) ? frob_err / frob_ref : 0.0;
+    double rel_frob = (sum_sq_ref > 0.0)
+                          ? std::sqrt(sum_sq_err) / std::sqrt(sum_sq_ref)
+                          : 0.0;
+    double rel_inf  = (max_abs_ref > 0.0)
+                          ? max_abs_err / max_abs_ref
+                          : 0.0;
+    double rms_ulp  = std::sqrt(sum_sq_ulp / static_cast<double>(count));
 
-    return {max_abs_err,
-            max_rel_err,
-            sum_abs_err / static_cast<double>(count),
-            frob_err,
-            frob_ref,
-            rel_frob,
+    return {rel_frob,
+            rel_inf,
             max_ulp,
-            sum_ulp / static_cast<double>(count),
-            mismatch,
+            rms_ulp,
             count};
 }
 

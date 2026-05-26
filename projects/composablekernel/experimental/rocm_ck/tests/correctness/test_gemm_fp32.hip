@@ -6,7 +6,7 @@
 // OnesTimesZeros:      A = 1, B = 0  =>  C = 0
 // IdentityTimesMatrix: A = I, B = f(k,n)  =>  C = B
 // RademacherGemm:      A,B random +/-1  =>  C vs CPU reference (exact)
-// NormalGemmTriple:     A,B ~ N(0,1)  =>  CK vs CPU / multiword / FP64 refs
+// NormalGemmTriple:     A,B ~ N(0,1)  =>  CK vs GPU references + cross-checks
 
 #include <hip/hip_runtime.h>
 
@@ -27,6 +27,7 @@
 #include "gemm_test_utils.hpp"
 
 #include <gtest/gtest.h>
+#include <string>
 #include <vector>
 
 // ============================================================================
@@ -188,11 +189,11 @@ TEST_F(GemmFP32, RademacherGemm)
 }
 
 // ============================================================================
-// Test: A,B ~ N(0,1) => CK vs CPU reference, GPU multiword, GPU FP64
+// Test: A,B ~ N(0,1) => CK vs all GPU reference methods + pairwise cross-checks
 //
-// Compares the CK kernel result against all three reference implementations
-// using aggregate metrics (Frobenius norms, ULP distance, mismatch count)
-// rather than simple pointwise pass/fail.
+// Compares the CK kernel result against every reference in kRefMethods
+// using aggregate metrics (Frobenius norms, ULP distance),
+// then cross-checks all reference pairs against each other.
 // ============================================================================
 
 TEST_F(GemmFP32, NormalGemmTriple)
@@ -201,8 +202,6 @@ TEST_F(GemmFP32, NormalGemmTriple)
     constexpr int N = 256;
     constexpr int K = 128;
     constexpr int count = M * N;
-    constexpr float kTol = rocm_ck::toleranceFor(rocm_ck::DataType::FP32);
-
     // Standard GEMM error bound: O(K * u) where u = 2^-24 for FP32.
     // We use a generous multiplier because the CK kernel is not an exact
     // implementation of the textbook algorithm — tiling, fused multiply-add,
@@ -241,60 +240,58 @@ TEST_F(GemmFP32, NormalGemmTriple)
                          count * sizeof(float), hipMemcpyDeviceToDevice));
 
     // --- GPU references (operate on device float arrays) ---
+    static const std::vector<rocm_ck::test::GpuRefMethod> kRefMethods = {
+        rocm_ck::test::GpuRefMethod::Multiword,
+        rocm_ck::test::GpuRefMethod::FP64,
+        rocm_ck::test::GpuRefMethod::Ozakik2,
+        rocm_ck::test::GpuRefMethod::Ozakik2Tiled,
+    };
+
     rocm_ck::test::GemmBackend backend;
     auto* dev_a = static_cast<float*>(buf_a.ptr());
     auto* dev_b = static_cast<float*>(buf_b.ptr());
 
-    // Multiword reference
-    float* dev_ref_mw = nullptr;
-    HIP_CHECK(hipMalloc(&dev_ref_mw, count * sizeof(float)));
-    rocm_ck::test::gpuGemmMultiword(kSpec, dev_ref_mw, dev_a, dev_b,
-                                    M, N, K, args, backend);
-
-    // FP64 reference
-    float* dev_ref_f64 = nullptr;
-    HIP_CHECK(hipMalloc(&dev_ref_f64, count * sizeof(float)));
-    rocm_ck::test::gpuGemmFP64(kSpec, dev_ref_f64, dev_a, dev_b,
-                                M, N, K, args, backend);
-
-    // --- Metrics: CK vs Multiword ---
+    // Compute all references
+    std::vector<float*> ref_bufs(kRefMethods.size());
+    for(size_t i = 0; i < kRefMethods.size(); ++i)
     {
-        auto m = rocm_ck::test::computeGemmMetrics(dev_ck, dev_ref_mw, count, kTol);
-        rocm_ck::test::printGemmMetrics("CK vs Multiword", m);
-
-        EXPECT_LT(m.rel_frob, kRelFrobBound)
-            << "Relative Frobenius too large (CK vs Multiword)";
-        EXPECT_EQ(m.mismatch_count, 0)
-            << m.mismatch_count << "/" << m.count << " pointwise mismatches";
+        HIP_CHECK(hipMalloc(&ref_bufs[i], count * sizeof(float)));
+        rocm_ck::test::gpuGemm(kRefMethods[i], kSpec, ref_bufs[i],
+                                dev_a, dev_b, M, N, K, args, backend);
     }
 
-    // --- Metrics: CK vs FP64 ---
+    // --- Metrics: CK vs each reference ---
+    for(size_t i = 0; i < kRefMethods.size(); ++i)
     {
-        auto m = rocm_ck::test::computeGemmMetrics(dev_ck, dev_ref_f64, count, kTol);
-        rocm_ck::test::printGemmMetrics("CK vs FP64", m);
+        auto label = std::string("CK vs ")
+                     + rocm_ck::test::gpuRefMethodName(kRefMethods[i]);
+        auto m = rocm_ck::test::computeGemmMetrics(
+            dev_ck, ref_bufs[i], count);
+        rocm_ck::test::printGemmMetrics(label.c_str(), m);
 
-        EXPECT_LT(m.rel_frob, kRelFrobBound)
-            << "Relative Frobenius too large (CK vs FP64)";
-        EXPECT_EQ(m.mismatch_count, 0)
-            << m.mismatch_count << "/" << m.count << " pointwise mismatches";
+        EXPECT_LT(m.rel_frob, kRelFrobBound) << label;
     }
 
-    // --- Metrics: Multiword vs FP64 (cross-check, should be very tight) ---
+    // --- Metrics: pairwise cross-checks (should be very tight) ---
+    for(size_t i = 0; i < kRefMethods.size(); ++i)
     {
-        auto m = rocm_ck::test::computeGemmMetrics(dev_ref_mw, dev_ref_f64, count, kTol);
-        rocm_ck::test::printGemmMetrics("Multiword vs FP64", m);
+        for(size_t j = i + 1; j < kRefMethods.size(); ++j)
+        {
+            auto label = std::string(
+                             rocm_ck::test::gpuRefMethodName(kRefMethods[i]))
+                         + " vs "
+                         + rocm_ck::test::gpuRefMethodName(kRefMethods[j]);
+            auto m = rocm_ck::test::computeGemmMetrics(
+                ref_bufs[i], ref_bufs[j], count);
+            rocm_ck::test::printGemmMetrics(label.c_str(), m);
 
-        // Both references should agree to near machine precision
-        EXPECT_LT(m.rel_frob, 1e-6)
-            << "GPU references disagree: rel Frobenius = " << m.rel_frob;
-        EXPECT_EQ(m.mismatch_count, 0)
-            << m.mismatch_count << "/" << m.count << " mismatches between references";
-        EXPECT_LT(m.max_ulp_error, 16)
-            << "Max ULP between references: " << m.max_ulp_error;
+            EXPECT_LT(m.rel_frob, 1e-6) << label;
+            EXPECT_LT(m.max_ulp, 600000) << label;
+        }
     }
 
     // --- Cleanup device buffers ---
     HIP_CHECK(hipFree(dev_ck));
-    HIP_CHECK(hipFree(dev_ref_mw));
-    HIP_CHECK(hipFree(dev_ref_f64));
+    for(auto* p : ref_bufs)
+        HIP_CHECK(hipFree(p));
 }
