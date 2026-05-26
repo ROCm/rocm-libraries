@@ -321,14 +321,11 @@ container_reverse_exclusive_scan(const tuple<Xs...>& x, Reduce reduce, Init init
 }
 #endif
 
-// (X) Step B2 fix — was previously an in-place scan into `tuple<Xs...> y;`
-// which couldn't write a runtime int back into a `constant<N>` slot when
-// the input was a mixed (runtime, compile-time) tuple. That blocked TDM
-// `get_cached_global_strides` (tile_window.hpp:1788) for any dram view
-// whose lengths carried a `constant<N>` dim — which fmha Q/K dram windows
-// do. Rewritten to mirror `container_reverse_exclusive_scan_impl` above:
-// recursively build a fresh tuple via `container_push_front` so each
-// element gets its own deduced type and heterogeneous tuples are fine.
+// A prior in-place scan into `tuple<Xs...> y;` could not write a runtime
+// int back into a `constant<N>` slot when the input was a mixed
+// (runtime, compile-time) tuple. Mirror `container_reverse_exclusive_scan_impl`
+// above: recursively build a fresh tuple via `container_push_front` so each
+// element type is deduced independently and heterogeneous tuples work.
 //
 // Semantics preserved exactly vs. the original inclusive scan:
 //   y[N-1] = f(init,        x[N-1])
