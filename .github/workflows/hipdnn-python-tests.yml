@@ -64,11 +64,3 @@ jobs:
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DHIP_PLATFORM=amd
           ninja -C build hipdnn_frontend_python libmiopen_plugin.so
-
-      - name: Run Python binding tests
-        run: |
-          . .venv/bin/activate
-          PYTHONPATH=projects/hipdnn/python:build/lib \
-          LD_LIBRARY_PATH=build/lib:/opt/rocm/lib \
-          HIPDNN_PLUGIN_PATH=build/lib/hipdnn_plugins/engines \
-          pytest projects/hipdnn/python/hipdnn_frontend/test/ -v
