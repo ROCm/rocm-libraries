@@ -63,6 +63,9 @@ option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
+option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
+       "Install TensileLite Python packages and test tools into the test artifact tree."
+       OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -563,6 +566,89 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
         DEPENDS
         COMPONENT clients-common
     )
+endif()
+
+# Install TensileLite Python packages and test tools for artifact-based testing.
+# Produces:
+#   share/hipblaslt/tensilelite/Tensile/     — Tensile Python package
+#   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
+#   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
+    set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
+    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+
+    # Tensile Python package
+    install(
+        DIRECTORY "${_tensilelite_src}/Tensile/"
+        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN ".pytest_cache" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
+
+    # Scripts used by unit tests
+    install(
+        FILES "${_tensilelite_src}/scripts/analyze_timing.py"
+        DESTINATION "${_tensilelite_install_dest}/scripts"
+        COMPONENT tests
+    )
+    # Preserve executable permissions on entry points
+    install(
+        PROGRAMS
+            "${_tensilelite_src}/Tensile/bin/Tensile"
+            "${_tensilelite_src}/Tensile/bin/TensileCreateLibrary"
+        DESTINATION "${_tensilelite_install_dest}/Tensile/bin"
+        COMPONENT tests
+    )
+
+    # rocisa Python package — normalize rocisa/rocisa/ to top-level rocisa/
+    install(
+        DIRECTORY "${_tensilelite_src}/rocisa/rocisa/"
+        DESTINATION "${_tensilelite_install_dest}/rocisa"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
+    # rocisa native extension
+    if(TARGET _rocisa)
+        install(
+            TARGETS _rocisa
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
+            COMPONENT tests
+        )
+    endif()
+    # Co-install stinkytofu shared library next to _rocisa
+    if(TARGET stinkytofu AND NOT WIN32)
+        install(FILES $<TARGET_FILE:stinkytofu>
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
+            COMPONENT tests
+        )
+        install(FILES $<TARGET_SONAME_FILE:stinkytofu>
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
+            COMPONENT tests
+        )
+    endif()
+
+    # rocisa tests
+    install(
+        DIRECTORY "${_tensilelite_src}/rocisa/test/"
+        DESTINATION "${_tensilelite_install_dest}/rocisa_tests"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
+
+    # pytest config (marker registration, xfail_strict)
+    install(
+        FILES "${_tensilelite_src}/pytest.ini"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+        OPTIONAL
+    )
+
+    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
+    # common/generator tests are enabled in CI.
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

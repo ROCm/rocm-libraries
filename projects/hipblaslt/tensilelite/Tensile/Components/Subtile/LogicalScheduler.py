@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple, Union
+from bisect import bisect_left
 import copy
 import io
 import math
@@ -138,12 +139,63 @@ class SchedulerConfig:
     lrSB: Optional[ReadGranularity] = None
     grSA: Optional[ReadGranularity] = None
     grSB: Optional[ReadGranularity] = None
-    numPartitionsM: int = 1   # partition grid in M dimension
-    numPartitionsN: int = 1   # partition grid in N dimension
+    partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
+    partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+
+    # Resolve a partition spec into per-partition sizes along one dimension.
+    # spec is either:
+    #  - an explicit list (must sum to total)
+    #  - a single tile size (0 means full dim).
+    # Uneven splits place the remainder in the middle so the smaller partition is bracketed by full ones.
+    #
+    # Every partition size must be a multiple of `mn` (LR read granularity) to avoid emitting under-sized LRs.
+    # Single-int specs are rounded DOWN to an mn-multiple (smaller partition, less VGPR usage).
+    # If no solution exists, we return [total] (single partition).
+    @staticmethod
+    def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str, mn: int = 1) -> List[int]:
+        if isinstance(spec, (list, tuple)):
+            assert sum(spec) == total, \
+                f"partition sizes for {dim} must sum to {total}, got {sum(spec)}"
+            assert all(s >= 1 for s in spec), \
+                f"all partition sizes for {dim} must be >= 1"
+            assert all(s % mn == 0 for s in spec), \
+                f"partition sizes for {dim} must be multiples of mn={mn}, got {list(spec)}"
+            return list(spec)
+        s = spec if spec != 0 else total
+        assert 1 <= s <= total, \
+            f"partition size for {dim} must be in [1, {total}], got {s}"
+        if total % mn != 0:
+            return [total]
+        s = max(mn, (s // mn) * mn)
+        if s > total:
+            return [total]
+        num_full = total // s
+        remainder = total - num_full * s
+        if remainder == 0:
+            return [s] * num_full
+        if num_full == 1:
+            return [s, remainder]
+        mid = num_full // 2
+        return [s] * mid + [remainder] + [s] * (num_full - mid)
+
+    @staticmethod
+    def _build_prefix(sizes: List[int]) -> List[int]:
+        prefix = [0]
+        for s in sizes:
+            prefix.append(prefix[-1] + s)
+        return prefix
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
+        mn_M = max((g.mn for g in (self.lrA, self.lrSA) if g is not None), default=1)
+        mn_N = max((g.mn for g in (self.lrB, self.lrSB) if g is not None), default=1)
+        self._partitionSizesM = self._normalize_partition_sizes(
+            self.partitionSizeM, self.numMFMATilesM, 'M', mn_M)
+        self._partitionSizesN = self._normalize_partition_sizes(
+            self.partitionSizeN, self.numMFMATilesN, 'N', mn_N)
+        self._prefixM = self._build_prefix(self._partitionSizesM)
+        self._prefixN = self._build_prefix(self._partitionSizesN)
         self.plr = 0 if self.pgr == 0 else 1
         # Forcing offsetPartition to 1.
         self.offsetPartition = 1 if self.pgr >= 2 else 0
@@ -151,43 +203,50 @@ class SchedulerConfig:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
 
     @property
+    def partitionSizesM(self) -> List[int]:
+        return self._partitionSizesM
+
+    @property
+    def partitionSizesN(self) -> List[int]:
+        return self._partitionSizesN
+
+    @property
     def hasScale(self) -> bool:
         return self.lrSA is not None and self.lrSB is not None
+
+    @property
+    def numPartitionsM(self) -> int:
+        return len(self._partitionSizesM)
+
+    @property
+    def numPartitionsN(self) -> int:
+        return len(self._partitionSizesN)
 
     @property
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
 
-    @property
-    def partitionSizeM(self) -> int:
-        assert self.numMFMATilesM % self.numPartitionsM == 0
-        return self.numMFMATilesM // self.numPartitionsM
-
-    @property
-    def partitionSizeN(self) -> int:
-        assert self.numMFMATilesN % self.numPartitionsN == 0
-        return self.numMFMATilesN // self.numPartitionsN
-
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
-        """Return partition candidates as [(numPartitionsM, numPartitionsN), ...].
+        """Return partition candidates as [(partitionSizeM, partitionSizeN), ...].
 
-        Enumerates all divisors of MAX(M, N) in ascending order and
-        partitions the larger dimension. Starts with (1, 1).
-        This will only produces 1xN or Nx1 partitions to allow VGPR pressure reduction.
+        For the smaller dimension, uses a single partition (full size).
+        For the larger dimension, starts at full size then jumps to divUp(dim,2)
+        and decrements from there, skipping unbalanced 2-partition sizes.
         """
         M = tileInfoA.localMMATileGrid[0]
         N = tileInfoB.localMMATileGrid[0]
-        maxDim = max(M, N)
 
-        divisors = sorted(d for d in range(1, maxDim + 1) if maxDim % d == 0)
+        def divUp(n, d):
+            return (n + d - 1) // d
 
-        candidates = []
-        for d in divisors:
-            if N >= M:
-                candidates.append((1, d))
-            else:
-                candidates.append((d, 1))
+        def partitionSizes(dim):
+            return [dim] + list(range(divUp(dim, 2), 0, -1))
+
+        if N >= M:
+            candidates = [(M, s) for s in partitionSizes(N)]
+        else:
+            candidates = [(s, N) for s in partitionSizes(M)]
 
         return candidates
 
@@ -434,15 +493,13 @@ class LogicalScheduler:
         """Return {'A': (start, end), 'B': (start, end)} for partition pi.
 
         Uses COLUMN_MAJOR ordering: M (A) varies fastest, N (B) varies slowest.
+        Tile ranges are derived from prefix sums of partition sizes.
         """
         cfg = self.config
-        # COLUMN_MAJOR: M is inner (pi % M), N is outer (pi // M)
         piM = pi % cfg.numPartitionsM
         piN = pi // cfg.numPartitionsM
-        a0 = piM * cfg.partitionSizeM
-        b0 = piN * cfg.partitionSizeN
-        return {'A': (a0, a0 + cfg.partitionSizeM),
-                'B': (b0, b0 + cfg.partitionSizeN)}
+        return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
+                'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
     def place_LRs(self) -> List[List[SubIterKSlot]]:
         """Place MFMAs and LRs based on read granularities.
@@ -634,184 +691,114 @@ class LogicalScheduler:
     def assign_vgpr_tiles(self):
         """Assign physical vgprTileIds to all placements (A, B, SA, SB).
 
-        Free-list allocator with per-tensor FIFO queues, iterated until
-        convergence (or max 4 unroll iterations).
+        Deterministic double-buffer allocator.  Each tensor gets two sets
+        of vgprTiles, each of size maxPartitionGroups.  The active set
+        alternates based on the K-group index and macro-tile iteration:
 
-        Three phases:
-          1. Scan all MFMAs to find last read position for each
-             (tensor, tileId, k_data_group) key.
-          2. Walk execution order in a loop: each iteration feeds the
-             previous next_iter as the starting active state.  Appends
-             one tile-map dict per iteration to each placement's list.
-             Stops when next_iter matches the seeded state (convergence).
-          3. Record unroll_factor, needs_unrolling, and max tile_peaks.
+          set = (mt_iter * num_k_groups + k // gran.k) % 2
 
-        Keys use a unified formula parameterized by ReadGranularity:
-          key = (tensor, (tileId // lr_gran.mn) * lr_gran.mn, (k // lr_gran.k) * lr_gran.k)
+        Within a set the position is the sequential index of the tile
+        group inside its partition.  Unrolling (factor 2) is needed when
+        num_k_groups is odd for any tensor, because the set parity flips
+        across macro-tile boundaries.
 
-        Sets self.tile_peaks (per-tensor max across unrolls),
-        self.needs_unrolling, self.unroll_factor.
+        Sets self.tile_peaks, self.needs_unrolling, self.unroll_factor.
         """
         self._ensure_pass(Pass.LR)
 
         cfg = self.config
         numK = cfg.numSubIterK
-        MAX_UNROLL = 8
+        numP = cfg.numPartitions
 
         lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
         if cfg.hasScale:
             lr_grans['SA'] = cfg.lrSA
             lr_grans['SB'] = cfg.lrSB
 
-        # ── Phase 1: find last MFMA read for each key ──
-        last_read = {}  # key -> flat position
-        for pi, slots in enumerate(self._partitions):
-            for slot in slots:
-                if not slot.mfma:
-                    continue
-                pos = pi * numK + slot.subIterK
-                k = slot.subIterK
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
-                    gran = lr_grans[tensor]
-                    for t in tileRange.tileId_list:
-                        group = (t // gran.mn) * gran.mn
-                        k_chunk = (k // gran.k) * gran.k
-                        last_read[(tensor, group, k_chunk)] = pos
+        # ── Precompute per-partition group mappings ──
+        part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
-        # ── Phase 2: iterate until convergence ──
-        from collections import deque
+        # group_to_pos[tensor][pi] = {group: position}
+        group_to_pos = {t: [] for t in self.tensors}
+        max_groups = {t: 0 for t in self.tensors}
 
-        class _FreeList:
-            __slots__ = ('free', 'next_id', 'active_count', 'peak')
-            def __init__(self):
-                self.free = deque()
-                self.next_id = 0
-                self.active_count = 0
-                self.peak = 0
-            def alloc(self):
-                if self.free:
-                    vid = self.free.popleft()  # FIFO for convergence
-                else:
-                    vid = self.next_id
-                    self.next_id += 1
-                self.active_count += 1
-                self.peak = max(self.peak, self.active_count)
-                return vid
-            def release(self, vid):
-                self.free.append(vid)
-                self.active_count -= 1
+        for pi in range(numP):
+            for tensor in self.tensors:
+                side = TENSOR_SIDE[tensor]
+                start, end = part_ranges[pi][side]
+                gran = lr_grans[tensor]
+                groups = sorted(set(
+                    (t // gran.mn) * gran.mn for t in range(start, end)))
+                g2p = {g: i for i, g in enumerate(groups)}
+                group_to_pos[tensor].append(g2p)
+                max_groups[tensor] = max(max_groups[tensor], len(groups))
 
-        max_peaks = {t: 0 for t in self.tensors}
-        carry_active = {}
-        all_next_iters = []     # next_iter from each iteration, for cycle detection
+        # Reverse lookup: (side, tile_start) → partition index
+        tile_start_to_pi = {}
+        for pi in range(numP):
+            for side in ('A', 'B'):
+                tile_start_to_pi[(side, part_ranges[pi][side][0])] = pi
 
-        pools = {t: _FreeList() for t in self.tensors}
+        # ── Compute per-tensor K-groups and unroll factor ──
+        num_k_groups = {}
+        for tensor in self.tensors:
+            num_k_groups[tensor] = numK // lr_grans[tensor].k
 
-        for unroll_iter in range(MAX_UNROLL):
-            if unroll_iter == 0:
-                active = {}
-            else:
-                active = dict(carry_active)
-                # Reset active_count to match carry_active (tiles that survived
-                # as live from the previous iteration's wrapping LRs).
-                for t in self.tensors:
-                    pools[t].active_count = sum(
-                        1 for key in active if key[0] == t)
+        unroll_factor = 1
+        for tensor in self.tensors:
+            if num_k_groups[tensor] % 2 != 0:
+                unroll_factor = 2
+                break
 
-            next_iter = {}
-
+        # ── Deterministic tile assignment ──
+        for unroll_iter in range(unroll_factor):
             for pi, slots in enumerate(self._partitions):
                 for slot in slots:
-                    pos = pi * numK + slot.subIterK
                     k = slot.subIterK
 
-                    # ── MFMA reads: look up or seed ──
                     if slot.mfma:
                         for tensor in self.tensors:
-                            side = TENSOR_SIDE[tensor]
-                            tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
                             gran = lr_grans[tensor]
+                            nkg = num_k_groups[tensor]
+                            set_idx = (unroll_iter * nkg + k // gran.k) % 2
+                            side = TENSOR_SIDE[tensor]
+                            tileRange = (slot.mfma.tileA if side == 'A'
+                                         else slot.mfma.tileB)
                             tile_map = {}
                             for t in tileRange.tileId_list:
                                 group = (t // gran.mn) * gran.mn
-                                k_chunk = (k // gran.k) * gran.k
-                                key = (tensor, group, k_chunk)
-                                if key not in active:
-                                    active[key] = pools[tensor].alloc()
-                                tile_map[group] = active[key]
-                            slot.mfma.vgpr_tile_maps.setdefault(tensor, []).append(tile_map)
+                                pos = group_to_pos[tensor][pi][group]
+                                tile_map[group] = (set_idx * max_groups[tensor]
+                                                   + pos)
+                            slot.mfma.vgpr_tile_maps.setdefault(
+                                tensor, []).append(tile_map)
 
-                    # ── LR writes: allocate new tiles ──
                     for lr in slot.lrs:
                         tensor = lr.tensor
-                        is_wrapping = lr.mtIteration != 0
-                        target = next_iter if is_wrapping else active
-
                         gran = lr_grans[tensor]
+                        nkg = num_k_groups[tensor]
+                        target_mt = unroll_iter + lr.mtIteration
+                        target_k = lr.tiles.subIterK_start
+                        set_idx = (target_mt * nkg + target_k // gran.k) % 2
+
+                        side = TENSOR_SIDE[tensor]
+                        lr_pi = tile_start_to_pi.get(
+                            (side, lr.tiles.tileId_start), pi)
+
                         tile_map = {}
-                        seen_keys = set()
                         for t in lr.tiles.tileId_list:
                             group = (t // gran.mn) * gran.mn
-                            for lk in lr.tiles.subIterK_list:
-                                k_chunk = (lk // gran.k) * gran.k
-                                key = (tensor, group, k_chunk)
-                                if key in seen_keys:
-                                    continue
-                                seen_keys.add(key)
-                                if key in target:
-                                    pools[tensor].release(target[key])
-                                vid = pools[tensor].alloc()
-                                target[key] = vid
-                                tile_map[group] = vid
+                            if group in tile_map:
+                                continue
+                            pos = group_to_pos[tensor][lr_pi][group]
+                            tile_map[group] = (set_idx * max_groups[tensor]
+                                               + pos)
                         lr.vgpr_tile_map.append(tile_map)
 
-                    # ── Release tiles whose last read was at this position ──
-                    to_release = [key for key, lr_pos in last_read.items()
-                                  if lr_pos == pos and key in active]
-                    for key in to_release:
-                        pools[key[0]].release(active[key])
-                        del active[key]
-
-            # Track max peaks across iterations
-            for t in self.tensors:
-                max_peaks[t] = max(max_peaks[t], pools[t].peak)
-
-            # Check convergence: if this iteration's next_iter matches
-            # any previous iteration's next_iter, we found a cycle.
-            # The cycle period is (current_iter - matching_iter).
-            # All iterations from matching_iter to current_iter-1 form
-            # the repeating pattern; iterations before that are prologue.
-            converged = False
-            for prev_idx, prev_ni in enumerate(all_next_iters):
-                if next_iter == prev_ni:
-                    # Strip tile maps from the redundant convergence iteration.
-                    for pi2, slots2 in enumerate(self._partitions):
-                        for slot2 in slots2:
-                            if slot2.mfma:
-                                for tensor in self.tensors:
-                                    if tensor in slot2.mfma.vgpr_tile_maps:
-                                        slot2.mfma.vgpr_tile_maps[tensor].pop()
-                            for lr2 in slot2.lrs:
-                                lr2.vgpr_tile_map.pop()
-                    converged = True
-                    break
-            if converged:
-                break
-
-            # Carry next_iter forward as active for next iteration
-            all_next_iters.append(next_iter)
-            carry_active = next_iter
-        else:
-            assert False, (f"assign_vgpr_tiles did not converge after "
-                           f"{MAX_UNROLL} unroll iterations")
-
-        # ── Phase 3: record results ──
-        # unroll_factor = number of unique iterations (convergence iteration excluded)
-        self.unroll_factor = unroll_iter
-        self.needs_unrolling = self.unroll_factor > 1
-        self.tile_peaks = max_peaks
+        # ── Record results ──
+        self.tile_peaks = {t: 2 * max_groups[t] for t in self.tensors}
+        self.unroll_factor = unroll_factor
+        self.needs_unrolling = unroll_factor > 1
 
         self._completed.add(Pass.VGPR_TILES)
 
@@ -939,27 +926,37 @@ class LogicalScheduler:
         atoms = []
         for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
             mn = gr_gran.mn
+            last = max(0, min(upper.get((tensor, mt_val), numSlots) - 1,
+                            numSlots - 1))
             for pos in range(t_start, t_end, mn):
-                atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end))
+                atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end, last))
 
-        loads_per_slot = len(atoms) // numSlots
-
-        # 2b. Distribute atoms into flat buckets [0..numSlots),
-        #     each bucket maps to (partition=flat//numK, subIterK=flat%numK)
+        # 2b. Place atoms across [0..numSlots) weighted by partition MFMA count.
+        #     Each partition's slots get a share proportional to its MFMAs,
+        #     so larger partitions receive more GR loads.
+        nAtoms = len(atoms)
         buckets = [[] for _ in range(numSlots)]
-        for atom in atoms:
-            tensor, mt_val, _, _, ks, ke = atom
-            cur = 0
-            last = min(upper.get((tensor, mt_val), numSlots) - 1, numSlots - 1)
-            while cur < last:
-                pi = cur // numK
-                subK = cur % numK
-                if (not self._has_lr_conflict(lower, tensor, mt_val,
-                                              pi, subK, ks, ke) and
-                        len(buckets[cur]) < loads_per_slot):
-                    break
-                cur += 1
-            buckets[cur].append(atom)
+
+        mfma_per_partition = []
+        for pi in range(numP):
+            piM = pi % cfg.numPartitionsM
+            piN = pi // cfg.numPartitionsM
+            mfma_per_partition.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
+
+        weight_prefix = [0]
+        for s in range(numSlots):
+            weight_prefix.append(weight_prefix[-1] + mfma_per_partition[s // numK])
+        total_weight = weight_prefix[numSlots]
+        slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
+
+        for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
+            slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
+                       last) if nAtoms else 0
+            while (slot < last and
+                   self._has_lr_conflict(lower, tensor, mt_val,
+                                         slot // numK, slot % numK, ks, ke)):
+                slot += 1
+            buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
 
         # 2c. Remerge consecutive atoms and place into partitions
         for flat, bucket in enumerate(buckets):
@@ -2462,12 +2459,15 @@ class LogicalScheduler:
         """Print assign_vgpr_tiles output: LRs + MFMAs with vgprTileId annotations."""
         partitions = self._partitions
         buf = io.StringIO()
-        buf.write(f"needsUnrolling: {self.needs_unrolling}, "
-                  f"unrollFactor: {self.unroll_factor}\n")
-        peaks_str = ", ".join(f"{t}: {cnt}" for t, cnt in sorted(self.tile_peaks.items()))
+        needs = getattr(self, 'needs_unrolling', None)
+        factor = getattr(self, 'unroll_factor', 1)
+        peaks = getattr(self, 'tile_peaks', {})
+        buf.write(f"needsUnrolling: {needs}, "
+                  f"unrollFactor: {factor}\n")
+        peaks_str = ", ".join(f"{t}: {cnt}" for t, cnt in sorted(peaks.items()))
         buf.write(f"vgprTiles: {peaks_str}\n")
-        for ui in range(self.unroll_factor):
-            if self.unroll_factor > 1:
+        for ui in range(factor):
+            if factor > 1:
                 buf.write(f"MAINLOOP (unroll {ui}):\n")
             else:
                 buf.write("MAINLOOP:\n")
