@@ -957,3 +957,194 @@ class TestNoGpuDetected:
 
         assert result == 1
         mock_resolve.assert_not_called()
+
+
+class TestProfilingFlagParsing:
+    """Argparse-layer coverage for the seven profiling flags. The
+    behavioural rejection of `--pmc all` without `--pmc-allow-multipass`
+    lives at the MetricsConfig layer (tests in test_metrics_config.py)
+    and is re-asserted here at the CLI boundary so a regression in the
+    propagation between argparse → MetricsConfig is caught."""
+
+    def test_pmc_flag_accepts_named_sets(self):
+        parser = create_parser()
+        for set_name in ("basic", "memory", "flops", "all"):
+            args = parser.parse_args(["--graph", "g.json", "--pmc", set_name])
+            assert args.pmc == set_name
+
+    def test_pmc_flag_rejects_unknown_set(self):
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--graph", "g.json", "--pmc", "bogus"])
+
+    def test_pmc_allow_multipass_default_false(self):
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json"])
+        assert args.pmc_allow_multipass is False
+
+    def test_pmc_allow_multipass_sets_true(self):
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "--pmc-allow-multipass"])
+        assert args.pmc_allow_multipass is True
+
+    def test_emit_trace_accepts_pftrace_and_kineto(self):
+        parser = create_parser()
+        for fmt in ("pftrace", "kineto"):
+            args = parser.parse_args(["--graph", "g.json", "--emit-trace", fmt])
+            assert args.emit_trace == fmt
+
+    def test_emit_trace_rejects_unknown_format(self):
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--graph", "g.json", "--emit-trace", "bogus"])
+
+    def test_perf_flag_default_false_store_true_when_set(self):
+        parser = create_parser()
+        assert parser.parse_args(["--graph", "g.json"]).perf is False
+        assert parser.parse_args(["--graph", "g.json", "--perf"]).perf is True
+
+    def test_roofline_flag_default_false_store_true_when_set(self):
+        parser = create_parser()
+        assert parser.parse_args(["--graph", "g.json"]).roofline is False
+        assert parser.parse_args(["--graph", "g.json", "--roofline"]).roofline is True
+
+    def test_roofline_data_type_flag_does_not_exist(self):
+        """``--roofline-data-type`` was removed because it's only valid on
+        ``rocprof-compute analyze``, not ``profile``. Anyone trying to
+        pass it should get an argparse error, not a silent acceptance."""
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--graph", "g.json", "--roofline-data-type", "FP16"])
+
+    def test_profiling_output_dir_default_none_accepts_path(self, tmp_path):
+        parser = create_parser()
+        assert parser.parse_args(["--graph", "g.json"]).profiling_output_dir is None
+        args = parser.parse_args(
+            ["--graph", "g.json", "--profiling-output-dir", str(tmp_path / "out")]
+        )
+        assert args.profiling_output_dir == Path(str(tmp_path / "out"))
+
+    def test_profiling_timeout_default_and_override(self):
+        """600s default matches MetricsConfig.profiling_timeout_s default
+        — if these drift, a user-passed flag could silently revert to a
+        different per-source value."""
+        parser = create_parser()
+        assert parser.parse_args(["--graph", "g.json"]).profiling_timeout == 600
+        args = parser.parse_args(["--graph", "g.json", "--profiling-timeout", "1800"])
+        assert args.profiling_timeout == 1800
+        # 0 is the documented "disable timeout" sentinel and must parse.
+        args = parser.parse_args(["--graph", "g.json", "--profiling-timeout", "0"])
+        assert args.profiling_timeout == 0
+
+
+class TestProfilingFlagPropagation:
+    """All seven profiling flags must round-trip from argparse Namespace
+    into MetricsConfig the way `run_suite_cli` constructs it. Anything
+    that drops or renames a flag here would silently disable a CLI
+    option without test failure."""
+
+    def _make_args(self, **overrides):
+        parser = create_parser()
+        cli = ["--graph", "g.json"]
+        for k, v in overrides.items():
+            if isinstance(v, bool):
+                if v:
+                    cli.append(k)
+            else:
+                cli.extend([k, str(v)])
+        return parser.parse_args(cli)
+
+    def test_all_flags_set_lands_in_metrics_config(self, tmp_path, monkeypatch):
+        """Drive the full propagation chain: argparse Namespace ->
+        run_suite_cli -> MetricsConfig fields. We stub
+        run_suite_benchmark so this stays a pure unit test (no graph
+        files, no rocprofv3 binary)."""
+        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
+        from dnn_benchmarking.reporting.reporter import Reporter
+
+        args = self._make_args(
+            **{
+                "--warmup": 1,
+                "--iters": 1,
+                "--pmc": "memory",
+                "--pmc-allow-multipass": True,
+                "--emit-trace": "pftrace",
+                "--perf": True,
+                "--roofline": True,
+                "--profiling-output-dir": str(tmp_path / "out"),
+                "--profiling-timeout": 1234,
+            }
+        )
+
+        captured = {}
+
+        def fake_run(config, **kwargs):
+            captured["metrics"] = config.metrics
+            return 0
+
+        with patch(
+            "dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark",
+            side_effect=lambda graph_paths, config, **kw: fake_run(
+                config, graph_paths=graph_paths, **kw
+            ),
+        ):
+            rc = run_suite_cli(
+                args,
+                graph_paths=[Path("g.json")],
+                reporter=Reporter(),
+            )
+        assert rc == 0
+        m = captured["metrics"]
+        assert m.pmc_set == "memory"
+        assert m.pmc_allow_multipass is True
+        assert m.emit_trace == "pftrace"
+        assert m.perf is True
+        assert m.roofline is True
+        assert m.profiling_output_dir == Path(str(tmp_path / "out"))
+        assert m.profiling_timeout_s == 1234
+
+    def test_pmc_all_without_multipass_rejected_at_cli_layer(self):
+        """The dataclass-level check in MetricsConfig.__post_init__ must
+        bubble through run_suite_cli's ValueError handler as exit-code 1
+        plus a reporter error. Catches regressions where the propagation
+        site swallows the dataclass error or routes around the gate."""
+        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
+        from dnn_benchmarking.reporting.reporter import Reporter
+
+        args = self._make_args(
+            **{
+                "--warmup": 1,
+                "--iters": 1,
+                "--pmc": "all",
+                # No --pmc-allow-multipass: MetricsConfig.__post_init__ raises.
+            }
+        )
+
+        reporter = MagicMock(spec=Reporter)
+        rc = run_suite_cli(args, graph_paths=[Path("g.json")], reporter=reporter)
+        assert rc == 1
+        reporter.print_error.assert_called_once()
+        err_text = reporter.print_error.call_args[0][0]
+        assert "Suite configuration error" in err_text
+        assert "multipass" in err_text.lower() or "pmc" in err_text.lower()
+
+    def test_pmc_all_with_multipass_accepted_at_cli_layer(self):
+        """Positive control for the previous test."""
+        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
+        from dnn_benchmarking.reporting.reporter import Reporter
+
+        args = self._make_args(
+            **{
+                "--warmup": 1,
+                "--iters": 1,
+                "--pmc": "all",
+                "--pmc-allow-multipass": True,
+            }
+        )
+
+        with patch(
+            "dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark",
+            return_value=0,
+        ):
+            rc = run_suite_cli(args, graph_paths=[Path("g.json")], reporter=Reporter())
+        assert rc == 0

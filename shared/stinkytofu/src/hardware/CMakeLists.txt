@@ -5,4 +5,6 @@
 # ArchHelper_includes.inc includes them directly (same dir)
 target_sources(stinkytofu PRIVATE
     ArchHelper.cpp
+    ComgrProbe.cpp
+    ToolchainCaps.cpp
 )
