@@ -33,7 +33,10 @@
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ComgrProbe.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
@@ -197,6 +200,34 @@ NB_MODULE(_stinkytofu, m) {
     // Architecture IDs
     // ========================================================================
     nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
+
+    // ========================================================================
+    // Toolchain capability probing (via comgr)
+    // ========================================================================
+    m.def("hasComgrSupport", &hasComgrSupport,
+          "Return True if this build was compiled with comgr support");
+
+    m.def(
+        "probeToolchainCaps",
+        [](std::array<int, 3> arch) {
+            auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info)
+                throw nb::value_error(("Unsupported architecture: gfx" + std::to_string(arch[0]) +
+                                       std::to_string(arch[1]) + std::to_string(arch[2]))
+                                          .c_str());
+            GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+            AsmCapsConfig caps = ToolchainCaps::probe(archId);
+            nb::dict result;
+            result["VgprMsbMode"] = static_cast<int>(caps.vgprMsbMode);
+            return result;
+        },
+        nb::arg("arch"),
+        "Probe toolchain capabilities for [major, minor, stepping]. Results are cached.");
+
+    nb::enum_<VgprMsbMode>(m, "VgprMsbMode")
+        .value("NONE", VgprMsbMode::None)
+        .value("MSB8", VgprMsbMode::Msb8)
+        .value("MSB16", VgprMsbMode::Msb16);
 
     // ========================================================================
     // PyLogicalModule - Python-Specific High-Level IR Container
