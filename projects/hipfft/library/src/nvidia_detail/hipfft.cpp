@@ -896,8 +896,8 @@ try
     if(cufftret == CUFFT_SUCCESS)
     {
         // Verify that allocation actually occured.
-        const int nGPUs = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->nGPUs;
-        const auto data = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->data;
+        const int  nGPUs = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->nGPUs;
+        const auto data  = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->data;
         // Computation requires that at least one GPU buffer is actually allocated.
         bool allnull = true;
         for(int idx = 0; idx < nGPUs; ++idx)

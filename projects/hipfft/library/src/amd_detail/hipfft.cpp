@@ -553,7 +553,7 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     // Sanity check that split_dim isn't out-of-bounds:
     if(splitdim >= dim)
         throw HIPFFT_INTERNAL_ERROR;
-    
+
     // We are going to put the Hermitian-symmetric length change here:
     auto batchlengthdata = batchlength;
     if(isherm)
@@ -2240,8 +2240,10 @@ try
             {
             case 1:
             {
-                auto ret = hipMemcpy(
-                    destptr, srcptr, myDesc->descriptor->size[idx], h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost);
+                auto ret = hipMemcpy(destptr,
+                                     srcptr,
+                                     myDesc->descriptor->size[idx],
+                                     h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost);
                 if(ret != hipSuccess)
                 {
                     return HIPFFT_INTERNAL_ERROR;

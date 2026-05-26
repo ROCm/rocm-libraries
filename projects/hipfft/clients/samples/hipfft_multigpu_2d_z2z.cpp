@@ -53,11 +53,10 @@ int main()
     hipfftXtSubFormat_t format         = HIPFFT_XT_FORMAT_INPLACE;
     size_t              ngpus          = 2;
 
-
     // Perform an inverse FFT before on the input data before transforming.  This implies that the
     // output is more readable, which is helpful for understanding the data layout.
     const bool linearize_output = true;
-    
+
     // We only want to print a subset of the data:
     const int printlimit = 5;
 

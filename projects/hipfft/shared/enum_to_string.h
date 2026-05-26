@@ -21,9 +21,9 @@
 #ifndef ENUM_TO_STRING_H
 #define ENUM_TO_STRING_H
 
-#include "fft_params.h"
 #include "../library/include/hipfft/hipfft.h"
 #include "../library/include/hipfft/hipfftXt.h"
+#include "fft_params.h"
 
 // Return the string of the hipError code.
 static std::string hipError_to_string(const hipError_t ret)

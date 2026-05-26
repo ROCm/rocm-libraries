@@ -22,13 +22,13 @@
 #ifndef SAMPLE_UTILS_HPP_
 #define SAMPLE_UTILS_HPP_
 
-#include <hip/hip_runtime_api.h>
-#include <cstddef>
-#include <string>
-#include <stdexcept>
 #include <complex>
+#include <cstddef>
+#include <hip/hip_runtime_api.h>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -40,15 +40,15 @@ void printarraylimit(const std::vector<Tvalue>& vals,
                      const size_t               printlimit)
 {
     const size_t skipmarg = 2;
-    const bool xskip = Nx > skipmarg && Nx - skipmarg > printlimit; 
-    const bool yskip = Ny > skipmarg && Ny - skipmarg > printlimit;
+    const bool   xskip    = Nx > skipmarg && Nx - skipmarg > printlimit;
+    const bool   yskip    = Ny > skipmarg && Ny - skipmarg > printlimit;
 
     bool xskipped = false;
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
         if(!xskipped && xskip && xidx > printlimit)
         {
-            xskipped=true;
+            xskipped = true;
             std::cout << "...\n";
             xidx = Nx - skipmarg;
         }
@@ -77,10 +77,10 @@ void printarraylimit(const std::vector<Tvalue>& vals,
                      const size_t               printlimit)
 {
     const size_t skipmarg = 2;
-    const bool xskip = Nx > skipmarg && Nx - skipmarg > printlimit; 
-    const bool yskip = Ny > skipmarg && Ny - skipmarg > printlimit;
-    const bool zskip = Nz > skipmarg && Nz - skipmarg > printlimit;
-    
+    const bool   xskip    = Nx > skipmarg && Nx - skipmarg > printlimit;
+    const bool   yskip    = Ny > skipmarg && Ny - skipmarg > printlimit;
+    const bool   zskip    = Nz > skipmarg && Nz - skipmarg > printlimit;
+
     bool xskipped = false;
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
@@ -496,8 +496,8 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
     hipfftHandle plan{};
-    auto hipfft_rt = HIPFFT_SUCCESS;
-    hipfft_rt = hipfftPlan2d(&plan, // plan handle
+    auto         hipfft_rt = HIPFFT_SUCCESS;
+    hipfft_rt              = hipfftPlan2d(&plan, // plan handle
                              Nx, // transform length
                              Ny, // transform length
                              HIPFFT_Z2Z); // transform type (HIPFFT_C2C for single-precision)

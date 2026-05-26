@@ -162,7 +162,7 @@ TEST_P(hipfftxtunit, plancreation)
         GTEST_SKIP();
 
     // FIXME: 3D, single-precision
-    
+
     const int Nx = 32;
     const int Ny = 32;
 
@@ -203,7 +203,7 @@ TEST_P(hipfftxtunit, plancreation)
         std::vector<int> lengths = {Nx, Ny};
         const int        nbatch  = ngpus;
         // Note: implicit default strides and distances enforced if {i,o}nembed are nullptr
-        hipfft_rt                = hipfftMakePlanMany(plan,
+        hipfft_rt = hipfftMakePlanMany(plan,
                                        lengths.size(),
                                        lengths.data(),
                                        nullptr,
@@ -373,7 +373,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     };
 
     // Host data configuration:
-    const auto host_distances       = default_distances(dft_type, placement, fft_io_in, lengths, batches);
+    const auto host_distances = default_distances(dft_type, placement, fft_io_in, lengths, batches);
     auto       hostdiststrides      = host_distances;
     const auto hostdatabatchlengths = computedatabatchlengths(isherm, batchlengths);
     const auto host_strides         = default_strides(dft_type, placement, fft_io_in, lengths);
@@ -547,7 +547,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                             std::begin(idx), std::end(idx), std::begin(hostdiststrides), 0);
                         if(isreal)
                         {
-                            auto hostdat = reinterpret_cast<double*>(hostbuf.data());
+                            auto       hostdat = reinterpret_cast<double*>(hostbuf.data());
                             const auto yscale
                                 = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
                             hostdat[pos] = xidx + yscale * yidx;
@@ -578,13 +578,13 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                                 std::begin(idx), std::end(idx), std::begin(hostdiststrides), 0);
                             if(isreal)
                             {
-                                auto hostdat = reinterpret_cast<double*>(hostbuf.data());
+                                auto       hostdat = reinterpret_cast<double*>(hostbuf.data());
                                 const auto yscale
                                     = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
                                 const auto zscale
                                     = yscale
-                                    * std::pow(10.0, -std::ceil(std::log10(batchlengths[3]))) ;
-                                hostdat[pos] = xidx + yscale  * yidx  + zscale * zidx;
+                                      * std::pow(10.0, -std::ceil(std::log10(batchlengths[3])));
+                                hostdat[pos] = xidx + yscale * yidx + zscale * zidx;
                             }
                             else
                             {
@@ -719,10 +719,13 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         std::vector<size_t> brick_strides;
         if(isherm)
         {
-            brick_distances = default_distances(
-                fft_transform_type_complex_forward, placement, fft_io_in, brick_lengths, brick_batches);
-            brick_strides
-                = default_strides(fft_transform_type_complex_forward, placement, fft_io_in, brick_lengths);
+            brick_distances = default_distances(fft_transform_type_complex_forward,
+                                                placement,
+                                                fft_io_in,
+                                                brick_lengths,
+                                                brick_batches);
+            brick_strides   = default_strides(
+                fft_transform_type_complex_forward, placement, fft_io_in, brick_lengths);
         }
         else
         {
