@@ -303,7 +303,15 @@ EnginePluginResourceManager::~EnginePluginResourceManager()
     // Destroy plugin handles
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
-        safeDestroyHandle(plugin, handle);
+        // Destructors are implicitly noexcept: a log call inside safeDestroyHandle
+        // (fmt formatting, sink I/O, allocation) can throw.
+        try
+        {
+            safeDestroyHandle(plugin, handle);
+        }
+        catch(...)
+        {
+        }
     }
 }
 
