@@ -27,6 +27,7 @@
 #include "workspace.hpp"
 #include "test.hpp"
 #include <miopen/tensor_extra.hpp>
+#include <miopen/random.hpp>
 
 #define WORKAROUND_SWDEV_511223 1
 

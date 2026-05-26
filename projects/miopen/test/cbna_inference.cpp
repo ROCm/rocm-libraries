@@ -27,7 +27,7 @@
 #include "driver.hpp"
 #include "workspace.hpp"
 #include <miopen/fusionHost.hpp>
-#include <miopen/stringutils.hpp>
+#include <miopen/batch_norm.hpp>
 
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
 using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroyOperatorArgs);
