@@ -234,19 +234,22 @@ int profile_grouped_conv_fwd_tile(int argc, char* argv[])
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_FP32_FWD;
                 return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                time_kernel);
+                                                time_kernel,
+                                                instance_index);
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_FP16_FWD;
                 return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                time_kernel);
+                                                time_kernel,
+                                                instance_index);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_BF16_FWD;
                 return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                time_kernel);
+                                                time_kernel,
+                                                instance_index);
             }
         }
     }
