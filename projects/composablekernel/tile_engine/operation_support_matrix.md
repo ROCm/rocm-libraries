@@ -12,7 +12,7 @@
 | GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
-| GEMM | gemm_decode [9]<br>engine: gemm_decode/ | ✅ | | ✅ | | | | | ✅ | | | | | ✅ | ✅ | |
+| GEMM | gemm_decode [9]<br>engine: gemm_decode/ | ✅ | ✅ | ✅ | | | | | ✅ | | | | | ✅ | ✅ | |
 | GEMM | grouped_gemm<br>example: 17_grouped_gemm/ | ❌ | ❌ | ❌ | | | | | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GEMM | grouped_gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | Reduce | multi_reduce2d [8]<br>engine: reduce/<br>example: 05_reduce/ | ✅ | | ❌ | | | | | | | | | ❌ | ✅ | ✅ | ❌ |
@@ -50,7 +50,7 @@
 - [6] **streamk_gemm:** Builder and default configs support all 4 layouts, but CMake defaults to `rcr` only. Building others requires `-DGEMM_STREAMK_LAYOUT="rcr;rrr;ccr;crr"`.
 - [7] **streamk_gemm:** CK Tile kernels have no arch-specific guards; tile engine filtering is pending validation for gfx950/gfx1201.
 - [8] **multi_reduce2d:** CK Tile's reduce example supports bf16 input but the tile engine only configures fp16. The reduce kernel adapts to wave32/wave64 at runtime via `is_wave32()`.
-- [9] **gemm_decode:** P0 covers the universal-family SmallM orientation only (BF16/BF16, FP16/FP16) on gfx942/gfx950. Per-tensor and per-token FP8 scaling lands in P0b, blockscale 1×128/128×128 in P1, MX (e8m0) in P2, and the SmallN orientation in P3. The tile engine ships one default tile config in P0 to validate the per-instance build pipeline; the full sweep matrix lands with the Python instance builder in P1+.
+- [9] **gemm_decode:** Covers the SmallM (M = 1..16, large N) orientation on gfx942/gfx950. The universal kernel handles BF16/BF16, FP16/FP16 (P0), FP8 PerTensor × PerTensor (P0b) and an optional `[N]` bias-vector epilogue (P0b); the dedicated blockscale kernel handles FP8 with `Block2D<1, 128>` X / `Block2D<128, 128>` W scales using a workgroup-LDS scale broadcast (WD-OPT-18, P1). MX (e8m0) lands in P2, the SmallN orientation in P3, and the dispatcher integration in P4. The tile engine ships hand-written instances for each variant (BF16 SmallM default, FP8 PerTensor SmallM, FP8 blockscale SmallM DSV3); the full sweep matrix lands with the Python instance builder in P1+.
 - Reduce operations do not use matrix layouts.
 
 **Layout codes:** Each layout code specifies the memory layout of tensors A, B, and C as row-major (r) or column-major (c). For example, `rcr` means A is row-major, B is column-major, and C is row-major. For gemm_multi_d, the instance builder uses 4-character codes (e.g., `rcrr`) where the 4th character specifies the D tensor layout; in the table above, the 3-character A/B/C portion is shown since the D layout is always row-major (r) for all supported configurations.
