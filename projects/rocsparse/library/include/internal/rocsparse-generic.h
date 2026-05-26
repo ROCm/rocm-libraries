@@ -42,6 +42,7 @@
 #include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
 #include "generic/rocsparse_spic0.h"
+#include "generic/rocsparse_spildlt0.h"
 #include "generic/rocsparse_spilu0.h"
 #include "generic/rocsparse_spitsv.h"
 #include "generic/rocsparse_spmm.h"
