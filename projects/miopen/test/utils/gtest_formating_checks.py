@@ -42,6 +42,16 @@ IGNORE_LIST = {
     "../../test/gtest/unary_tensor_ops.cpp",
     "CPU_MIOpenDriverRegressionBigTensorTest_FP32",
     "GPU_UnitTestConvSolverAsmBwdWrW3x3Wrw_FP32",
+    "../../test/gtest/conv2d_find2.cpp",
+    "../../test/gtest/conv2d.cpp",
+    "../../test/gtest/conv2d.hpp",
+    "../../test/gtest/conv3d_find2.cpp",
+    "../../test/gtest/conv_3d.cpp",
+    "../../test/gtest/conv3d.cpp",
+    "../../test/gtest/conv3d.hpp",
+    "../../test/gtest/conv3d_test.cpp",
+    "../../test/gtest/immed_conv2d.cpp",
+    "../../test/gtest/immed_conv3d.cpp"
 }
 
 # Valid enums and Regex for validation

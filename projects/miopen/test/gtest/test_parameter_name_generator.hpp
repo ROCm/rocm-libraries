@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <algorithm>
 #include <concepts>
@@ -30,7 +7,9 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "gtest_common.hpp"
@@ -52,6 +31,10 @@ concept Container = std::ranges::range<T>;
 // Concept for non container types.
 template <typename T>
 concept NotContainer = !Container<T>;
+
+// Concept for std::string types.
+template <typename T>
+concept StdString = std::is_same_v<T, std::string>;
 
 // Template wrapper around a test parameter.
 // It defines the << operator as required by GTest, and the cast operator that returns the wrapped
@@ -139,9 +122,9 @@ struct NamedContainer
 //      );
 //
 template <typename... T>
-[[maybe_unused]] auto MakeNamedParameterValues(const std::string& name, T... values)
+[[maybe_unused]] auto MakeNamedParameterValues(const std::string& name, T&&... values)
 {
-    return testing::Values(NamedParameter<T>{name, values}...);
+    return testing::Values(NamedParameter<T>{name, std::forward<T>(values)}...);
 }
 
 // Variadic template function that creates a GTest ValueArray of 'NamedContainer' each one with the
@@ -161,7 +144,8 @@ template <typename... T>
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
 template <typename T>
-    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T> &&
+             (!StdString<T>)
 [[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
                                                          const std::ranges::range auto& collection,
                                                          const std::string& separator = " ")
@@ -179,7 +163,7 @@ template <typename T>
 }
 
 template <typename T>
-    requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
+    requires(NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>) || StdString<T>
 [[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
                                                          const std::ranges::range auto& collection)
 {
@@ -205,8 +189,8 @@ template <typename T>
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
 //      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
 //
-[[maybe_unused]] static std::string GetRangeAsString(const std::ranges::range auto& r,
-                                                     std::string_view separator = " ")
+[[maybe_unused]] std::string GetRangeAsString(const std::ranges::range auto& r,
+                                              std::string_view separator = " ")
 {
     std::string str;
 
@@ -231,5 +215,34 @@ template <typename T>
 
     return str;
 }
+
+template <typename ParamsInfo, std::size_t... Is>
+[[maybe_unused]] std::string GetParamNamesString(const ParamsInfo& inputParamsInfo,
+                                                 std::index_sequence<Is...>)
+{
+    std::stringstream ss;
+    std::string str;
+
+    ((ss << (Is ? "_" : "") << std::get<Is>(inputParamsInfo.param)), ...);
+    ss << "_test_id_" << inputParamsInfo.index;
+
+    str = ss.str();
+
+    // Name format only supports letters, numbers and underscores.
+    std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
+        return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+    });
+
+    return str;
+}
+
+template <typename TestCase>
+struct DefaultTestNameGenerator
+{
+    [[maybe_unused]] std::string operator()(const auto& info)
+    {
+        return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
+    }
+};
 
 } // namespace
