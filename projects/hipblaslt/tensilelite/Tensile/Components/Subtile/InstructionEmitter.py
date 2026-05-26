@@ -75,8 +75,10 @@ class InstructionEmitter:
             self.tileInfoMap['SA'] = scaleTileInfoA
             self.tileInfoMap['SB'] = scaleTileInfoB
 
-        # Dispatch table — unroll_iter is passed for mfma/lr/gr_inc/lr_inc
-        # (gr_inc/lr_inc consume ui for the R-period swap-vs-advance split).
+        # Dispatch table — unroll_iter is passed only for mfma/lr where the
+        # per-body-copy K-position selects the right scale byte / VGPR tile.
+        # gr_inc / lr_inc fire identically across all body copies (data side)
+        # and the R>1 scale gating is now decoupled from `ui` at this layer.
         self._dispatch = {
             'mfma':     lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':       lambda em, ui: self.emit_lr(em.source, ui),
@@ -84,8 +86,8 @@ class InstructionEmitter:
             'wait_gr':  lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':  lambda em, ui: self.emit_wait_lr(),
             'sync':     lambda em, ui: self.emit_sync(),
-            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source, ui),
-            'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source, ui),
+            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source),
+            'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source),
             'skip':     lambda em, ui: self.emit_skip(em.source),
         }
 
@@ -216,7 +218,7 @@ class InstructionEmitter:
     def emit_sync(self):
         return [SBarrier(comment="Barrier")]
 
-    def emit_lr_inc(self, source, unroll_iter=0):
+    def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor.
 
         Under R>1 the data LR-side swap must fire on EVERY body copy so
@@ -233,7 +235,7 @@ class InstructionEmitter:
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_gr_inc(self, source, unroll_iter=0):
+    def emit_gr_inc(self, source):
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor.
 
         Mirror of emit_lr_inc on the write side: under R>1 BOTH the data SRD

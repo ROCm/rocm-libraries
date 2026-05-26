@@ -1773,6 +1773,40 @@ if __name__ == "__main__":
             buf.write(f"  {str(inst).rstrip()}\n")
         return buf.getvalue()
 
+    def _print_unrolled_schedule(scheduler):
+        """Pretty-print the per-outer-iter / per-body-copy op cadence.
+
+        Debug-only: walks _emitted_per_unroll (R body copies per outer iter
+        under R>1) and emits one line per non-empty op of the form
+            [iter=<ui>, type=GR|LR|MFMA|GR_INC|LR_INC, tensor=A|B|SA|SB]
+        Empty handlers (e.g. scale ops gated out of a given ui under R>1)
+        are noted with ``(gated)`` so it's obvious which body copies the
+        R-period gating elides.  Useful for confirming, at a glance, that
+        consecutive body copies alternate which scale K-byte they MFMA
+        against and that scale GR / gr_inc / lr_inc land in the expected
+        ui%R slot.
+        """
+        R = scheduler.config.scaleSchedulingPeriod
+        uf = scheduler.unroll_factor
+        buf = io.StringIO()
+        buf.write(f"unroll_factor={uf}, R={R}\n")
+        TYPE_MAP = {'gr': 'GR', 'lr': 'LR', 'mfma': 'MFMA',
+                    'gr_inc': 'GR_INC', 'lr_inc': 'LR_INC',
+                    'wait_gr': 'WAIT_GR', 'wait_lr': 'WAIT_LR',
+                    'sync': 'SYNC', 'skip': 'SKIP'}
+        for ui in range(uf):
+            buf.write(f"-- outer body copy ui={ui} (ui%R={ui % R}) --\n")
+            for pi, partition_emitted in enumerate(scheduler._emitted_per_unroll[ui]):
+                for k_slot, emitted in enumerate(partition_emitted):
+                    for em in emitted:
+                        opType = TYPE_MAP.get(em.opType, em.opType)
+                        tensor = getattr(em.source, 'tensor', None) \
+                            or getattr(em.source, 'compare', '-')
+                        gated = " (gated)" if not em.instructions else ""
+                        buf.write(f"  [iter={ui % R}, type={opType:<7s}, "
+                                  f"tensor={tensor}] P{pi}.k{k_slot}{gated}\n")
+        return buf.getvalue()
+
     if args.pgr >= 1:
         loop_sections = [
             ("PRELOOP",  sched._preloop_emitted, False),
@@ -1790,6 +1824,14 @@ if __name__ == "__main__":
         print(f"  {label} (emitLoop)")
         print(f"{'=' * 60}")
         print(_print_emitLoop(label, emitted_3d, schedule=schedule))
+        if args.interactive:
+            input("Press Enter for next step...")
+
+    if sched.unroll_factor > 1:
+        print(f"{'=' * 60}")
+        print("  Unrolled schedule (per ui, per body copy)")
+        print(f"{'=' * 60}")
+        print(_print_unrolled_schedule(sched))
         if args.interactive:
             input("Press Enter for next step...")
 
@@ -2400,8 +2442,8 @@ def test_data_gr_inc_lr_inc_emit_split_R2():
         _ui = [0]
         for ui in range(R):
             _ui[0] = ui
-            InstructionEmitter.emit_gr_inc(emitter, grA, ui)
-            InstructionEmitter.emit_lr_inc(emitter, lrA, ui)
+            InstructionEmitter.emit_gr_inc(emitter, grA)
+            InstructionEmitter.emit_lr_inc(emitter, lrA)
 
     # Both body copies fire SRD-advance + LDS-write-swap + LDS-read-swap.
     expected = ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A']
@@ -2429,8 +2471,8 @@ def test_data_gr_inc_lr_inc_emit_split_R2():
                side_effect=lambda tc, w, k: _rec_r1(f'gr_swap_{tc}')), \
          patch('Tensile.Components.Subtile.InstructionEmitter.localReadLDSBufferSwap',
                side_effect=lambda tc, w, k: _rec_r1(f'lr_swap_{tc}')):
-        InstructionEmitter.emit_gr_inc(emitter1, GRIncOp(tensor='A'), 0)
-        InstructionEmitter.emit_lr_inc(emitter1, LRIncOp(tensor='A'), 0)
+        InstructionEmitter.emit_gr_inc(emitter1, GRIncOp(tensor='A'))
+        InstructionEmitter.emit_lr_inc(emitter1, LRIncOp(tensor='A'))
     assert calls_r1 == ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A'], (
         f"R=1: expected SRD + GR-swap + LR-swap each per body copy, "
         f"got {calls_r1}")
