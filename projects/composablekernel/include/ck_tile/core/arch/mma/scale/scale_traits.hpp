@@ -72,9 +72,11 @@ concept ScaleMfmaDataTypeToFlag = requires(DataTypeToFlag dataTypeToFlag) {
 } // namespace scale::detail
 
 // No real flags for now, scale and opsel are handled in higher level and passed down directly.
-struct DefaultScaleMfmaCtrlFlags;
+struct DefaultScaleMfmaCtrlFlags
+{
+};
 
-CK_TILE_HOST_DEVICE void print_flags(DefaultScaleMfmaCtrlFlags const& ctrlFlags)
+CK_TILE_HOST_DEVICE void print_flags([[maybe_unused]]DefaultScaleMfmaCtrlFlags const& ctrlFlags)
 {
     printf("CtrlFlags: (empty)\n");
 }
