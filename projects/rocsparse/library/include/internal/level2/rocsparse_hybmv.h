@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using HYB storage format
+*  \brief Sparse matrix vector multiplication using the HYB storage format.
 *
 *  \details
 *  \p rocsparse_hybmv multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$
@@ -53,14 +53,14 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans       matrix operation type.
 *  @param[in]
@@ -84,7 +84,7 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_size \p hyb structure was not initialized with
 *              valid matrix sizes.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p hyb, \p x,
-*              \p beta or \p y pointer is invalid.
+*              \p beta, or \p y pointer is invalid.
 *  \retval     rocsparse_status_invalid_value \p hyb structure was not initialized
 *              with a valid partitioning type.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
@@ -95,8 +95,8 @@ extern "C" {
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
 *
 *  \par Example
-*  This example performs a sparse matrix vector multiplication in HYB format. Also
-*  demonstrate conversion from CSR to HYB.
+*  This example performs a sparse matrix vector multiplication in HYB format and
+*  demonstrates a conversion from the CSR to HYB format.
 *  \snippet example_rocsparse_hybmv.cpp doc example
 */
 /**@{*/

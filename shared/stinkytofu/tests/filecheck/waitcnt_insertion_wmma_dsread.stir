@@ -31,7 +31,7 @@
 # CHECK-SAME: dlcnt = 0
 # CHECK-NEXT: v_wmma_f32_16x16x32_bf16
 # Only two waitcnt inserts should exist, and no tensor waitcnt should appear
-# (StinkyWaitCntInsertionPass runs here with the default insertTensorWaitCnt=false).
+# (no tensor loads are present in this block, so the tensor-wait heuristic is a no-op).
 # CHECK-NOT: s_wait_tensorcnt
 # CHECK-NOT: s_wait_loadcnt
 
@@ -41,6 +41,6 @@ st.func @waitcnt_insertion_wmma_dsread() {
   v[30:31] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
   v[40:41] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
   v[50:51] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
-  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
-  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[50:57], a[10:17]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[50:57], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
 }

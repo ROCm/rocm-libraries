@@ -40,10 +40,26 @@
 namespace {
 using namespace stinkytofu;
 
-// Check if instruction is a movable side effect (like s_barrier or a scheduling fence)
-static bool isMovableSideEffect(const StinkyInstruction& inst) {
-    // Barriers with LDS pseudo-reg deps are movable — ordering enforced by the DAG.
-    if (isBarrier(inst) && !inst.getDestRegs().empty()) return true;
+static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
+                         const DAGNodeList& dagNodes) {
+    std::cerr << "*** DAG Graph Dump: ***\n";
+    for (unsigned i = 0; i < dagGraph.size(); ++i) {
+        std::cerr << "Node " << i << ": ";
+        dagNodes[i].inst->dump(std::cerr);
+        std::cerr << "  successors: ";
+        for (unsigned succId : dagGraph[i]) {
+            std::cerr << succId << " ";
+        }
+        std::cerr << "\n";
+    }
+    std::cerr << "\n\n";
+}
+
+static bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
     return false;
 }
 
@@ -246,7 +262,7 @@ static void scheduleRegionWithMovableSideEffects(
             std::vector<DsInfo*> group;
             auto flushGroup = [&]() {
                 if (group.empty()) return;
-                bool asc = groupAsc.count(prevAff) ? groupAsc[prevAff] : true;
+                bool asc = groupAsc.contains(prevAff) ? groupAsc[prevAff] : true;
                 if (!asc) {
                     // Reverse operand type order but keep DAG id order within
                     // each type. Sort by (srcReg descending, idx ascending).
@@ -313,28 +329,17 @@ static void scheduleRegionWithMovableSideEffects(
     }
 }
 
-static bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
-    for (const StinkyRegister& r : inst.getSrcRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    for (const StinkyRegister& r : inst.getDestRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    return false;
-}
-
 static bool hasSideEffect(const StinkyInstruction& inst) {
-    if (
-        // TODO: provide a configurable way to ignore certain instructions,
-        //       e.g. LocalWriteInstruction
-        //
-        // dynamic_cast<const LocalWriteInstruction*>(op) ||
-        //
-        isGlobalMemStore(inst) || isBranch(inst) || isBarrier(inst) || isWaitCnt(inst) ||
-        isHasSideEffect(inst)) {
+    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst)) {
         return true;
     }
-    // Memory ops without LDS pseudo-registers (no MemTokenData assigned)
-    // must be treated as non-movable side effects to preserve strict ordering.
-    if ((isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) && !hasLdsPseudoRegs(inst)) {
+
+    // Barriers and memory ops without LDS pseudo-registers (no MemTokenData
+    // assigned) must be treated conservatively as non-movable side effects to
+    // preserve strict ordering. When LDS pseudo-regs are present, ordering is
+    // enforced by the DAG via def-use edges, so they are safe to schedule.
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+        !hasLdsPseudoRegs(inst)) {
         return true;
     }
     return false;
@@ -377,8 +382,7 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
         }
 
         StinkyInstruction& inst = *instPtr;
-        // Only break regions on non-movable side effects
-        if (hasSideEffect(inst) && !isMovableSideEffect(inst)) {
+        if (hasSideEffect(inst)) {
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
                                                  wmmaIndex);
 
