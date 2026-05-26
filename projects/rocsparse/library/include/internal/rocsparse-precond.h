@@ -32,6 +32,7 @@
 #include "precond/rocsparse_bsric0.h"
 #include "precond/rocsparse_bsrilu0.h"
 #include "precond/rocsparse_csric0.h"
+#include "precond/rocsparse_csrildlt0.h"
 #include "precond/rocsparse_csrilu0.h"
 #include "precond/rocsparse_csritilu0.h"
 #include "precond/rocsparse_gpsv.h"
