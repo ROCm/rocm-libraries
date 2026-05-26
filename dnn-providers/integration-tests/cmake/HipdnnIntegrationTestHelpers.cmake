@@ -1,63 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Internal helper — see add_external_integration_test_target() below for the
-# why. Generates a CMake script that dumps the install-tree layout from
-# ctest's cwd, installs it next to the renamed TOML in bin/, and appends a
-# ctest entry to the install-staging string for the given subdir.
-function(_stage_layout_debug_test ARG_TARGET_NAME ARG_PLUGIN_TARGET ARG_INSTALL_SUBDIR LABELS)
-    set(_debug_script_basename
-        "${ARG_PLUGIN_TARGET}_external_test_layout_debug.cmake"
-    )
-    set(_debug_script_path
-        "${CMAKE_CURRENT_BINARY_DIR}/${_debug_script_basename}"
-    )
-    file(WRITE "${_debug_script_path}" [==[
-# Auto-generated layout-debug script — see HipdnnIntegrationTestHelpers.cmake.
-foreach(_rel "." ".." "../..")
-    get_filename_component(_abs "${_rel}" ABSOLUTE)
-    message("")
-    message("==== ${_rel}  =>  ${_abs} ====")
-    if(EXISTS "${_abs}")
-        file(GLOB _items LIST_DIRECTORIES true "${_abs}/*")
-        list(SORT _items)
-        foreach(_item ${_items})
-            get_filename_component(_name "${_item}" NAME)
-            if(IS_DIRECTORY "${_item}")
-                message("  DIR   ${_name}/")
-            else()
-                file(SIZE "${_item}" _sz)
-                message("  FILE  ${_name}   (${_sz} bytes)")
-            endif()
-        endforeach()
-    else()
-        message("  (does not exist)")
-    endif()
-endforeach()
-message(FATAL_ERROR
-    "[layout-debug] intentional non-zero exit so ctest --output-on-failure "
-    "prints the directory listings above. Delete this test once the "
-    "cross-provider integration entry is reliably finding its files."
-)
-]==])
-    install(FILES "${_debug_script_path}"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    )
-
-    set(_debug_install_rel "../${_debug_script_basename}")
-    set(_debug_test_name "${ARG_TARGET_NAME}-layout-debug")
-    set(_debug_cmd
-        "add_test([=[${_debug_test_name}]=] \"cmake\" \"-P\" \"${_debug_install_rel}\")\n"
-    )
-    string(APPEND _debug_cmd
-        "set_tests_properties([=[${_debug_test_name}]=] PROPERTIES LABELS \"${LABELS};layout_debug\")\n"
-    )
-    set_property(GLOBAL APPEND_STRING
-        PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
-        "${_debug_cmd}"
-    )
-endfunction()
-
 # HipdnnIntegrationTestHelpers
 # ----------------------------
 #
@@ -219,14 +162,6 @@ function(add_external_integration_test_target)
         set_property(GLOBAL APPEND_STRING
             PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
             "${_install_cmd}"
-        )
-
-        # TEMP DEBUG: dump the install-tree layout from ctest's cwd so we can
-        # see what files actually arrived in CI when the cross-provider test
-        # can't find its binary or plugin. Delete once the suite is green.
-        _stage_layout_debug_test(
-            "${ARG_TARGET_NAME}" "${ARG_PLUGIN_TARGET}"
-            "${ARG_INSTALL_SUBDIR}" "${_LABELS}"
         )
     endif()
 endfunction()
