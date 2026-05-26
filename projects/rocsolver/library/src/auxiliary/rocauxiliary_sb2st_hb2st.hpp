@@ -38,11 +38,8 @@
 #include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocsolver_hybrid_storage.hpp"
-#include "print_matrix.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
-
-//#define PRINT
 
 // Number of threads in x and y
 // Reductions in larfg and larf must be updated if DIMX is changed
@@ -168,7 +165,7 @@ __device__ void sb2st_larf(
             value += shift_left( value, 1 );
             if (xid == 0)
             {
-                /// What about multiplying conj(tau) here?
+                // todo: what about multiplying conj(tau) here instead of in loop below?
                 s_work[yid] = value;
             }
             __threadfence_block();  // threads are sync'd in one wavefront
@@ -200,7 +197,7 @@ __device__ void sb2st_larf(
             value += shift_left( value, 1 );
             if (xid == 0)
             {
-                /// What about multiplying tau here?
+                // todo: what about multiplying tau here instead of in loop below?
                 s_work[yid] = value;
             }
             __threadfence_block();  // threads are sync'd in one wavefront
@@ -233,9 +230,9 @@ __device__ void sb2st_helarf(
     for (I j = yid; j < n; j += DIMY)
     {
         // gemv reduction
-        /// C = (I - tau v v^H) C = C - tau v (v^H C)
-        /// wj = v^T * conj( Cj )
-        /// Why not do wj = v^H * Cj, i.e., conj( v )?
+        // C = (I - tau v v^H) C = C - tau v (v^H C)
+        // wj = v^T * conj( Cj )
+        // todo: why not do wj = v^H * Cj, i.e., conj( v )?
         T value = 0;
         for (I i = xid; i < n; i += DIMX)
         {
@@ -248,7 +245,7 @@ __device__ void sb2st_helarf(
         value += shift_left( value, 1 );
         if (xid == 0)
         {
-            /// What about multiplying tau here?
+            // todo: what about multiplying tau here?
             s_work[yid] = value;
         }
     }
@@ -450,11 +447,6 @@ __device__ void sb2st_hb2st_task(
                     V[vi + vj*ldv] = s_housev[0];
                     tau[vj] = s_tau;
                 }
-                // hmm... if I did i = xid; then it copies the whole s_housev,
-                // but 0's whole column of A; need to preserve the top element
-                // assigned above, A[idiag+kd, jp].
-                // todo: use 2 loops?
-                // V needs to be 0'd out, so maybe set Vk = I and don't set V[vi,vj] = 1 above?
                 for (I i = xid+1; i < nc; i += DIMX)
                 {
                     V[vi + i + vj*ldv] = s_housev[i];
@@ -542,10 +534,9 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
     T* tau = load_ptr_batch<T>( TTau, bid, 0, strideTau );
 
     // shared memory setup
-    // todo: should s_mem be double, float, byte, T?
-    extern __shared__ double s_mem[];
+    extern __shared__ char s_mem[];
     T* s_housev = reinterpret_cast<T*>(s_mem);
-    T* s_work   = reinterpret_cast<T*>(s_housev + kd);
+    T* s_work   = s_housev + kd;
 
     // get sweep parameters
     I last_sweep = round / 2;
@@ -595,7 +586,6 @@ void rocsolver_sb2st_hb2st_getMemorySize(
 }
 
 //------------------------------------------------------------------------------
-// todo: why not have these in same order as rocsolver_sb2st_hb2st_template args?
 template <typename T, typename I, typename S>
 rocblas_status rocsolver_sb2st_hb2st_argCheck(
     rocblas_handle handle,
@@ -604,7 +594,6 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
     const I kd,
     const I ldab,
     const I ldv,
-    // why are these T and S instead of T* and S* ?
     T Aband,
     S D,
     S E,
@@ -644,7 +633,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     rocblas_fill uplo,
     const I n,
     const I kd,
-    // where is this U instead of T* ?
     U Aband,
     const rocblas_stride shiftA,
     const I ldab,
@@ -674,20 +662,13 @@ rocblas_status rocsolver_sb2st_hb2st_template(
 
     // Set V = 0.
     // Ideally, set each Vk = I, but need to iterate over Vk.
-    // Strided batch laset, with stride = kd*ldv?
+    // todo: Strided batch laset, with stride = kd*ldv?
     I nt = ceildiv( n-1, kd );
     I nv_blocks = nt*(nt + 1)/2;
     I nv = nv_blocks*kd;
     rocblas_stride shiftV = 0;
-    //laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
-    //       batch_count );
     HIP_CHECK( hipMemsetAsync( V + shiftV, 0, sizeof(T) * ldv * nv, stream ) );
 
-    // rocblas_pointer_mode old_mode;
-    // rocblas_get_pointer_mode( handle, &old_mode );
-    // rocblas_set_pointer_mode( handle, rocblas_pointer_mode_host );
-
-    // Is this slow?
     int device;
     HIP_CHECK( hipGetDevice( &device ) );
     hipDeviceProp_t props;
@@ -697,7 +678,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     size_t s_mem_size_reduct = sizeof( T ) * DIMY;
     size_t s_mem_size = s_mem_size_housev + s_mem_size_reduct;
 
-    // What about just launching kernel and checking error for sharedMem exceeded?
     if (s_mem_size > props.sharedMemPerBlock)
     {
         return rocblas_status_internal_error;
@@ -741,8 +721,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     }
 
     // copy diagonal
-    // todo: can we call BLAS copy( Aband[idiag, 0], ldab, D, 1 )?
-    // todo: should this be done in sb2st_hb2st_task when E is set?
     I idiag = kd - 1;
     I copyblocks = ceildiv( n, BS1 );
     ROCSOLVER_LAUNCH_KERNEL(
@@ -750,8 +728,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
         dim3( copyblocks, 1, batch_count ), dim3( BS1 ), 0, stream,
         n, Aband, shiftA + idiag, ldab, strideA,
         D, strideD );
-
-    // rocblas_set_pointer_mode( handle, old_mode );
 
     return rocblas_status_success;
 }

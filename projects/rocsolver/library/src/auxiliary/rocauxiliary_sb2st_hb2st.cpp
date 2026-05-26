@@ -29,10 +29,6 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-// todo: what is difference between T, S, U?
-// I gather that for complex, T=complex, S=real, U=complex*.
-// Why not just use T* instead of U?
-
 template <typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_impl(
     rocblas_handle handle,
@@ -49,16 +45,12 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
 {
     ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv );
 
-//printf( "%s: uplo %c, n %d, kd %d, ldab %d, ldv %d\n",
-//        __func__, rocblas2char_fill( uplo ), n, kd, ldab, ldv );
     if (! handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    // todo: why is argCheck not in same order as routine itself?
     rocblas_status st = rocsolver_sb2st_hb2st_argCheck(
         handle, uplo, n, kd, ldab, ldv, Aband, D, E, V, tau );
-        // handle, n, kd, Aband, ldab, D, E, V, ldv  // e.g.
     if (st != rocblas_status_continue)
         return st;
 
@@ -78,25 +70,13 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     size_t size_work;
     rocsolver_sb2st_hb2st_getMemorySize<false, T, I, S>(
         n, kd, batch_count, &size_work );
-    assert( size_work == 0 );
 
     if (rocblas_is_device_memory_size_query( handle ) )
         return rocblas_set_optimal_device_memory_size( handle, size_work );
 
-    // memory workspace allocation
-    /*
-    void* work;
-    rocblas_device_malloc mem( handle, size_work );
+    // no memory workspace allocation
+    assert( size_work == 0 );
 
-    if (! mem)
-        return rocblas_status_memory_error;
-
-    work = mem[0];
-    */
-
-    // todo: for what matrices do we need shift and when not?
-    // todo: if there is no workspace, do we still put it for consistency and
-    // future compatability?
     // execution
     return rocsolver_sb2st_hb2st_template<false, false, T, I>(
         handle, uplo, n, kd,

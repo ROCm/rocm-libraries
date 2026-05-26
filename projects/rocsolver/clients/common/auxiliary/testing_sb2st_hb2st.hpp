@@ -35,7 +35,6 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
-#include "print_matrix.hpp"
 #include "common/misc/generate.hpp"
 
 //------------------------------------------------------------------------------
@@ -194,10 +193,6 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     using S = decltype( std::real( T{} ) );
     using std::abs, std::imag, std::real, std::max;
 
-    hipStream_t stream;
-    CHECK_ROCBLAS_ERROR(
-        rocblas_get_stream( handle, &stream ) );
-
     I idiag = kd - 1;
 
     // input data initialization
@@ -206,8 +201,6 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
 
     // execute computations
     // GPU lapack
-    double start, time;
-    start = get_time_us_sync(stream);
     CHECK_ROCBLAS_ERROR(
         rocsolver_sb2st_hb2st(
             handle, uplo, n, kd,
@@ -215,30 +208,28 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
             dD.data(), dE.data(),
             dV.data(), ldv,
             dTau.data() ) );
-    time = get_time_us_sync(stream) - start;
-        CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
+    CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
     CHECK_HIP_ERROR( hDRes.transfer_from( dD ) );
     CHECK_HIP_ERROR( hERes.transfer_from( dE ) );
 
     S err = 0;
-    S max_err_ = 0;
+    *max_err = 0;
     if constexpr (rocblas_is_complex<T>)
     {
-        // Check that diag is real.
+        // Check that diag is real to working precision.
         for (I j = 0; j < n; ++j)
         {
             err = max( err, abs( imag( hAbandRes[0][idiag + j*ldab] ) ) );
         }
-        printf( "imag( D ) error %9.3g\n", err );
-        max_err_ = max( err, max_err_ );
+        *max_err = rocblas_max_nan( err, *max_err );
 
-        // Check that subdiag is real.
+        // Check that subdiag is real to working precision.
         err = 0;
         for (I j = 0; j < n-1; ++j)
         {
             err = max( err, abs( imag( hAbandRes[0][idiag + 1 + j*ldab] ) ) );
         }
-        max_err_ = max( err, max_err_ );
+        *max_err = rocblas_max_nan( err, *max_err );
     }
 
     // Check that diag( A ) == D.
@@ -247,7 +238,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     {
         err += hDRes[0][j] != real( hAbandRes[0][idiag + j*ldab] );
     }
-    max_err_ = max( err, max_err_ );
+    *max_err = rocblas_max_nan( err, *max_err );
 
     // Check that diag( A, -1 ) == E.
     err = 0;
@@ -255,70 +246,29 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     {
         err += hERes[0][j] != real( hAbandRes[0][idiag + 1 + j*ldab] );
     }
-    printf( "diag( A, -1 ) == E error %9.3g\n", err );
-    max_err_ = max( err, max_err_ );
+    *max_err = rocblas_max_nan( err, *max_err );
 
-    #if 1
-        // Compute eigenvalues of tridiagonal matrix
-        start = get_time_us_sync(stream);
-        cpu_sterf( n, hDRes.data(), hERes.data() );
-        time = get_time_us_sync(stream) - start;
-        printf( "n %d, CPU sterf time %.4f\n", int(n), time );
+    // Compute eigenvalues of tridiagonal matrix
+    cpu_sterf( n, hDRes.data(), hERes.data() );
 
-        printf( "eig_rocsol = [" );
-        for (I i = 0; i < std::min<I>( 5, n ); ++i)
-        {
-            printf( "  %11.5g", hDRes[0][i] );
-        }
-        printf( "  ..." );
-        for (I i = std::max<I>( n-5, 5 ); i < n; ++i)
-        {
-            printf( "  %11.5g", hDRes[0][i] );
-        }
-        printf( " ];\n" );
-    #endif
-
-    #if 1
-        // CPU lapack
-        // Compute eigenvalues of banded matrix
-        int info;
-        int worksize = rocblas_is_complex<T> ? int(n) : std::max( 1, 3*int(n) - 2 );
-        std::vector<T> work( worksize, T( 0 ) );
-        int worksize_real = rocblas_is_complex<T> ? std::max( 1, 3*int(n) - 2 ) : 0;
-        std::vector<S> work_real( worksize_real, S( 0 ) );
-        T dummy;  // for Z
-        // todo: assuming lower
-        start = get_time_us_sync(stream);
-        cpu_sbev_hbev( rocblas_evect_none, uplo, int(n), int(kd), &hAband[0][idiag], int(ldab),
-                       hW.data(), &dummy, 1,
-                       work.data(), work_real.data(), &info );
-        time = get_time_us_sync(stream) - start;
-        printf( "n %d, kd %d, CPU hbev time %.4f\n", int(n), int(kd), time );
-
-        printf( "eig_lapack = [" );
-        for (I i = 0; i < std::min<I>( 5, n ); ++i)
-        {
-            printf( "  %11.5g", hW[0][i] );
-        }
-        printf( "  ..." );
-        for (I i = std::max<I>( n-5, 5 ); i < n; ++i)
-        {
-            printf( "  %11.5g", hW[0][i] );
-        }
-        printf( " ];\n" );
-    #endif
+    // CPU lapack
+    // Compute eigenvalues of banded matrix
+    int info;
+    int worksize = rocblas_is_complex<T> ? int(n) : std::max( 1, 3*int(n) - 2 );
+    std::vector<T> work( worksize, T( 0 ) );
+    int worksize_real = rocblas_is_complex<T> ? std::max( 1, 3*int(n) - 2 ) : 0;
+    std::vector<S> work_real( worksize_real, S( 0 ) );
+    T dummy;  // for eigenvectors, Z
+    // Assuming lower.
+    cpu_sbev_hbev( rocblas_evect_none, uplo, int(n), int(kd), &hAband[0][idiag], int(ldab),
+                    hW.data(), &dummy, 1,
+                    work.data(), work_real.data(), &info );
 
     // Compare CPU and GPU eigval results in hW and hDRes, respectively.
     err = norm_error( 'F', 1, n, 1, hW.data(), hDRes.data() );
-    max_err_ = max( max_err_, err );
-    if (std::isnan( err ))
-        max_err_ = err;
+    *max_err = rocblas_max_nan( *max_err, err );
 
-    *max_err = max_err_;
-
-    // todo: check orthogonality of V?
-    // todo: check backwards error Q^H Aband - Atridiag or Aband - Q Atridiag?
-    // cf. LAWN 41.
+    // Orthogonality of V and backward error checked in unmtr_hb2st tester.
 }
 
 template <typename T, typename I, typename Td, typename Ud, typename Uh>
@@ -341,6 +291,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const bool profile_kernels,
                              const bool perf)
 {
+    rocsolver_timer timer;
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(
         rocblas_get_stream( handle, &stream ) );
@@ -372,7 +323,6 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
         sb2st_hb2st_initData<false, true, T, I>(
             handle, uplo, n, kd, dAband, ldab, hAband );
 
-        start = get_time_us_sync(stream);
         CHECK_ROCBLAS_ERROR(
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
@@ -380,13 +330,9 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                 dD.data(), dE.data(),
                 dV.data(), ldv,
                 dTau.data() ) );
-        time = get_time_us_sync(stream) - start;
-        printf( "n %d, kd %d, cold iter %d, time %.4f\n", n, kd, iter, time );
     }
 
     // gpu-lapack performance
-    rocsolver_timer timer;
-
     if (profile > 0)
     {
         if (profile_kernels)
@@ -410,8 +356,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                 dD.data(), dE.data(),
                 dV.data(), ldv,
                 dTau.data() ) );
-        time = timer.end(stream);
-        printf( "n %d, kd %d, hot  iter %d, time %.4f\n", n, kd, iter, time );
+        timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
 }

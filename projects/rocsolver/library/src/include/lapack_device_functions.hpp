@@ -1264,8 +1264,6 @@ __device__ void
     }
 }
 
-//---------------------------------------------------------------------------------------------
-
 /** AXPY computes a constant times a vector plus a vector. **/
 template <typename T, typename U, typename V>
 ROCSOLVER_KERNEL void axpy_kernel(const rocblas_int n,

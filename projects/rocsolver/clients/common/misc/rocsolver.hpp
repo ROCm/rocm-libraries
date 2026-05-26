@@ -422,8 +422,6 @@ rocblas_status rocsolver_zhb2st_64(rocblas_handle handle,
                                    const int64_t ldv,
                                    rocblas_double_complex* tau);
 
-// todo:
-//                                rocblas_fill uplo,
 rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
                                 const rocblas_int n,
                                 const rocblas_int kd,
