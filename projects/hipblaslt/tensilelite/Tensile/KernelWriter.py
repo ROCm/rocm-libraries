@@ -516,6 +516,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     timing dance (set the flag *after* ``setupNewTile`` initializes
     ``self.states`` but *before* ``_loopBody`` reads it).
 
+    Note (rocm-libraries-xj16, 2026-05-26): this is now ONE of TWO inline
+    assertion paths that fire on every CMS kernel. The shadow path
+    (this flag's block @ KernelWriter.py:5506) compares ctx.cms vs a
+    synthetic SHADOW default capture; the real-vs-real path
+    (``_captureNonCmsBuild`` block @ KernelWriter.py:~5670) compares
+    ctx.cms vs a real Build #2 emitted by
+    ``Tensile.Components.CustomSchedule.approach_a.build_non_cms_reference``.
+    Both run; both must pass. Shadow deletion is owned by
+    ``rocm-libraries-czby`` and gated on real-vs-real reaching 100%.
+
     Implementation: monkey-patch ``setupNewTile`` once with a wrapper that
     sets the flag on ``self.states`` immediately after the underlying
     method returns. Idempotent — calling twice is harmless.
@@ -553,6 +563,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def enable_capture_non_cms_build(self):
     """Enable Approach-A non-CMS reference capture (rocm-libraries-nyb5).
+
+    Note (rocm-libraries-xj16, 2026-05-26): under the new auto-activation
+    regime, every CMS kernel has ``_captureNonCmsBuild`` flipped on by
+    ``kernelBody``'s head (see KernelWriter.py:~4966), and the
+    ``_captureNonCmsBuild`` block in ``kernelBody`` (~5670+) drives a
+    real-vs-real inline assertion (compare_graphs +
+    validate_edge_wait_coverage on ctx.default vs ctx.cms). This method
+    is now mainly for *tests* that want a standalone non-CMS-only build
+    (no comparison) — the auto-activation handles the inline-assert
+    case directly. The host writer's CMS-callsite branch in the
+    ``_captureNonCmsBuild`` block invokes
+    ``build_non_cms_reference`` itself, so callers do not need to
+    coordinate a second writer just to arm the assertion.
 
     Switches on a parallel capture path that observes the *natural* non-CMS
     emit on a build with ``UseCustomMainLoopSchedule=0``. This is distinct
@@ -5626,6 +5649,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # CMS build. Non-CMS kernels stay unaffected.
     if kernel.get("UseCustomMainLoopSchedule"):
       self.states._captureDefaultSchedule = True
+      # rocm-libraries-xj16: also auto-activate the real-vs-real Build #2
+      # capture so the inline real-vs-real compare_graphs assertion at
+      # KernelWriter.py:~5656+ runs alongside the shadow assertion. Per
+      # 2026-05-26 user directive: every CMS kernel must be validated by
+      # both paths during the transition; shadow deletion (czby / mnzh /
+      # 78n3) is gated on real-vs-real passing 100% on real YAML. The
+      # `_captureNonCmsBuild` block detects CMS-vs-non-CMS callsite by
+      # inspecting `kernel["UseCustomMainLoopSchedule"]` and either drives
+      # `build_non_cms_reference` inline (CMS path) or accepts the natural
+      # non-CMS `_loopBody` capture (the existing Build-#2 entrypoint used
+      # by tests).
+      self.states._captureNonCmsBuild = True
 
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
@@ -6459,68 +6494,179 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # tuning run would be a 27 GB peak leak otherwise.
         self._capture_context.reset()
 
-    # rocm-libraries-nyb5 (Approach A): parallel assembly site for the
-    # non-CMS reference build. When `_captureNonCmsBuild` is set, the
-    # _loopBody non-CMS branch has populated `ctx.default_main` (after
-    # closeLoop, with LCC); the noLoadLoop non-CMS branch has populated
-    # `ctx.default_n_gl` / `ctx.default_n_ll`. Assemble the
-    # `FourPartCapture` here and stash on `ctx.default` so callers
-    # (notably `Tensile.Components.CustomSchedule.approach_a.
-    # build_non_cms_reference`) can read it via the existing
-    # `_last_default_capture` shim. We deliberately do NOT run
-    # compare_graphs here — Approach A's whole point is that the
-    # comparison is driven OUTSIDE the build, by the validator
-    # consuming Build #1 (CMS) and Build #2 (this) captures.
+    # rocm-libraries-nyb5 + rocm-libraries-xj16: assembly site + inline
+    # real-vs-real assertion for the non-CMS reference build. Two
+    # callsite shapes are multiplexed here, distinguished by
+    # `kernel["UseCustomMainLoopSchedule"]`:
+    #
+    #  (a) CMS kernel (UseCustomMainLoopSchedule=1) — auto-activated by
+    #      kernelBody head per rocm-libraries-xj16. The host writer's
+    #      own non-CMS branches in `_loopBody` / `noLoadLoop` do NOT
+    #      fire (they're gated on `not UseCustomMainLoopSchedule`), so
+    #      `ctx.default_main` is None at this point. We drive
+    #      `Tensile.Components.CustomSchedule.approach_a.
+    #      build_non_cms_reference` inline to produce the real Build #2
+    #      `FourPartCapture`, assign it as `ctx.default`, then run
+    #      compare_graphs + validate_edge_wait_coverage against
+    #      `ctx.cms` (preserved across `_capture_context.reset()` by
+    #      the shadow block's finally clause; reset only clears
+    #      scratch state, see ScheduleCapture.CaptureContext.reset).
+    #
+    #  (b) non-CMS kernel (UseCustomMainLoopSchedule=0) — the existing
+    #      `build_non_cms_reference` entry point manually enables
+    #      `_captureNonCmsBuild` via `enable_capture_non_cms_build()`
+    #      (approach_a.py:126). The non-CMS `_loopBody` branch (line
+    #      ~4854) has populated `ctx.default_main` with LCC; the
+    #      noLoadLoop non-CMS branch has populated
+    #      `ctx.default_n_gl` / `ctx.default_n_ll`. We assemble the
+    #      `FourPartCapture` and stash on `ctx.default` so the outer
+    #      caller can read it via the `_last_default_capture` shim.
+    #      Recursing into another Build #2 from here would be infinite
+    #      — the `kernel["UseCustomMainLoopSchedule"]` predicate keeps
+    #      shape (a) and (b) disjoint.
+    #
+    # Per user directive 2026-05-26: "When running a yaml we MUST
+    # assert of failures. We should always be erroring out if a cms
+    # schedule is being created and the validation doesn't pass."
+    # This reverses the earlier deliberate choice (Approach A's
+    # original framing of "comparison driven OUTSIDE the build") —
+    # validation must always assert on failure per 2026-05-26
+    # directive. Both inline assertions (shadow @5506 + real-vs-real
+    # @here) run; the shadow path remains as a transition safety net
+    # owned by rocm-libraries-czby and gets deleted only after this
+    # path passes 100% on real YAML.
     if getattr(self.states, "_captureNonCmsBuild", False):
       from Tensile.Components.ScheduleCapture import (
         FourPartCapture, clone_loop_body, collect_regset_stream,
       )
-      from Tensile.Components.CMSValidator import ArchProfile
+      from Tensile.Components.CMSValidator import (
+        ArchProfile, build_dataflow_graph, compare_graphs,
+        validate_edge_wait_coverage,
+      )
       assert loopCopies == 1, (
         f"Non-CMS reference capture (rocm-libraries-nyb5) requires "
         f"loopCopies==1; got loopCopies={loopCopies}. Capture "
         f"machinery needs per-lc support before lifting this "
         f"restriction."
       )
+      is_cms_callsite = bool(kernel.get("UseCustomMainLoopSchedule"))
       try:
         ctx = self._capture_context
-        main = ctx.default_main
-        n_gl_dict = {0: ctx.default_n_gl} if ctx.default_n_gl is not None else {}
-        n_ll_dict = {0: ctx.default_n_ll} if ctx.default_n_ll is not None else {}
-        if main is not None:
-          num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+        if is_cms_callsite:
+          # rocm-libraries-xj16 shape (a): drive Build #2 inline. The
+          # host writer is mid-CMS-build; we need a real non-CMS
+          # FourPartCapture to compare ctx.cms against. We invoke the
+          # canonical helper rather than re-implementing the second
+          # writer here so all callers (this site + tests) share the
+          # same code path.
+          from Tensile.Components.CustomSchedule.approach_a import (
+            build_non_cms_reference,
+          )
+          # `build_non_cms_reference` forces UseCustomMainLoopSchedule=0
+          # on its config copy (approach_a.py:118), so the recursion
+          # guard via `is_cms_callsite` is structural — Build #2 cannot
+          # re-enter shape (a).
+          kernel_config = dict(kernel)
+          isaInfoMap = getattr(kernel, "isaInfoMap", None)
+          if isaInfoMap is None:
+            # If the Solution wasn't built with an isaInfoMap, we
+            # cannot drive Build #2. Fail loud rather than silently
+            # skipping the gate — per 2026-05-26 directive, validation
+            # must always assert on CMS builds.
+            raise AssertionError(
+              f"rocm-libraries-xj16: real-vs-real assertion cannot run "
+              f"because kernel.isaInfoMap is unavailable. The CMS build "
+              f"path must propagate isaInfoMap through Solution "
+              f"construction. kernel macroTile="
+              f"{kernel.get('MacroTile0')}x{kernel.get('MacroTile1')}x"
+              f"{kernel.get('DepthU')}."
+            )
+          ctx.default = build_non_cms_reference(
+            kernel_config, self.assembler, isaInfoMap,
+          )
+        else:
+          # rocm-libraries-nyb5 shape (b): consume the natural non-CMS
+          # captures the inner _loopBody / noLoadLoop branches stashed.
+          main = ctx.default_main
+          n_gl_dict = {0: ctx.default_n_gl} if ctx.default_n_gl is not None else {}
+          n_ll_dict = {0: ctx.default_n_ll} if ctx.default_n_ll is not None else {}
+          if main is not None:
+            num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+            isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
+            arch_profile = ArchProfile.for_isa(isa_tuple)
+            # Same RegSet harvest as the legacy assembly site so
+            # symbolic operands resolve to consistent numeric byte-keys
+            # across both builds (the load-bearing invariant for
+            # compare_graphs in build_dataflow_graph Phase 2;
+            # rocm-libraries-bb34).
+            regset_stream = collect_regset_stream(self)
+            if regset_stream:
+              main.name_to_idx = dict(regset_stream)
+              if ctx.default_n_gl is not None:
+                ctx.default_n_gl.name_to_idx = dict(regset_stream)
+              if ctx.default_n_ll is not None:
+                ctx.default_n_ll.name_to_idx = dict(regset_stream)
+              if ctx.prologue is not None:
+                ctx.prologue.name_to_idx = dict(regset_stream)
+            ctx.default = FourPartCapture(
+              main_loop={0: main},
+              main_loop_prev={0: clone_loop_body(main)},
+              n_gl=n_gl_dict,
+              n_ll=n_ll_dict,
+              num_mfma=num_mfma,
+              num_codepaths=1,
+              source="non-cms-reference",
+              num_mfma_per_subiter=self.states.numMfmaPerIter,
+              arch_profile=arch_profile,
+              prologue=ctx.prologue,
+            )
+
+        # rocm-libraries-xj16 inline real-vs-real assertion. Only runs
+        # on CMS callsites — shape (b) is the inner Build #2 producing
+        # the reference capture and has nothing to compare against. We
+        # mirror the shadow block's structure: arch_profile alignment,
+        # compare_graphs + validate_edge_wait_coverage, escape hatch
+        # for off-nominal test fixtures, distinct failure message tag.
+        if is_cms_callsite and ctx.cms is not None and ctx.default is not None \
+            and not getattr(self, "_capture_skip_internal_validate", False):
+          # Align arch_profile so both graphs use the same per-arch
+          # timing helpers (same invariant as the shadow block @5615).
           isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
           arch_profile = ArchProfile.for_isa(isa_tuple)
-          # Same RegSet harvest as the legacy assembly site so symbolic
-          # operands resolve to consistent numeric byte-keys across
-          # both builds (the load-bearing invariant for compare_graphs
-          # in build_dataflow_graph Phase 2; rocm-libraries-bb34).
-          regset_stream = collect_regset_stream(self)
-          if regset_stream:
-            main.name_to_idx = dict(regset_stream)
-            if ctx.default_n_gl is not None:
-              ctx.default_n_gl.name_to_idx = dict(regset_stream)
-            if ctx.default_n_ll is not None:
-              ctx.default_n_ll.name_to_idx = dict(regset_stream)
-            if ctx.prologue is not None:
-              ctx.prologue.name_to_idx = dict(regset_stream)
-          ctx.default = FourPartCapture(
-            main_loop={0: main},
-            main_loop_prev={0: clone_loop_body(main)},
-            n_gl=n_gl_dict,
-            n_ll=n_ll_dict,
-            num_mfma=num_mfma,
-            num_codepaths=1,
-            source="non-cms-reference",
-            num_mfma_per_subiter=self.states.numMfmaPerIter,
-            arch_profile=arch_profile,
-            prologue=ctx.prologue,
+          ctx.cms.arch_profile = arch_profile
+          if getattr(ctx.default, "arch_profile", None) is None:
+            ctx.default.arch_profile = arch_profile
+          kernel_label = (
+            f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
+            f" (real-vs-real)"
+          )
+          ref_graph = build_dataflow_graph(ctx.default)
+          subj_graph = build_dataflow_graph(ctx.cms)
+          graph_failures = compare_graphs(ref_graph, subj_graph)
+          assert not graph_failures, (
+            f"Dataflow graph comparison failed for kernel {kernel_label}: "
+            f"{len(graph_failures)} edge difference(s):\n  "
+            + "\n  ".join(
+              f.format()
+              for f in graph_failures
+            )
+          )
+          wait_failures = validate_edge_wait_coverage(subj_graph)
+          assert not wait_failures, (
+            f"Wait-coverage validation failed for kernel {kernel_label}: "
+            f"{len(wait_failures)} failure(s):\n  "
+            + "\n  ".join(
+              f.format()
+              for f in wait_failures
+            )
           )
       finally:
         # Same per-kernel reset discipline as the legacy assembly site.
-        # `ctx.default` is preserved (consumer-facing); scratch state
-        # cleared so a subsequent build on the same writer (rare but
-        # not forbidden) starts clean.
+        # `ctx.default` and `ctx.cms` are preserved (consumer-facing);
+        # scratch state cleared so a subsequent build on the same
+        # writer (rare but not forbidden) starts clean. Auto-activation
+        # makes the reset load-bearing: ~2.7 MB per CMS kernel × 10k+
+        # kernels in a tuning run would otherwise be a 27 GB peak leak.
         self._capture_context.reset()
 
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
