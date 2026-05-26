@@ -120,7 +120,8 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesHandlesEmptyArchitecture)
     // strings; both are valid round-trips of the empty input.
     const auto* arch = deviceProps->architecture_name();
     EXPECT_TRUE(arch == nullptr || arch->str().empty())
-        << "Expected null or empty architecture, got '" << (arch ? arch->str() : "<null>") << "'";
+        << "Expected null or empty architecture, got '"
+        << (arch != nullptr ? arch->str() : "<null>") << "'";
 }
 
 TEST_F(TestDeviceProperties, SerializeDevicePropertiesHandlesLargeValues)
@@ -292,8 +293,8 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesIsConsistent)
 // though it only exercises an error path.
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesInvalidDeviceIdThrows)
 {
-    constexpr int kInvalidDeviceId = 99999;
-    EXPECT_THROW(queryDeviceProperties(kInvalidDeviceId), hipdnn_backend::HipdnnException);
+    constexpr int INVALID_DEVICE_ID = 99999;
+    EXPECT_THROW(queryDeviceProperties(INVALID_DEVICE_ID), hipdnn_backend::HipdnnException);
 }
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesExplicitDeviceIdMatchesCurrent)
