@@ -27,12 +27,12 @@
 #include "rocsparse_csrildlt0_kernel_binsearch.hpp"
 #include "rocsparse_csrildlt0_kernel_hash.hpp"
 
-rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle        handle,
-                                                   rocsparse_csrildlt0_info csrildlt0_info,
-                                                   rocsparse_spmat_descr   A,
-                                                   void*                   diag,
-                                                   size_t                  buffer_size,
-                                                   void*                   buffer)
+rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle         handle,
+                                                    rocsparse_csrildlt0_info csrildlt0_info,
+                                                    rocsparse_spmat_descr    A,
+                                                    void*                    diag,
+                                                    size_t                   buffer_size,
+                                                    void*                    buffer)
 {
     const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
                         && handle->asic_rev < 2);

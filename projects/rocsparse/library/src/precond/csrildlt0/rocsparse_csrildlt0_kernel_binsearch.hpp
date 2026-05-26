@@ -30,6 +30,6 @@ namespace rocsparse
 {
     csrildlt0_kernel_launch_t
         find_csrildlt0_kernel_binsearch_launch(rocsparse_handle            handle,
-                                              rocsparse_csrildlt0_info     csrildlt0_info,
-                                              rocsparse_const_spmat_descr A);
+                                               rocsparse_csrildlt0_info    csrildlt0_info,
+                                               rocsparse_const_spmat_descr A);
 }

@@ -29,23 +29,23 @@
 namespace rocsparse
 {
     rocsparse_status csrildlt0_analysis_buffer_size(rocsparse_handle            handle,
-                                                   rocsparse_const_spmat_descr A,
-                                                   size_t*                     buffer_size);
+                                                    rocsparse_const_spmat_descr A,
+                                                    size_t*                     buffer_size);
 
     rocsparse_status csrildlt0_solve_buffer_size(rocsparse_handle            handle,
-                                                rocsparse_const_spmat_descr A,
-                                                size_t*                     buffer_size);
+                                                 rocsparse_const_spmat_descr A,
+                                                 size_t*                     buffer_size);
 
-    rocsparse_status csrildlt0_analysis(rocsparse_handle           handle,
-                                       rocsparse_spmat_descr      A,
-                                       rocsparse_analysis_policy  analysis,
-                                       rocsparse_csrildlt0_info*   p_csrildlt0_info,
-                                       void*                      temp_buffer);
+    rocsparse_status csrildlt0_analysis(rocsparse_handle          handle,
+                                        rocsparse_spmat_descr     A,
+                                        rocsparse_analysis_policy analysis,
+                                        rocsparse_csrildlt0_info* p_csrildlt0_info,
+                                        void*                     temp_buffer);
 
-    rocsparse_status csrildlt0(rocsparse_handle        handle,
-                              rocsparse_csrildlt0_info csrildlt0_info,
-                              rocsparse_spmat_descr   A,
-                              void*                   diag,
-                              size_t                  buffer_size,
-                              void*                   buffer);
+    rocsparse_status csrildlt0(rocsparse_handle         handle,
+                               rocsparse_csrildlt0_info csrildlt0_info,
+                               rocsparse_spmat_descr    A,
+                               void*                    diag,
+                               size_t                   buffer_size,
+                               void*                    buffer);
 }

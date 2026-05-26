@@ -274,7 +274,6 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_bsric0.hpp"
 #include "testing_bsrilu0.hpp"
 #include "testing_csric0.hpp"
-#include "testing_spildlt0.hpp"
 #include "testing_csrilu0.hpp"
 #include "testing_csritilu0.hpp"
 #include "testing_csritilu0_ex.hpp"
@@ -283,6 +282,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gtsv_interleaved_batch.hpp"
 #include "testing_gtsv_no_pivot.hpp"
 #include "testing_gtsv_no_pivot_strided_batch.hpp"
+#include "testing_spildlt0.hpp"
 
 // Conversion
 #include "testing_bsr2csr.hpp"

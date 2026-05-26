@@ -68,7 +68,7 @@ namespace rocsparse
                            (A->data_type != spildlt0_descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
 
-        const rocsparse_format        format         = A->format;
+        const rocsparse_format         format         = A->format;
         const rocsparse_spildlt0_stage previous_stage = spildlt0_descr->get_stage();
 
         switch(spildlt0_stage)
@@ -94,8 +94,8 @@ namespace rocsparse
             }
             }
 
-            spildlt0_descr->m_batch_count                    = A->batch_count;
-            const rocsparse_analysis_policy analysis_policy  = spildlt0_descr->get_analysis_policy();
+            spildlt0_descr->m_batch_count                   = A->batch_count;
+            const rocsparse_analysis_policy analysis_policy = spildlt0_descr->get_analysis_policy();
             if(rocsparse::enum_utils::is_invalid(analysis_policy))
             {
                 RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
@@ -114,8 +114,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    spildlt0_descr->set_shared_csrildlt0_info(
-                        A->info->get_shared_csrildlt0_info());
+                    spildlt0_descr->set_shared_csrildlt0_info(A->info->get_shared_csrildlt0_info());
                     csrildlt0_info = spildlt0_descr->get_csrildlt0_info();
                     break;
                 }
@@ -126,8 +125,8 @@ namespace rocsparse
                 }
                 }
 
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrildlt0_analysis(handle, A, analysis_policy, &csrildlt0_info, buffer));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrildlt0_analysis(
+                    handle, A, analysis_policy, &csrildlt0_info, buffer));
 
                 switch(analysis_policy)
                 {
@@ -174,7 +173,8 @@ namespace rocsparse
             {
                 RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
                     rocsparse_status_invalid_pointer,
-                    "diag pointer must be set via rocsparse_spildlt0_input_diag before compute stage");
+                    "diag pointer must be set via rocsparse_spildlt0_input_diag before compute "
+                    "stage");
             }
 
             spildlt0_descr->m_batch_count = A->batch_count;
@@ -228,9 +228,9 @@ extern "C" rocsparse_status rocsparse_spildlt0(rocsparse_handle            handl
                                                rocsparse_const_spmat_descr A, // 2
                                                rocsparse_spmat_descr       P, // 3
                                                rocsparse_spildlt0_stage    spildlt0_stage, // 4
-                                               size_t                      buffer_size_in_bytes, // 5
-                                               void*                       buffer, // 6
-                                               rocsparse_error*            p_error)
+                                               size_t           buffer_size_in_bytes, // 5
+                                               void*            buffer, // 6
+                                               rocsparse_error* p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -253,8 +253,8 @@ try
                        (buffer == nullptr) && (buffer_size_in_bytes != 0),
                        rocsparse_status_invalid_pointer);
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::spildlt0(handle, spildlt0_descr, P, spildlt0_stage, buffer_size_in_bytes, buffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spildlt0(
+        handle, spildlt0_descr, P, spildlt0_stage, buffer_size_in_bytes, buffer));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

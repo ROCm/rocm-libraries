@@ -31,11 +31,11 @@
 struct _rocsparse_spildlt0_descr
 {
 protected:
-    rocsparse_spildlt0_stage                 m_stage;
-    rocsparse_spildlt0_alg                   m_alg;
-    rocsparse_datatype                       m_compute_datatype;
-    rocsparse_analysis_policy                m_analysis_policy;
-    std::shared_ptr<_rocsparse_csric0_info>  m_csrildlt0_info;
+    rocsparse_spildlt0_stage                m_stage;
+    rocsparse_spildlt0_alg                  m_alg;
+    rocsparse_datatype                      m_compute_datatype;
+    rocsparse_analysis_policy               m_analysis_policy;
+    std::shared_ptr<_rocsparse_csric0_info> m_csrildlt0_info;
 
     rocsparse_format       m_format{};
     const double*          m_tolerance_pointer{};
@@ -71,7 +71,7 @@ public:
 
     rocsparse_csrildlt0_info get_csrildlt0_info();
     void                     set_csrildlt0_info(rocsparse_csrildlt0_info value);
-    void                     set_shared_csrildlt0_info(std::shared_ptr<_rocsparse_csric0_info> value);
+    void set_shared_csrildlt0_info(std::shared_ptr<_rocsparse_csric0_info> value);
 
     rocsparse_format get_format() const;
     void             set_format(rocsparse_format format);

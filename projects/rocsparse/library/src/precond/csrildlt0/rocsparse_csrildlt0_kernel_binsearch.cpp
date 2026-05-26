@@ -43,20 +43,20 @@ namespace rocsparse
     // csr_val stores the strictly lower-triangular entries of L.
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     ROCSPARSE_DEVICE_ILF void csrildlt0_device_binsearch(J m,
-                                                        const I* __restrict__ csr_row_ptr,
-                                                        const J* __restrict__ csr_col_ind,
-                                                        T* __restrict__ csr_val,
-                                                        floating_data_t<T>* __restrict__ diag,
-                                                        const I* __restrict__ csr_diag_ind,
-                                                        int32_t* __restrict__ done,
-                                                        const J* __restrict__ map,
-                                                        J* __restrict__ zero_pivot,
-                                                        J* __restrict__ singular_pivot,
-                                                        double               tol,
-                                                        rocsparse_index_base idx_base,
-                                                        int                  boost,
-                                                        double               boost_tol,
-                                                        floating_data_t<T>   boost_val)
+                                                         const I* __restrict__ csr_row_ptr,
+                                                         const J* __restrict__ csr_col_ind,
+                                                         T* __restrict__ csr_val,
+                                                         floating_data_t<T>* __restrict__ diag,
+                                                         const I* __restrict__ csr_diag_ind,
+                                                         int32_t* __restrict__ done,
+                                                         const J* __restrict__ map,
+                                                         J* __restrict__ zero_pivot,
+                                                         J* __restrict__ singular_pivot,
+                                                         double               tol,
+                                                         rocsparse_index_base idx_base,
+                                                         int                  boost,
+                                                         double               boost_tol,
+                                                         floating_data_t<T>   boost_val)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -159,7 +159,10 @@ namespace rocsparse
                 {
                     // L_{row,k} * D_k * conj(L_{local_col,k})
                     floating_data_t<T> d_k = diag[col_k - idx_base];
-                    local_sum = rocsparse::fma(csr_val[k], static_cast<T>(d_k) * rocsparse::conj(csr_val[m_idx]), local_sum);
+                    local_sum
+                        = rocsparse::fma(csr_val[k],
+                                         static_cast<T>(d_k) * rocsparse::conj(csr_val[m_idx]),
+                                         local_sum);
                 }
             }
 
@@ -213,42 +216,47 @@ namespace rocsparse
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrildlt0_kernel_binsearch(J m,
-                                   const I* __restrict__ csr_row_ptr,
-                                   const J* __restrict__ csr_col_ind,
-                                   T* __restrict__ csr_val,
-                                   int64_t csr_val_stride,
-                                   floating_data_t<T>* __restrict__ diag,
-                                   int64_t diag_stride,
-                                   const I* __restrict__ csr_diag_ind,
-                                   int32_t* __restrict__ done,
-                                   int64_t done_stride,
-                                   const J* __restrict__ map,
-                                   J* __restrict__ zero_pivot,
-                                   int64_t zero_pivot_stride,
-                                   J* __restrict__ singular_pivot,
-                                   int64_t            singular_pivot_stride,
-                                   rocsparse_datatype tolerance_datatype,
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
-                                   bool                 is_singular_tol_host_mode,
-                                   rocsparse_index_base idx_base,
-                                   int                  boost,
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
-                                   rocsparse_datatype   boost_tol_datatype,
-                                   bool                 is_boost_tol_host_mode,
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(floating_data_t<T>, boost_val),
-                                   bool                 is_boost_val_host_mode)
+                                    const I* __restrict__ csr_row_ptr,
+                                    const J* __restrict__ csr_col_ind,
+                                    T* __restrict__ csr_val,
+                                    int64_t csr_val_stride,
+                                    floating_data_t<T>* __restrict__ diag,
+                                    int64_t diag_stride,
+                                    const I* __restrict__ csr_diag_ind,
+                                    int32_t* __restrict__ done,
+                                    int64_t done_stride,
+                                    const J* __restrict__ map,
+                                    J* __restrict__ zero_pivot,
+                                    int64_t zero_pivot_stride,
+                                    J* __restrict__ singular_pivot,
+                                    int64_t            singular_pivot_stride,
+                                    rocsparse_datatype tolerance_datatype,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
+                                    bool                 is_singular_tol_host_mode,
+                                    rocsparse_index_base idx_base,
+                                    int                  boost,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                                    rocsparse_datatype boost_tol_datatype,
+                                    bool               is_boost_tol_host_mode,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(floating_data_t<T>,
+                                                                        boost_val),
+                                    bool is_boost_val_host_mode)
     {
         ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_64);
         const double tolerance
             = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
 
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
-            boost && (boost_tol_datatype == rocsparse_datatype_f32_r), is_boost_tol_host_mode, boost_tol_32);
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
-            boost && (boost_tol_datatype == rocsparse_datatype_f64_r), is_boost_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost
+                                                && (boost_tol_datatype == rocsparse_datatype_f32_r),
+                                            is_boost_tol_host_mode,
+                                            boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost
+                                                && (boost_tol_datatype == rocsparse_datatype_f64_r),
+                                            is_boost_tol_host_mode,
+                                            boost_tol_64);
         const double b_tol
             = (boost_tol_datatype == rocsparse_datatype_f64_r) ? boost_tol_64 : boost_tol_32;
 
@@ -274,24 +282,25 @@ namespace rocsparse
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
-    static rocsparse_status csrildlt0_kernel_binsearch_launch(rocsparse_handle        handle,
-                                                             rocsparse_csrildlt0_info csrildlt0_info,
-                                                             rocsparse_spmat_descr   A,
-                                                             void*                   diag,
-                                                             size_t                  buffer_size,
-                                                             void*                   buffer)
+    static rocsparse_status
+        csrildlt0_kernel_binsearch_launch(rocsparse_handle         handle,
+                                          rocsparse_csrildlt0_info csrildlt0_info,
+                                          rocsparse_spmat_descr    A,
+                                          void*                    diag,
+                                          size_t                   buffer_size,
+                                          void*                    buffer)
     {
         auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-        int32_t* done_array         = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
+        int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
         const dim3 csrildlt0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                   A->batch_count);
+                                    A->batch_count);
         const dim3 csrildlt0_threads(BLOCKSIZE);
 
-        auto                         numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
-        auto                         numeric_near  = csrildlt0_info->get_singularity_numeric_near();
+        auto numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
+        auto numeric_near  = csrildlt0_info->get_singularity_numeric_near();
         const rocsparse_pointer_mode tolerance_pointer_mode
             = numeric_near->get_tolerance_pointer_mode();
         const rocsparse_datatype tolerance_datatype = numeric_near->get_tolerance_datatype();
@@ -301,19 +310,19 @@ namespace rocsparse
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
 
         // Boost parameters
-        auto                         boost                = A->info->get_boost();
-        const int                    boost_enable         = boost->get_enable();
-        const rocsparse_datatype     boost_tol_datatype   = boost->get_tol_datatype();
-        const auto                   boost_tol_size       = rocsparse::datatype_sizeof(boost_tol_datatype);
+        auto                     boost              = A->info->get_boost();
+        const int                boost_enable       = boost->get_enable();
+        const rocsparse_datatype boost_tol_datatype = boost->get_tol_datatype();
+        const auto               boost_tol_size = rocsparse::datatype_sizeof(boost_tol_datatype);
         const rocsparse_pointer_mode boost_tol_pointer_mode = boost->get_tol_pointer_mode();
         const rocsparse_pointer_mode boost_val_pointer_mode = boost->get_val_pointer_mode();
-        const float*  boost_tol_32 = (boost_tol_size == sizeof(float))
-                                         ? reinterpret_cast<const float*>(boost->get_tol())
-                                         : nullptr;
-        const double* boost_tol_64 = (boost_tol_size == sizeof(double))
-                                         ? reinterpret_cast<const double*>(boost->get_tol())
-                                         : nullptr;
-        const floating_data_t<T>* boost_val_ptr
+        const float*                 boost_tol_32           = (boost_tol_size == sizeof(float))
+                                                                  ? reinterpret_cast<const float*>(boost->get_tol())
+                                                                  : nullptr;
+        const double*                boost_tol_64           = (boost_tol_size == sizeof(double))
+                                                                  ? reinterpret_cast<const double*>(boost->get_tol())
+                                                                  : nullptr;
+        const floating_data_t<T>*    boost_val_ptr
             = reinterpret_cast<const floating_data_t<T>*>(boost->get_val());
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -387,54 +396,108 @@ namespace rocsparse
     INST_ALL_BINSEARCH(32, rocsparse_double_complex, int64_t, int64_t);
 
 #undef INST_ALL_BINSEARCH
-// clang-format on
+    // clang-format on
 
     // find_csrildlt0_kernel_binsearch_launch: select based on device and matrix properties
     csrildlt0_kernel_launch_t
         find_csrildlt0_kernel_binsearch_launch(rocsparse_handle            handle,
-                                              rocsparse_csrildlt0_info     csrildlt0_info,
-                                              rocsparse_const_spmat_descr A)
+                                               rocsparse_csrildlt0_info    csrildlt0_info,
+                                               rocsparse_const_spmat_descr A)
     {
-        const bool sleep   = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
+        const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
                             && handle->asic_rev < 2);
         const bool use_wf64 = (handle->wavefront_size == 64);
 
         // Helper lambda to select index-type variant given a fixed scalar type T
-#define INST_ALL_BINSEARCH_IDX(SCALAR_T)                                                    \
-    [&]() -> csrildlt0_kernel_launch_t {                                                    \
-        if(A->row_type == rocsparse_indextype_i32)                                          \
-        {                                                                                   \
-            if(use_wf64)                                                                    \
-                return sleep                                                                 \
-                           ? csrildlt0_kernel_binsearch_launch<true, 256, 64, SCALAR_T, int32_t, int32_t>  \
-                           : csrildlt0_kernel_binsearch_launch<false, 256, 64, SCALAR_T, int32_t, int32_t>; \
-            else                                                                            \
-                return sleep                                                                 \
-                           ? csrildlt0_kernel_binsearch_launch<true, 256, 32, SCALAR_T, int32_t, int32_t>  \
-                           : csrildlt0_kernel_binsearch_launch<false, 256, 32, SCALAR_T, int32_t, int32_t>; \
-        }                                                                                   \
-        else if(A->col_type == rocsparse_indextype_i32)                                     \
-        {                                                                                   \
-            if(use_wf64)                                                                    \
-                return sleep                                                                 \
-                           ? csrildlt0_kernel_binsearch_launch<true, 256, 64, SCALAR_T, int64_t, int32_t>  \
-                           : csrildlt0_kernel_binsearch_launch<false, 256, 64, SCALAR_T, int64_t, int32_t>; \
-            else                                                                            \
-                return sleep                                                                 \
-                           ? csrildlt0_kernel_binsearch_launch<true, 256, 32, SCALAR_T, int64_t, int32_t>  \
-                           : csrildlt0_kernel_binsearch_launch<false, 256, 32, SCALAR_T, int64_t, int32_t>; \
-        }                                                                                   \
-        else                                                                                \
-        {                                                                                   \
-            if(use_wf64)                                                                    \
-                return sleep                                                                 \
-                           ? csrildlt0_kernel_binsearch_launch<true, 256, 64, SCALAR_T, int64_t, int64_t>  \
-                           : csrildlt0_kernel_binsearch_launch<false, 256, 64, SCALAR_T, int64_t, int64_t>; \
-            else                                                                            \
-                return sleep                                                                 \
-                           ? csrildlt0_kernel_binsearch_launch<true, 256, 32, SCALAR_T, int64_t, int64_t>  \
-                           : csrildlt0_kernel_binsearch_launch<false, 256, 32, SCALAR_T, int64_t, int64_t>; \
-        }                                                                                   \
+#define INST_ALL_BINSEARCH_IDX(SCALAR_T)                                   \
+    [&]() -> csrildlt0_kernel_launch_t {                                   \
+        if(A->row_type == rocsparse_indextype_i32)                         \
+        {                                                                  \
+            if(use_wf64)                                                   \
+                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
+                                                                 256,      \
+                                                                 64,       \
+                                                                 SCALAR_T, \
+                                                                 int32_t,  \
+                                                                 int32_t>  \
+                             : csrildlt0_kernel_binsearch_launch<false,    \
+                                                                 256,      \
+                                                                 64,       \
+                                                                 SCALAR_T, \
+                                                                 int32_t,  \
+                                                                 int32_t>; \
+            else                                                           \
+                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
+                                                                 256,      \
+                                                                 32,       \
+                                                                 SCALAR_T, \
+                                                                 int32_t,  \
+                                                                 int32_t>  \
+                             : csrildlt0_kernel_binsearch_launch<false,    \
+                                                                 256,      \
+                                                                 32,       \
+                                                                 SCALAR_T, \
+                                                                 int32_t,  \
+                                                                 int32_t>; \
+        }                                                                  \
+        else if(A->col_type == rocsparse_indextype_i32)                    \
+        {                                                                  \
+            if(use_wf64)                                                   \
+                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
+                                                                 256,      \
+                                                                 64,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int32_t>  \
+                             : csrildlt0_kernel_binsearch_launch<false,    \
+                                                                 256,      \
+                                                                 64,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int32_t>; \
+            else                                                           \
+                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
+                                                                 256,      \
+                                                                 32,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int32_t>  \
+                             : csrildlt0_kernel_binsearch_launch<false,    \
+                                                                 256,      \
+                                                                 32,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int32_t>; \
+        }                                                                  \
+        else                                                               \
+        {                                                                  \
+            if(use_wf64)                                                   \
+                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
+                                                                 256,      \
+                                                                 64,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int64_t>  \
+                             : csrildlt0_kernel_binsearch_launch<false,    \
+                                                                 256,      \
+                                                                 64,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int64_t>; \
+            else                                                           \
+                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
+                                                                 256,      \
+                                                                 32,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int64_t>  \
+                             : csrildlt0_kernel_binsearch_launch<false,    \
+                                                                 256,      \
+                                                                 32,       \
+                                                                 SCALAR_T, \
+                                                                 int64_t,  \
+                                                                 int64_t>; \
+        }                                                                  \
     }()
 
         switch(A->data_type)

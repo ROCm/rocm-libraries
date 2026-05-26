@@ -30,15 +30,15 @@
 // Host reference for ILDLt factorization (templated on index types I, J)
 template <typename T, typename I, typename J>
 static void host_csrildlt0_ref(J                    M,
-                                const I*             csr_row_ptr,
-                                const J*             csr_col_ind,
-                                T*                   csr_val,
-                                floating_data_t<T>*  diag,
-                                rocsparse_index_base base,
-                                int64_t*             struct_pivot,
-                                int64_t*             numeric_pivot,
-                                int64_t*             singular_pivot,
-                                double               tol)
+                               const I*             csr_row_ptr,
+                               const J*             csr_col_ind,
+                               T*                   csr_val,
+                               floating_data_t<T>*  diag,
+                               rocsparse_index_base base,
+                               int64_t*             struct_pivot,
+                               int64_t*             numeric_pivot,
+                               int64_t*             singular_pivot,
+                               double               tol)
 {
     *struct_pivot   = -1;
     *numeric_pivot  = -1;
@@ -113,7 +113,7 @@ static void host_csrildlt0_ref(J                    M,
                 }
             }
 
-            T val_j = (csr_val[j] - local_sum) * static_cast<T>(inv_d_j);
+            T val_j    = (csr_val[j] - local_sum) * static_cast<T>(inv_d_j);
             csr_val[j] = val_j;
 
             // Accumulate |L_{ai,col_j}|^2 * D_{col_j} (real)
@@ -124,8 +124,8 @@ static void host_csrildlt0_ref(J                    M,
 
         if(!has_diag)
         {
-            *struct_pivot = (*struct_pivot == -1) ? (ai + base)
-                                                  : std::min(*struct_pivot, int64_t(ai + base));
+            *struct_pivot
+                = (*struct_pivot == -1) ? (ai + base) : std::min(*struct_pivot, int64_t(ai + base));
             *numeric_pivot = (*numeric_pivot == -1) ? (ai + base)
                                                     : std::min(*numeric_pivot, int64_t(ai + base));
         }
@@ -215,8 +215,7 @@ namespace rocsparse_clients
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_error* p_error = nullptr;
-            std::ignore
-                = rocsparse_spildlt0_descr_destroy(this->m_handle, this->m_descr, p_error);
+            std::ignore = rocsparse_spildlt0_descr_destroy(this->m_handle, this->m_descr, p_error);
         }
 
         inline operator rocsparse_spildlt0_descr&()
@@ -231,18 +230,17 @@ namespace rocsparse_clients
     };
 }
 
-
 template <typename I, typename J, typename T>
 void testing_spildlt0_set_input_bad_arg(const Arguments& arg)
 {
-    rocsparse_error*              p_error = nullptr;
-    rocsparse_local_handle        local_handle;
-    rocsparse_spildlt0_descr      spildlt0_descr     = (rocsparse_spildlt0_descr)0x4;
-    rocsparse_handle              handle             = local_handle;
-    static constexpr int          nex                = 2;
-    static const int              ex[nex]            = {4, 5};
-    const rocsparse_spildlt0_input input             = rocsparse_spildlt0_input_alg;
-    void*                          data              = (void*)0x4;
+    rocsparse_error*               p_error = nullptr;
+    rocsparse_local_handle         local_handle;
+    rocsparse_spildlt0_descr       spildlt0_descr     = (rocsparse_spildlt0_descr)0x4;
+    rocsparse_handle               handle             = local_handle;
+    static constexpr int           nex                = 2;
+    static const int               ex[nex]            = {4, 5};
+    const rocsparse_spildlt0_input input              = rocsparse_spildlt0_input_alg;
+    void*                          data               = (void*)0x4;
     size_t                         data_size_in_bytes = sizeof(input);
     select_bad_arg_analysis(rocsparse_spildlt0_set_input,
                             nex,
@@ -306,9 +304,9 @@ void testing_spildlt0_buffer_size_bad_arg(const Arguments& arg)
     rocsparse_handle         handle         = local_handle;
     rocsparse_spildlt0_descr spildlt0_descr = (rocsparse_spildlt0_descr)0x4;
 
-    rocsparse_spmat_descr       A             = (rocsparse_spmat_descr)0x4;
-    rocsparse_spmat_descr       P             = (rocsparse_spmat_descr)0x4;
-    rocsparse_spildlt0_stage    spildlt0_stage = rocsparse_spildlt0_stage_analysis;
+    rocsparse_spmat_descr    A              = (rocsparse_spmat_descr)0x4;
+    rocsparse_spmat_descr    P              = (rocsparse_spmat_descr)0x4;
+    rocsparse_spildlt0_stage spildlt0_stage = rocsparse_spildlt0_stage_analysis;
 
     rocsparse_error* p_error = nullptr;
     {
@@ -332,14 +330,14 @@ template <typename I, typename J, typename T>
 void testing_spildlt0_get_output_bad_arg(const Arguments& arg)
 {
     rocsparse_local_handle    local_handle;
-    rocsparse_handle          handle              = local_handle;
-    rocsparse_spildlt0_descr  spildlt0_descr      = (rocsparse_spildlt0_descr)0x4;
-    rocsparse_error*          p_error             = nullptr;
-    static constexpr int      nex                 = 2;
-    static const int          ex[nex]             = {4, 5};
-    size_t                    data_size_in_bytes  = sizeof(int64_t);
-    void*                     data                = (void*)0x4;
-    rocsparse_spildlt0_output output              = rocsparse_spildlt0_output_singularity_position;
+    rocsparse_handle          handle             = local_handle;
+    rocsparse_spildlt0_descr  spildlt0_descr     = (rocsparse_spildlt0_descr)0x4;
+    rocsparse_error*          p_error            = nullptr;
+    static constexpr int      nex                = 2;
+    static const int          ex[nex]            = {4, 5};
+    size_t                    data_size_in_bytes = sizeof(int64_t);
+    void*                     data               = (void*)0x4;
+    rocsparse_spildlt0_output output             = rocsparse_spildlt0_output_singularity_position;
     select_bad_arg_analysis(rocsparse_spildlt0_get_output,
                             nex,
                             ex,
@@ -388,8 +386,8 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
     // Now get a concrete example and continue.
     //
     rocsparse_clients::csr_tridiag_matrix_t<T, I, J> A(4);
-    rocsparse_spmat_descr                             P = A;
-    host_scalar<double>                               hsingularity_tolerance(1);
+    rocsparse_spmat_descr                            P = A;
+    host_scalar<double>                              hsingularity_tolerance(1);
     hsingularity_tolerance[0] = 1.0e-5;
     device_scalar<double> dsingularity_tolerance(hsingularity_tolerance);
 
@@ -422,23 +420,21 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
 
         // Set the diag device pointer
         void* d_diag_ptr = (void*)d_diag;
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spildlt0_set_input(handle,
-                                         spildlt0_descr,
-                                         rocsparse_spildlt0_input_diag,
-                                         &d_diag_ptr,
-                                         sizeof(d_diag_ptr),
-                                         p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
+                                                           spildlt0_descr,
+                                                           rocsparse_spildlt0_input_diag,
+                                                           &d_diag_ptr,
+                                                           sizeof(d_diag_ptr),
+                                                           p_error));
 
         size_t buffer_size;
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spildlt0_buffer_size(handle,
-                                           spildlt0_descr,
-                                           A,
-                                           P,
-                                           rocsparse_spildlt0_stage_analysis,
-                                           &buffer_size,
-                                           p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_buffer_size(handle,
+                                                             spildlt0_descr,
+                                                             A,
+                                                             P,
+                                                             rocsparse_spildlt0_stage_analysis,
+                                                             &buffer_size,
+                                                             p_error));
         hipStream_t stream;
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
         {
@@ -471,13 +467,13 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
                                                      p_error));
 
             for(auto input : {rocsparse_spildlt0_input_alg,
-                               rocsparse_spildlt0_input_analysis_policy,
-                               rocsparse_spildlt0_input_compute_datatype,
-                               rocsparse_spildlt0_input_boost_enable,
-                               rocsparse_spildlt0_input_boost_tolerance,
-                               rocsparse_spildlt0_input_boost_value,
-                               rocsparse_spildlt0_input_singularity_tolerance,
-                               rocsparse_spildlt0_input_diag})
+                              rocsparse_spildlt0_input_analysis_policy,
+                              rocsparse_spildlt0_input_compute_datatype,
+                              rocsparse_spildlt0_input_boost_enable,
+                              rocsparse_spildlt0_input_boost_tolerance,
+                              rocsparse_spildlt0_input_boost_value,
+                              rocsparse_spildlt0_input_singularity_tolerance,
+                              rocsparse_spildlt0_input_diag})
             {
                 switch(input)
                 {
@@ -500,22 +496,22 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
 
                     CHECK_ROCSPARSE_ERROR(
                         rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-                    CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(
-                        handle,
-                        spildlt0_descr,
-                        rocsparse_spildlt0_input_singularity_tolerance,
-                        hsingularity_tolerance,
-                        sizeof(double),
-                        p_error));
+                    CHECK_ROCSPARSE_ERROR(
+                        rocsparse_spildlt0_set_input(handle,
+                                                     spildlt0_descr,
+                                                     rocsparse_spildlt0_input_singularity_tolerance,
+                                                     hsingularity_tolerance,
+                                                     sizeof(double),
+                                                     p_error));
                     CHECK_ROCSPARSE_ERROR(
                         rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-                    CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(
-                        handle,
-                        spildlt0_descr,
-                        rocsparse_spildlt0_input_singularity_tolerance,
-                        dsingularity_tolerance,
-                        sizeof(double),
-                        p_error));
+                    CHECK_ROCSPARSE_ERROR(
+                        rocsparse_spildlt0_set_input(handle,
+                                                     spildlt0_descr,
+                                                     rocsparse_spildlt0_input_singularity_tolerance,
+                                                     dsingularity_tolerance,
+                                                     sizeof(double),
+                                                     p_error));
                     break;
                 }
                 case rocsparse_spildlt0_input_boost_enable:
@@ -543,26 +539,24 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
         }
 
         {
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spildlt0_buffer_size(handle,
-                                               spildlt0_descr,
-                                               A,
-                                               P,
-                                               rocsparse_spildlt0_stage_compute,
-                                               &buffer_size,
-                                               p_error));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_buffer_size(handle,
+                                                                 spildlt0_descr,
+                                                                 A,
+                                                                 P,
+                                                                 rocsparse_spildlt0_stage_compute,
+                                                                 &buffer_size,
+                                                                 p_error));
             device_dense_vector<char> buffer(buffer_size);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
 
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
             CHECK_ROCSPARSE_ERROR(
-                rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-            CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(
-                handle,
-                spildlt0_descr,
-                rocsparse_spildlt0_input_singularity_tolerance,
-                hsingularity_tolerance,
-                sizeof(double),
-                p_error));
+                rocsparse_spildlt0_set_input(handle,
+                                             spildlt0_descr,
+                                             rocsparse_spildlt0_input_singularity_tolerance,
+                                             hsingularity_tolerance,
+                                             sizeof(double),
+                                             p_error));
 
             //
             // Call compute.
@@ -591,13 +585,13 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
 
             CHECK_ROCSPARSE_ERROR(
                 rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-            CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(
-                handle,
-                spildlt0_descr,
-                rocsparse_spildlt0_input_singularity_tolerance,
-                dsingularity_tolerance,
-                sizeof(double),
-                p_error));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spildlt0_set_input(handle,
+                                             spildlt0_descr,
+                                             rocsparse_spildlt0_input_singularity_tolerance,
+                                             dsingularity_tolerance,
+                                             sizeof(double),
+                                             p_error));
 
             //
             // Call compute.
@@ -679,9 +673,9 @@ void testing_spildlt0(const Arguments& arg)
 
     rocsparse_clients::spildlt0_descr spildlt0_descr(handle, batch_count);
 
-    const rocsparse_spildlt0_alg     alg              = rocsparse_spildlt0_alg_default;
-    const rocsparse_analysis_policy  analysis_policy  = arg.apol;
-    const rocsparse_datatype         compute_datatype = get_datatype<T>();
+    const rocsparse_spildlt0_alg    alg              = rocsparse_spildlt0_alg_default;
+    const rocsparse_analysis_policy analysis_policy  = arg.apol;
+    const rocsparse_datatype        compute_datatype = get_datatype<T>();
 
     CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(
         handle, spildlt0_descr, rocsparse_spildlt0_input_alg, &alg, sizeof(alg), p_error));
@@ -693,13 +687,12 @@ void testing_spildlt0(const Arguments& arg)
                                                        sizeof(analysis_policy),
                                                        p_error));
 
-    CHECK_ROCSPARSE_ERROR(
-        rocsparse_spildlt0_set_input(handle,
-                                     spildlt0_descr,
-                                     rocsparse_spildlt0_input_compute_datatype,
-                                     &compute_datatype,
-                                     sizeof(compute_datatype),
-                                     p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
+                                                       spildlt0_descr,
+                                                       rocsparse_spildlt0_input_compute_datatype,
+                                                       &compute_datatype,
+                                                       sizeof(compute_datatype),
+                                                       p_error));
 
     // Set the diag device pointer
     void* d_diag_ptr = (void*)d_diag;
@@ -717,14 +710,13 @@ void testing_spildlt0(const Arguments& arg)
 
     {
         size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spildlt0_buffer_size(handle,
-                                           spildlt0_descr,
-                                           A,
-                                           A,
-                                           rocsparse_spildlt0_stage_analysis,
-                                           &buffer_size_in_bytes,
-                                           p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_buffer_size(handle,
+                                                             spildlt0_descr,
+                                                             A,
+                                                             A,
+                                                             rocsparse_spildlt0_stage_analysis,
+                                                             &buffer_size_in_bytes,
+                                                             p_error));
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
 
@@ -776,14 +768,13 @@ void testing_spildlt0(const Arguments& arg)
         //
         {
             size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spildlt0_buffer_size(handle,
-                                               spildlt0_descr,
-                                               A,
-                                               A,
-                                               rocsparse_spildlt0_stage_compute,
-                                               &buffer_size_in_bytes,
-                                               p_error));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_buffer_size(handle,
+                                                                 spildlt0_descr,
+                                                                 A,
+                                                                 A,
+                                                                 rocsparse_spildlt0_stage_compute,
+                                                                 &buffer_size_in_bytes,
+                                                                 p_error));
 
             device_dense_vector<char> buffer(buffer_size_in_bytes);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
@@ -830,7 +821,7 @@ void testing_spildlt0(const Arguments& arg)
                 auto& host_csr = A.template as<rocsparse_format_csr>().host();
 
                 // Copy current device values back to host for comparison
-                host_vector<T>          h_csr_val_gpu(host_csr.val.size());
+                host_vector<T>                  h_csr_val_gpu(host_csr.val.size());
                 host_vector<floating_data_t<T>> h_diag_gpu(M * batch_count);
                 CHECK_HIP_ERROR(hipMemcpy(h_csr_val_gpu,
                                           A.get_device_values(),
@@ -842,29 +833,30 @@ void testing_spildlt0(const Arguments& arg)
                                           hipMemcpyDeviceToHost));
 
                 // CPU reference (run on a copy of the original host values)
-                host_vector<T>          h_csr_val_ref = host_csr.val;
+                host_vector<T>                  h_csr_val_ref = host_csr.val;
                 host_vector<floating_data_t<T>> h_diag_ref(M * batch_count,
-                                                            static_cast<floating_data_t<T>>(0));
+                                                           static_cast<floating_data_t<T>>(0));
 
                 const double singular_pivot_tolerance = 0.0;
 
-                auto& cpu_symbolic_pivot     = spildlt0_descr.m_cpu_symbolic_singularity_position;
-                auto& cpu_numeric_near_pivot = spildlt0_descr.m_cpu_numeric_near_singularity_position;
+                auto& cpu_symbolic_pivot = spildlt0_descr.m_cpu_symbolic_singularity_position;
+                auto& cpu_numeric_near_pivot
+                    = spildlt0_descr.m_cpu_numeric_near_singularity_position;
                 auto& cpu_numeric_exact_pivot
                     = spildlt0_descr.m_cpu_numeric_exact_singularity_position;
 
                 for(int64_t i = 0; i < batch_count; ++i)
                 {
                     host_csrildlt0_ref<T, I, J>(static_cast<J>(host_csr.m),
-                                                 host_csr.ptr.data(),
-                                                 host_csr.ind.data(),
-                                                 h_csr_val_ref.data() + i * A.get_stride(),
-                                                 h_diag_ref.data() + i * M,
-                                                 host_csr.base,
-                                                 cpu_symbolic_pivot + i,
-                                                 cpu_numeric_exact_pivot + i,
-                                                 cpu_numeric_near_pivot + i,
-                                                 singular_pivot_tolerance);
+                                                host_csr.ptr.data(),
+                                                host_csr.ind.data(),
+                                                h_csr_val_ref.data() + i * A.get_stride(),
+                                                h_diag_ref.data() + i * M,
+                                                host_csr.base,
+                                                cpu_symbolic_pivot + i,
+                                                cpu_numeric_exact_pivot + i,
+                                                cpu_numeric_near_pivot + i,
+                                                singular_pivot_tolerance);
                 }
 
                 for(int64_t j = 0; j < batch_count; ++j)
@@ -897,7 +889,8 @@ void testing_spildlt0(const Arguments& arg)
                 {
                     if(ROCSPARSE_REPRODUCIBILITY)
                     {
-                        rocsparse_reproducibility::save("L values", h_csr_val_gpu, "D values", h_diag_gpu);
+                        rocsparse_reproducibility::save(
+                            "L values", h_csr_val_gpu, "D values", h_diag_gpu);
                     }
 
                     // For complex types, accumulation error is larger.
@@ -920,14 +913,13 @@ void testing_spildlt0(const Arguments& arg)
     if(arg.timing)
     {
         size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spildlt0_buffer_size(handle,
-                                           spildlt0_descr,
-                                           A,
-                                           A,
-                                           rocsparse_spildlt0_stage_compute,
-                                           &buffer_size_in_bytes,
-                                           p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_buffer_size(handle,
+                                                             spildlt0_descr,
+                                                             A,
+                                                             A,
+                                                             rocsparse_spildlt0_stage_compute,
+                                                             &buffer_size_in_bytes,
+                                                             p_error));
 
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));

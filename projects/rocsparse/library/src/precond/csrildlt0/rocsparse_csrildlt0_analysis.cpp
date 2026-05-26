@@ -27,10 +27,10 @@
 #include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::csrildlt0_analysis(rocsparse_handle          handle,
-                                              rocsparse_spmat_descr     A,
-                                              rocsparse_analysis_policy analysis,
-                                              rocsparse_csrildlt0_info*  p_csrildlt0_info,
-                                              void*                     temp_buffer)
+                                               rocsparse_spmat_descr     A,
+                                               rocsparse_analysis_policy analysis,
+                                               rocsparse_csrildlt0_info* p_csrildlt0_info,
+                                               void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -39,7 +39,7 @@ rocsparse_status rocsparse::csrildlt0_analysis(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    auto info          = A->info;
+    auto info           = A->info;
     auto csrildlt0_info = p_csrildlt0_info[0];
 
     if(analysis == rocsparse_analysis_policy_reuse)
@@ -91,19 +91,19 @@ rocsparse_status rocsparse::csrildlt0_analysis(rocsparse_handle          handle,
     }
 
     RETURN_IF_ROCSPARSE_ERROR(csrildlt0_info->recreate(rocsparse_operation_none,
-                                                      rocsparse_fill_mode_lower,
-                                                      handle,
-                                                      rocsparse_operation_none,
-                                                      A->rows,
-                                                      A->nnz,
-                                                      A->descr,
-                                                      A->data_type,
-                                                      A->const_val_data,
-                                                      A->row_type,
-                                                      A->const_row_data,
-                                                      A->col_type,
-                                                      A->const_col_data,
-                                                      temp_buffer));
+                                                       rocsparse_fill_mode_lower,
+                                                       handle,
+                                                       rocsparse_operation_none,
+                                                       A->rows,
+                                                       A->nnz,
+                                                       A->descr,
+                                                       A->data_type,
+                                                       A->const_val_data,
+                                                       A->row_type,
+                                                       A->const_row_data,
+                                                       A->col_type,
+                                                       A->const_col_data,
+                                                       temp_buffer));
 
     return rocsparse_status_success;
 }

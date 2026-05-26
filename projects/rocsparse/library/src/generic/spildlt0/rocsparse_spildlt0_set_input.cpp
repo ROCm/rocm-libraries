@@ -50,8 +50,8 @@ extern "C" rocsparse_status rocsparse_spildlt0_set_input(rocsparse_handle       
                                                          rocsparse_spildlt0_descr spildlt0_descr,
                                                          rocsparse_spildlt0_input input,
                                                          const void*              data,
-                                                         size_t                   data_size_in_bytes,
-                                                         rocsparse_error*         p_error)
+                                                         size_t           data_size_in_bytes,
+                                                         rocsparse_error* p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

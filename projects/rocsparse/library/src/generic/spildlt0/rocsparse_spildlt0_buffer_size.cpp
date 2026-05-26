@@ -92,14 +92,13 @@ namespace rocsparse
  *    C wrapper
  * ===========================================================================
  */
-extern "C" rocsparse_status
-    rocsparse_spildlt0_buffer_size(rocsparse_handle            handle,
-                                   rocsparse_spildlt0_descr    spildlt0_descr,
-                                   rocsparse_const_spmat_descr A,
-                                   rocsparse_const_spmat_descr P,
-                                   rocsparse_spildlt0_stage    spildlt0_stage,
-                                   size_t*                     p_buffer_size_in_bytes,
-                                   rocsparse_error*            p_error)
+extern "C" rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle         handle,
+                                                           rocsparse_spildlt0_descr spildlt0_descr,
+                                                           rocsparse_const_spmat_descr A,
+                                                           rocsparse_const_spmat_descr P,
+                                                           rocsparse_spildlt0_stage spildlt0_stage,
+                                                           size_t*          p_buffer_size_in_bytes,
+                                                           rocsparse_error* p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

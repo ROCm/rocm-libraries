@@ -29,10 +29,10 @@
 
 namespace rocsparse
 {
-    typedef rocsparse_status (*csrildlt0_kernel_launch_t)(rocsparse_handle        handle,
-                                                         rocsparse_csrildlt0_info csrildlt0_info,
-                                                         rocsparse_spmat_descr   A,
-                                                         void*                   diag,
-                                                         size_t                  buffer_size,
-                                                         void*                   buffer);
+    typedef rocsparse_status (*csrildlt0_kernel_launch_t)(rocsparse_handle         handle,
+                                                          rocsparse_csrildlt0_info csrildlt0_info,
+                                                          rocsparse_spmat_descr    A,
+                                                          void*                    diag,
+                                                          size_t                   buffer_size,
+                                                          void*                    buffer);
 }

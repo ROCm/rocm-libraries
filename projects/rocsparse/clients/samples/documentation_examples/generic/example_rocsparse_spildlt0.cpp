@@ -24,23 +24,23 @@
 #include <iostream>
 #include <rocsparse/rocsparse.h>
 
-#define HIP_CHECK(stat)                                                                        \
-    {                                                                                          \
-        if(stat != hipSuccess)                                                                 \
-        {                                                                                      \
+#define HIP_CHECK(stat)                                                                       \
+    {                                                                                         \
+        if(stat != hipSuccess)                                                                \
+        {                                                                                     \
             std::cerr << "Error: hip error " << stat << " in line " << __LINE__ << std::endl; \
-            return -1;                                                                         \
-        }                                                                                      \
+            return -1;                                                                        \
+        }                                                                                     \
     }
 
-#define ROCSPARSE_CHECK(stat)                                                          \
-    {                                                                                  \
-        if(stat != rocsparse_status_success)                                           \
-        {                                                                              \
+#define ROCSPARSE_CHECK(stat)                                                         \
+    {                                                                                 \
+        if(stat != rocsparse_status_success)                                          \
+        {                                                                             \
             std::cerr << "Error: rocsparse error " << stat << " in line " << __LINE__ \
-                      << std::endl;                                                    \
-            return -1;                                                                 \
-        }                                                                              \
+                      << std::endl;                                                   \
+            return -1;                                                                \
+        }                                                                             \
     }
 
 //! [doc example]
@@ -249,12 +249,8 @@ int main()
     //
     // Set the diagonal output pointer before the compute phase.
     //
-    ROCSPARSE_CHECK(rocsparse_spildlt0_set_input(handle,
-                                                 spildlt0_descr,
-                                                 rocsparse_spildlt0_input_diag,
-                                                 &ddiag,
-                                                 sizeof(void*),
-                                                 nullptr));
+    ROCSPARSE_CHECK(rocsparse_spildlt0_set_input(
+        handle, spildlt0_descr, rocsparse_spildlt0_input_diag, &ddiag, sizeof(void*), nullptr));
 
     //
     // Compute phase.

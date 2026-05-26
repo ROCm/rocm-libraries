@@ -2036,7 +2036,7 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
 *  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
 */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle         handle,
+rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle          handle,
                                                  rocsparse_spildlt0_descr* p_spildlt0_descr,
                                                  rocsparse_error*          p_error);
 

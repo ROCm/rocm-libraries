@@ -49,20 +49,20 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_DEVICE_ILF void csrildlt0_device_hash(J m,
-                                                   const I* __restrict__ csr_row_ptr,
-                                                   const J* __restrict__ csr_col_ind,
-                                                   T* __restrict__ csr_val,
-                                                   floating_data_t<T>* __restrict__ diag,
-                                                   const I* __restrict__ csr_diag_ind,
-                                                   int32_t* __restrict__ done,
-                                                   const J* __restrict__ map,
-                                                   J* __restrict__ zero_pivot,
-                                                   J* __restrict__ singular_pivot,
-                                                   double               tol,
-                                                   rocsparse_index_base idx_base,
-                                                   int                  boost,
-                                                   double               boost_tol,
-                                                   floating_data_t<T>   boost_val)
+                                                    const I* __restrict__ csr_row_ptr,
+                                                    const J* __restrict__ csr_col_ind,
+                                                    T* __restrict__ csr_val,
+                                                    floating_data_t<T>* __restrict__ diag,
+                                                    const I* __restrict__ csr_diag_ind,
+                                                    int32_t* __restrict__ done,
+                                                    const J* __restrict__ map,
+                                                    J* __restrict__ zero_pivot,
+                                                    J* __restrict__ singular_pivot,
+                                                    double               tol,
+                                                    rocsparse_index_base idx_base,
+                                                    int                  boost,
+                                                    double               boost_tol,
+                                                    floating_data_t<T>   boost_val)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -109,7 +109,7 @@ namespace rocsparse
         // Fill hash table with column indices of the current row
         for(I j = row_begin + lid; j < row_end; j += WFSIZE)
         {
-            J key      = csr_col_ind[j];
+            J       key  = csr_col_ind[j];
             int32_t hash = (key * 103) & (WFSIZE * HASH - 1);
 
             while(true)
@@ -190,10 +190,12 @@ namespace rocsparse
                         // L_{row,k} is at data[hash], L_{j,k} is at csr_val[k]
                         // D_k is at diag[key] (real scalar)
                         // Update: L_{row,k} * D_k * conj(L_{j,k})
-                        I idx_row_k = data[hash];
-                        floating_data_t<T> d_k = diag[key - idx_base];
-                        local_sum   = rocsparse::fma(
-                            csr_val[idx_row_k], static_cast<T>(d_k) * rocsparse::conj(csr_val[k]), local_sum);
+                        I                  idx_row_k = data[hash];
+                        floating_data_t<T> d_k       = diag[key - idx_base];
+                        local_sum
+                            = rocsparse::fma(csr_val[idx_row_k],
+                                             static_cast<T>(d_k) * rocsparse::conj(csr_val[k]),
+                                             local_sum);
                         break;
                     }
                     else
@@ -208,8 +210,8 @@ namespace rocsparse
             if(lid == WFSIZE - 1)
             {
                 // L_{row, local_col} = (A_{row, local_col} - sum) / D_{local_col}
-                local_val      = (local_val - local_sum) * inv_d_j;
-                csr_val[j]     = local_val;
+                local_val  = (local_val - local_sum) * inv_d_j;
+                csr_val[j] = local_val;
                 // Accumulate |L_{row,j}|^2 * D_j = (re^2 + im^2) * D_j for the diagonal update (real)
                 const floating_data_t<T> re_l = rocsparse::real(local_val);
                 const floating_data_t<T> im_l = rocsparse::imag(local_val);
@@ -238,7 +240,7 @@ namespace rocsparse
                 }
 
                 // Store D_i (real scalar); zero the diagonal slot in csr_val (unit diagonal)
-                diag[row] = d_i;
+                diag[row]         = d_i;
                 csr_val[row_diag] = static_cast<T>(0);
 
                 if(d_i == static_cast<floating_data_t<T>>(0))
@@ -262,42 +264,46 @@ namespace rocsparse
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrildlt0_kernel_hash(J m,
-                              const I* __restrict__ csr_row_ptr,
-                              const J* __restrict__ csr_col_ind,
-                              T* __restrict__ csr_val,
-                              int64_t csr_val_stride,
-                              floating_data_t<T>* __restrict__ diag,
-                              int64_t diag_stride,
-                              const I* __restrict__ csr_diag_ind,
-                              int32_t* __restrict__ done,
-                              int64_t done_stride,
-                              const J* __restrict__ map,
-                              J* __restrict__ zero_pivot,
-                              int64_t zero_pivot_stride,
-                              J* __restrict__ singular_pivot,
-                              int64_t            singular_pivot_stride,
-                              rocsparse_datatype tolerance_datatype,
-                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
-                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
-                              bool                 is_singular_tol_host_mode,
-                              rocsparse_index_base idx_base,
-                              int                  boost,
-                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
-                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
-                              rocsparse_datatype   boost_tol_datatype,
-                              bool                 is_boost_tol_host_mode,
-                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(floating_data_t<T>, boost_val),
-                              bool                 is_boost_val_host_mode)
+                               const I* __restrict__ csr_row_ptr,
+                               const J* __restrict__ csr_col_ind,
+                               T* __restrict__ csr_val,
+                               int64_t csr_val_stride,
+                               floating_data_t<T>* __restrict__ diag,
+                               int64_t diag_stride,
+                               const I* __restrict__ csr_diag_ind,
+                               int32_t* __restrict__ done,
+                               int64_t done_stride,
+                               const J* __restrict__ map,
+                               J* __restrict__ zero_pivot,
+                               int64_t zero_pivot_stride,
+                               J* __restrict__ singular_pivot,
+                               int64_t            singular_pivot_stride,
+                               rocsparse_datatype tolerance_datatype,
+                               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
+                               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
+                               bool                 is_singular_tol_host_mode,
+                               rocsparse_index_base idx_base,
+                               int                  boost,
+                               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                               rocsparse_datatype boost_tol_datatype,
+                               bool               is_boost_tol_host_mode,
+                               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(floating_data_t<T>, boost_val),
+                               bool is_boost_val_host_mode)
     {
         ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_64);
         const double tolerance
             = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
 
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
-            boost && (boost_tol_datatype == rocsparse_datatype_f32_r), is_boost_tol_host_mode, boost_tol_32);
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
-            boost && (boost_tol_datatype == rocsparse_datatype_f64_r), is_boost_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost
+                                                && (boost_tol_datatype == rocsparse_datatype_f32_r),
+                                            is_boost_tol_host_mode,
+                                            boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost
+                                                && (boost_tol_datatype == rocsparse_datatype_f64_r),
+                                            is_boost_tol_host_mode,
+                                            boost_tol_64);
         const double b_tol
             = (boost_tol_datatype == rocsparse_datatype_f64_r) ? boost_tol_64 : boost_tol_32;
 
@@ -328,23 +334,23 @@ namespace rocsparse
               typename T,
               typename I,
               typename J>
-    static rocsparse_status csrildlt0_kernel_hash_launch(rocsparse_handle        handle,
-                                                        rocsparse_csrildlt0_info csrildlt0_info,
-                                                        rocsparse_spmat_descr   A,
-                                                        void*                   diag,
-                                                        size_t                  buffer_size,
-                                                        void*                   buffer)
+    static rocsparse_status csrildlt0_kernel_hash_launch(rocsparse_handle         handle,
+                                                         rocsparse_csrildlt0_info csrildlt0_info,
+                                                         rocsparse_spmat_descr    A,
+                                                         void*                    diag,
+                                                         size_t                   buffer_size,
+                                                         void*                    buffer)
     {
         auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-        int32_t* done_array         = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
+        int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
         const dim3    csrildlt0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                   A->batch_count);
+                                    A->batch_count);
         const dim3    csrildlt0_threads(BLOCKSIZE);
 
-        auto                         numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
-        auto                         numeric_near  = csrildlt0_info->get_singularity_numeric_near();
+        auto numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
+        auto numeric_near  = csrildlt0_info->get_singularity_numeric_near();
         const rocsparse_pointer_mode tolerance_pointer_mode
             = numeric_near->get_tolerance_pointer_mode();
         const rocsparse_datatype tolerance_datatype = numeric_near->get_tolerance_datatype();
@@ -354,19 +360,19 @@ namespace rocsparse
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
 
         // Boost parameters
-        auto                         boost                = A->info->get_boost();
-        const int                    boost_enable         = boost->get_enable();
-        const rocsparse_datatype     boost_tol_datatype   = boost->get_tol_datatype();
-        const auto                   boost_tol_size       = rocsparse::datatype_sizeof(boost_tol_datatype);
+        auto                     boost              = A->info->get_boost();
+        const int                boost_enable       = boost->get_enable();
+        const rocsparse_datatype boost_tol_datatype = boost->get_tol_datatype();
+        const auto               boost_tol_size = rocsparse::datatype_sizeof(boost_tol_datatype);
         const rocsparse_pointer_mode boost_tol_pointer_mode = boost->get_tol_pointer_mode();
         const rocsparse_pointer_mode boost_val_pointer_mode = boost->get_val_pointer_mode();
-        const float*  boost_tol_32 = (boost_tol_size == sizeof(float))
-                                         ? reinterpret_cast<const float*>(boost->get_tol())
-                                         : nullptr;
-        const double* boost_tol_64 = (boost_tol_size == sizeof(double))
-                                         ? reinterpret_cast<const double*>(boost->get_tol())
-                                         : nullptr;
-        const floating_data_t<T>* boost_val_ptr
+        const float*                 boost_tol_32           = (boost_tol_size == sizeof(float))
+                                                                  ? reinterpret_cast<const float*>(boost->get_tol())
+                                                                  : nullptr;
+        const double*                boost_tol_64           = (boost_tol_size == sizeof(double))
+                                                                  ? reinterpret_cast<const double*>(boost->get_tol())
+                                                                  : nullptr;
+        const floating_data_t<T>*    boost_val_ptr
             = reinterpret_cast<const floating_data_t<T>*>(boost->get_val());
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -408,39 +414,39 @@ namespace rocsparse
 
     // Instantiate for all HASH sizes (1,2,4,8,16) and type combos.
     // HASH is selected at runtime based on max_nnz from analysis (like csric0).
-#define INST_HASH_LAUNCH(WF, HASH, T, I, J)                                               \
-    template rocsparse_status csrildlt0_kernel_hash_launch<256, WF, HASH, T, I, J>(       \
+#define INST_HASH_LAUNCH(WF, HASH, T, I, J)                                         \
+    template rocsparse_status csrildlt0_kernel_hash_launch<256, WF, HASH, T, I, J>( \
         rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*)
 
-#define INST_ALL_HASHES(WF, T, I, J) \
-    INST_HASH_LAUNCH(WF,  1, T, I, J); \
-    INST_HASH_LAUNCH(WF,  2, T, I, J); \
-    INST_HASH_LAUNCH(WF,  4, T, I, J); \
-    INST_HASH_LAUNCH(WF,  8, T, I, J); \
+#define INST_ALL_HASHES(WF, T, I, J)  \
+    INST_HASH_LAUNCH(WF, 1, T, I, J); \
+    INST_HASH_LAUNCH(WF, 2, T, I, J); \
+    INST_HASH_LAUNCH(WF, 4, T, I, J); \
+    INST_HASH_LAUNCH(WF, 8, T, I, J); \
     INST_HASH_LAUNCH(WF, 16, T, I, J)
 
-    INST_ALL_HASHES(64, float,                    int32_t, int32_t);
-    INST_ALL_HASHES(32, float,                    int32_t, int32_t);
-    INST_ALL_HASHES(64, double,                   int32_t, int32_t);
-    INST_ALL_HASHES(32, double,                   int32_t, int32_t);
-    INST_ALL_HASHES(64, rocsparse_float_complex,  int32_t, int32_t);
-    INST_ALL_HASHES(32, rocsparse_float_complex,  int32_t, int32_t);
+    INST_ALL_HASHES(64, float, int32_t, int32_t);
+    INST_ALL_HASHES(32, float, int32_t, int32_t);
+    INST_ALL_HASHES(64, double, int32_t, int32_t);
+    INST_ALL_HASHES(32, double, int32_t, int32_t);
+    INST_ALL_HASHES(64, rocsparse_float_complex, int32_t, int32_t);
+    INST_ALL_HASHES(32, rocsparse_float_complex, int32_t, int32_t);
     INST_ALL_HASHES(64, rocsparse_double_complex, int32_t, int32_t);
     INST_ALL_HASHES(32, rocsparse_double_complex, int32_t, int32_t);
-    INST_ALL_HASHES(64, float,                    int64_t, int32_t);
-    INST_ALL_HASHES(32, float,                    int64_t, int32_t);
-    INST_ALL_HASHES(64, double,                   int64_t, int32_t);
-    INST_ALL_HASHES(32, double,                   int64_t, int32_t);
-    INST_ALL_HASHES(64, rocsparse_float_complex,  int64_t, int32_t);
-    INST_ALL_HASHES(32, rocsparse_float_complex,  int64_t, int32_t);
+    INST_ALL_HASHES(64, float, int64_t, int32_t);
+    INST_ALL_HASHES(32, float, int64_t, int32_t);
+    INST_ALL_HASHES(64, double, int64_t, int32_t);
+    INST_ALL_HASHES(32, double, int64_t, int32_t);
+    INST_ALL_HASHES(64, rocsparse_float_complex, int64_t, int32_t);
+    INST_ALL_HASHES(32, rocsparse_float_complex, int64_t, int32_t);
     INST_ALL_HASHES(64, rocsparse_double_complex, int64_t, int32_t);
     INST_ALL_HASHES(32, rocsparse_double_complex, int64_t, int32_t);
-    INST_ALL_HASHES(64, float,                    int64_t, int64_t);
-    INST_ALL_HASHES(32, float,                    int64_t, int64_t);
-    INST_ALL_HASHES(64, double,                   int64_t, int64_t);
-    INST_ALL_HASHES(32, double,                   int64_t, int64_t);
-    INST_ALL_HASHES(64, rocsparse_float_complex,  int64_t, int64_t);
-    INST_ALL_HASHES(32, rocsparse_float_complex,  int64_t, int64_t);
+    INST_ALL_HASHES(64, float, int64_t, int64_t);
+    INST_ALL_HASHES(32, float, int64_t, int64_t);
+    INST_ALL_HASHES(64, double, int64_t, int64_t);
+    INST_ALL_HASHES(32, double, int64_t, int64_t);
+    INST_ALL_HASHES(64, rocsparse_float_complex, int64_t, int64_t);
+    INST_ALL_HASHES(32, rocsparse_float_complex, int64_t, int64_t);
     INST_ALL_HASHES(64, rocsparse_double_complex, int64_t, int64_t);
     INST_ALL_HASHES(32, rocsparse_double_complex, int64_t, int64_t);
 
@@ -492,9 +498,11 @@ namespace rocsparse
         case rocsparse_datatype_f64_r:
             return rocsparse::transform_i_type<V..., double>(std::forward<P>(p)...);
         case rocsparse_datatype_f32_c:
-            return rocsparse::transform_i_type<V..., rocsparse_float_complex>(std::forward<P>(p)...);
+            return rocsparse::transform_i_type<V..., rocsparse_float_complex>(
+                std::forward<P>(p)...);
         case rocsparse_datatype_f64_c:
-            return rocsparse::transform_i_type<V..., rocsparse_double_complex>(std::forward<P>(p)...);
+            return rocsparse::transform_i_type<V..., rocsparse_double_complex>(
+                std::forward<P>(p)...);
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
         case rocsparse_datatype_i8_r:
@@ -530,18 +538,21 @@ namespace rocsparse
     }
 
     // find_csrildlt0_kernel_hash_launch: select kernel based on device and matrix properties
-    csrildlt0_kernel_launch_t find_csrildlt0_kernel_hash_launch(rocsparse_handle             handle,
-                                                                rocsparse_csrildlt0_info     csrildlt0_info,
-                                                                rocsparse_const_spmat_descr  A)
+    csrildlt0_kernel_launch_t
+        find_csrildlt0_kernel_hash_launch(rocsparse_handle            handle,
+                                          rocsparse_csrildlt0_info    csrildlt0_info,
+                                          rocsparse_const_spmat_descr A)
     {
-        auto       trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
-        const auto max_nnz  = trm_info->get_max_nnz();
+        auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        const auto max_nnz = trm_info->get_max_nnz();
         switch(handle->wavefront_size)
         {
         case 32:
-            return rocsparse::transform_mxnnz<256, 32>(max_nnz, A->data_type, A->row_type, A->col_type);
+            return rocsparse::transform_mxnnz<256, 32>(
+                max_nnz, A->data_type, A->row_type, A->col_type);
         case 64:
-            return rocsparse::transform_mxnnz<256, 64>(max_nnz, A->data_type, A->row_type, A->col_type);
+            return rocsparse::transform_mxnnz<256, 64>(
+                max_nnz, A->data_type, A->row_type, A->col_type);
         default:
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error,
                                                   "invalid wavefront size");
