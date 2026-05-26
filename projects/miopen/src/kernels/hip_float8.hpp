@@ -54,6 +54,8 @@
 #define MIOPEN_FP8_IEEE_EXPONENT_BIAS 1
 #endif
 
+using hip_bfloat16 = bfloat16;
+
 namespace miopen_hip_f8_impl {
 
 template <int wm, int we, typename T, bool negative_zero_nan, bool clip>

@@ -23,16 +23,14 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/config.h>
+
 #include <miopen/dropout.hpp>
-#include <miopen/util.hpp>
-#include <miopen/float_equal.hpp>
-#include <miopen/visit_float.hpp>
-#include <miopen/check_numerics.hpp>
-#include <miopen/kernel_cache.hpp>
-#include <miopen/tensor.hpp>
 #include <miopen/datatype.hpp>
-#include <miopen_rocrand.hpp>
+#include <miopen/float_equal.hpp>
+#include <miopen/check_numerics.hpp>
+
+#include <rocrand/rocrand_xorwow.h>
+typedef rocrand_device::xorwow_engine rocrand_state_xorwow;
 
 #define DROPOUT_DEBUG 0
 
