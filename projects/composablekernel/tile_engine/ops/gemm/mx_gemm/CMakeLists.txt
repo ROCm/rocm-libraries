@@ -4,6 +4,7 @@
 set(MX_GEMM_DATATYPE "fp4;fp8" CACHE STRING "List of datatypes for GEMM MX (semicolon-separated)")
 set(MX_GEMM_LAYOUT "rcr" CACHE STRING "List of layout for GEMM MX (semicolon-separated)")
 set(MX_GEMM_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(MX_GEMM_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_MX_GEMM "Enable ccache for GEMM MX ops compilation" OFF)
 
 # Store the directory path for use in functions
@@ -171,13 +172,27 @@ function(build_individual_mx_gemm_targets datatype layout)
     # Create working directory first
     file(MAKE_DIRECTORY ${working_path})
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${MX_GEMM_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${MX_GEMM_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     message(VERBOSE "COMMAND: ${Python3_EXECUTABLE} -u ${CMAKE_CURRENT_LIST_DIR}/mx_gemm_instance_builder.py
                 --working_path ${working_path}
                 --datatype ${datatype}
                 --layout ${layout}
                 --config_json ${json_blob}
                 --gpu_target ${MX_GEMM_GPU_TARGETS_INDIVIDUAL}
-                --list_kernels ")
+                --list_kernels
+                ${extra_list_args}")
 
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
@@ -189,6 +204,7 @@ function(build_individual_mx_gemm_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${MX_GEMM_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -305,6 +321,20 @@ else()
     foreach(scheduler IN LISTS MX_GEMM_SCHEDULERS)
         add_custom_target(benchmark_mx_gemm_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set.
+    if(NOT "${MX_GEMM_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH MX_GEMM_DATATYPE _mx_n_dt)
+        list(LENGTH MX_GEMM_LAYOUT _mx_n_lay)
+        math(EXPR _mx_n_combos "${_mx_n_dt} * ${_mx_n_lay}")
+        if(_mx_n_combos GREATER 0)
+            math(EXPR MX_GEMM_MAX_INSTANCES
+                "${MX_GEMM_MAX_INSTANCES} / ${_mx_n_combos}")
+            message(STATUS "  mx_gemm: per-combo budget = ${MX_GEMM_MAX_INSTANCES} (${_mx_n_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS MX_GEMM_DATATYPE)

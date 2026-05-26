@@ -72,8 +72,9 @@ void mx_gemm_host_reference(int verify,
     {
         c_m_n_host_result.SetZero();
 
-        ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, AccDataType, CDataType>(
-            a_m_k, b_k_n, c_m_n_host_result, scale_a_host, scale_b_host);
+        ck_tile::
+            reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
+                a_m_k, b_k_n, c_m_n_host_result, scale_a_host, scale_b_host);
     }
 }
 
