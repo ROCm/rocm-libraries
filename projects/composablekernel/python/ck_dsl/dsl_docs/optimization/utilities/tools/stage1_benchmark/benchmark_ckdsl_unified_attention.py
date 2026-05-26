@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Benchmark CK DSL `unified_attention` tiled-2D kernel on traced shapes.
 
 Reads aiter trace-shape ndjson files (`tests/aiter_ua_shapes.json`,
@@ -152,7 +153,9 @@ def benchmark_one(
             stream=hip_stream,
         )
 
-    latency_ms = _time_call(call_once, warmup=warmup, iters=iterations, stream=hip_stream)
+    latency_ms = _time_call(
+        call_once, warmup=warmup, iters=iterations, stream=hip_stream
+    )
     flops = attention_flops(shape, data["query_lens"], data["kv_lens_list"])
     tflops = (flops / 1e12) / (latency_ms / 1e3) if latency_ms > 0 else 0.0
 
@@ -203,7 +206,9 @@ def main() -> int:
         default="any",
         help="filter sliding-window shapes",
     )
-    parser.add_argument("--call-idx", type=int, default=None, help="select a single call_idx")
+    parser.add_argument(
+        "--call-idx", type=int, default=None, help="select a single call_idx"
+    )
     parser.add_argument("--limit", type=int, default=None, help="cap number of shapes")
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--warmup", type=int, default=5)
@@ -232,7 +237,9 @@ def main() -> int:
     shapes = load_shapes(args.shapes)
     dtype_filter = None if args.dtype == "all" else args.dtype
     sw_filter = {"any": None, "only": True, "none": False}[args.sliding_window]
-    shapes = filter_prefill_2d(shapes, dtype=dtype_filter, require_sliding_window=sw_filter)
+    shapes = filter_prefill_2d(
+        shapes, dtype=dtype_filter, require_sliding_window=sw_filter
+    )
     shapes = dedupe_shapes(shapes)
 
     if args.call_idx is not None:
@@ -272,9 +279,7 @@ def main() -> int:
             }
         results.append(res)
         if res.get("success"):
-            print(
-                f"  latency={res['latency_ms']:.3f} ms  tflops={res['tflops']:.2f}"
-            )
+            print(f"  latency={res['latency_ms']:.3f} ms  tflops={res['tflops']:.2f}")
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

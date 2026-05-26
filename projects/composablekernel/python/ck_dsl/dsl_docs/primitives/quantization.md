@@ -152,5 +152,5 @@ For int8 GEMM:
  -> quantise; two block-LDS reductions, one for `sum(x^2)` and one
  for `max(|x * gamma|)`.
 - `attention_unified.py` and `attention_tiled_*` for FP8 K/V cache integration (in progress).
-- `RUNBOOK_COMPLIANCE.md` §10 for the compiler-flag and metadata coverage.
+- `runbook_compliance.md` §10 for the compiler-flag and metadata coverage.
 - `gpu-op-optimization-runbook` §1.4 (Dtypes And Numerics) for tolerance policy.

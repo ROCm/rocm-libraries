@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Shared utilities for Unified Attention (UA) benchmarks.
 
 Loads aiter trace-shape JSON files (one JSON object per line) captured from
@@ -79,7 +82,9 @@ class UAShape:
     out_dtype: str
 
     @classmethod
-    def from_record(cls, rec: dict[str, Any], source_file: str, line_idx: int) -> "UAShape":
+    def from_record(
+        cls, rec: dict[str, Any], source_file: str, line_idx: int
+    ) -> "UAShape":
         q_shape = rec["q_shape"]
         k_shape = rec["k_shape"]
         bt_shape = rec["block_table_shape"]
@@ -343,7 +348,9 @@ def make_inputs(
     }
 
 
-def attention_flops(shape: UAShape, query_lens: list[int], kv_lens_list: list[int]) -> int:
+def attention_flops(
+    shape: UAShape, query_lens: list[int], kv_lens_list: list[int]
+) -> int:
     """Causal-attention FLOPs: 4 * sum_i(q_i * kv_i_effective) * H * d.
 
     For each sequence ``i``, the causal mask makes the average effective

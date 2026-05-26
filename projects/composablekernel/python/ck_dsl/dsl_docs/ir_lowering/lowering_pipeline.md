@@ -142,7 +142,7 @@ This is the canonical bounds-checked configuration. Out-of-range byte offsets si
 
 `INT32_MAX = 2147483647 = (1 << 31) - 1` is the default `oob_sentinel` in `AsyncTileLoader.issue` and the loader helpers.
 
-A wrong DW3 flag (the `0` default in the LLVM intrinsic without these encoded bits) yields a single dword load with no bounds check, which then misreads padded boundary positions as the next row of A. This was a real correctness bug fixed during the implicit-GEMM conv bake-off (see `RUNBOOK_COMPLIANCE.md` empirical pass).
+A wrong DW3 flag (the `0` default in the LLVM intrinsic without these encoded bits) yields a single dword load with no bounds check, which then misreads padded boundary positions as the next row of A. This was a real correctness bug fixed during the implicit-GEMM conv bake-off (see `runbook_compliance.md` empirical pass).
 
 ## COMGR
 
