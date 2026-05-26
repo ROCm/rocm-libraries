@@ -142,18 +142,18 @@ __global__ static void __launch_bounds__(LASET_MAX_THREADS) laset_kernel(char co
 // Initializes matrix on the device.
 template <typename T, typename I, typename Istride, typename UA>
 rocblas_status laset(rocblas_handle handle,
-                  char const uplo_c,
-                  I const m,
-                  I const n,
-                  T const alpha,
-                  T const beta,
+                     char const uplo_c,
+                     I const m,
+                     I const n,
+                     T const alpha,
+                     T const beta,
 
-                  UA A_,
-                  Istride const shiftA,
-                  I const lda,
-                  Istride const strideA,
+                     UA A_,
+                     Istride const shiftA,
+                     I const lda,
+                     Istride const strideA,
 
-                  I const batch_count)
+                     I const batch_count)
 {
     // quick return
     if(m <= 0 || n <= 0 || batch_count <= 0)

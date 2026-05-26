@@ -38,26 +38,29 @@
 // represented by diagonal D and sub/super-diagonal E,
 // and A and C are real or complex m-by-n general matrices.
 //
-template <typename T, typename S=decltype( std::real( T{} ) )>
-void cpu_stmm(
-    rocblas_int m, rocblas_int n,
-    T const* A, rocblas_int lda,
-    S const* D, S const* E,
-    T* C, rocblas_int ldc )
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_stmm(rocblas_int m,
+              rocblas_int n,
+              T const* A,
+              rocblas_int lda,
+              S const* D,
+              S const* E,
+              T* C,
+              rocblas_int ldc)
 {
-    assert( m >= 0 );
-    assert( n >= 0 );
-    assert( lda >= m );
-    assert( ldc >= m );
+    assert(m >= 0);
+    assert(n >= 0);
+    assert(lda >= m);
+    assert(ldc >= m);
 
     // Quick return
-    if (m == 0 || n == 0)
+    if(m == 0 || n == 0)
         return;
 
     // Single vector
-    if (n == 1)
+    if(n == 1)
     {
-        for (rocblas_int i = 0; i < m; ++i)
+        for(rocblas_int i = 0; i < m; ++i)
         {
             C[i] = A[i] * D[0];
         }
@@ -65,34 +68,31 @@ void cpu_stmm(
     }
 
     // General case, n >= 2.
-    for (rocblas_int j = 0; j < n; ++j)
+    for(rocblas_int j = 0; j < n; ++j)
     {
-        if (j == 0)
+        if(j == 0)
         {
             // C[:,0] = A[:,0]*D[0] + A[:,1]*E[0]
-            for (rocblas_int i = 0; i < m; ++i)
+            for(rocblas_int i = 0; i < m; ++i)
             {
-                C[i + j*ldc] = A[i +     j*lda] * D[j]
-                             + A[i + (j+1)*lda] * E[j];
+                C[i + j * ldc] = A[i + j * lda] * D[j] + A[i + (j + 1) * lda] * E[j];
             }
         }
-        else if (j == n-1)
+        else if(j == n - 1)
         {
             // C[:,n-1] = A[:,n-2]*E[n-2] + A[:,n-1]*D[n-1]
-            for (rocblas_int i = 0; i < m; ++i)
+            for(rocblas_int i = 0; i < m; ++i)
             {
-                C[i + j*ldc] = A[i + (j-1)*lda] * E[j-1]
-                            + A[i +     j*lda] * D[j];
+                C[i + j * ldc] = A[i + (j - 1) * lda] * E[j - 1] + A[i + j * lda] * D[j];
             }
         }
         else
         {
             // C[:,j] = A[:,j-1]*E[j-1] + A[:,j]*D[j] + A[:,j+1]*E[j]
-            for (rocblas_int i = 0; i < m; ++i)
+            for(rocblas_int i = 0; i < m; ++i)
             {
-                C[i + j*ldc] = A[i + (j-1)*lda] * E[j-1]
-                            + A[i +     j*lda] * D[j]
-                            + A[i + (j+1)*lda] * E[j];
+                C[i + j * ldc] = A[i + (j - 1) * lda] * E[j - 1] + A[i + j * lda] * D[j]
+                    + A[i + (j + 1) * lda] * E[j];
             }
         }
     }
@@ -115,52 +115,55 @@ void cpu_stmm(
 //      [ d d d d d ]   main diagonal
 //
 template <typename T>
-void cpu_hbadd(
-    rocblas_fill uplo, rocblas_int n, rocblas_int kd,
-    T alpha,
-    T const* Aband, rocblas_int ldab,
-    T beta,
-    T* C, rocblas_int ldc )
+void cpu_hbadd(rocblas_fill uplo,
+               rocblas_int n,
+               rocblas_int kd,
+               T alpha,
+               T const* Aband,
+               rocblas_int ldab,
+               T beta,
+               T* C,
+               rocblas_int ldc)
 {
     using std::imag;
 
-    assert( n >= 0 );
-    assert( kd >= 0 );
-    assert( ldab >= kd+1 );
-    assert( ldc >= n );
-    assert( uplo == rocblas_fill_lower || uplo == rocblas_fill_upper );
+    assert(n >= 0);
+    assert(kd >= 0);
+    assert(ldab >= kd + 1);
+    assert(ldc >= n);
+    assert(uplo == rocblas_fill_lower || uplo == rocblas_fill_upper);
 
     // Quick return
-    if (n == 0)
+    if(n == 0)
         return;
 
-    if (uplo == rocblas_fill_lower)
+    if(uplo == rocblas_fill_lower)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            for (rocblas_int i = j; i < min( j+kd+1, n ); ++i)
+            for(rocblas_int i = j; i < min(j + kd + 1, n); ++i)
             {
-                T Aij = Aband[ i-j + j*ldab ];
-                if (i == j)
-                    assert( imag( Aij ) == 0 );
-                C[i + j*ldc] = alpha*Aij + beta*C[i + j*ldc];
-                if (i != j)
-                    C[j + i*ldc] = alpha*sconj( Aij ) + beta*C[j + i*ldc];
+                T Aij = Aband[i - j + j * ldab];
+                if(i == j)
+                    assert(imag(Aij) == 0);
+                C[i + j * ldc] = alpha * Aij + beta * C[i + j * ldc];
+                if(i != j)
+                    C[j + i * ldc] = alpha * sconj(Aij) + beta * C[j + i * ldc];
             }
         }
     }
     else // upper
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            for (rocblas_int i = max( j-kd, 0 ); i <= j; ++i)
+            for(rocblas_int i = max(j - kd, 0); i <= j; ++i)
             {
-                T Aij = Aband[ kd-(i-j) + j*ldab ];
-                if (i == j)
-                    assert( imag( Aij ) == 0 );
-                C[i + j*ldc] = alpha*Aij + beta*C[i + j*ldc];
-                if (i != j)
-                    C[j + i*ldc] = alpha*sconj( Aij ) + beta*C[j + i*ldc];
+                T Aij = Aband[kd - (i - j) + j * ldab];
+                if(i == j)
+                    assert(imag(Aij) == 0);
+                C[i + j * ldc] = alpha * Aij + beta * C[i + j * ldc];
+                if(i != j)
+                    C[j + i * ldc] = alpha * sconj(Aij) + beta * C[j + i * ldc];
             }
         }
     }

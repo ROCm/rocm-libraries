@@ -72,10 +72,10 @@ void cpu_syr(rocblas_fill uplo, rocblas_int n, T alpha, T *x,
                rocblas_int incx, T *A, rocblas_int lda);
 */
 
-template <typename T, typename S=decltype(std::real(T{}))>
+template <typename T, typename S = decltype(std::real(T{}))>
 S cpu_lange(char norm, rocblas_int m, rocblas_int n, const T* A, rocblas_int lda, S* rwork);
 
-template <typename T, typename S=decltype(std::real(T{}))>
+template <typename T, typename S = decltype(std::real(T{}))>
 S cpu_lanhb(char norm, char uplo, rocblas_int n, rocblas_int kd, const T* A, rocblas_int lda, S* rwork);
 
 template <typename T, typename S>

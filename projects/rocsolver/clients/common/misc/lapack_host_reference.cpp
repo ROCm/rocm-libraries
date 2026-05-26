@@ -42,15 +42,54 @@
 extern "C" {
 #endif
 
-float  slange_(const char* norm, const int* m, const int* n, const float*  A, const int* lda, float*  rwork);
-double dlange_(const char* norm, const int* m, const int* n, const double* A, const int* lda, double* rwork);
-float  clange_(const char* norm, const int* m, const int* n, const rocblas_float_complex*  A, const int* lda, float*  rwork);
-double zlange_(const char* norm, const int* m, const int* n, const rocblas_double_complex* A, const int* lda, double* rwork);
+float slange_(const char* norm, const int* m, const int* n, const float* A, const int* lda, float* rwork);
+double dlange_(const char* norm,
+               const int* m,
+               const int* n,
+               const double* A,
+               const int* lda,
+               double* rwork);
+float clange_(const char* norm,
+              const int* m,
+              const int* n,
+              const rocblas_float_complex* A,
+              const int* lda,
+              float* rwork);
+double zlange_(const char* norm,
+               const int* m,
+               const int* n,
+               const rocblas_double_complex* A,
+               const int* lda,
+               double* rwork);
 
-float  slansb_(const char* norm, const char* uplo, const int* n, const int* kd, const float*  Aband, const int* ldab, float*  rwork);
-double dlansb_(const char* norm, const char* uplo, const int* n, const int* kd, const double* Aband, const int* ldab, double* rwork);
-float  clanhb_(const char* norm, const char* uplo, const int* n, const int* kd, const rocblas_float_complex*  Aband, const int* ldab, float*  rwork);
-double zlanhb_(const char* norm, const char* uplo, const int* n, const int* kd, const rocblas_double_complex* Aband, const int* ldab, double* rwork);
+float slansb_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const int* kd,
+              const float* Aband,
+              const int* ldab,
+              float* rwork);
+double dlansb_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const int* kd,
+               const double* Aband,
+               const int* ldab,
+               double* rwork);
+float clanhb_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const int* kd,
+              const rocblas_float_complex* Aband,
+              const int* ldab,
+              float* rwork);
+double zlanhb_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const int* kd,
+               const rocblas_double_complex* Aband,
+               const int* ldab,
+               double* rwork);
 
 void sgecon_(char* norm,
              int* n,

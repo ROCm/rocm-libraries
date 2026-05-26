@@ -63,18 +63,18 @@ const vector<vector<int>> store_range = {
     {-1, 0, 0, 0},
     {0, -1, 0, 0},
     // normal (valid) samples
-    {1, 1, 0, 0},  // left,  no-trans   // also bad args
-    {1, 1, 1, 0},  // right, no-trans
-    {0, 0, 0, 0},  // left,  no-trans   // also bad args
-    {0, 0, 1, 0},  // right, no-trans
-    {0, 0, 0, 1},  // left,  conj-trans
-    {0, 0, 1, 1},  // right, conj-trans
+    {1, 1, 0, 0}, // left,  no-trans   // also bad args
+    {1, 1, 1, 0}, // right, no-trans
+    {0, 0, 0, 0}, // left,  no-trans   // also bad args
+    {0, 0, 1, 0}, // right, no-trans
+    {0, 0, 0, 1}, // left,  conj-trans
+    {0, 0, 1, 1}, // right, conj-trans
 };
 
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
     // quick return
-    {0, 1, 0},  // also bad args
+    {0, 1, 0}, // also bad args
     {1, 0, 0},
     // invalid
     {-1, 1, 0},
@@ -90,7 +90,7 @@ const vector<vector<int>> size_range = {
 
 const vector<vector<int64_t>> size_range_64 = {
     // quick return
-    {0, 1, 0},  // also bad args
+    {0, 1, 0}, // also bad args
     {1, 0, 0},
     // invalid
     {-1, 1, 0},
@@ -153,11 +153,8 @@ protected:
     {
         Arguments arg = ormtr_hb2st_setup_arguments(this->GetParam());
 
-        if(arg.peek<I>("m") == 0
-           && arg.peek<I>("n") == 1
-           && arg.peek<I>("kd") == 0
-           && arg.peek<char>("side") == 'L'
-           && arg.peek<char>("trans") == 'N')
+        if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 1 && arg.peek<I>("kd") == 0
+           && arg.peek<char>("side") == 'L' && arg.peek<char>("trans") == 'N')
         {
             testing_ormtr_unmtr_hb2st_bad_arg<T, I>();
         }

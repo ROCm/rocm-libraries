@@ -28,10 +28,10 @@
 #pragma once
 
 #include "auxiliary/rocauxiliary_larft.hpp"
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_datatype2string.hpp"
-#include "lib_device_helpers.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -43,20 +43,19 @@ ROCSOLVER_BEGIN_NAMESPACE
 // If needed, we can limit max_parallel to limit workspace memory.
 //
 template <bool BATCHED, typename T, typename I = rocblas_int>
-void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
-    const rocblas_side side,
-    const rocblas_operation trans,
-    const I m,
-    const I n,
-    const I kd,
-    const I batch_count,
-    I* max_parallel,
-    size_t* size_scalars,
-    size_t* size_T,
-    size_t* size_W,
-    size_t* size_Z,
-    size_t* size_work,
-    size_t* size_workArr)
+void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
+                                               const rocblas_operation trans,
+                                               const I m,
+                                               const I n,
+                                               const I kd,
+                                               const I batch_count,
+                                               I* max_parallel,
+                                               size_t* size_scalars,
+                                               size_t* size_T,
+                                               size_t* size_W,
+                                               size_t* size_Z,
+                                               size_t* size_work,
+                                               size_t* size_workArr)
 {
     *max_parallel = 1;
     *size_scalars = 0;
@@ -70,46 +69,45 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     if(m == 0 || n == 0 || batch_count == 0)
         return;
 
-    I nz = (side == rocblas_side_left ? n : m);  // cols in Z
-    I nq = (side == rocblas_side_left ? m : n);  // rows in Q
-    I nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
+    I nz = (side == rocblas_side_left ? n : m); // cols in Z
+    I nq = (side == rocblas_side_left ? m : n); // rows in Q
+    I nt = ceildiv(nq - 1, kd); // block cols in conceptual V
 
     // If batch_count = 1, set max_parallel > 1 and batch update block rows or
     // cols of a single matrix.
     // If batch_count > 1, set max_parallel = 1 and batch multiple matrices.
-    if (batch_count == 1)
+    if(batch_count == 1)
     {
-        *max_parallel = ceildiv( nt, 2 );
+        *max_parallel = ceildiv(nt, 2);
     }
     I bc = batch_count * (*max_parallel);
     bool batched = bc > 1;
     *size_Z = sizeof(T) * kd * nz * bc;
     *size_T = sizeof(T) * kd * kd * bc;
-    *size_W = sizeof(T) * 2*kd * kd * bc;
-    *size_workArr = batched ? sizeof(T*) * 2 * bc: 0;
+    *size_W = sizeof(T) * 2 * kd * kd * bc;
+    *size_workArr = batched ? sizeof(T*) * 2 * bc : 0;
 
     // extra space for larft calls
     size_t w, wa;
-    rocsolver_larft_getMemorySize<true, T>(  // always (strided) batched
-        2*kd, kd, bc, size_scalars, &w, &wa);
+    rocsolver_larft_getMemorySize<true, T>( // always (strided) batched
+        2 * kd, kd, bc, size_scalars, &w, &wa);
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 }
 
 //------------------------------------------------------------------------------
 template <bool COMPLEX, typename T, typename U, typename I = rocblas_int>
-rocblas_status rocsolver_ormtr_hb2st_argCheck(
-    rocblas_handle handle,
-    const rocblas_side side,
-    const rocblas_operation trans,
-    const I m,
-    const I n,
-    const I kd,
-    T V,
-    const I ldv,
-    U tau,
-    T C,
-    const I ldc)
+rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
+                                              const rocblas_side side,
+                                              const rocblas_operation trans,
+                                              const I m,
+                                              const I n,
+                                              const I kd,
+                                              T V,
+                                              const I ldv,
+                                              U tau,
+                                              T C,
+                                              const I ldc)
 {
     // order is important for unit tests:
 
@@ -126,15 +124,14 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
         return rocblas_status_invalid_value;
     }
 
-    if(trans != rocblas_operation_none
-       && trans != rocblas_operation_transpose
+    if(trans != rocblas_operation_none && trans != rocblas_operation_transpose
        && trans != rocblas_operation_conjugate_transpose)
     {
         return rocblas_status_invalid_value;
     }
 
     // 2. invalid size
-    if(m < 0 || n < 0 || ldv < 2*kd || ldc < m)
+    if(m < 0 || n < 0 || ldv < 2 * kd || ldc < m)
     {
         return rocblas_status_invalid_size;
     }
@@ -144,7 +141,7 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if((m && n && ! V) || (m && n && ! tau) || (m && n && ! C))
+    if((m && n && !V) || (m && n && !tau) || (m && n && !C))
     {
         return rocblas_status_invalid_pointer;
     }
@@ -154,36 +151,36 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
 
 //------------------------------------------------------------------------------
 template <bool BATCHED, bool STRIDED, typename T, typename U, typename I = rocblas_int>
-rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
-    rocblas_handle handle,
-    const rocblas_side side,
-    const rocblas_operation trans,
-    const I m,
-    const I n,
-    const I kd,
-    U V,
-    const I shiftV,
-    const I ldv,
-    rocblas_stride strideV,
-    T* tau,
-    rocblas_stride strideTau,
-    U C,
-    const I shiftC,
-    const I ldc,
-    rocblas_stride strideC,
-    const I batch_count,
-    I max_parallel,
-    T* scalars,
-    T* Tr, const I ldt,
-    T* W,  const I ldw,
-    T* Z,  const I ldz,
-    T* work,
-    T** workArr)
+rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
+                                                    const rocblas_side side,
+                                                    const rocblas_operation trans,
+                                                    const I m,
+                                                    const I n,
+                                                    const I kd,
+                                                    U V,
+                                                    const I shiftV,
+                                                    const I ldv,
+                                                    rocblas_stride strideV,
+                                                    T* tau,
+                                                    rocblas_stride strideTau,
+                                                    U C,
+                                                    const I shiftC,
+                                                    const I ldc,
+                                                    rocblas_stride strideC,
+                                                    const I batch_count,
+                                                    I max_parallel,
+                                                    T* scalars,
+                                                    T* Tr,
+                                                    const I ldt,
+                                                    T* W,
+                                                    const I ldw,
+                                                    T* Z,
+                                                    const I ldz,
+                                                    T* work,
+                                                    T** workArr)
 {
-    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans,
-                    "m:", m, "n:", n, "kd:", kd,
-                    "shiftV:", shiftV, "ldv:", ldv,
-                    "shiftC:", shiftC, "ldc:", ldc,
+    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans, "m:", m, "n:", n,
+                    "kd:", kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count, "mp:", max_parallel);
 
     const T zero = 0;
@@ -197,23 +194,23 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I nz = (side == rocblas_side_left ? n : m);  // cols in Z
-    I nq = (side == rocblas_side_left ? m : n);  // rows in Q
-    I nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
+    I nz = (side == rocblas_side_left ? n : m); // cols in Z
+    I nq = (side == rocblas_side_left ? m : n); // rows in Q
+    I nt = ceildiv(nq - 1, kd); // block cols in conceptual V
 
-    rocblas_stride strideT = ldt*kd;
-    rocblas_stride strideW = ldw*kd;
-    rocblas_stride strideZ = ldz*nz;
+    rocblas_stride strideT = ldt * kd;
+    rocblas_stride strideW = ldw * kd;
+    rocblas_stride strideZ = ldz * nz;
 
     I bc = batch_count;
     //max_parallel = 1;
-    if (max_parallel > 1)
+    if(max_parallel > 1)
     {
-        strideV   = kd*ldv;
+        strideV = kd * ldv;
         strideTau = kd;
-        strideC   = 2*kd;
+        strideC = 2 * kd;
         // For side=right, C is strided by cols instead of rows.
-        if (side == rocblas_side_right)
+        if(side == rocblas_side_right)
         {
             strideC *= ldc;
         }
@@ -230,86 +227,82 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     bool left = (side == rocblas_side_left);
     bool backward = left == (trans == rocblas_operation_none);
     I k_begin, k_end, k_step;
-    if (backward)
+    if(backward)
     {
         // left no-trans OR right (conj-)trans
         k_begin = nt - 1;
-        k_end   = -nt;
-        k_step  = -1;
+        k_end = -nt;
+        k_step = -1;
     }
     else
     {
         // left (conj-)trans OR right no-trans
         k_begin = -(nt - 1);
-        k_end   = nt;
-        k_step  = 1;
+        k_end = nt;
+        k_step = 1;
     }
 
-    for (I k = k_begin; k != k_end; k += k_step)
+    for(I k = k_begin; k != k_end; k += k_step)
     {
         // i, j are block indices of the top of each conceptual V{i,j} block.
-        I j_begin = std::max( I(0), k );
-        I j_end   = ceildiv( nt + k, I(2) );
+        I j_begin = std::max(I(0), k);
+        I j_end = ceildiv(nt + k, I(2));
 
         // For given k, the j's are independent; we always go ascending.
         I j = j_begin;
-        while (j < j_end)
+        while(j < j_end)
         {
             // r is storage index of V{i,j} block.
-            I i = 2*j - k;
-            I r = get_v_block_index( nt, i, j ) * kd;
+            I i = 2 * j - k;
+            I r = get_v_block_index(nt, i, j) * kd;
 
             // For side = left,  ii is top  row of C block.
             // For side = right, ii is left col of C block.
-            I ii = i*kd + 1;
+            I ii = i * kd + 1;
 
             // V block has dimensions mv-by-kv.
-            I mv = std::min( 2*kd - 1, nq - ii );
-            I kv = std::min( mv, kd );
+            I mv = std::min(2 * kd - 1, nq - ii);
+            I kv = std::min(mv, kd);
 
             // Check dimensions (mv, kv) for last j in this batch. If it is
             // different, save that j for the next batch, which will be a
             // cleanup with batch_count = 1.
-            I j_last = std::min( j + max_parallel, j_end ) - 1;
+            I j_last = std::min(j + max_parallel, j_end) - 1;
             {
-                I i_last = 2*j_last - k;
-                I ii_last = i_last*kd + 1;
-                I mv_last = std::min( 2*kd - 1, nq - ii );
-                I kv_last = std::min( mv, kd );
-                if (mv_last != mv || kv_last != kv)
+                I i_last = 2 * j_last - k;
+                I ii_last = i_last * kd + 1;
+                I mv_last = std::min(2 * kd - 1, nq - ii);
+                I kv_last = std::min(mv, kd);
+                if(mv_last != mv || kv_last != kv)
                 {
                     j_last -= 1;
                 }
             }
 
-            if (max_parallel > 1)
+            if(max_parallel > 1)
             {
                 bc = j_last + 1 - j_begin;
             }
             // Generate T, dim: (kv x kv)
-            rocsolver_larft_template<T>(
-                handle, rocblas_forward_direction, rocblas_column_wise,
-                mv, kv, // opts
-                V, r*ldv + shiftV, ldv, strideV, // V
-                &tau[ r ], strideTau, // tau
-                Tr, ldt, strideT, // T
-                bc, scalars, work, workArr );
+            rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, mv,
+                                        kv, // opts
+                                        V, r * ldv + shiftV, ldv, strideV, // V
+                                        &tau[r], strideTau, // tau
+                                        Tr, ldt, strideT, // T
+                                        bc, scalars, work, workArr);
 
             // Rest of code is equivalent to larfb to apply a block reflector,
             // but using gemm instead of trmm.
 
             // W = V * op(T), dim: (mv x kv) = (mv x kv) (kv x kv)
-            auto opT = backward ? rocblas_operation_none
-                                : rocblas_operation_conjugate_transpose;
-            rocsolver_gemm(
-                handle, rocblas_operation_none, opT,
-                mv, kv, kv, // opts
-                &one,  V,  r*ldv + shiftV, ldv, strideV, // V
-                       Tr, 0,              ldt, strideT, // op(T)
-                &zero, W,  0,              ldw, strideW, // W
-                bc, workArr );
+            auto opT = backward ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
+            rocsolver_gemm(handle, rocblas_operation_none, opT, mv, kv, kv, // opts
+                           &one, V, r * ldv + shiftV, ldv, strideV, // V
+                           Tr, 0, ldt, strideT, // op(T)
+                           &zero, W, 0, ldw, strideW, // W
+                           bc, workArr);
 
-            if (left)
+            if(left)
             {
                 // Update block row Ci.
                 // Ci = op(Q) Ci = (I - V op(T) V^H) Ci
@@ -317,26 +310,20 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                 //    = Ci - W Z
 
                 // Z = V^H Ci  (kv x n) = (mv x kv)^H (mv x n)
-                rocsolver_gemm(
-                    handle,
-                    rocblas_operation_conjugate_transpose,
-                    rocblas_operation_none,
-                    kv, n, mv, // opts
-                    &one,  V, r*ldv + shiftV, ldv, strideV,  // V^H (mv x kv)^H
-                           C, ii + shiftC,    ldc, strideC,  // C (mv x n)
-                    &zero, Z, 0,              ldz, strideZ,  // Z (kv x n)
-                    bc, workArr );
+                rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
+                               rocblas_operation_none, kv, n, mv, // opts
+                               &one, V, r * ldv + shiftV, ldv, strideV, // V^H (mv x kv)^H
+                               C, ii + shiftC, ldc, strideC, // C (mv x n)
+                               &zero, Z, 0, ldz, strideZ, // Z (kv x n)
+                               bc, workArr);
 
                 // Ci -= W Z  (mv x n) = (mv x kv) (kv x n)
-                rocsolver_gemm(
-                    handle,
-                    rocblas_operation_none,
-                    rocblas_operation_none,
-                    mv, n, kv, // opts
-                    &negone, W, 0,           ldw, strideW,  // W (mv x kv)
-                             Z, 0,           ldz, strideZ,  // Z (kv x n)
-                    &one,    C, ii + shiftC, ldc, strideC,  // C (mv x n)
-                    bc, workArr );
+                rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, mv, n,
+                               kv, // opts
+                               &negone, W, 0, ldw, strideW, // W (mv x kv)
+                               Z, 0, ldz, strideZ, // Z (kv x n)
+                               &one, C, ii + shiftC, ldc, strideC, // C (mv x n)
+                               bc, workArr);
             }
             else // right
             {
@@ -347,26 +334,20 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                 // W = V op(T)^H, above.
 
                 // Z = Vr^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
-                rocsolver_gemm(
-                    handle,
-                    rocblas_operation_conjugate_transpose,
-                    rocblas_operation_conjugate_transpose,
-                    kv, m, mv, // opts
-                    &one,  V, r*ldv,  ldv, strideV, // V^H
-                           C, ii*ldc, ldc, strideC, // C^H
-                    &zero, Z, 0,      ldz, strideZ, // Z
-                    bc, workArr );
+                rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
+                               rocblas_operation_conjugate_transpose, kv, m, mv, // opts
+                               &one, V, r * ldv, ldv, strideV, // V^H
+                               C, ii * ldc, ldc, strideC, // C^H
+                               &zero, Z, 0, ldz, strideZ, // Z
+                               bc, workArr);
 
                 // Ci -= Z^H W^H, dim: (m x mv) = (kv x m)^H (mv x kv)^H
-                rocsolver_gemm(
-                    handle,
-                    rocblas_operation_conjugate_transpose,
-                    rocblas_operation_conjugate_transpose,
-                    m, mv, kv, // opts
-                    &negone, Z, 0,      ldz, strideZ, // Z^H
-                             W, 0,      ldw, strideW, // W^H
-                    &one,    C, ii*ldc, ldc, strideC, // C
-                    bc, workArr );
+                rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
+                               rocblas_operation_conjugate_transpose, m, mv, kv, // opts
+                               &negone, Z, 0, ldz, strideZ, // Z^H
+                               W, 0, ldw, strideW, // W^H
+                               &one, C, ii * ldc, ldc, strideC, // C
+                               bc, workArr);
             }
 
             j = j_last + 1;
