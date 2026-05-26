@@ -81,6 +81,7 @@ struct GemmPipelineProblemBase
     static constexpr bool TransposeC            = Traits::TransposeC;
     static constexpr index_t NumWaveGroups      = Traits::NumWaveGroups;
     static constexpr bool UseStructuredSparsity = Traits::UseStructuredSparsity;
+    static constexpr bool PermutePackTensorC    = Traits::PermutePackTensorC;
 
     static constexpr index_t kBlockSize = BlockGemmShape::NumWarps * get_warp_size();
 
@@ -298,6 +299,7 @@ struct UniversalGemmPipelineProblem
     static constexpr bool TransposeC            = Traits::TransposeC;
     static constexpr index_t NumWaveGroups      = Traits::NumWaveGroups;
     static constexpr bool UseStructuredSparsity = Traits::UseStructuredSparsity;
+    static constexpr bool PermutePackTensorC    = Traits::PermutePackTensorC;
 
     static constexpr index_t kBlockSize = BlockGemmShape::NumWarps * get_warp_size();
 
@@ -358,6 +360,7 @@ struct FlatmmPipelineProblem
     static constexpr bool TransposeC            = Traits::TransposeC;
     static constexpr index_t NumWaveGroups      = Traits::NumWaveGroups;
     static constexpr bool UseStructuredSparsity = Traits::UseStructuredSparsity;
+    static constexpr bool PermutePackTensorC    = Traits::PermutePackTensorC;
 
     static constexpr index_t kBlockSize = BlockGemmShape::NumWarps * get_warp_size();
 

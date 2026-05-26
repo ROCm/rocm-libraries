@@ -564,6 +564,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrloadDefaultPolicy
                                             true,
                                             false,
                                             false,
+                                            false,
                                             NumAccess>;
 
         using BlockGemmPolicy =

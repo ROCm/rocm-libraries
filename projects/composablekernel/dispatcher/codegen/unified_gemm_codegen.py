@@ -601,7 +601,7 @@ struct {struct_name} {{
     using BDataType = {ns_name}::BDataType;
     using CDataType = {ns_name}::CDataType;
     using AccDataType = {ns_name}::AccDataType;
-    
+
     // Configuration
     static constexpr index_t BlockSize = {config.block_size};
     static constexpr index_t TileM = {t.tile_m};
@@ -613,7 +613,7 @@ struct {struct_name} {{
     static constexpr index_t WarpTileM = {t.warp_tile_m};
     static constexpr index_t WarpTileN = {t.warp_tile_n};
     static constexpr index_t WarpTileK = {t.warp_tile_k};
-    
+
     // Traits
     static constexpr bool kPadM = {str(tr.pad_m).lower()};
     static constexpr bool kPadN = {str(tr.pad_n).lower()};
@@ -622,9 +622,10 @@ struct {struct_name} {{
     static constexpr bool UsePersistentKernel = {str(tr.persistent).lower()};
     static constexpr bool DoubleSmemBuffer = {str(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2").lower()};
     static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool PermutePackTensorC            = false;
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
     static constexpr index_t NumWaveGroups = {config.num_wave_groups};
-    
+
     {self._tile_types(config, ns_name)}
     {self._launch_function(config)}
 }};
@@ -656,7 +657,7 @@ using AccDataType = float;
         sequence<WarpPerBlock_M, WarpPerBlock_N, WarpPerBlock_K>,
         sequence<WarpTileM, WarpTileN, WarpTileK>,
         false, false>;
-    
+
     using TilePartitioner = GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
     using Traits = TileGemmTraits<kPadM, kPadN, kPadK, {ns_name}::ALayout, {ns_name}::BLayout, {ns_name}::CLayout, NumWaveGroups>;
     using GemmPipelineProblem = GemmPipelineProblem<ADataType, BDataType, AccDataType, TileShape, Traits>;
@@ -682,11 +683,11 @@ using AccDataType = float;
         const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
         const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-        
+
         float ave_time{{0}};
-        
+
         constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
-        
+
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             ADataType, BDataType, AccDataType, TileShape,
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
@@ -694,26 +695,26 @@ using AccDataType = float;
                                             UseStructuredSparsity, UsePersistentKernel,
                                             NumWaveGroups, Preshuffle>,
             scheduler>;
-        
+
         using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
         {self._epilogue_code(config)}
-        
+
         using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-        
+
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             auto kargs = GemmKernel::MakeKernelArgs(args);
-            
+
             if (!GemmKernel::IsSupportedArgument(kargs)) {{
                 throw std::runtime_error("Arguments not supported!");
             }}
-            
+
             const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if config.trait.persistent else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
             const dim3 blocks = GemmKernel::BlockSize();
-            
+
             constexpr int kBlockPerCu = {config.k_block_per_cu};
             ave_time = launch_kernel(stream,
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-            
+
             return ave_time;
         }};
 
@@ -734,11 +735,11 @@ using AccDataType = float;
         const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
         const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-        
+
         float ave_time{{0}};
-        
+
         constexpr auto scheduler = GemmPipelineScheduler::Default;  // Preshuffle uses Default scheduler
-        
+
         // Preshuffle uses TileFlatmmShape instead of TileGemmShape for the problem
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             ADataType, BDataType, AccDataType, TileShape,
@@ -747,26 +748,26 @@ using AccDataType = float;
                                             UseStructuredSparsity, UsePersistentKernel,
                                             NumWaveGroups, Preshuffle>,
             scheduler>;
-        
+
         using GemmPipeline = WeightPreshufflePipelineAGmemBGmemCRegV2<UniversalGemmProblem>;
         {self._epilogue_code(config)}
-        
+
         using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-        
+
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             auto kargs = GemmKernel::MakeKernelArgs(args);
-            
+
             if (!GemmKernel::IsSupportedArgument(kargs)) {{
                 throw std::runtime_error("Arguments not supported for preshuffle kernel!");
             }}
-            
+
             const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if config.trait.persistent else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
             const dim3 blocks = GemmKernel::BlockSize();
-            
+
             constexpr int kBlockPerCu = {config.k_block_per_cu};
             ave_time = launch_kernel(stream,
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-            
+
             return ave_time;
         }};
 
@@ -784,11 +785,11 @@ using AccDataType = float;
         const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
         const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-        
+
         float ave_time{{0}};
-        
+
         constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
-        
+
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             ADataType, BDataType, AccDataType, TileShape,
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
@@ -796,34 +797,34 @@ using AccDataType = float;
                                             UseStructuredSparsity, UsePersistentKernel,
                                             NumWaveGroups, Preshuffle>,
             scheduler>;
-        
+
         using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
         {self._epilogue_code(config)}
-        
+
         // Use GemmKernelMultiD for Multi-D variant
         using GemmKernel = ck_tile::GemmKernelMultiD<TilePartitioner, GemmPipeline, GemmEpilogue>;
-        
+
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             auto kargs = GemmKernel::MakeKernelArgs(args);
-            
+
             if (!GemmKernel::IsSupportedArgument(kargs)) {{
                 throw std::runtime_error("Arguments not supported! Multi-D currently doesn't support k_batch > 1");
             }}
-            
+
             const dim3 grids = GemmKernel::GridSize(args.M, args.N, args.k_batch);
             const dim3 blocks = GemmKernel::BlockSize();
-            
+
             constexpr int kBlockPerCu = {config.k_block_per_cu};
             ave_time = launch_kernel(stream,
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-            
+
             return ave_time;
         }};
 
         BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
         return ave_time;
     }}
-    
+
     // Overload for standard GemmHostArgs (converts to Multi-D args with empty D tensors)
     static float launch(const GemmHostArgs& args, const stream_config& stream) {{
         std::array<const void*, NumDTensor> empty_ds{{}};
@@ -925,9 +926,9 @@ namespace backends = ::ck_tile::dispatcher::backends;
 inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx942") {{
     // Use the unique kernel struct name
     using KernelStruct = Kernel_{kernel_name};
-    
+
     KernelKey key;
-    
+
     // Signature
     key.signature.dtype_a = {self.tm.DTYPE_TO_DISPATCHER[self.datatype]};
     key.signature.dtype_b = {self.tm.DTYPE_TO_DISPATCHER[self.datatype]};
@@ -943,7 +944,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.signature.elementwise_op = "{config.elementwise_op}";
     key.signature.num_d_tensors = {config.num_d_tensors};
     key.signature.structured_sparsity = false;
-    
+
     // Algorithm
     key.algorithm.tile_shape = {{{config.tile.tile_m}, {config.tile.tile_n}, {config.tile.tile_k}}};
     key.algorithm.wave_shape = {{{config.tile.warp_m}, {config.tile.warp_n}, {config.tile.warp_k}}};
@@ -957,9 +958,9 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
     key.algorithm.transpose_c = false;
     key.algorithm.num_wave_groups = {config.num_wave_groups};
-    
+
     key.gfx_arch = gfx_arch;
-    
+
     return std::make_shared<backends::GeneratedKernelInstance<KernelStruct>>(key, "{kernel_name}");
 }}
 

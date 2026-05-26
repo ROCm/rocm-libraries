@@ -196,6 +196,7 @@ struct GroupedConvUniversalPipelineAgBgCrPolicy
                                             Problem::TransposeC,
                                             false,
                                             Problem::UseStructuredSparsity,
+                                            false,
                                             wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,

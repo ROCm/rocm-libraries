@@ -476,6 +476,7 @@ struct DeviceGemm_Xdl_CkTileWrap : public
         static constexpr bool TransposeC =
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
         static constexpr bool UseStructuredSparsity = false;
+        static constexpr bool PermutePackTensorC    = false;
         static constexpr bool UseDataCachePrefetch  = false;
         static constexpr bool DataCachePrefetchToL1 = false;
 

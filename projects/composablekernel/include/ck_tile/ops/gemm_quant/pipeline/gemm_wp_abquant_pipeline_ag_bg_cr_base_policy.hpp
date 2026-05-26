@@ -117,6 +117,7 @@ struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipel
                                             Problem::TransposeC,
                                             false,
                                             false,
+                                            false,
                                             NumAccess>;
 
         // TODO : Use a custom block policy for AsBrCr

@@ -238,6 +238,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
     static constexpr bool ClusterLaunch =
         ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
+    static constexpr bool PackTensorEnable =
+        ck_tile::tuple_element_or_default_t<Tuple, 16, std::false_type>::value;
+
     // TF32 uses tf32_t as compute type but float as buffer/storage type
     using ADataTypeBuf = ck_tile::if_select_t<ADataType, ck_tile::tf32_t, float, ADataType>;
     using BDataTypeBuf = ck_tile::if_select_t<BDataType, ck_tile::tf32_t, float, BDataType>;
@@ -276,7 +279,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
             M_Warp_Tile == N_Warp_Tile;
 #else
-        constexpr bool TransposeC = false;
+        constexpr bool TransposeC = PackTensorEnable ? true : false;
 #endif
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
@@ -318,7 +321,11 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                                                      StructuredSparsity,
                                                                      Persistent,
                                                                      NumWaveGroup,
-                                                                     preshuffle>;
+                                                                     preshuffle,
+                                                                     16,
+                                                                     false,
+                                                                     false,
+                                                                     PackTensorEnable>;
 
         using UniversalGemmProblem =
             ck_tile::UniversalGemmPipelineProblem<ADataTypeBuf,
@@ -335,32 +342,51 @@ class TestCkTileGemmPipeline : public ::testing::Test
         using GemmPipeline =
             typename GemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
 
-        using GemmEpilogue = typename GemmEpilogueTypeSelector<
-            PipelineType,
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
-                                             DsDataType,
-                                             AccDataType,
-                                             CDataType,
-                                             DsLayout,
-                                             CLayout,
-                                             ck_tile::element_wise::PassThrough,
-                                             TilePartitioner::MPerBlock,
-                                             TilePartitioner::NPerBlock,
-                                             M_Warp,
-                                             N_Warp,
-                                             M_Warp_Tile,
-                                             N_Warp_Tile,
-                                             K_Warp_Tile,
-                                             UniversalGemmProblem::TransposeC,
-                                             1,                /*kNumWaveGroups_*/
-                                             false,            /*FixedVectorSize_*/
-                                             1,                /*VectorSizeC_*/
-                                             false,            /*TiledMMAPermuteN_*/
-                                             1,                /*BlockedXDLN_PerWarp_*/
-                                             DoubleSmemBuffer, /*DoubleSmemBuffer*/
-                                             AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType /*BComputeDataType_*/>>::epilogue;
+        using CShuffleProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
+                                                                 BDataType,
+                                                                 DsDataType,
+                                                                 AccDataType,
+                                                                 CDataType,
+                                                                 DsLayout,
+                                                                 CLayout,
+                                                                 ck_tile::element_wise::PassThrough,
+                                                                 TilePartitioner::MPerBlock,
+                                                                 TilePartitioner::NPerBlock,
+                                                                 M_Warp,
+                                                                 N_Warp,
+                                                                 M_Warp_Tile,
+                                                                 N_Warp_Tile,
+                                                                 K_Warp_Tile,
+                                                                 UniversalGemmProblem::TransposeC,
+                                                                 1,     /*kNumWaveGroups_*/
+                                                                 false, /*FixedVectorSize_*/
+                                                                 1,     /*VectorSizeC_*/
+                                                                 false, /*TiledMMAPermuteN_*/
+                                                                 1,     /*BlockedXDLN_PerWarp_*/
+                                                                 DoubleSmemBuffer,
+                                                                 AComputeDataType,
+                                                                 BComputeDataType>;
+
+        using GemmEpilogue = std::conditional_t<
+            PackTensorEnable,
+            ck_tile::PackTensorGemmEpilogue<
+                ck_tile::PackTensorGemmEpilogueProblem<ADataType,
+                                                       BDataType,
+                                                       DsDataType,
+                                                       AccDataType,
+                                                       CDataType,
+                                                       DsLayout,
+                                                       CLayout,
+                                                       ck_tile::element_wise::PassThrough,
+                                                       TilePartitioner::MPerBlock,
+                                                       TilePartitioner::NPerBlock,
+                                                       kPadM,
+                                                       kPadN,
+                                                       M_Warp_Tile,
+                                                       N_Warp_Tile,
+                                                       K_Warp_Tile,
+                                                       UniversalGemmProblem::TransposeC>>,
+            typename GemmEpilogueTypeSelector<PipelineType, CShuffleProblem>::epilogue>;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
         auto kargs   = Kernel::MakeKernelArgs(args);

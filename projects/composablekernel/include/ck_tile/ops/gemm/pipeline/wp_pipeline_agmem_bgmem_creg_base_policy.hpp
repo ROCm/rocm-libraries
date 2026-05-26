@@ -292,6 +292,7 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
                                Problem::TransposeC,
                                false,
                                false,
+                               false,
                                NumAccess>;
 
         using BlockWeightPreshufflePolicy =

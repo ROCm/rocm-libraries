@@ -154,13 +154,37 @@ struct CTransposedWarpDstrEncodingTrait
         typename Impl::kCTYs2RHsMinor>;
 };
 
+template <typename Impl>
+struct CTransposedPackTensorWarpDstrEncodingTrait
+{
+    static constexpr auto kCM1PerLane = 8;
+    using type                        = tile_distribution_encoding<
+                               sequence<>,
+                               tuple<sequence<Impl::kCNBlock, Impl::kCNLane>,
+                                     sequence<Impl::kCMBlock, Impl::kCM0PerLane, Impl::kCMLane, kCM1PerLane>>,
+                               tuple<typename Impl::kCTPs2RHssMajor>,
+                               tuple<typename Impl::kCTPs2RHssMinor>,
+                               typename Impl::kCTYs2RHsMajor,
+                               typename Impl::kCTYs2RHsMinor>;
+};
+
 template <typename WarpGemmAttributeWmmaImpl_,
           bool kTransC                       = false,
+          bool kPermutePackTensorC           = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
           WGAttrNumAccessEnum AttrNumAccessB = WGAttrNumAccessEnum::Single>
 struct WarpGemmAttributeWmma
 {
-    using Impl = remove_cvref_t<WarpGemmAttributeWmmaImpl_>;
+    using RawImpl = remove_cvref_t<WarpGemmAttributeWmmaImpl_>;
+
+    template <typename Impl_>
+    struct PackTensorImpl : Impl_
+    {
+        static constexpr index_t kCM1PerLane = 8;
+        static constexpr index_t kCM0PerLane = Impl_::kM / Impl_::kCMLane / kCM1PerLane;
+    };
+
+    using Impl = std::conditional_t<kPermutePackTensorC, PackTensorImpl<RawImpl>, RawImpl>;
 
     // When kTransC is true and A/B types differ, we need an impl with swapped types
     using TransposedImpl =
@@ -189,6 +213,7 @@ struct WarpGemmAttributeWmma
     static constexpr index_t kCMLane = Impl::kCMLane;
 
     static_assert(Impl::kAK0PerLane * Impl::kAK1PerLane == Impl::kBK0PerLane * Impl::kBK1PerLane);
+    static_assert(!kPermutePackTensorC || kTransC);
     static constexpr index_t kKPerThread = Impl::kAK0PerLane * Impl::kAK1PerLane;
     static constexpr index_t kAKPack     = Impl::kAK1PerLane;
     static constexpr index_t kBKPack     = Impl::kBK1PerLane;
@@ -199,10 +224,14 @@ struct WarpGemmAttributeWmma
     using BWarpDstrEncoding = typename BWarpDstrEncodingTrait<Impl, AttrNumAccessB>::type;
 
     // kCM0PerLane = 1, kCMLane = 2, kCM1PerLane = 2, kCNLane = 16
-    using CWarpDstrEncoding =
+    using CWarpWithTransDstrEncoding =
         std::conditional_t<kTransC,
                            typename CTransposedWarpDstrEncodingTrait<Impl>::type,
                            typename CWarpDstrEncodingTrait<Impl>::type>;
+    using CWarpDstrEncoding =
+        std::conditional_t<kPermutePackTensorC,
+                           typename CTransposedPackTensorWarpDstrEncodingTrait<Impl>::type,
+                           CWarpWithTransDstrEncoding>;
 
     // c_vec += a_vec * b_vec
     template <typename... Params>

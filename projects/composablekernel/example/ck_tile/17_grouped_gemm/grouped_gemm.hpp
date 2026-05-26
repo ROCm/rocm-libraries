@@ -52,6 +52,7 @@ struct GemmConfigBase
 
     static constexpr bool TransposeC            = false;
     static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool PermutePackTensorC    = false;
 
     static constexpr int kBlockPerCu                         = 1;
     static constexpr ck_tile::index_t TileParitionerGroupNum = 8;

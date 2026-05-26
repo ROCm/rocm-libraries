@@ -100,6 +100,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12|gfx13")
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
         endif()
+        if(GPU_TARGETS MATCHES "gfx13")
+            add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_wmma_packtensor test_gemm_pipeline_compv3_wmma_packtensor.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_compv3_wmma_packtensor PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        endif()
     endif()
 
     # Label all ck_tile gemm tests with CK_TILE_GEMM_TESTS for selective execution

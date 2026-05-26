@@ -1473,6 +1473,8 @@ struct UniversalGemmPipelineAgBgCrPolicy
                                             Problem::TransposeC,
                                             false,
                                             Problem::UseStructuredSparsity,
+                                            Problem::PermutePackTensorC,
+                                            wg_attr_num_access,
                                             wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,

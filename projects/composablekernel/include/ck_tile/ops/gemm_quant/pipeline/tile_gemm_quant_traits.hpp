@@ -70,6 +70,7 @@ struct TileGemmQuantTraits
     static constexpr bool TransposeC            = TransposeC_;
     static constexpr bool UseStructuredSparsity = false;
     static constexpr index_t NumWaveGroups      = 1;
+    static constexpr bool PermutePackTensorC    = false;
     static constexpr bool UsePersistentKernel   = UsePersistentKernel_;
 
     static constexpr bool APreshuffleQuant = APreshuffleQuant_;

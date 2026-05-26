@@ -59,6 +59,7 @@ struct WarpGemmKernel
                                                      TransposeC,
                                                      SwizzleA,
                                                      UseStructuredSparsity,
+                                                     false,
                                                      NumAccess>;
         // A: [M,K] row-major (packed)
         const auto a_view = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(

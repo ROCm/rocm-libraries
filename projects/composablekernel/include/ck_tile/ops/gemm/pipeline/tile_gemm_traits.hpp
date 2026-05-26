@@ -29,6 +29,7 @@ struct TileGemmTraits
 
     static constexpr bool TransposeC            = false;
     static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool PermutePackTensorC    = false;
     static constexpr index_t NumWaveGroups      = NumWaveGroups_;
 };
 
@@ -46,7 +47,8 @@ template <bool kPadM_,
           bool Preshuffle_            = false,
           int VectorSize_             = 16,
           bool UseDataCachePrefetch_  = false,
-          bool DataCachePrefetchToL1_ = false>
+          bool DataCachePrefetchToL1_ = false,
+          bool PackTensor_            = false>
 struct TileGemmUniversalTraits
 {
     static constexpr bool kPadM            = kPadM_;
@@ -66,6 +68,7 @@ struct TileGemmUniversalTraits
     static constexpr bool Preshuffle            = Preshuffle_;
     static constexpr bool UseDataCachePrefetch  = UseDataCachePrefetch_;
     static constexpr bool DataCachePrefetchToL1 = DataCachePrefetchToL1_;
+    static constexpr bool PermutePackTensorC    = PackTensor_;
 };
 
 template <bool kPadM_,

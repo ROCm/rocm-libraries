@@ -33,6 +33,9 @@ using NonPersistent = std::false_type;
 using ClusterEnable  = std::true_type;
 using ClusterDisable = std::false_type;
 
+using PackTensorEnable  = std::true_type;
+using PackTensorDisable = std::false_type;
+
 using I16  = ck_tile::number<16>;
 using I32  = ck_tile::number<32>;
 using I64  = ck_tile::number<64>;
@@ -268,6 +271,11 @@ using KernelTypesCompTDMWmma = ::testing::Types<
 
 using KernelTypesCompAsyncWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync>
+>;
+
+using KernelTypesCompV3WmmaPackTensor = ::testing::Types<
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompV3,    NonPersistent,  ClusterDisable,  PackTensorEnable>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompV3,    NonPersistent,  ClusterDisable,  PackTensorEnable>
 >;
 
 // clang-format on

@@ -11,218 +11,301 @@
 
 namespace ck_tile {
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x4_f32 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x4_f32,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x16_f16_f16 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_f16_f16,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x16_bf16_bf16 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_bf16_bf16,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_i32_16x16x16_i8_i8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_i32_16x16x16_i8_i8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x16_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_f8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x16_bf8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_bf8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x32_f16_f16 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x32_f16_f16,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x32_bf16_bf16 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x32_bf16_bf16,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x16_f8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_f8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x16_bf8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_bf8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_i32_16x16x64_i8_i8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_i32_16x16x64_i8_i8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_i32_16x16x64_u8_u8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_i32_16x16x64_u8_u8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x64_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_f8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x64_bf8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_bf8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x64_f8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_f8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x64_bf8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_bf8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f16_16x16x64_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_f8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f16_16x16x64_bf8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_bf8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f16_16x16x64_f8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_f8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f16_16x16x64_bf8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_bf8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
 template <typename AType,
           typename BType,
           bool kTransC,
-          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f16_16x16x64 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64<AType, BType>,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
 template <typename AType,
           typename BType,
           bool kTransC,
-          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f16_16x16x32 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x32<AType, BType>,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
 template <typename AType,
           typename BType,
           bool kTransC,
-          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x32 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x32<AType, BType>,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
 template <typename AType,
           typename BType,
           bool kTransC,
-          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_i32_16x16x32 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_i32_16x16x32<AType, BType>,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x128_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x128_f8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x128_bf8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x128_bf8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x128_f8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x128_f8_bf8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_16x16x128_bf8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x128_bf8_f8,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC          = false>
 using WarpGemmWmma_f32_32x16x128_f4 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_32x16x128_f4,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
@@ -230,10 +313,12 @@ template <typename AType,
           typename BType,
           bool kTransC,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
-          WGAttrNumAccessEnum AttrNumAccessB = WGAttrNumAccessEnum::Default>
+          WGAttrNumAccessEnum AttrNumAccessB = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC           = false>
 using WarpGemmWmma_f32_16x16x128_f8f6f4 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x128_f8f6f4<AType, BType>,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccessA,
                                        AttrNumAccessB>>;
 
@@ -241,10 +326,12 @@ template <typename AType,
           typename BType,
           bool kTransC,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
-          WGAttrNumAccessEnum AttrNumAccessB = WGAttrNumAccessEnum::Default>
+          WGAttrNumAccessEnum AttrNumAccessB = WGAttrNumAccessEnum::Default,
+          bool kPermutePackTensorC           = false>
 using WarpGemmWmma_f32_32x32x128_f8f6f4 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_32x32x128_f8f6f4<AType, BType>,
                                        kTransC,
+                                       kPermutePackTensorC,
                                        AttrNumAccessA,
                                        AttrNumAccessB>>;
 

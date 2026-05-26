@@ -2275,7 +2275,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
     static_assert((std::is_same<T, float>::value && (N == 1 || N == 2 || N == 4 || N == 8)) ||
                       (std::is_same<T, fp16_t>::value && (N == 2 || N == 4 || N == 8)) ||
                       (std::is_same<T, bf16_t>::value && (N == 2 || N == 4 || N == 8)) ||
-                      (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4)),
+                      (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4 || N == 8)),
                   "wrong! not implemented");
 
     if constexpr(std::is_same<T, float>::value)

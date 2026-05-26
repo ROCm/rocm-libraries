@@ -194,6 +194,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                                             Problem::TransposeC,
                                             false,
                                             false,
+                                            false,
                                             wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::ADataType,

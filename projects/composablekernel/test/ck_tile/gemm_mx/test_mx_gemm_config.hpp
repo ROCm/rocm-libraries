@@ -65,9 +65,9 @@ struct MxGemmConfig
     static constexpr bool kPadN = false;
     static constexpr bool kPadK = false;
 
-    static constexpr bool TransposeC            = false;
-    static constexpr bool UseStructuredSparsity = false;
-
+    static constexpr bool TransposeC                = false;
+    static constexpr bool UseStructuredSparsity     = false;
+    static constexpr bool PermutePackTensorC        = false;
     static constexpr int kBlockPerCu                = 1;
     static constexpr int TileParitionerGroupNum     = 8;
     static constexpr int TileParitionerM01          = 4;

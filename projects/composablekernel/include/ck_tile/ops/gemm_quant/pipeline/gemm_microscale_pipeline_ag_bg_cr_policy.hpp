@@ -294,6 +294,7 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                                             Problem::TransposeC,
                                             false,
                                             false,
+                                            false,
                                             wg_attr_num_accessA,
                                             wg_attr_num_accessB>;
         static_assert(is_any_of<AComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value);

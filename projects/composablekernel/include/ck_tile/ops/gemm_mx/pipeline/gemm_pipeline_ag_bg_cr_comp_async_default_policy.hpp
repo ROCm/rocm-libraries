@@ -120,6 +120,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
                                             Problem::TransposeC,
                                             false,
                                             false,
+                                            false,
                                             wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmARegBRegCRegV1CustomPolicy<ADataType,

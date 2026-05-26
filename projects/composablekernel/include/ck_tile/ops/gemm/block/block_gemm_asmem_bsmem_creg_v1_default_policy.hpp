@@ -48,6 +48,7 @@ struct BlockGemmASmemBSmemCRegV1DefaultPolicy
                                               true,
                                               false,
                                               false,
+                                              false,
                                               wg_attr_num_access>;
                 return make_tuple(WG{}, 4, 1);
             }
@@ -60,6 +61,7 @@ struct BlockGemmASmemBSmemCRegV1DefaultPolicy
                                               16,
                                               16,
                                               true,
+                                              false,
                                               false,
                                               false,
                                               wg_attr_num_access>;

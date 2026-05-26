@@ -93,6 +93,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                             true,
                                             false, // SwizzleAccess
                                             false, // UseStructuredSparsity
+                                            false,
                                             NumAccess>;
 
         using BlockGemmPolicy =
@@ -170,6 +171,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                             true,
                                             false, // SwizzleAccess
                                             false, // UseStructuredSparsity
+                                            false,
                                             NumAccess>;
 
         using BlockGemmPolicy =

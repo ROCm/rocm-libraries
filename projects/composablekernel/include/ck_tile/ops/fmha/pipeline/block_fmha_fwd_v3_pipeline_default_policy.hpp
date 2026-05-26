@@ -295,6 +295,7 @@ struct BlockFmhaV3PipelineDefaultPolicy
                                             true,
                                             false,
                                             false,
+                                            false,
                                             WGAttrNumAccessEnum::Double>;
 
         using BlockGemmPolicy =

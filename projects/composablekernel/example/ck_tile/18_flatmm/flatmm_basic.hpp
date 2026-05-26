@@ -33,6 +33,7 @@ struct FlatmmConfig32
 
     static constexpr bool TransposeC            = false;
     static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool PermutePackTensorC    = false;
 
     static constexpr int kBlockPerCu                = 1;
     static constexpr int TileParitionerGroupNum     = 8;
@@ -71,6 +72,7 @@ struct FlatmmConfig16
 
     static constexpr bool TransposeC            = false;
     static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool PermutePackTensorC    = false;
 
     static constexpr int kBlockPerCu                = 1;
     static constexpr int TileParitionerGroupNum     = 8;

@@ -125,6 +125,7 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                                           true,  // TransposeC
                                           false, // SwizzleA
                                           false,
+                                          false,
                                           AttrNumAccess>{};
             }();
 
@@ -143,6 +144,7 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                                        Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                                        true,  // TransposeC
                                        false, // SwizzleA
+                                       false,
                                        false,
                                        AttrNumAccess>;
                 // fp8: kABKPerLane / WGAttrNumAccessEnum::Double = 16
@@ -1125,6 +1127,7 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
                                           Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                                           true,  // TransposeC
                                           false, // SwizzleA
+                                          false,
                                           false,
                                           AttrNumAccess>{};
             }();

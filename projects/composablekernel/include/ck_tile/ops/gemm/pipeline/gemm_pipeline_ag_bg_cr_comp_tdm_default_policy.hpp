@@ -438,6 +438,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
                                             Problem::TransposeC,
                                             false,
                                             false,
+                                            false,
                                             a_wg_attr_num_access,
                                             b_wg_attr_num_access>;
 

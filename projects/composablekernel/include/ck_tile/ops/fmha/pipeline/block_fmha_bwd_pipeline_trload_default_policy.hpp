@@ -122,6 +122,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             false,
             false,
             false,
+            false,
             NumAccess>;
 
         using BlockGemmPolicy =

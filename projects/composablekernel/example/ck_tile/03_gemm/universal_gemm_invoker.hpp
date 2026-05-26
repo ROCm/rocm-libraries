@@ -72,7 +72,8 @@ struct UniversalInvoker
                                              GemmConfig::Preshuffle,
                                              16,
                                              GemmConfig::UseDataCachePrefetch,
-                                             GemmConfig::DataCachePrefetchToL1>;
+                                             GemmConfig::DataCachePrefetchToL1,
+                                             GemmConfig::PermutePackTensorC>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
 
@@ -106,32 +107,54 @@ struct UniversalInvoker
         using GemmPipeline = typename PipelineTypeTraits<
             GemmConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
 
-        using GemmEpilogue = typename EpilogueTypeTraits<
-            GemmConfig::Pipeline,
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
-                                             DsDataType,
-                                             AccDataType,
-                                             CDataType,
-                                             DsLayout,
-                                             ELayout,
-                                             CDEElementWise,
-                                             TilePartitioner::MPerBlock,
-                                             TilePartitioner::NPerBlock,
-                                             GemmConfig::M_Warp,
-                                             GemmConfig::N_Warp,
-                                             GemmConfig::M_Warp_Tile,
-                                             GemmConfig::N_Warp_Tile,
-                                             GemmConfig::K_Warp_Tile,
-                                             UniversalGemmProblem::TransposeC,
-                                             GemmConfig::NumWaveGroups,
-                                             false,                        /*FixedVectorSize_*/
-                                             1,                            /*VectorSizeC_*/
-                                             false,                        /*TiledMMAPermuteN_*/
-                                             1,                            /*BlockedXDLN_PerWarp_*/
-                                             GemmConfig::DoubleSmemBuffer, /*DoubleSmemBuffer*/
-                                             AComputeDataType,
-                                             BComputeDataType>>::Epilogue;
+        using PackTensorProblem =
+            ck_tile::PackTensorGemmEpilogueProblem<ADataType,
+                                                   BDataType,
+                                                   DsDataType,
+                                                   AccDataType,
+                                                   CDataType,
+                                                   DsLayout,
+                                                   ELayout,
+                                                   CDEElementWise,
+                                                   TilePartitioner::MPerBlock,
+                                                   TilePartitioner::NPerBlock,
+                                                   GemmConfig::kPadM,
+                                                   GemmConfig::kPadN,
+                                                   GemmConfig::M_Warp_Tile,
+                                                   GemmConfig::N_Warp_Tile,
+                                                   GemmConfig::K_Warp_Tile,
+                                                   UniversalGemmProblem::TransposeC>;
+        using PackTensorEpilogue = ck_tile::PackTensorGemmEpilogue<PackTensorProblem>;
+
+        using CShuffleProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
+                                                                 BDataType,
+                                                                 DsDataType,
+                                                                 AccDataType,
+                                                                 CDataType,
+                                                                 DsLayout,
+                                                                 ELayout,
+                                                                 CDEElementWise,
+                                                                 TilePartitioner::MPerBlock,
+                                                                 TilePartitioner::NPerBlock,
+                                                                 GemmConfig::M_Warp,
+                                                                 GemmConfig::N_Warp,
+                                                                 GemmConfig::M_Warp_Tile,
+                                                                 GemmConfig::N_Warp_Tile,
+                                                                 GemmConfig::K_Warp_Tile,
+                                                                 UniversalGemmProblem::TransposeC,
+                                                                 GemmConfig::NumWaveGroups,
+                                                                 false, /*FixedVectorSize_*/
+                                                                 1,     /*VectorSizeC_*/
+                                                                 false, /*TiledMMAPermuteN_*/
+                                                                 1,     /*BlockedXDLN_PerWarp_*/
+                                                                 GemmConfig::DoubleSmemBuffer,
+                                                                 AComputeDataType,
+                                                                 BComputeDataType>;
+        using CShuffleEpilogue =
+            typename EpilogueTypeTraits<GemmConfig::Pipeline, CShuffleProblem>::Epilogue;
+
+        using GemmEpilogue = std::
+            conditional_t<GemmConfig::PermutePackTensorC, PackTensorEpilogue, CShuffleEpilogue>;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
@@ -260,7 +283,11 @@ struct UniversalInvoker
                                              GemmConfig::UseStructuredSparsity,
                                              true, // Persistent = true for async test
                                              GemmConfig::NumWaveGroups,
-                                             GemmConfig::Preshuffle>;
+                                             GemmConfig::Preshuffle,
+                                             16,
+                                             false,
+                                             false,
+                                             GemmConfig::PermutePackTensorC>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
         using AComputeDataType =
@@ -293,31 +320,53 @@ struct UniversalInvoker
         using GemmPipeline = typename PipelineTypeTraits<
             GemmConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
 
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
-                                             DsDataType,
-                                             AccDataType,
-                                             CDataType,
-                                             DsLayout,
-                                             ELayout,
-                                             CDEElementWise,
-                                             TilePartitioner::MPerBlock,
-                                             TilePartitioner::NPerBlock,
-                                             GemmConfig::M_Warp,
-                                             GemmConfig::N_Warp,
-                                             GemmConfig::M_Warp_Tile,
-                                             GemmConfig::N_Warp_Tile,
-                                             GemmConfig::K_Warp_Tile,
-                                             UniversalGemmProblem::TransposeC,
-                                             GemmConfig::NumWaveGroups,
-                                             false, /*FixedVectorSize_*/
-                                             1,     /*VectorSizeC_*/
-                                             false, /*TiledMMAPermuteN_*/
-                                             1,     /*BlockedXDLN_PerWarp_*/
-                                             GemmConfig::DoubleSmemBuffer,
-                                             AComputeDataType,
-                                             BComputeDataType>>;
+        using PackTensorProblem =
+            ck_tile::PackTensorGemmEpilogueProblem<ADataType,
+                                                   BDataType,
+                                                   DsDataType,
+                                                   AccDataType,
+                                                   CDataType,
+                                                   DsLayout,
+                                                   ELayout,
+                                                   CDEElementWise,
+                                                   TilePartitioner::MPerBlock,
+                                                   TilePartitioner::NPerBlock,
+                                                   GemmConfig::kPadM,
+                                                   GemmConfig::kPadN,
+                                                   GemmConfig::M_Warp_Tile,
+                                                   GemmConfig::N_Warp_Tile,
+                                                   GemmConfig::K_Warp_Tile,
+                                                   UniversalGemmProblem::TransposeC>;
+        using PackTensorEpilogue = ck_tile::PackTensorGemmEpilogue<PackTensorProblem>;
+
+        using CShuffleProblem  = ck_tile::CShuffleEpilogueProblem<ADataType,
+                                                                  BDataType,
+                                                                  DsDataType,
+                                                                  AccDataType,
+                                                                  CDataType,
+                                                                  DsLayout,
+                                                                  ELayout,
+                                                                  CDEElementWise,
+                                                                  TilePartitioner::MPerBlock,
+                                                                  TilePartitioner::NPerBlock,
+                                                                  GemmConfig::M_Warp,
+                                                                  GemmConfig::N_Warp,
+                                                                  GemmConfig::M_Warp_Tile,
+                                                                  GemmConfig::N_Warp_Tile,
+                                                                  GemmConfig::K_Warp_Tile,
+                                                                  UniversalGemmProblem::TransposeC,
+                                                                  GemmConfig::NumWaveGroups,
+                                                                  false, /*FixedVectorSize_*/
+                                                                  1,     /*VectorSizeC_*/
+                                                                  false, /*TiledMMAPermuteN_*/
+                                                                  1,     /*BlockedXDLN_PerWarp_*/
+                                                                  GemmConfig::DoubleSmemBuffer,
+                                                                  AComputeDataType,
+                                                                  BComputeDataType>;
+        using CShuffleEpilogue = ck_tile::CShuffleEpilogue<CShuffleProblem>;
+
+        using GemmEpilogue = std::
+            conditional_t<GemmConfig::PermutePackTensorC, PackTensorEpilogue, CShuffleEpilogue>;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 

@@ -130,7 +130,7 @@ struct thread_buffer {
             return reinterpret_cast<thread_buffer<Tx, vx>&>(data);}
     template<typename Tx>
     CK_TILE_HOST_DEVICE constexpr auto get_as() const {TB_COMMON_AS();
-            if constexpr(sizeof(value_type) <= 1 )
+            if constexpr(sizeof(value_type) <= 1 && has_same_scalar_type<value_type, Tx>::value)
             return _get_as<Tx>();   // TODO: current compiler for 8bit data need use union to get data back, should fix in the future
             else
             return reinterpret_cast<const thread_buffer<Tx, vx>&>(data);}
@@ -139,7 +139,7 @@ struct thread_buffer {
             return reinterpret_cast<thread_buffer<Tx, vx>&>(data).get(number<I>{});}
     template<typename Tx, index_t I>
     CK_TILE_HOST_DEVICE constexpr auto get_as(number<I>) const {TB_COMMON_AS();
-            if constexpr(sizeof(value_type) <= 1 )
+            if constexpr(sizeof(value_type) <= 1 && has_same_scalar_type<value_type, Tx>::value)
             return _get_as<Tx>(number<I>{});   // TODO: current compiler for 8bit data need use union to get data back, should fix in the future
             else
             return reinterpret_cast<const thread_buffer<Tx, vx>&>(data).get(number<I>{});}

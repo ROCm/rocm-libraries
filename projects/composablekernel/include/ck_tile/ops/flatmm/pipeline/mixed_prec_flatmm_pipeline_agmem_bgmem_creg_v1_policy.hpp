@@ -272,6 +272,7 @@ struct F8xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
             Problem::TransposeC,
             false,
             false,
+            false,
             wg_attr_num_access<Problem>>;
         using BlockFlatmmPolicy = BlockFlatmmASmemBSmemCRegV1CustomPolicy< //
             ADataType,

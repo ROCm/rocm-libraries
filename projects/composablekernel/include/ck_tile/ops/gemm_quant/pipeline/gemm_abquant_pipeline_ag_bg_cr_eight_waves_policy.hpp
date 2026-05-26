@@ -126,6 +126,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                                             Problem::TransposeC,
                                             false,
                                             false,
+                                            false,
                                             WGAccessDouble>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ADataType,
