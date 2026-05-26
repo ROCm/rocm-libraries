@@ -76,11 +76,10 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, TestGoodHeuristicPluginPolicyIsEnu
     const std::string expectedPolicyName
         = hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName();
 
-    const bool found = std::any_of(policies.begin(),
-                                   policies.end(),
-                                   [&](const HeuristicPolicyInfo& p) {
-                                       return p.policyName == expectedPolicyName;
-                                   });
+    const bool found
+        = std::any_of(policies.begin(), policies.end(), [&](const HeuristicPolicyInfo& p) {
+              return p.policyName == expectedPolicyName;
+          });
 
     EXPECT_TRUE(found) << "Expected test_good_heuristic_plugin policy '" << expectedPolicyName
                        << "' to appear in enumeration of " << policies.size() << " policies";
