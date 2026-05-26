@@ -3130,4 +3130,75 @@ Tests:
   requested_solution_num: 10
   gpu_arch: '950'
 
+# Subtile MXFP8 tests (gfx950)
+# All use preswizzled scales (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT).
+# K must be a multiple of R*DU=256 for the new swizzled-scale library; smaller
+# K values will fall back to the non-swizzled F8BS library which is still
+# correct but uses a different code path.
+# Build: ./install.sh -dck -a gfx950
+# Run:   ./hipblaslt-test --gtest_filter="*subtile_fp8*"
+
+# Basic correctness — MT256-class winners (R=2 DU=128, scaleA/B=1001).
+- name: matmul_subtile_fp8_basic
+  category: quick
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [256, 512, 1024]
+  N: [256, 512, 1024]
+  K: [256, 512, 1024]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  batch_count: [1, 2]
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# Edge tiles — partial MT256 boundaries (M and N not multiple of 256).
+- name: matmul_subtile_fp8_edges
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 256, K: 256 }
+    - { M: 256, N: 128, K: 256 }
+    - { M: 128, N: 128, K: 256 }
+    - { M: 192, N: 192, K: 512 }
+    - { M: 256, N: 512, K: 512 }
+    - { M: 384, N: 384, K: 768 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  batch_count: [1, 2]
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# Bigger square — the perf-yaml-shape class (K%256==0).
+- name: matmul_subtile_fp8_large
+  category: nightly
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [2048, 4096]
+  N: [2048, 4096]
+  K: [2048, 4096]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
 ...
