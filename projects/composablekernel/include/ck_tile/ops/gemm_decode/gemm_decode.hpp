@@ -11,6 +11,7 @@
 #include "ck_tile/ops/gemm_decode/pipeline/gemm_decode_problem.hpp"
 #include "ck_tile/ops/gemm_decode/pipeline/gemm_decode_policy.hpp"
 #include "ck_tile/ops/gemm_decode/kernel/gemm_decode_universal_kernel.hpp"
+#include "ck_tile/ops/gemm_decode/kernel/gemm_decode_blockscale_kernel.hpp"
 
 namespace ck_tile {
 
@@ -30,6 +31,21 @@ float launch_gemm_decode_universal(const typename Kernel::Kargs& args, const str
 
     return launch_kernel(s,
                          make_kernel(Kernel{}, Kernel::GridSize(args), Kernel::BlockSize(), 0, args));
+}
+
+// Same shape as the universal launcher but for GemmDecodeBlockscaleKernel.
+// The two are kept distinct so the caller chooses the kernel family
+// explicitly (the dispatcher in P4 will collapse this into one entry point).
+template <typename Kernel>
+float launch_gemm_decode_blockscale(const typename Kernel::Kargs& args, const stream_config& s)
+{
+    if(!Kernel::IsSupportedArgument(args))
+    {
+        throw std::invalid_argument("GemmDecodeBlockscaleKernel arguments are not supported.");
+    }
+
+    return launch_kernel(
+        s, make_kernel(Kernel{}, Kernel::GridSize(args), Kernel::BlockSize(), 0, args));
 }
 
 } // namespace ck_tile

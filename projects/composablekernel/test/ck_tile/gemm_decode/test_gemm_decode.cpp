@@ -519,6 +519,212 @@ TEST(GemmDecodeUniversalUnscaled, Fp16Fp16BiasMatrix)
 }
 
 #ifdef CK_TILE_USE_OCP_FP8
+
+namespace {
+
+// Blockscale reference: dequantize each FP8 element with its (row, k_block)
+// scale and accumulate in FP32. Mirrors the kernel's contract.
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          index_t XScaleBlockN,
+          index_t XScaleBlockK,
+          index_t WScaleBlockN,
+          index_t WScaleBlockK>
+void ReferenceGemmBlockscale(const HostTensor<ADataType>& a,
+                             const HostTensor<BDataType>& b,
+                             const HostTensor<float>&     x_scale, // [M / XScaleBlockN,
+                                                                   //  K / XScaleBlockK]
+                             const HostTensor<float>&     w_scale, // [N / WScaleBlockN,
+                                                                   //  K / WScaleBlockK]
+                             HostTensor<CDataType>&       c,
+                             index_t                      M,
+                             index_t                      N,
+                             index_t                      K)
+{
+    const index_t aqk = K / XScaleBlockK;
+    const index_t bqk = K / WScaleBlockK;
+    for(index_t m = 0; m < M; ++m)
+    {
+        for(index_t n = 0; n < N; ++n)
+        {
+            float acc = 0.0f;
+            for(index_t k = 0; k < K; ++k)
+            {
+                const float xs = x_scale(m / XScaleBlockN, k / XScaleBlockK);
+                const float ws = w_scale(n / WScaleBlockN, k / WScaleBlockK);
+                const float a_f = type_convert<float>(a(m, k));
+                const float b_f = type_convert<float>(b(n, k));
+                acc += a_f * b_f * xs * ws;
+                (void)aqk;
+                (void)bqk;
+            }
+            c(m, n) = type_convert<CDataType>(acc);
+        }
+    }
+}
+
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          index_t XScaleBlockN = 1,
+          index_t XScaleBlockK = 128,
+          index_t WScaleBlockN = 128,
+          index_t WScaleBlockK = 128>
+::testing::AssertionResult RunBlockscaleCase(const std::string& test_name,
+                                             const DecodeShape& shape,
+                                             index_t            k_batch)
+{
+    using ComputeDataType = float;
+    using XLayout = GemmDecodeScaleLayout::Block2D<XScaleBlockN, XScaleBlockK>;
+    using WLayout = GemmDecodeScaleLayout::Block2D<WScaleBlockN, WScaleBlockK>;
+    using Problem = GemmDecodeProblem<ADataType,
+                                      BDataType,
+                                      ComputeDataType,
+                                      CDataType,
+                                      /*XScaleDataType=*/float,
+                                      /*WScaleDataType=*/float,
+                                      XLayout,
+                                      WLayout,
+                                      /*kVector=*/16,
+                                      /*kUseDot2=*/true,
+                                      /*kUsePackedFp32=*/false,
+                                      /*kMPerWarp=*/1,
+                                      /*kNPerWarp=*/1,
+                                      GemmDecodeOutputAxis::SmallM,
+                                      /*kHasBias=*/false,
+                                      /*kWarpsPerBlock=*/1>;
+    using Kernel = GemmDecodeBlockscaleKernel<Problem, GemmDecodePolicy>;
+
+    const index_t aqn = shape.M / XScaleBlockN;
+    const index_t aqk = shape.K / XScaleBlockK;
+    const index_t bqn = shape.N / WScaleBlockN;
+    const index_t bqk = shape.K / WScaleBlockK;
+
+    HostTensor<ADataType> a({shape.M, shape.K});
+    HostTensor<BDataType> b({shape.N, shape.K});
+    HostTensor<float> x_scale({aqn, aqk});
+    HostTensor<float> w_scale({bqn, bqk});
+    HostTensor<CDataType> c_host({shape.M, shape.N});
+    HostTensor<CDataType> c_dev({shape.M, shape.N});
+
+    FillRandom(a, -1.0f, 1.0f, 0xA1u);
+    FillRandom(b, -1.0f, 1.0f, 0xB2u);
+    // Scales positive, modest variation so the dequant magnitude stays bounded.
+    FillRandom(x_scale, 0.05f, 0.25f, 0xD4u);
+    FillRandom(w_scale, 0.05f, 0.25f, 0xE5u);
+
+    ReferenceGemmBlockscale<ADataType,
+                            BDataType,
+                            CDataType,
+                            XScaleBlockN,
+                            XScaleBlockK,
+                            WScaleBlockN,
+                            WScaleBlockK>(a, b, x_scale, w_scale, c_host,
+                                          shape.M, shape.N, shape.K);
+
+    DeviceMem a_buf(a.get_element_space_size_in_bytes());
+    DeviceMem b_buf(b.get_element_space_size_in_bytes());
+    DeviceMem c_buf(c_dev.get_element_space_size_in_bytes());
+    DeviceMem xs_buf(x_scale.get_element_space_size_in_bytes());
+    DeviceMem ws_buf(w_scale.get_element_space_size_in_bytes());
+
+    a_buf.ToDevice(a.mData.data());
+    b_buf.ToDevice(b.mData.data());
+    xs_buf.ToDevice(x_scale.mData.data());
+    ws_buf.ToDevice(w_scale.mData.data());
+    c_buf.SetZero();
+
+    auto kargs = Kernel::MakeKernelArgs(a_buf.GetDeviceBuffer(),
+                                        b_buf.GetDeviceBuffer(),
+                                        c_buf.GetDeviceBuffer(),
+                                        xs_buf.GetDeviceBuffer(),
+                                        ws_buf.GetDeviceBuffer(),
+                                        /*p_bias=*/nullptr,
+                                        shape.M,
+                                        shape.N,
+                                        shape.K,
+                                        /*stride_a=*/shape.K,
+                                        /*stride_b=*/shape.K,
+                                        /*stride_c=*/shape.N,
+                                        /*k_batch=*/k_batch);
+
+    if(!Kernel::IsSupportedArgument(kargs))
+    {
+        return ::testing::AssertionFailure()
+               << test_name << ": Kargs unexpectedly rejected by IsSupportedArgument().";
+    }
+
+    const stream_config s{nullptr, /*time_kernel=*/false};
+    try
+    {
+        launch_gemm_decode_blockscale<Kernel>(kargs, s);
+    }
+    catch(const std::exception& ex)
+    {
+        return ::testing::AssertionFailure() << test_name << ": launch threw: " << ex.what();
+    }
+
+    c_buf.FromDevice(c_dev.mData.data());
+
+    const float atol = AbsoluteTolerance<CDataType, ADataType>(shape.K);
+    float max_diff = 0.0f;
+    index_t bad_index = -1;
+    for(index_t i = 0; i < static_cast<index_t>(c_host.get_element_space_size()); ++i)
+    {
+        const float h = type_convert<float>(c_host.mData[i]);
+        const float d = type_convert<float>(c_dev.mData[i]);
+        const float diff = std::abs(h - d);
+        if(diff > max_diff)
+        {
+            max_diff  = diff;
+            bad_index = i;
+        }
+    }
+
+    if(max_diff > atol)
+    {
+        const float h = type_convert<float>(c_host.mData[bad_index]);
+        const float d = type_convert<float>(c_dev.mData[bad_index]);
+        return ::testing::AssertionFailure()
+               << test_name << " (M=" << shape.M << ", N=" << shape.N << ", K=" << shape.K
+               << ", k_batch=" << k_batch << "): mismatch at i=" << bad_index << " host=" << h
+               << " dev=" << d << " diff=" << max_diff << " atol=" << atol;
+    }
+    return ::testing::AssertionSuccess();
+}
+
+template <typename ADataType, typename BDataType, typename CDataType>
+void RunBlockscaleMatrix(const std::string& dtype_name)
+{
+    const std::vector<index_t> Ms{1, 2, 4};
+    const std::vector<index_t> Ns{2048, 4096};
+    const std::vector<index_t> Ks{2048, 7168};
+    const std::vector<index_t> KBatches{1, 2};
+
+    for(index_t M : Ms)
+    {
+        for(index_t N : Ns)
+        {
+            for(index_t K : Ks)
+            {
+                for(index_t kb : KBatches)
+                {
+                    const DecodeShape shape{M, N, K};
+                    const std::string name = dtype_name + " M=" + std::to_string(M) +
+                                             " N=" + std::to_string(N) +
+                                             " K=" + std::to_string(K) +
+                                             " kb=" + std::to_string(kb);
+                    EXPECT_TRUE(
+                        (RunBlockscaleCase<ADataType, BDataType, CDataType>(name, shape, kb)));
+                }
+            }
+        }
+    }
+}
+
+} // namespace
+
 TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorMatrix)
 {
     RunFp8PerTensorMatrix<fp8_t, fp8_t, bf16_t>("FP8/FP8/BF16");
@@ -532,6 +738,11 @@ TEST(GemmDecodeUniversalFp8, Fp8Fp8ToFp16PerTensorMatrix)
 TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorBiasMatrix)
 {
     RunFp8PerTensorMatrix<fp8_t, fp8_t, bf16_t, /*kHasBias=*/true>("FP8/FP8/BF16+bias");
+}
+
+TEST(GemmDecodeBlockscaleFp8, Fp8Fp8ToBf16BlockscaleMatrix)
+{
+    RunBlockscaleMatrix<fp8_t, fp8_t, bf16_t>("FP8/FP8/BF16 1x128/128x128");
 }
 #endif // CK_TILE_USE_OCP_FP8
 
