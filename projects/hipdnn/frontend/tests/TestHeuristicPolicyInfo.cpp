@@ -23,10 +23,10 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
-using ::testing::_;
-using ::testing::DoAll;
-using ::testing::Return;
-using ::testing::SetArgPointee;
+// using-directive instead of `using ::testing::_;` to avoid
+// bugprone-reserved-identifier on the global-namespace `_`. Matches the
+// pattern used in TestGraph.cpp.
+using namespace ::testing;
 
 namespace
 {
@@ -35,8 +35,8 @@ namespace
 // non-null pointer suffices for the mock path.
 hipdnnHandle_t fakeHandle()
 {
-    static int sentinel = 0;
-    return reinterpret_cast<hipdnnHandle_t>(&sentinel);
+    static int s_sentinel = 0;
+    return reinterpret_cast<hipdnnHandle_t>(&s_sentinel);
 }
 
 // Helper: install a getHeuristicPolicyInfo expectation that returns a single
