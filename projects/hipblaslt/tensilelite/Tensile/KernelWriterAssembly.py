@@ -15764,6 +15764,18 @@ class KernelWriterAssembly(KernelWriter):
     factorDim = factorDims[fdIdx]
     edgeModule.add(writeLabel)
 
+    # CompactLoopStore: allocate two dedicated, named sgprs for the CLS loop so
+    # it no longer hijacks WorkGroup2 / ArgType (which are still live in some
+    # store paths -- e.g. batched-GEMM batch offsets read WorkGroup2, and
+    # ArgType is read during store-arg load). Checked out once here so the same
+    # registers persist across all batches (and activation branches) of this
+    # store, and freed at the end of the function.
+    #   CLSm0Base      : M0 base accumulator (src VGPR index offset)
+    #   CLSLoopCounter : CLS loop iteration countdown
+    if kernel["CompactLoopStore"]:
+      edgeModule.add(self.defineSgpr("CLSm0Base", 1))
+      edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
+
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
 
@@ -15898,8 +15910,9 @@ class KernelWriterAssembly(KernelWriter):
         # GlobalWriteBatchWriter.computeBatchesPerCLSBody). The CLS loop tail
         # emitted by GlobalWriteBatch.emit() at batchIdx == batchesPerCLSBody-1
         # branches the loop back at runtime to re-execute the body CLS-iter-count
-        # times via M0 indirection. Iterating past this would just emit dead
-        # code after the CLS tail's s_endpgm.
+        # times via M0 indirection. Emitting additional batches beyond the CLS body
+        # is unnecessary and would only duplicate store code that is intended to be
+        # re-executed via the runtime loop.
         # For non-CLS, numBatchesCLS == numBatches so behaviour is unchanged.
         if kernel["CompactLoopStore"]:
           numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches)
@@ -15923,7 +15936,7 @@ class KernelWriterAssembly(KernelWriter):
             if _elStopIdx < len(element):
               next_rowInc_per_batch[_bIdx] = _coord1All[_elStopIdx] - _coord1All[_elStopIdx - 1]
 
-        for batchIdx in range(0, numBatches):
+        for batchIdx in range(0, numBatchesCLS):
           elementStartIdx = batchIdx * numElementsPerBatch
           elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
           elementsThisBatch = element[elementStartIdx:elementStopIdx]
@@ -16005,6 +16018,12 @@ class KernelWriterAssembly(KernelWriter):
     # Add actLoopEndLabel if needed
     if len(actLoopLabelModules) > 1:
       edgeModule.add(actLoopEndLabel)
+
+    # CompactLoopStore: release the dedicated CLS sgprs now that all batches /
+    # activation branches of this store have been emitted.
+    if kernel["CompactLoopStore"]:
+      edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
+      edgeModule.add(self.undefineSgpr("CLSm0Base"))
 
     if len(factorDims) == 1:
       isDeferredReturn = "Deferred" in endLabel.getLabelName()

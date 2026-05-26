@@ -205,20 +205,31 @@ class GlobalWriteBatchWriter:
     return SOrSaveExecB32 if self.wavelen == 32 else SOrSaveExecB64
 
   @staticmethod
-  def computeBatchesPerCLSBody(kernel, numBatches: int) -> int:
-    """How many batches one CLS loop body covers (= numBatches / CLS iter count).
+  def computeCLSLayout(kernel, numBatches: int):
+    """Single source of truth for the CLS loop layout math.
 
-    The body must align to the SrdD-advance period, else the CLS loop would run
-    s_add SrdD too many times. Which dim is the CLS iter dim (the one taken out
-    of the body) depends on the output layout. Unsupported store paths (non-MI,
-    StoreRemap, StreamK) or non-divisible cases fall back to numBatches (iter=1).
+    Returns (batchesPerCLSBody, iterCount, m0Step), all derived from ONE shared
+    read of the MI output layout so the loop trip count and the M0 src stride
+    can never drift apart:
+      - batchesPerCLSBody: how many batches one CLS loop body covers. The body
+        must align to the SrdD-advance period, else the loop would run s_add
+        SrdD too many times.
+      - iterCount: numBatches / batchesPerCLSBody (>= 1).
+      - m0Step: stride of the CLS iter dim in the v_movrelsd_2_b32 src formula
+        (added to M0 each iteration).
+    Which dim is the CLS iter dim depends on the output layout:
+      (a) outerTT1  > 1, VW1 == 1            : iter = wgIdx1, step = OPM*BM*BN*VW0*outerTT0*VW1
+      (b) outerTT1 == 1, VW1 > 1, SS=False   : iter = vw1,    step = OPM*BM*BN*VW0*outerTT0
+      (c) outerTT1 == 1, VW1 == 1, SS=True   : iter = tIdx,   step = NEPBS / inner_dims
+    Store paths not covered by the CLS loop (non-MI, StoreRemap, StreamK) and
+    non-divisible / non-regular layouts fall back to a single iteration
+    (batchesPerCLSBody = numBatches), where m0Step is dead.
     """
+    batchesPerBody = numBatches
+    m0Step = 1
     if not kernel["EnableMatrixInstruction"]:
-      return numBatches
-    if kernel.get("StoreRemapVectorWidth", 0) != 0:
-      return numBatches
-    if kernel.get("StreamK", 0) != 0:
-      return numBatches
+      return batchesPerBody, 1, m0Step
+
     VW0 = kernel["VectorWidthA"]
     VW1 = kernel["VectorWidthB"]
     outerTT0 = kernel["MIWaveTile"][0] // VW0
@@ -226,41 +237,51 @@ class GlobalWriteBatchWriter:
     miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
     miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
     miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
+    matrixInstBM = 1 if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"]
+    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
     OPM   = miM_ * miN_ // kernel["WavefrontSize"]
     NEPBS = kernel["NumElementsPerBatchStore"]
-    #   (a) outerTT1  > 1, (VWB < MIWaveTile[1], e.g. TT/NT VWB=1):
-    #   (b) outerTT1 == 1, VW1 > 1, SS=False: CLS iter = vw1
-    #   (c) outerTT1 == 1, VW1 == 1, SS=True: CLS iter = tIdx-block
+
     if outerTT1 > 1 and VW1 == 1:
-      if numBatches % outerTT1 != 0:
-        return numBatches
-      return max(1, numBatches // outerTT1)
+      m0Step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0 * VW1
+      if numBatches % outerTT1 == 0:
+        batchesPerBody = max(1, numBatches // outerTT1)
     elif outerTT1 == 1 and VW1 > 1 and not kernel["SourceSwap"]:
-      srd_period = max(1, numBatches // VW1)
-      if numBatches % VW1 != 0:
-        return numBatches
-      return srd_period
+      m0Step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0
+      if numBatches % VW1 == 0:
+        batchesPerBody = max(1, numBatches // VW1)
     elif outerTT1 == 1 and VW1 == 1 and kernel["SourceSwap"]:
-      matrixInstBM = 1 if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"]
-      matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
       inner_dims = VW0 * outerTT0 * matrixInstBM * matrixInstBN
-      regular = (NEPBS % inner_dims == 0)
-      if not regular:
-        return numBatches
-      return max(1, ceil(numBatches / NEPBS))
-    return numBatches
+      if NEPBS % inner_dims == 0:
+        m0Step = max(1, NEPBS // inner_dims)
+        batchesPerBody = max(1, ceil(numBatches / NEPBS))
+
+    # StoreRemap / StreamK store paths are not covered by the CLS loop: force a
+    # single iteration (body = all batches). m0Step is left as derived above to
+    # preserve the original emitted SrdD step (it is dead when iterCount == 1).
+    if kernel.get("StoreRemapVectorWidth", 0) != 0 or kernel.get("StreamK", 0) != 0:
+      batchesPerBody = numBatches
+
+    iterCount = max(1, numBatches // batchesPerBody)
+    return batchesPerBody, iterCount, m0Step
+
+  @staticmethod
+  def computeBatchesPerCLSBody(kernel, numBatches: int) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches)[0]
 
   def _computeBatchesPerCLSBody(self) -> int:
-    return GlobalWriteBatchWriter.computeBatchesPerCLSBody(self.kernel, self.numBatches)
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)[0]
 
   @staticmethod
   def computeCLSIterCount(kernel, numBatches: int) -> int:
     """CLS loop iter count = numBatches / batchesPerCLSBody. Minimum 1."""
-    body = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches)
-    return max(1, numBatches // body)
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches)[1]
 
   def _computeCLSIterCount(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSIterCount(self.kernel, self.numBatches)
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)[1]
+
+  def _computeCLSLayout(self):
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)
 
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
@@ -308,8 +329,8 @@ class GlobalWriteBatchWriter:
 
       clsLabel = getattr(self.ss, "_clsLoopLabel", None)
       if clsLabel is not None and (self._computeBatchesPerCLSBody() - 1 == self.batchIdx) and self.ss.elementAddr:
-        module.add(SSubI32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=1))
-        module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=0))
+        module.add(SSubI32(dst=sgpr("CLSLoopCounter"), src0=sgpr("CLSLoopCounter"), src1=1))
+        module.add(SCmpEQU32(src0=sgpr("CLSLoopCounter"), src1=0))
         module.add(SCBranchSCC0(clsLabel.getLabelName(), "loop while counter != 0"))
         # if not self.kernel["StreamK"] == 3:
         #   module.add(SEndpgm(comment="stop here after CLS loop"))
@@ -504,8 +525,6 @@ class GlobalWriteBatchWriter:
           loadsIssued = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
           if (self.ss.cfg.gwvw != gwvw) and (not skipLoad):
             remain_load = self.ss.cfg.gwvw - 1
-            bpl = self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
-            bpr = ceil(bpl / self.parentWriter.states.bpr)
             #For below ds_read instruction do not add bias issued , because of all ds_load instructions need to be completed at the same time in this batch.
             for r in range(remain_load):
               modGwvw.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, factor_gwvw, comment=comment))
@@ -564,6 +583,7 @@ class GlobalWriteBatchWriter:
     elementIdx = 0
     addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
     addrBiasVgpr          = addrCalc.addrBiasVgpr
+    addrCVgpr             = addrCalc.addrCVgpr
     addrDVgpr             = addrCalc.addrDVgpr
     addrScaleAlphaVecVgpr = addrCalc.addrScaleAlphaVecVgpr
     addrScaleAVecVgpr     = addrCalc.addrScaleAVecVgpr
@@ -601,6 +621,9 @@ class GlobalWriteBatchWriter:
       if self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel"):
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, \
             mask, bufferOOB, True, self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
+      if self.beta:
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, \
+            mask, bufferOOB, True, self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
       self._epilogScratchFree(tmpInrSgpr)
 
     # Init sgpr offset -- NonEdge only. Needed for the delayed-pattern
@@ -766,44 +789,19 @@ class GlobalWriteBatchWriter:
                                              loadInputCode,
                                              factor_gwvw)
 
-      module.add(SMovB32(dst=sgpr("WorkGroup2"), src=hex(0x0), comment="CLS M0 base = 0"))
-      module.add(SMovB32(dst=sgpr("ArgType"), src=hex(self._computeCLSIterCount()), comment="CLS loop iter count"))
+      module.add(SMovB32(dst=sgpr("CLSm0Base"), src=hex(0x0), comment="CLS M0 base = 0"))
+      module.add(SMovB32(dst=sgpr("CLSLoopCounter"), src=hex(self._computeCLSIterCount()), comment="CLS loop iter count"))
       module.addComment2(commentStr)
       self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
       module.add(self.ss._clsLoopLabel)
-      module.add(SMovB32(dst=mgpr(0), src=sgpr("WorkGroup2"),
-          comment="LDS clamp at sgpr(WorkGroup2)"))
+      module.add(SMovB32(dst=mgpr(0), src=sgpr("CLSm0Base"),
+          comment="LDS clamp at sgpr(CLSm0Base)"))
       # CLS M0 step: M0 indirectly offsets the src VGPR index of v_movrelsd_2_b32.
-      # Step = the stride of the CLS iter dim in the SRC formula.
-      #   - outerTT1 > 1 (VWB < MIWaveTile[1], e.g. TT/NT VWB=1):
-      #       CLS iter = wgIdx1, src stride = OPM*BM*BN*VW0*outerTT0*VW1
-      #   - outerTT1 == 1, SS=True: CLS iter = tIdx, src stride = 1 (default)
-      #   - outerTT1 == 1, SS=False: CLS iter = vw1,
-      #       src stride = OPM*BM*BN*VW0*outerTT0
-      cls_m0_step = 1
-      if self.kernel["EnableMatrixInstruction"]:
-        matrixInstT  = min(self.kernel["MatrixInstM"], self.kernel["MatrixInstN"])
-        matrixInstM_ = (self.kernel["MatrixInstM"] * self.kernel["MatrixInstBM"]) if (self.kernel["MatrixInstM"] == 4) else matrixInstT
-        matrixInstN_ = (self.kernel["MatrixInstN"] * self.kernel["MatrixInstBN"]) if (self.kernel["MatrixInstN"] == 4) else matrixInstT
-        matrixInstBM = 1 if (self.kernel["MatrixInstM"] == 4) else self.kernel["MatrixInstBM"]
-        matrixInstBN = 1 if (self.kernel["MatrixInstN"] == 4) else self.kernel["MatrixInstBN"]
-        OPM   = matrixInstM_ * matrixInstN_ // self.kernel["WavefrontSize"]
-        NEPBS = self.kernel["NumElementsPerBatchStore"]
-        VW0 = self.kernel["VectorWidthA"]
-        VW1 = self.kernel["VectorWidthB"]
-        outerTT0 = self.kernel["MIWaveTile"][0] // VW0
-        outerTT1 = self.kernel["MIWaveTile"][1] // VW1
-        if outerTT1 > 1 and VW1 == 1:
-          # CLS iter = wgIdx1, src coef of wgIdx1
-          cls_m0_step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0 * VW1
-        elif outerTT1 == 1 and VW1 > 1 and not self.kernel["SourceSwap"]:
-          # CLS iter = vw1, src coef of vw1
-          cls_m0_step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0
-        elif outerTT1 == 1 and VW1 == 1 and self.kernel["SourceSwap"]:
-          inner_dims = VW0 * outerTT0 * matrixInstBM * matrixInstBN
-          if NEPBS % inner_dims == 0:
-            cls_m0_step = max(1, NEPBS // inner_dims)
-      module.add(SAddU32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), src1=cls_m0_step,
+      # Step = the stride of the CLS iter dim in the SRC formula; taken from the
+      # same layout derivation as the loop iter count (computeCLSLayout) so the
+      # two can never drift apart.
+      _, _, cls_m0_step = self._computeCLSLayout()
+      module.add(SAddU32(dst=sgpr("CLSm0Base"), src0=sgpr("CLSm0Base"), src1=cls_m0_step,
                          comment="CLS M0 step (src coef of CLS iter dim)"))
     else:
       module.addComment2(commentStr)
