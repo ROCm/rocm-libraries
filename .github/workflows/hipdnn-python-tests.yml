@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   python-tests:
-    runs-on: azure-linux-scale-rocm
+    runs-on: linux-gfx942-1gpu-ossci-rocm
     steps:
       - name: Checkout rocm-libraries
         uses: actions/checkout@v6
