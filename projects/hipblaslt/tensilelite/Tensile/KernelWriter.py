@@ -2833,21 +2833,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.vgprPool.checkIn(tP["gpr"]["subIterReg"])
           tP["gpr"]["subIterReg"] = None
 
-      if kernel["BufferLoad"]:
-        # BufferLoad: addresses first (sets up SRD), then final offsets (computes 32-bit offsets)
+      def emitGraAddresses():
         if not forceNoTileCode:
-          # Addresses A(MXSA)
           if not tdmA:
             module.addComment1("global read addresses: addresses a")
             module.add(self.graAddresses(kernel, tensorParametersA))
           if not tdmA and kernel["ProblemType"]["MXBlockA"]:
             module.addComment1("global read addresses: addresses mxsa")
             module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-          # Addresses Metadata
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             module.addComment1("global read addresses: addresses metadata")
             module.add(self.graAddresses(kernel, tPM))
-          # Addresses B(MXSB)
           if not tdmB and kernel["ProblemType"]["MXBlockB"]:
             module.addComment1("global read addresses: addresses mxsb")
             module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
@@ -2855,11 +2851,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.addComment1("global read addresses: addresses b")
             module.add(self.graAddresses(kernel, tensorParametersB))
 
-        # workgroup SGPRs no longer needed
-        if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
-          module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
-
-        # Final offsets A(MXSA)
+      def emitGraFinalOffsets():
         if not tdmA:
           module.addComment1("global read addresses: final offsets a")
           module.add(self.graFinalOffsets(kernel, tensorParametersA))
@@ -2873,7 +2865,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.graMetadataFinalOffsets(kernel, tPMRef))
           else:
             module.add(self.graFinalOffsets(kernel, tPM))
-        # Final offsets B(MXSB)
         if not tdmB and kernel["ProblemType"]["MXBlockB"]:
           module.addComment1("global read addresses: final offsets mxsb")
           module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
@@ -2881,54 +2872,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.addComment1("global read addresses: final offsets b")
           module.add(self.graFinalOffsets(kernel, tensorParametersB))
           # releaseTensorTmpGprs(tensorParametersB)
+
+      def emitRemoveGROffsetsSgprs():
+        if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
+          module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
+
+      if kernel["BufferLoad"]:
+        # BufferLoad: addresses first (sets up SRD), then final offsets (computes 32-bit offsets)
+        emitGraAddresses()
+        emitRemoveGROffsetsSgprs()
+        emitGraFinalOffsets()
       else:
         # Flat addressing: final offsets first (GLOBAL_OFFSET writes byte offset into addr VGPRs),
         # then addresses (adds base pointer to get full 64-bit flat address)
-        if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
-          module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
-
-        # Final offsets A(MXSA)
-        if not tdmA:
-          module.addComment1("global read addresses: final offsets a")
-          module.add(self.graFinalOffsets(kernel, tensorParametersA))
-          # releaseTensorTmpGprs(tensorParametersA)
-        if not tdmA and kernel["ProblemType"]["MXBlockA"]:
-          module.addComment1("global read addresses: final offsets mxsa")
-          module.add(self.graFinalOffsets(kernel, tensorParametersA["MX"]))
-        if kernel["ProblemType"]["Sparse"]:
-          module.addComment1("global read addresses: final offsets metadata")
-          if kernel["DirectToVgprSparseMetadata"]:
-            module.add(self.graMetadataFinalOffsets(kernel, tPMRef))
-          else:
-            module.add(self.graFinalOffsets(kernel, tPM))
-        # Final offsets B(MXSB)
-        if not tdmB and kernel["ProblemType"]["MXBlockB"]:
-          module.addComment1("global read addresses: final offsets mxsb")
-          module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
-        if not tdmB:
-          module.addComment1("global read addresses: final offsets b")
-          module.add(self.graFinalOffsets(kernel, tensorParametersB))
-          # releaseTensorTmpGprs(tensorParametersB)
-
-        if not forceNoTileCode:
-          # Addresses A(MXSA)
-          if not tdmA:
-            module.addComment1("global read addresses: addresses a")
-            module.add(self.graAddresses(kernel, tensorParametersA))
-          if not tdmA and kernel["ProblemType"]["MXBlockA"]:
-            module.addComment1("global read addresses: addresses mxsa")
-            module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-          # Addresses Metadata
-          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-            module.addComment1("global read addresses: addresses metadata")
-            module.add(self.graAddresses(kernel, tPM))
-          # Addresses B(MXSB)
-          if not tdmB and kernel["ProblemType"]["MXBlockB"]:
-            module.addComment1("global read addresses: addresses mxsb")
-            module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
-          if not tdmB:
-            module.addComment1("global read addresses: addresses b")
-            module.add(self.graAddresses(kernel, tensorParametersB))
+        emitRemoveGROffsetsSgprs()
+        emitGraFinalOffsets()
+        emitGraAddresses()
 
       self.dontAppendCode = False
       self.dontAppendCode = self.dontAppendCode or forceNoTileCode
@@ -7463,7 +7422,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numGlobalReadsA = kernel["NumLoadsCoalescedA"] \
           * kernel["NumLoadsPerpendicularA"] * kernel["GlobalReadVectorWidthA"]
       numGlobalReadInstructionsA = int(numGlobalReadsA * tensorParametersA["bpeGR"])//\
-          (tensorParametersA["globalReadInstruction"].blockWidth * 4)
+          int(tensorParametersA["globalReadInstruction"].blockWidth * 4)
 
       if kernel["enableTDMA"]:
         self.states.a.numVgprGlobalReadOffsets = 0
@@ -7502,7 +7461,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numGlobalReadsB = kernel["NumLoadsCoalescedB"] \
           * kernel["NumLoadsPerpendicularB"] * kernel["GlobalReadVectorWidthB"]
       numGlobalReadInstructionsB = int(numGlobalReadsB * tensorParametersB["bpeGR"])// \
-          (tensorParametersB["globalReadInstruction"].blockWidth * 4)
+          int(tensorParametersB["globalReadInstruction"].blockWidth * 4)
 
       if kernel["enableTDMB"]:
         self.states.b.numVgprGlobalReadOffsets = 0
@@ -7541,7 +7500,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numGlobalReadsMetadata = kernel["NumLoadsCoalescedMetadata"] \
             * kernel["NumLoadsPerpendicularMetadata"] * kernel["GlobalReadVectorWidthMetadata"]
         numGlobalReadInstructionsMetadata = int(numGlobalReadsMetadata * tensorParametersM["bpe"])//\
-            (tensorParametersM["globalReadInstruction"].blockWidth * 4)
+            int(tensorParametersM["globalReadInstruction"].blockWidth * 4)
         if kernel["BufferLoad"]:
           self.states.m.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMetadata * self.states.rpgo)
         if self.states.globalReadIncsUseVgpr:

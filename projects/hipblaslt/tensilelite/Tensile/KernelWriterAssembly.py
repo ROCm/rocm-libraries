@@ -10509,13 +10509,16 @@ class KernelWriterAssembly(KernelWriter):
                   if isLds and kernel["UseInstOffsetForGRO"]:
                     instOffsetInc += ldsInc
 
-                else: # Not buffer load, ie 'flat' load
+                else: # Not buffer load, ie 'global' load
                   # mask if current address if in bounds
                   module.add(VCmpXLtU64(dst=VCC(), \
                       src0=vgpr("GlobalReadAddr%s+%u"%(tP["tensorChar"], graIdx),2), \
                       src1=vgpr(maxAddrVgpr,2), \
                       comment="addr < maxAddr"))
-                  hi16=(kernel["ProblemType"]["DataType%s"%tcDataType].isHalf() or kernel["ProblemType"]["DataType%s"%tcDataType].isBFloat16()) and r%2==1
+                  if kernel["ProblemType"]["DataType%s"%tcDataType].isHalf() or kernel["ProblemType"]["DataType%s"%tcDataType].isBFloat16():
+                    hi16 = loopCnt%2 if tP["glvw"]==1 else r%2
+                  else:
+                    hi16 = 0
                   destVgpr="G2L%s+%u+%u"%(tc, g2lIdx, regIdx)
                   # load one element from address
                   module.add(self.chooseGlobalRead(False, \
@@ -10704,10 +10707,12 @@ class KernelWriterAssembly(KernelWriter):
 
       if isTr:
         self.vgprPool.checkIn(maxGroVgpr)
-      elif not kernel["BufferLoad"]:
-        self.vgprPool.checkIn(maxAddrVgpr)
-        self.vgprPool.checkIn(bpeVgpr)
-        self.vgprPool.checkIn(zeroVgpr)
+
+    # BufferLoad=0 VGPRs are local to each call — always free them
+    if not isTr and not kernel["BufferLoad"]:
+      self.vgprPool.checkIn(maxAddrVgpr)
+      self.vgprPool.checkIn(bpeVgpr)
+      self.vgprPool.checkIn(zeroVgpr)
 
     if doTailOpt == 2:
       return module, loadCnt, vgprList, directToLdsLoads
@@ -11205,11 +11210,18 @@ class KernelWriterAssembly(KernelWriter):
 
                 #print "IM=", type(imod.instList[-1]), imod.instList[-1],
               else: # not buffer load
+                offsetVgpr = "GlobalReadAddr%s+%u"%(tc,graIdx)
+                if tc == "A" and record[0] == True:
+                  self.globalread_gpr_record.a.addrVgpr.append(offsetVgpr)
+                  self.globalread_gpr_record.a.offset.append("0")
+                elif tc == "B" and record[1] == True:
+                  self.globalread_gpr_record.b.addrVgpr.append(offsetVgpr)
+                  self.globalread_gpr_record.b.offset.append("0")
                 destVgpr = destVgprPrefix + "+%u"%(g2lIdx + tP["shiftGR"])
                 loadModule.add( self.chooseGlobalRead(False, \
                           bpl, \
                           destVgpr=destVgpr, \
-                          addr0=vgpr("GlobalReadAddr%s+%u"%(tc,graIdx),2), addr1="", \
+                          addr0=vgpr(offsetVgpr,2), addr1="", \
                           soffset=0, offset=0, \
                           glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                           hi16=(kernel["ProblemType"]["MacDataType%s"%tc if not tP["isM"] else "DataType"].isHalf() or kernel["ProblemType"]["MacDataType%s"%tc if not tP["isM"] else "DataType"].isBFloat16()) and loopCnt%2==1, \
@@ -15991,7 +16003,7 @@ class KernelWriterAssembly(KernelWriter):
       elif bpl==16:
         return GlobalLoadTR16B128(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
     else:
-      modifier = GLOBALModifiers(offset=0)
+      modifier = GLOBALModifiers(offset=0, glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=lds, isStore=False)
       saddr_off = vgpr("off", 1, False, False, True)
       if bpl==1 and hi16:
         return GlobalLoadD16HIU8(dst=vgpr(destVgpr, rpv*4), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
@@ -16013,7 +16025,7 @@ class KernelWriterAssembly(KernelWriter):
         # emulate global_load_b192 as global_load_b128 + global_load_b64
         rv = Module("emulated _global_load_b192")
         rv.add(GlobalLoadB128(dst=vgpr(destVgpr, 4), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment))
-        modifier2 = GLOBALModifiers(offset=16)
+        modifier2 = GLOBALModifiers(offset=16, glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=lds, isStore=False)
         rv.add(GlobalLoadB64(dst=vgpr(_vgprOffset(destVgpr, 4), 2), vaddr=addr0, saddr=saddr_off, modifier=modifier2, comment=comment))
         return rv
       elif bpl >= 32 and bpl % 16 == 0:
@@ -16023,7 +16035,7 @@ class KernelWriterAssembly(KernelWriter):
         shiftRpv = rpv // rounds
         rv.add(GlobalLoadB128(dst=vgpr(destVgpr, shiftRpv), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment))
         for i in range(1, rounds):
-          modifierN = GLOBALModifiers(offset=16*i)
+          modifierN = GLOBALModifiers(offset=16*i, glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=lds, isStore=False)
           vgprOff = _vgprOffset(destVgpr, int(shiftRpv * i))
           rv.add(GlobalLoadB128(dst=vgpr(vgprOff, shiftRpv), vaddr=addr0, saddr=saddr_off, modifier=modifierN, comment=comment))
         return rv
@@ -16103,7 +16115,7 @@ class KernelWriterAssembly(KernelWriter):
         bufferStoreImpl(soffset, mubuf)
 
     else:
-      modifier = GLOBALModifiers(offset=0)
+      modifier = GLOBALModifiers(offset=0, glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=False, isStore=True)
       saddr_off = vgpr("off", 1, False, False, True)
       if bps==1 and hi16:
         module.add(GlobalStoreD16HIB16(vaddr=addr0, src=vgpr(srcVgpr, rpv*4), saddr=saddr_off, modifier=modifier, comment=comment))
@@ -16126,7 +16138,7 @@ class KernelWriterAssembly(KernelWriter):
         shiftRpv = rpv // rounds
         module.add(GlobalStoreB128(vaddr=addr0, src=vgpr(srcVgpr, shiftRpv), saddr=saddr_off, modifier=modifier, comment=comment))
         for i in range(1, rounds):
-          modifierN = GLOBALModifiers(offset=shiftByte*i)
+          modifierN = GLOBALModifiers(offset=shiftByte*i, glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=False, isStore=True)
           vgprOff = _vgprOffset(srcVgpr, int(shiftRpv * i))
           module.add(GlobalStoreB128(vaddr=addr0, src=vgpr(vgprOff, shiftRpv), saddr=saddr_off, modifier=modifierN, comment=comment))
       else:
