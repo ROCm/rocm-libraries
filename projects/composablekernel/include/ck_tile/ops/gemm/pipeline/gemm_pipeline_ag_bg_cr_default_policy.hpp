@@ -361,7 +361,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
                                                  : WGAttrNumAccessEnum::Invalid;
 #else
         constexpr auto wg_attr_num_access_A = WGAttrNumAccessEnum::Default;
-        constexpr auto wg_attr_num_access_A = WGAttrNumAccessEnum::Default;
+        constexpr auto wg_attr_num_access_B = WGAttrNumAccessEnum::Default;
 #endif
 
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
