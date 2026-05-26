@@ -46,6 +46,7 @@
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
@@ -67,6 +68,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
         pm.addPass(createStinkyRemoveWaitCntPass());
+        pm.addPass(createStinkyRemoveNopPass());
     }
 
     // addPeepholeOptPasses(pm, optLevel);

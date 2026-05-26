@@ -19,6 +19,7 @@ target_sources(stinkytofu PRIVATE
     ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
     StinkyRemoveWaitCntPass.cpp
+    StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
