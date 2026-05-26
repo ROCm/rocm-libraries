@@ -6,8 +6,8 @@
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -118,13 +118,13 @@ using TypesFwdInferenceNchw = ::testing::Types<TypePair<float, float>,
                                                TypePair<fp8_e5m2, float>>;
 
 template <class T>
-class CpuFpReferenceBatchnormFwdInferenceNchw : public ::testing::Test
+class CpuReferenceBatchnormFwdInferenceNchw : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceBatchnormFwdInferenceNchw, TypesFwdInferenceNchw, );
+TYPED_TEST_SUITE(CpuReferenceBatchnormFwdInferenceNchw, TypesFwdInferenceNchw, );
 
-TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNchw, BatchnormFwdInferenceNchw)
+TYPED_TEST(CpuReferenceBatchnormFwdInferenceNchw, BatchnormFwdInferenceNchw)
 {
     const Tensor<typename TypeParam::First> inputTensor({1, 3, 224, 224});
     Tensor<typename TypeParam::First> outputTensor({1, 3, 224, 224});
@@ -133,20 +133,20 @@ TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNchw, BatchnormFwdInferenceNchw)
     const Tensor<typename TypeParam::Second> meanTensor({1, 3});
     const Tensor<typename TypeParam::Second> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
 using TypesFwdInferenceNhwc = ::testing::Types<TypePair<float, float>, TypePair<half, bfloat16>>;
 
 template <class T>
-class CpuFpReferenceBatchnormFwdInferenceNhwc : public ::testing::Test
+class CpuReferenceBatchnormFwdInferenceNhwc : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceBatchnormFwdInferenceNhwc, TypesFwdInferenceNhwc, );
+TYPED_TEST_SUITE(CpuReferenceBatchnormFwdInferenceNhwc, TypesFwdInferenceNhwc, );
 
-TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNhwc, BatchnormFwdInferenceNhwc)
+TYPED_TEST(CpuReferenceBatchnormFwdInferenceNhwc, BatchnormFwdInferenceNhwc)
 {
     const Tensor<typename TypeParam::First> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     Tensor<typename TypeParam::First> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
@@ -155,11 +155,11 @@ TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNhwc, BatchnormFwdInferenceNhwc)
     const Tensor<float> meanTensor({1, 3});
     const Tensor<float> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
+TEST(TestCpuReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
 {
     const std::vector<int64_t> dims = {1, 1, 2, 2};
 
@@ -192,7 +192,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
     // y = scale * (x - mean) * inv_variance + bias = 2 * (x - 2.5) * inv_variance + 0.5
     const std::vector<double> expectedOutput = {-2.18327084, -0.39442361, 1.39442361, 3.18327084};
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 
     auto tolerance = 1e-6;
@@ -203,7 +203,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedOutput[3], tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference2D)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdInference2D)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<float> inputTensor({4, 3});
@@ -222,11 +222,11 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference2D)
         invVarianceTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference3D)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdInference3D)
 {
     // Test with 3D tensor (batch, channel, length)
     Tensor<float> inputTensor({2, 3, 10});
@@ -246,11 +246,11 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference3D)
         varianceTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
 {
     // Test with 5D tensor (batch, channel, depth, height, width)
     Tensor<float> inputTensor({2, 3, 4, 5, 6});
@@ -269,11 +269,11 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
         varianceTensor.setHostValue(0.5f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
+TEST(TestCpuReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
 {
     Tensor<float> inputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
     Tensor<float> outputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
@@ -291,7 +291,7 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
         varianceTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
@@ -313,13 +313,13 @@ using TypesBackwardNchw = ::testing::Types<TypeTriplet<float, float, float>,
                                            TypeTriplet<double, double, double>>;
 
 template <typename T>
-class CpuFpReferenceBatchnormBackwardNchw : public ::testing::Test
+class CpuReferenceBatchnormBackwardNchw : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceBatchnormBackwardNchw, TypesBackwardNchw, );
+TYPED_TEST_SUITE(CpuReferenceBatchnormBackwardNchw, TypesBackwardNchw, );
 
-TYPED_TEST(CpuFpReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
+TYPED_TEST(CpuReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
 {
     const Tensor<typename TypeParam::First> xTensor({6, 3, 32, 32});
     const Tensor<typename TypeParam::First> dyTensor({6, 3, 32, 32});
@@ -330,7 +330,7 @@ TYPED_TEST(CpuFpReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
     Tensor<typename TypeParam::Second> dscaleTensor({1, 3});
     Tensor<typename TypeParam::Second> dbiasTensor({1, 3});
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       meanTensor,
                                       invVarianceTensor,
@@ -340,7 +340,7 @@ TYPED_TEST(CpuFpReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
                                       dbiasTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNhwc)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardNhwc)
 {
     const Tensor<float> xTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     const Tensor<float> dyTensor({6, 3, 32, 32}, TensorLayout::NHWC);
@@ -351,7 +351,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNhwc)
     Tensor<float> dscaleTensor({1, 3});
     Tensor<float> dbiasTensor({1, 3});
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       meanTensor,
                                       invVarianceTensor,
@@ -361,7 +361,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNhwc)
                                       dbiasTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
+TEST(TestCpuReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
 {
     const std::vector<int64_t> dims = {1, 1, 2, 2};
 
@@ -408,7 +408,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
     std::vector<double> expectedDx
         = {-2.14659950e-06, -7.15533166e-07, 7.15533166e-07, 2.14659950e-06};
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       scaleTensor,
                                       dxTensor,
@@ -427,7 +427,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
     EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 1), expectedDx[3], tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward2D)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackward2D)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<float> xTensor({4, 3});
@@ -448,7 +448,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward2D)
         invVarianceTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       meanTensor,
                                       invVarianceTensor,
@@ -458,7 +458,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward2D)
                                       dbiasTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward3D)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackward3D)
 {
     // Test with 3D tensor (batch, channel, length)
     Tensor<float> xTensor({2, 3, 10});
@@ -479,7 +479,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward3D)
         invVarianceTensor.setHostValue(0.5f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       meanTensor,
                                       invVarianceTensor,
@@ -489,7 +489,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward3D)
                                       dbiasTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNcdhw)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardNcdhw)
 {
     // Test with 5D tensor (batch, channel, depth, height, width)
     Tensor<float> xTensor({2, 3, 4, 5, 6});
@@ -510,7 +510,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNcdhw)
         invVarianceTensor.setHostValue(0.7071f, 0, i); // 1/sqrt(2)
     }
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       meanTensor,
                                       invVarianceTensor,
@@ -520,7 +520,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNcdhw)
                                       dbiasTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNdhwc)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardNdhwc)
 {
     Tensor<float> xTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
     Tensor<float> dyTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
@@ -540,7 +540,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNdhwc)
         invVarianceTensor.setHostValue(0.7071f, 0, i); // 1/sqrt(2)
     }
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
+    CpuReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
                                       meanTensor,
                                       invVarianceTensor,
@@ -550,7 +550,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNdhwc)
                                       dbiasTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSavedStats)
+TEST(TestCpuReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSavedStats)
 {
     const std::vector<int64_t> dims = {1, 1, 2, 2};
 
@@ -587,7 +587,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSav
     std::vector<double> expectedDx
         = {-2.14659950e-06, -7.15533166e-07, 7.15533166e-07, 2.14659950e-06};
 
-    CpuFpReferenceBatchnorm::backward<double, double, double, double, double, double>(
+    CpuReferenceBatchnorm::backward<double, double, double, double, double, double>(
         dyTensor,
         xTensor,
         scaleTensor,
@@ -608,7 +608,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSav
     EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 1), expectedDx[3], tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsSingleElement)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsSingleElement)
 {
     // Edge case: single element per channel so variance = 0
     const std::vector<int64_t> dims = {1, 1, 1, 1};
@@ -636,7 +636,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsSingleEl
     // dx = scale * inv_variance * (dy - mean(dy) - x_hat * mean(dy * x_hat))
     //    = 1.5 * inv_variance * (0.3 - 0.3 - 0 * 0) = 0
 
-    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
+    CpuReferenceBatchnorm::backward<float, float, float, float, float, float>(
         dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
 
     auto tolerance = 1e-5f;
@@ -646,7 +646,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsSingleEl
     EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 0), 0.0f, tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsZeroVariance)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsZeroVariance)
 {
     // Edge case: all identical values so variance = 0
     const std::vector<int64_t> dims = {1, 1, 2, 2};
@@ -692,7 +692,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsZeroVari
     // dx[2] = 632.455532 * (0.3 - 0.25) = 31.62278
     // dx[3] = 632.455532 * (0.4 - 0.25) = 94.86833
 
-    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
+    CpuReferenceBatchnorm::backward<float, float, float, float, float, float>(
         dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
 
     auto tolerance = 1e-4f;
@@ -705,7 +705,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsZeroVari
     EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 1), 94.86833f, tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStats2DMinimal)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStats2DMinimal)
 {
     // Edge case: minimum valid 2D tensor (batch, channel only - no spatial dims)
     const std::vector<int64_t> dims = {2, 1};
@@ -735,7 +735,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStats2DMinima
     // x_hat = [(1.0-2.0)*inv_var, (3.0-2.0)*inv_var] ≈ [-0.999995, 0.999995]
     // dscale = sum(dy * x_hat) ≈ 0.2*(-0.999995) + 0.4*(0.999995) ≈ 0.199999
 
-    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
+    CpuReferenceBatchnorm::backward<float, float, float, float, float, float>(
         dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
 
     auto tolerance = 1e-4f;
@@ -747,7 +747,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStats2DMinima
     EXPECT_TRUE(std::isfinite(dxTensor.getHostValue(1, 0)));
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEpsilon)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEpsilon)
 {
     // Edge case: test with large epsilon to ensure it affects invVariance computation
     const std::vector<int64_t> dims = {1, 1, 1, 1};
@@ -770,7 +770,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEps
     // variance = 0.0
     // inv_variance = 1 / sqrt(0.0 + 1.0) = 1.0
 
-    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(dyTensor,
+    CpuReferenceBatchnorm::backward<float, float, float, float, float, float>(dyTensor,
                                                                                 xTensor,
                                                                                 scaleTensor,
                                                                                 dxTensor,
@@ -787,7 +787,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEps
     EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 0), 0.0f, tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)
 {
     Tensor<float> inputTensor({2, 3, 4, 4});
     Tensor<float> outputTensor({2, 3, 4, 4});
@@ -802,11 +802,11 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)
     }
 
     // Call without optional tensors
-    CpuFpReferenceBatchnorm::fwdTraining(
+    CpuReferenceBatchnorm::fwdTraining(
         inputTensor, scaleTensor, biasTensor, outputTensor, BATCHNORM_DEFAULT_EPSILON, 0.1);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
 {
     Tensor<float> inputTensor({2, 3, 4, 4});
     Tensor<float> outputTensor({2, 3, 4, 4});
@@ -823,7 +823,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
     }
 
     // Call with saved statistics for backward pass
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    CpuReferenceBatchnorm::fwdTraining(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,
@@ -840,7 +840,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
     }
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
 {
     Tensor<float> inputTensor({2, 3, 4, 4});
     Tensor<float> outputTensor({2, 3, 4, 4});
@@ -863,7 +863,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
     const double momentum = 0.1;
 
     // Cannot deduce template with partial nullptr params
-    CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, float>(
+    CpuReferenceBatchnorm::fwdTraining<float, float, float, float, float>(
         inputTensor,
         scaleTensor,
         biasTensor,
@@ -887,7 +887,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
     }
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
 {
     Tensor<float> inputTensor({2, 3, 4, 4});
     Tensor<float> outputTensor({2, 3, 4, 4});
@@ -925,7 +925,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
     }
 
     // Call with all optional parameters
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    CpuReferenceBatchnorm::fwdTraining(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,
@@ -970,13 +970,13 @@ using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<bfloat16, float, float
                                               TypeTriplet<half, bfloat16, float>>;
 
 template <typename T>
-class CpuFpReferenceBatchnromFwdTrainingNchw : public ::testing::Test
+class CpuReferenceBatchnormFwdTrainingNchw : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceBatchnromFwdTrainingNchw, TypesFwdTrainingNhwc, );
+TYPED_TEST_SUITE(CpuReferenceBatchnormFwdTrainingNchw, TypesFwdTrainingNhwc, );
 
-TYPED_TEST(CpuFpReferenceBatchnromFwdTrainingNchw, BatchnormFwdTrainingNchw)
+TYPED_TEST(CpuReferenceBatchnormFwdTrainingNchw, BatchnormFwdTrainingNchw)
 {
     Tensor<typename TypeParam::First> inputTensor({2, 3, 4, 4});
     Tensor<typename TypeParam::First> outputTensor({2, 3, 4, 4});
@@ -992,7 +992,7 @@ TYPED_TEST(CpuFpReferenceBatchnromFwdTrainingNchw, BatchnormFwdTrainingNchw)
         biasTensor.setHostValue(safeTestTypeCast<typename TypeParam::Second>(0.0), 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    CpuReferenceBatchnorm::fwdTraining(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,
@@ -1002,7 +1002,7 @@ TYPED_TEST(CpuFpReferenceBatchnromFwdTrainingNchw, BatchnormFwdTrainingNchw)
                                          &savedInvVariance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
+TEST(TestCpuReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
 {
     const std::vector<int64_t> dims = {1, 1, 2, 2};
 
@@ -1041,7 +1041,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
     // y = scale * (x - mean) * invVariance + bias
     const std::vector<double> expectedOutput = {-2.18327084, -0.39442361, 1.39442361, 3.18327084};
 
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    CpuReferenceBatchnorm::fwdTraining(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,
@@ -1075,7 +1075,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
     EXPECT_NEAR(nextRunningVariance.getHostValue(0, 0), 1.06666666666667, tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining2D)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTraining2D)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<float> inputTensor({4, 3});
@@ -1090,11 +1090,11 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining2D)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdTraining(
+    CpuReferenceBatchnorm::fwdTraining(
         inputTensor, scaleTensor, biasTensor, outputTensor, BATCHNORM_DEFAULT_EPSILON, 0.1);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining3D)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTraining3D)
 {
     // Test with 3D tensor (batch, channel, length)
     Tensor<float> inputTensor({2, 3, 10});
@@ -1109,11 +1109,11 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining3D)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdTraining(
+    CpuReferenceBatchnorm::fwdTraining(
         inputTensor, scaleTensor, biasTensor, outputTensor, BATCHNORM_DEFAULT_EPSILON, 0.1);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNcdhw)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTrainingNcdhw)
 {
     // Test with 5D tensor (batch, channel, depth, height, width)
     Tensor<float> inputTensor({2, 3, 4, 5, 6});
@@ -1130,7 +1130,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNcdhw)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    CpuReferenceBatchnorm::fwdTraining(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,
@@ -1140,7 +1140,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNcdhw)
                                          &savedInvVariance);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNdhwc)
+TEST(TestCpuReferenceBatchnormFp32, BatchnormFwdTrainingNdhwc)
 {
     // Test with 5D tensor in NDHWC layout
     Tensor<float> inputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
@@ -1157,7 +1157,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNdhwc)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    CpuReferenceBatchnorm::fwdTraining(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,

@@ -6,7 +6,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 #include <cmath>
@@ -74,178 +74,178 @@ void expectTensorValues(const Tensor<Type>& tensor,
 
 /* ============================= Validation tests ============================= */
 
-class TestCpuFpReferenceReduction : public ::testing::Test
+class TestCpuReferenceReduction : public ::testing::Test
 {
 };
 
-TEST_F(TestCpuFpReferenceReduction, ValidateRankMismatch)
+TEST_F(TestCpuReferenceReduction, ValidateRankMismatch)
 {
     auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({2, 3});
 
-    EXPECT_THROW((CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
+    EXPECT_THROW((CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
                  std::invalid_argument);
 }
 
-TEST_F(TestCpuFpReferenceReduction, ValidateInvalidYDim)
+TEST_F(TestCpuReferenceReduction, ValidateInvalidYDim)
 {
     auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({2, 2, 4}); // dim 1: 2 != 3 and != 1
 
-    EXPECT_THROW((CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
+    EXPECT_THROW((CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
                  std::invalid_argument);
 }
 
-TEST_F(TestCpuFpReferenceReduction, ValidateNoReducedDim)
+TEST_F(TestCpuReferenceReduction, ValidateNoReducedDim)
 {
     auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({2, 3, 4}); // no dim reduced
 
-    EXPECT_THROW((CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
+    EXPECT_THROW((CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
                  std::invalid_argument);
 }
 
-TEST_F(TestCpuFpReferenceReduction, NotSetModeThrows)
+TEST_F(TestCpuReferenceReduction, NotSetModeThrows)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x);
 
     EXPECT_THROW(
-        (CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::NOT_SET)),
+        (CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::NOT_SET)),
         std::invalid_argument);
 }
 
 /* ============================= Mode tests ============================= */
 // All mode tests use X = [[1,2,3],[4,5,6]] shape (2,3), reduce dim 1 -> Y shape (2,1)
 
-TEST_F(TestCpuFpReferenceReduction, Add)
+TEST_F(TestCpuReferenceReduction, Add)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x); // [1,2,3, 4,5,6]
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
 
     // Y[0,0] = 1+2+3 = 6,  Y[1,0] = 4+5+6 = 15
     expectTensorValues(y, {6.0f, 15.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Mul)
+TEST_F(TestCpuReferenceReduction, Mul)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MUL);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MUL);
 
     // Y[0,0] = 1*2*3 = 6,  Y[1,0] = 4*5*6 = 120
     expectTensorValues(y, {6.0f, 120.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Min)
+TEST_F(TestCpuReferenceReduction, Min)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MIN_OP);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MIN_OP);
 
     // Y[0,0] = min(1,2,3) = 1,  Y[1,0] = min(4,5,6) = 4
     expectTensorValues(y, {1.0f, 4.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Max)
+TEST_F(TestCpuReferenceReduction, Max)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MAX_OP);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MAX_OP);
 
     // Y[0,0] = max(1,2,3) = 3,  Y[1,0] = max(4,5,6) = 6
     expectTensorValues(y, {3.0f, 6.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Avg)
+TEST_F(TestCpuReferenceReduction, Avg)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::AVG);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::AVG);
 
     // Y[0,0] = (1+2+3)/3 = 2,  Y[1,0] = (4+5+6)/3 = 5
     expectTensorValues(y, {2.0f, 5.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Amax)
+TEST_F(TestCpuReferenceReduction, Amax)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillValues(x, {-3.0f, 1.0f, 2.0f, -5.0f, 4.0f, 0.0f});
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::AMAX);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::AMAX);
 
     // Y[0,0] = max(|-3|,|1|,|2|) = 3,  Y[1,0] = max(|-5|,|4|,|0|) = 5
     expectTensorValues(y, {3.0f, 5.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Norm1)
+TEST_F(TestCpuReferenceReduction, Norm1)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillValues(x, {-1.0f, 2.0f, -3.0f, 4.0f, -5.0f, 6.0f});
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::NORM1);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::NORM1);
 
     // Y[0,0] = |-1|+|2|+|-3| = 6,  Y[1,0] = |4|+|-5|+|6| = 15
     expectTensorValues(y, {6.0f, 15.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, Norm2)
+TEST_F(TestCpuReferenceReduction, Norm2)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::NORM2);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::NORM2);
 
     // Y[0,0] = sqrt(1+4+9) = sqrt(14),  Y[1,0] = sqrt(16+25+36) = sqrt(77)
     expectTensorValues(y, {std::sqrt(14.0f), std::sqrt(77.0f)}, 1e-5f);
 }
 
-TEST_F(TestCpuFpReferenceReduction, MulNoZeros)
+TEST_F(TestCpuReferenceReduction, MulNoZeros)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillValues(x, {2.0f, 0.0f, 3.0f, 0.0f, 5.0f, 4.0f});
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MUL_NO_ZEROS);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MUL_NO_ZEROS);
 
     // Y[0,0] = 2*3 = 6 (skip 0),  Y[1,0] = 5*4 = 20 (skip 0)
     expectTensorValues(y, {6.0f, 20.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, MinWithNegativeValues)
+TEST_F(TestCpuReferenceReduction, MinWithNegativeValues)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillValues(x, {-3.0f, 1.0f, -7.0f, 4.0f, -2.0f, 5.0f});
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MIN_OP);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MIN_OP);
 
     // Y[0,0] = min(-3, 1, -7) = -7,  Y[1,0] = min(4, -2, 5) = -2
     expectTensorValues(y, {-7.0f, -2.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, MaxWithNegativeValues)
+TEST_F(TestCpuReferenceReduction, MaxWithNegativeValues)
 {
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({2, 1});
     fillValues(x, {-3.0f, -1.0f, -7.0f, -4.0f, -2.0f, -5.0f});
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MAX_OP);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MAX_OP);
 
     // Y[0,0] = max(-3, -1, -7) = -1,  Y[1,0] = max(-4, -2, -5) = -2
     expectTensorValues(y, {-1.0f, -2.0f});
@@ -253,14 +253,14 @@ TEST_F(TestCpuFpReferenceReduction, MaxWithNegativeValues)
 
 /* ============================= Multi-dim reduction ============================= */
 
-TEST_F(TestCpuFpReferenceReduction, AddReduceMultipleDims)
+TEST_F(TestCpuReferenceReduction, AddReduceMultipleDims)
 {
     // X shape (2, 3, 4), Y shape (1, 3, 1) — reduce dims 0 and 2
     auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({1, 3, 1});
     fillSequential(x, 0.0f); // [0, 1, 2, ..., 23]
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
 
     // Y[0,0,0] = sum(X[:,0,:]) = (0+1+2+3)+(12+13+14+15) = 60
     // Y[0,1,0] = sum(X[:,1,:]) = (4+5+6+7)+(16+17+18+19) = 92
@@ -268,33 +268,33 @@ TEST_F(TestCpuFpReferenceReduction, AddReduceMultipleDims)
     expectTensorValues(y, {60.0f, 92.0f, 124.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, AddReduceAllDims)
+TEST_F(TestCpuReferenceReduction, AddReduceAllDims)
 {
     // X shape (2, 3), Y shape (1, 1) — reduce all dims
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({1, 1});
     fillSequential(x); // [1, 2, 3, 4, 5, 6]
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
 
     // Y[0,0] = 1+2+3+4+5+6 = 21
     expectTensorValues(y, {21.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, MaxReduceDim0)
+TEST_F(TestCpuReferenceReduction, MaxReduceDim0)
 {
     // X shape (2, 3), Y shape (1, 3) — reduce dim 0
     auto x = createTensor<float>({2, 3});
     auto y = createTensor<float>({1, 3});
     fillSequential(x); // [1,2,3, 4,5,6]
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MAX_OP);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::MAX_OP);
 
     // Y[0,0] = max(1,4) = 4,  Y[0,1] = max(2,5) = 5,  Y[0,2] = max(3,6) = 6
     expectTensorValues(y, {4.0f, 5.0f, 6.0f});
 }
 
-TEST_F(TestCpuFpReferenceReduction, AddReduceSingleInnerAxis)
+TEST_F(TestCpuReferenceReduction, AddReduceSingleInnerAxis)
 {
     // X shape (2,3,4,8), Y shape (2,3,1,8) — reduce dim 2 only
     //
@@ -346,7 +346,7 @@ TEST_F(TestCpuFpReferenceReduction, AddReduceSingleInnerAxis)
     // X[n,c,h,w] = n*96 + c*32 + h*8 + w
     fillSequential(x, 0.0f);
 
-    CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
+    CpuReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD);
 
     // Y[n,c,0,w] = sum over h: X[n,c,h,w] for h in {0,1,2,3}
     // Y[0,0,0,0] = X[0,0,0,0]+X[0,0,1,0]+X[0,0,2,0]+X[0,0,3,0] = 0+8+16+24 = 48
@@ -379,13 +379,13 @@ using ReductionTypes = ::testing::Types<ReductionTypeTuple<float, float, float>,
                                         ReductionTypeTuple<bfloat16, float, float>>;
 
 template <class T>
-class CpuFpReferenceReductionTyped : public ::testing::Test
+class CpuReferenceReductionTyped : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceReductionTyped, ReductionTypes, );
+TYPED_TEST_SUITE(CpuReferenceReductionTyped, ReductionTypes, );
 
-TYPED_TEST(CpuFpReferenceReductionTyped, AddReduceDim1)
+TYPED_TEST(CpuReferenceReductionTyped, AddReduceDim1)
 {
     using X = typename TypeParam::XDataType;
     using Y = typename TypeParam::YDataType;
@@ -395,12 +395,12 @@ TYPED_TEST(CpuFpReferenceReductionTyped, AddReduceDim1)
     auto y = createTensor<Y>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<X, Y, C>(x, y, ReductionMode::ADD);
+    CpuReferenceReduction::reduce<X, Y, C>(x, y, ReductionMode::ADD);
 
     expectTensorValues(y, {6.0f, 15.0f});
 }
 
-TYPED_TEST(CpuFpReferenceReductionTyped, MinReduceDim1)
+TYPED_TEST(CpuReferenceReductionTyped, MinReduceDim1)
 {
     using X = typename TypeParam::XDataType;
     using Y = typename TypeParam::YDataType;
@@ -410,12 +410,12 @@ TYPED_TEST(CpuFpReferenceReductionTyped, MinReduceDim1)
     auto y = createTensor<Y>({2, 1});
     fillSequential(x);
 
-    CpuFpReferenceReduction::reduce<X, Y, C>(x, y, ReductionMode::MIN_OP);
+    CpuReferenceReduction::reduce<X, Y, C>(x, y, ReductionMode::MIN_OP);
 
     expectTensorValues(y, {1.0f, 4.0f});
 }
 
-TYPED_TEST(CpuFpReferenceReductionTyped, AddReduceMultipleDims)
+TYPED_TEST(CpuReferenceReductionTyped, AddReduceMultipleDims)
 {
     using X = typename TypeParam::XDataType;
     using Y = typename TypeParam::YDataType;
@@ -425,7 +425,7 @@ TYPED_TEST(CpuFpReferenceReductionTyped, AddReduceMultipleDims)
     auto y = createTensor<Y>({1, 3, 1});
     fillSequential(x, 0.0f);
 
-    CpuFpReferenceReduction::reduce<X, Y, C>(x, y, ReductionMode::ADD);
+    CpuReferenceReduction::reduce<X, Y, C>(x, y, ReductionMode::ADD);
 
     expectTensorValues(y, {60.0f, 92.0f, 124.0f});
 }

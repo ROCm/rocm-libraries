@@ -7,8 +7,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleDequantize.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBlockScaleDequantize.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -65,7 +65,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
-    CpuFpReferenceBlockScaleDequantize::dequantize(*directXTensor,
+    CpuReferenceBlockScaleDequantize::dequantize(*directXTensor,
                                                    *directScaleTensor,
                                                    *directYTensor,
                                                    blockSize,
@@ -77,7 +77,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
     plan.execute(variantPack);
 
     const float tolerance = 1e-5f;
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directBundle.getTensor(3), planBundle.getTensor(3)));
 }
@@ -124,7 +124,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
-    CpuFpReferenceBlockScaleDequantize::dequantize(
+    CpuReferenceBlockScaleDequantize::dequantize(
         *directXTensor, *directScaleTensor, *directYTensor, blockSize, true);
 
     auto variantPack = planBundle.toHostVariantPack();
@@ -132,7 +132,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
     plan.execute(variantPack);
 
     const float tolerance = 1e-5f;
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directBundle.getTensor(3), planBundle.getTensor(3)));
 }
@@ -297,7 +297,7 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
     auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
-    CpuFpReferenceBlockScaleDequantize::dequantize(
+    CpuReferenceBlockScaleDequantize::dequantize(
         *directXTensor, *directScaleTensor, *directYTensor, blockSize, false);
 
     // Plan execution
@@ -306,7 +306,7 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
     plan.execute(variantPack);
 
     const float tolerance = 1e-2f;
-    const CpuFpReferenceValidation<OutputType> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<OutputType> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directBundle.getTensor(3), planBundle.getTensor(3)));
 }
@@ -390,7 +390,7 @@ TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
     auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
-    CpuFpReferenceBlockScaleDequantize::dequantize(
+    CpuReferenceBlockScaleDequantize::dequantize(
         *directXTensor, *directScaleTensor, *directYTensor, blockSize, false);
 
     auto variantPack = planBundle.toHostVariantPack();
@@ -398,7 +398,7 @@ TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
     plan.execute(variantPack);
 
     const float tolerance = 1e-2f;
-    const CpuFpReferenceValidation<OutputType> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<OutputType> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directBundle.getTensor(3), planBundle.getTensor(3)));
 }

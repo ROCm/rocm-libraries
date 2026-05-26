@@ -4,7 +4,7 @@
 #include <array>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <stdexcept>
 #include <vector>
 
@@ -112,6 +112,6 @@ TEST(TestShallowTensor, SparseTensorCreationAndUsage)
 
     //checking the shallow tensor of tensor matches should validate the setup of shallow
     //tensor for sparse data.
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     EXPECT_TRUE(refValidation.allClose(tensor, shallow));
 }

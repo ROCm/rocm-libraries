@@ -8,8 +8,8 @@
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
@@ -76,7 +76,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     variantPack[6] = planTensorBundle.meanTensor.memory().hostData();
     variantPack[7] = planTensorBundle.invVarianceTensor.memory().hostData();
 
-    CpuFpReferenceBatchnorm::fwdTraining(directTensorBundle.xTensor,
+    CpuReferenceBatchnorm::fwdTraining(directTensorBundle.xTensor,
                                          directTensorBundle.scaleTensor,
                                          directTensorBundle.biasTensor,
                                          directTensorBundle.yTensor,
@@ -88,7 +88,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     patient.execute(variantPack);
 
     auto tolerance = batchnorm::getToleranceTraining<float>();
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));

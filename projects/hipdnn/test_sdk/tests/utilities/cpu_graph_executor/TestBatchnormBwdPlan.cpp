@@ -7,8 +7,8 @@
 #include "BatchnormTensorBundles.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdPlan.hpp>
@@ -70,7 +70,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     variantPack[7] = planTensorBundle.dscaleTensor.memory().hostData();
     variantPack[8] = planTensorBundle.dbiasTensor.memory().hostData();
 
-    CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
+    CpuReferenceBatchnorm::backward(directTensorBundle.dyTensor,
                                       directTensorBundle.xTensor,
                                       directTensorBundle.scaleTensor,
                                       directTensorBundle.dxTensor,
@@ -92,9 +92,9 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
         -0.1, 0.1, -1.0, 1.0, -0.1, 0.1, nhw);
 
-    const CpuFpReferenceValidation<float> dxValidation(dxTol, dxTol);
-    const CpuFpReferenceValidation<float> dscaleValidation(dscaleTol, dscaleTol);
-    const CpuFpReferenceValidation<float> dbiasValidation(dbiasTol, dbiasTol);
+    const CpuReferenceValidation<float> dxValidation(dxTol, dxTol);
+    const CpuReferenceValidation<float> dscaleValidation(dscaleTol, dscaleTol);
+    const CpuReferenceValidation<float> dbiasValidation(dbiasTol, dbiasTol);
 
     EXPECT_TRUE(dxValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
     EXPECT_TRUE(
@@ -161,7 +161,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
     variantPack[7] = planTensorBundle.dscaleTensor.memory().hostData();
     variantPack[8] = planTensorBundle.dbiasTensor.memory().hostData();
 
-    CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
+    CpuReferenceBatchnorm::backward(directTensorBundle.dyTensor,
                                       directTensorBundle.xTensor,
                                       directTensorBundle.scaleTensor,
                                       directTensorBundle.dxTensor,
@@ -181,9 +181,9 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
     auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
         -0.1, 0.1, -1.0, 1.0, -0.1, 0.1, nhw);
 
-    const CpuFpReferenceValidation<float> dxValidation(dxTol, dxTol);
-    const CpuFpReferenceValidation<float> dscaleValidation(dscaleTol, dscaleTol);
-    const CpuFpReferenceValidation<float> dbiasValidation(dbiasTol, dbiasTol);
+    const CpuReferenceValidation<float> dxValidation(dxTol, dxTol);
+    const CpuReferenceValidation<float> dscaleValidation(dscaleTol, dscaleTol);
+    const CpuReferenceValidation<float> dbiasValidation(dbiasTol, dbiasTol);
 
     EXPECT_TRUE(dxValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
     EXPECT_TRUE(

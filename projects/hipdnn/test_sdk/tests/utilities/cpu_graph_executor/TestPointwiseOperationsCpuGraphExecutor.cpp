@@ -13,7 +13,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -152,7 +152,7 @@ public:
                 PointwiseMode::RELU_FWD, output, input0);
         }
 
-        const CpuFpReferenceValidation<InputType> validator;
+        const CpuReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 
@@ -185,7 +185,7 @@ public:
                 PointwiseMode::RELU_BWD, output, input0, input1);
         }
 
-        const CpuFpReferenceValidation<InputType> validator;
+        const CpuReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 };

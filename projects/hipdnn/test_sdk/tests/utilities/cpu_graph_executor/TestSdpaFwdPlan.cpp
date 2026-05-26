@@ -7,8 +7,8 @@
 #include "SdpaTensorBundles.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceSdpa.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp>
 
@@ -52,7 +52,7 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
     variantPack[nodeAttributes->v_tensor_uid()] = planTensorBundle.vTensor.memory().hostData();
     variantPack[nodeAttributes->o_tensor_uid()] = planTensorBundle.oTensor.memory().hostData();
 
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
+    CpuReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
                                                             directTensorBundle.kTensor,
                                                             directTensorBundle.vTensor,
                                                             directTensorBundle.oTensor);
@@ -61,7 +61,7 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
     patient.execute(variantPack);
 
     const float tolerance = 1e-5f;
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
 }
@@ -100,7 +100,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     variantPack[nodeAttributes->o_tensor_uid()] = planTensorBundle.oTensor.memory().hostData();
 
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
+    CpuReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
                                                             directTensorBundle.kTensor,
                                                             directTensorBundle.vTensor,
                                                             directTensorBundle.oTensor,
@@ -112,7 +112,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     patient.execute(variantPack);
 
     const float tolerance = 1e-5f;
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
 }

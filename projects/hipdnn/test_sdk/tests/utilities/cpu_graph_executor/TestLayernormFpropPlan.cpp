@@ -8,8 +8,8 @@
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceLayernorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropPlan.hpp>
@@ -69,7 +69,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.getTensor(attributes.y_tensor_uid()).rawHostData());
 
-    CpuFpReferenceLayernorm::fprop(*shallowXTensor,
+    CpuReferenceLayernorm::fprop(*shallowXTensor,
                                    shallowScaleTensor.get(),
                                    shallowBiasTensor.get(),
                                    *shallowYTensor,
@@ -79,7 +79,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
     fpropPlan.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));
@@ -130,7 +130,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.getTensor(attributes.y_tensor_uid()).rawHostData());
 
-    CpuFpReferenceLayernorm::fprop(*shallowXTensor,
+    CpuReferenceLayernorm::fprop(*shallowXTensor,
                                    shallowScaleTensor.get(),
                                    shallowBiasTensor.get(),
                                    *shallowYTensor,
@@ -140,7 +140,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
     fpropPlan.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));
@@ -225,7 +225,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
         invVariancePtr = shallowInvVarianceTensor.get();
     }
 
-    CpuFpReferenceLayernorm::fprop(*shallowXTensor,
+    CpuReferenceLayernorm::fprop(*shallowXTensor,
                                    shallowScaleTensor.get(),
                                    shallowBiasTensor.get(),
                                    *shallowYTensor,
@@ -237,7 +237,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
     fpropPlan.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));

@@ -5,7 +5,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -24,7 +24,7 @@ using DataTypes = ::testing::Types<float, half, bfloat16, double>;
 // ============================================================================
 
 template <typename T>
-class CpuFpReferenceBatchnormWithVariance : public ::testing::Test
+class CpuReferenceBatchnormWithVariance : public ::testing::Test
 {
 protected:
     // Helper to get parameter type for mixed precision
@@ -32,7 +32,7 @@ protected:
         = std::conditional_t<std::is_same_v<T, half> || std::is_same_v<T, bfloat16>, float, T>;
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceBatchnormWithVariance, DataTypes, );
+TYPED_TEST_SUITE(CpuReferenceBatchnormWithVariance, DataTypes, );
 
 // ============================================================================
 // Section 1: Basic Functionality Tests
@@ -40,10 +40,10 @@ TYPED_TEST_SUITE(CpuFpReferenceBatchnormWithVariance, DataTypes, );
 // Tests that batchnorm inference with variance works correctly across
 // different tensor shapes, layouts, and data types.
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianceNchw)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianceNchw)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const Tensor<DataType> inputTensor({1, 3, 224, 224});
     Tensor<DataType> outputTensor({1, 3, 224, 224});
@@ -52,14 +52,14 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianc
     const Tensor<ParamType> meanTensor({1, 3});
     const Tensor<ParamType> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianceNhwc)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianceNhwc)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const Tensor<DataType> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     Tensor<DataType> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
@@ -68,14 +68,14 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianc
     const Tensor<ParamType> meanTensor({1, 3});
     const Tensor<ParamType> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVariance2D)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVariance2D)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     Tensor<DataType> inputTensor({4, 3});
     Tensor<DataType> outputTensor({4, 3});
@@ -93,14 +93,14 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianc
         varianceTensor.setHostValue(safeTestTypeCast<ParamType>(1.0), 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVariance3D)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVariance3D)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     Tensor<DataType> inputTensor({2, 3, 10});
     Tensor<DataType> outputTensor({2, 3, 10});
@@ -118,14 +118,14 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianc
         varianceTensor.setHostValue(safeTestTypeCast<ParamType>(1.0), 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianceNcdhw)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianceNcdhw)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     Tensor<DataType> inputTensor({2, 3, 4, 5, 6});
     Tensor<DataType> outputTensor({2, 3, 4, 5, 6});
@@ -143,14 +143,14 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, BatchnormFwdInferenceWithVarianc
         varianceTensor.setHostValue(safeTestTypeCast<ParamType>(0.5), 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, ZeroVarianceHandling)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const std::vector<int64_t> dims = {1, 1, 2, 2};
     Tensor<DataType> inputTensor(dims);
@@ -171,7 +171,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
     meanTensor.setHostValue(safeTestTypeCast<ParamType>(3.0), 0, 0);
     varianceTensor.setHostValue(safeTestTypeCast<ParamType>(0.0), 0, 0); // Zero variance
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 
     // When variance is 0, inv_variance = 1/sqrt(epsilon)
@@ -191,10 +191,10 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
 // Tests that verify epsilon parameter is handled correctly across all data types.
 // Ensures numerical stability with different epsilon values.
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonSmall)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, CustomEpsilonSmall)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const std::vector<int64_t> dims = {1, 1, 2, 2};
     Tensor<DataType> inputTensor(dims);
@@ -217,7 +217,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonSmall)
 
     // With epsilon=1e-10: inv_var = 1/sqrt(1.25 + 1e-10) ≈ 0.894427191
     const double smallEpsilon = 1e-10;
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(inputTensor,
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(inputTensor,
                                                       scaleTensor,
                                                       biasTensor,
                                                       meanTensor,
@@ -246,10 +246,10 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonSmall)
         static_cast<double>(outputTensor.getHostValue(0, 0, 1, 1)), expectedOutput[3], tolerance);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonLarge)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, CustomEpsilonLarge)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const std::vector<int64_t> dims = {1, 1, 2, 2};
     Tensor<DataType> inputTensor(dims);
@@ -271,7 +271,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonLarge)
 
     // With epsilon=0.1: inv_var = 1/sqrt(1.25 + 0.1) = 1/sqrt(1.35) ≈ 0.860662386
     const double largeEpsilon = 0.1;
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(inputTensor,
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(inputTensor,
                                                       scaleTensor,
                                                       biasTensor,
                                                       meanTensor,
@@ -300,10 +300,10 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonLarge)
         static_cast<double>(outputTensor.getHostValue(0, 0, 1, 1)), expectedOutput[3], tolerance);
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const std::vector<int64_t> dims = {2, 3, 4, 4};
     Tensor<DataType> inputTensor(dims);
@@ -326,10 +326,10 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
         varianceTensor.setHostValue(safeTestTypeCast<ParamType>(0.5), 0, i);
     }
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputSmallEps, 1e-10);
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputLargeEps, 0.1);
 
     // Verify that different epsilon values produce measurably different outputs
@@ -357,10 +357,10 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
     EXPECT_TRUE(foundDifference) << "Epsilon should produce measurably different results";
 }
 
-TYPED_TEST(CpuFpReferenceBatchnormWithVariance, NoNaNOrInfProduced)
+TYPED_TEST(CpuReferenceBatchnormWithVariance, NoNaNOrInfProduced)
 {
     using DataType = TypeParam;
-    using ParamType = typename CpuFpReferenceBatchnormWithVariance<DataType>::ParamType;
+    using ParamType = typename CpuReferenceBatchnormWithVariance<DataType>::ParamType;
 
     const std::vector<int64_t> dims = {1, 1, 2, 2};
     Tensor<DataType> inputTensor(dims);
@@ -381,7 +381,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, NoNaNOrInfProduced)
     varianceTensor.setHostValue(safeTestTypeCast<ParamType>(1.25), 0, 0);
 
     // Test with very small epsilon to verify no numerical instability
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-10);
 
     // Verify all outputs are finite (no NaN or Inf)
@@ -404,7 +404,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, NoNaNOrInfProduced)
 // - SanityNchw: Uses FP64 golden reference with hardcoded expected values
 // - CompareVarianceVsInvVariance: Validates API equivalence (focused on FP32)
 
-TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, BatchnormFwdInferenceWithVarianceSanityNchw)
+TEST(TestCpuReferenceBatchnormWithVarianceFp64, BatchnormFwdInferenceWithVarianceSanityNchw)
 {
     const std::vector<int64_t> dims = {1, 1, 2, 2};
 
@@ -438,7 +438,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, BatchnormFwdInferenceWithVaria
     // y = scale * (x - mean) * inv_variance + bias = 2 * (x - 2.5) * inv_variance + 0.5
     const std::vector<double> expectedOutput = {-2.18327084, -0.39442361, 1.39442361, 3.18327084};
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 
     auto tolerance = 1e-6;
@@ -449,7 +449,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, BatchnormFwdInferenceWithVaria
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedOutput[3], tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceImplementationsNchw)
+TEST(TestCpuReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceImplementationsNchw)
 {
     // This test verifies that fwdInferenceWithVariance produces the same results
     // as fwdInference when given variance vs inv_variance inputs
@@ -483,10 +483,10 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceIm
     }
 
     // Call both implementations
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputFromVariance);
 
-    CpuFpReferenceBatchnorm::fwdInference(
+    CpuReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputFromInvVariance);
 
     // Compare results

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
 #include <vector>

@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
@@ -30,29 +30,29 @@ void makeTensorsEqual(T& tensor1, T& tensor2)
 
 /* ======== CpuFpReferenceValidation tests ======== */
 
-TEST(TestCpuFpReferenceValidation, NegativeToleranceThrows)
+TEST(TestCpuReferenceValidation, NegativeToleranceThrows)
 {
-    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(-1e-5f),
+    EXPECT_THROW(const CpuReferenceValidation<float> refValidation(-1e-5f),
                  std::invalid_argument);
 }
 
-TEST(TestCpuFpReferenceValidation, NaNToleranceThrows)
+TEST(TestCpuReferenceValidation, NaNToleranceThrows)
 {
-    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(
+    EXPECT_THROW(const CpuReferenceValidation<float> refValidation(
                      std::numeric_limits<float>::quiet_NaN()),
                  std::invalid_argument);
 }
 
-TEST(TestCpuFpReferenceValidation, InfToleranceThrows)
+TEST(TestCpuReferenceValidation, InfToleranceThrows)
 {
-    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(
+    EXPECT_THROW(const CpuReferenceValidation<float> refValidation(
                      0.0f, std::numeric_limits<float>::infinity()),
                  std::invalid_argument);
 }
 
-TEST(TestCpuFpReferenceValidationFp32, BasicTensorUsage)
+TEST(TestCpuReferenceValidationFp32, BasicTensorUsage)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<float> tensor1(dims);
@@ -63,9 +63,9 @@ TEST(TestCpuFpReferenceValidationFp32, BasicTensorUsage)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp32, TensorsToleranceDifferent)
+TEST(TestCpuReferenceValidationFp32, TensorsToleranceDifferent)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<float> tensor1(dims);
@@ -80,9 +80,9 @@ TEST(TestCpuFpReferenceValidationFp32, TensorsToleranceDifferent)
 }
 
 // Additional BasicTensorUsage tests for other data types
-TEST(TestCpuFpReferenceValidationBfp16, BasicTensorUsage)
+TEST(TestCpuReferenceValidationBfp16, BasicTensorUsage)
 {
-    const CpuFpReferenceValidation<bfloat16> refValidation;
+    const CpuReferenceValidation<bfloat16> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<bfloat16> tensor1(dims);
@@ -93,9 +93,9 @@ TEST(TestCpuFpReferenceValidationBfp16, BasicTensorUsage)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp16, BasicTensorUsage)
+TEST(TestCpuReferenceValidationFp16, BasicTensorUsage)
 {
-    const CpuFpReferenceValidation<half> refValidation;
+    const CpuReferenceValidation<half> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<half> tensor1(dims);
@@ -106,9 +106,9 @@ TEST(TestCpuFpReferenceValidationFp16, BasicTensorUsage)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp64, BasicTensorUsage)
+TEST(TestCpuReferenceValidationFp64, BasicTensorUsage)
 {
-    const CpuFpReferenceValidation<double> refValidation;
+    const CpuReferenceValidation<double> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<double> tensor1(dims);
@@ -120,9 +120,9 @@ TEST(TestCpuFpReferenceValidationFp64, BasicTensorUsage)
 }
 
 // TensorNotComparable tests
-TEST(TestCpuFpReferenceValidationBfp16, TensorNotComparable)
+TEST(TestCpuReferenceValidationBfp16, TensorNotComparable)
 {
-    const CpuFpReferenceValidation<bfloat16> refValidation;
+    const CpuReferenceValidation<bfloat16> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<bfloat16> tensor1(dims);
@@ -133,9 +133,9 @@ TEST(TestCpuFpReferenceValidationBfp16, TensorNotComparable)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp16, TensorNotComparable)
+TEST(TestCpuReferenceValidationFp16, TensorNotComparable)
 {
-    const CpuFpReferenceValidation<half> refValidation;
+    const CpuReferenceValidation<half> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<half> tensor1(dims);
@@ -146,9 +146,9 @@ TEST(TestCpuFpReferenceValidationFp16, TensorNotComparable)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp32, TensorNotComparable)
+TEST(TestCpuReferenceValidationFp32, TensorNotComparable)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<float> tensor1(dims);
@@ -159,9 +159,9 @@ TEST(TestCpuFpReferenceValidationFp32, TensorNotComparable)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp64, TensorNotComparable)
+TEST(TestCpuReferenceValidationFp64, TensorNotComparable)
 {
-    const CpuFpReferenceValidation<double> refValidation;
+    const CpuReferenceValidation<double> refValidation;
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<double> tensor1(dims);
@@ -173,10 +173,10 @@ TEST(TestCpuFpReferenceValidationFp64, TensorNotComparable)
 }
 
 // Tolerance tests
-TEST(TestCpuFpReferenceValidation, TensorToleranceComparison)
+TEST(TestCpuReferenceValidation, TensorToleranceComparison)
 {
-    const CpuFpReferenceValidation<double> refValidationLowTolerance(1e-7f, 1e-7f);
-    const CpuFpReferenceValidation<double> refValidationHighTolerance(1e-5f, 1e-5f);
+    const CpuReferenceValidation<double> refValidationLowTolerance(1e-7f, 1e-7f);
+    const CpuReferenceValidation<double> refValidationHighTolerance(1e-5f, 1e-5f);
     const std::vector<int64_t> dims = {10, 10};
 
     Tensor<double> tensor1(dims);
@@ -188,9 +188,9 @@ TEST(TestCpuFpReferenceValidation, TensorToleranceComparison)
     EXPECT_FALSE(refValidationLowTolerance.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, TensorDefaultTolerance)
+TEST(TestCpuReferenceValidation, TensorDefaultTolerance)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {1};
 
     Tensor<float> tensor1(dims);
@@ -202,9 +202,9 @@ TEST(TestCpuFpReferenceValidation, TensorDefaultTolerance)
 }
 
 // Edge case: different element counts
-TEST(TestCpuFpReferenceValidation, TensorDifferentElementCounts)
+TEST(TestCpuReferenceValidation, TensorDifferentElementCounts)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
 
     Tensor<float> tensor1({10, 10});
     Tensor<float> tensor2({5, 5});
@@ -214,9 +214,9 @@ TEST(TestCpuFpReferenceValidation, TensorDifferentElementCounts)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationStrided, StridedTensorEqual)
+TEST(TestCpuReferenceValidationStrided, StridedTensorEqual)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8, 16};
 
@@ -234,9 +234,9 @@ TEST(TestCpuFpReferenceValidationStrided, StridedTensorEqual)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
+TEST(TestCpuReferenceValidation, StridedTensorNotEqual)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8, 16};
 
@@ -258,9 +258,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, StridedTensorAllZeros)
+TEST(TestCpuReferenceValidation, StridedTensorAllZeros)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8, 16};
 
@@ -273,9 +273,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorAllZeros)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, StridedTensorDifferentStrides)
+TEST(TestCpuReferenceValidation, StridedTensorDifferentStrides)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides1 = {2, 4, 8, 16};
     const std::vector<int64_t> strides2 = {8, 4, 2, 1}; // Different stride order
@@ -293,10 +293,10 @@ TEST(TestCpuFpReferenceValidation, StridedTensorDifferentStrides)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, StridedTensorWithTolerance)
+TEST(TestCpuReferenceValidation, StridedTensorWithTolerance)
 {
     const float customTolerance = 1e-5f;
-    const CpuFpReferenceValidation<float> refValidation(customTolerance, customTolerance);
+    const CpuReferenceValidation<float> refValidation(customTolerance, customTolerance);
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8, 16};
 
@@ -312,9 +312,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorWithTolerance)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, StridedTensorFirstElementDiffers)
+TEST(TestCpuReferenceValidation, StridedTensorFirstElementDiffers)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8, 16};
 
@@ -331,9 +331,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorFirstElementDiffers)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, StridedTensorLastElementDiffers)
+TEST(TestCpuReferenceValidation, StridedTensorLastElementDiffers)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8, 16};
 
@@ -350,9 +350,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorLastElementDiffers)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidation, TensorSameElementCountDifferentDims)
+TEST(TestCpuReferenceValidation, TensorSameElementCountDifferentDims)
 {
-    const CpuFpReferenceValidation<float> refValidation;
+    const CpuReferenceValidation<float> refValidation;
 
     Tensor<float> tensor1({2, 50}); // 100 elements
     Tensor<float> tensor2({10, 10}); // 100 elements
@@ -596,16 +596,16 @@ TEST(TestCpuIntReferenceValidation, TensorSameElementCountDifferentDims)
 /* ======== NaN/Inf detection tests (TYPED_TEST across fp types) ======== */
 
 template <typename T>
-class CpuFpReferenceValidationNanInf : public ::testing::Test
+class CpuReferenceValidationNanInf : public ::testing::Test
 {
 };
 
-using FpValidationTypes = ::testing::Types<float, double, half, bfloat16>;
-TYPED_TEST_SUITE(CpuFpReferenceValidationNanInf, FpValidationTypes, );
+using ValidationTypes = ::testing::Types<float, double, half, bfloat16>;
+TYPED_TEST_SUITE(CpuReferenceValidationNanInf, ValidationTypes, );
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenReferenceHasNaN)
+TYPED_TEST(CpuReferenceValidationNanInf, FailsWhenReferenceHasNaN)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);
@@ -618,9 +618,9 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenReferenceHasNaN)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenImplementationHasNaN)
+TYPED_TEST(CpuReferenceValidationNanInf, FailsWhenImplementationHasNaN)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);
@@ -633,9 +633,9 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenImplementationHasNaN)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenBothHaveNaN)
+TYPED_TEST(CpuReferenceValidationNanInf, FailsWhenBothHaveNaN)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);
@@ -646,9 +646,9 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenBothHaveNaN)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenReferenceHasInf)
+TYPED_TEST(CpuReferenceValidationNanInf, FailsWhenReferenceHasInf)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);
@@ -661,9 +661,9 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenReferenceHasInf)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenImplementationHasNegativeInf)
+TYPED_TEST(CpuReferenceValidationNanInf, FailsWhenImplementationHasNegativeInf)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);
@@ -676,9 +676,9 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenImplementationHasNegativeInf
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenBothHaveInf)
+TYPED_TEST(CpuReferenceValidationNanInf, FailsWhenBothHaveInf)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);
@@ -692,9 +692,9 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenBothHaveInf)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TYPED_TEST(CpuFpReferenceValidationNanInf, PassesForFiniteValues)
+TYPED_TEST(CpuReferenceValidationNanInf, PassesForFiniteValues)
 {
-    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const CpuReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<TypeParam> tensor1(dims);

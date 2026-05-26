@@ -8,8 +8,8 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceRMSNorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -63,7 +63,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceRMSNorm::forward(*shallowXTensor, *shallowScaleTensor, *shallowYTensor, epsilon);
+    CpuReferenceRMSNorm::forward(*shallowXTensor, *shallowScaleTensor, *shallowYTensor, epsilon);
 
     RMSNormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
@@ -71,7 +71,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     // x in [0, 1], scale in [0, 1], C=3, no bias
     const float tolerance
         = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(0.0, 1.0, 0.0, 1.0, dims[1]);
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
@@ -161,7 +161,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceRMSNorm::forward<float, float, float, float>(*shallowXTensor,
+    CpuReferenceRMSNorm::forward<float, float, float, float>(*shallowXTensor,
                                                                *shallowScaleTensor,
                                                                *shallowYTensor,
                                                                epsilon,
@@ -175,7 +175,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
     // x in [0, 1], scale in [0, 1], C=3, bias in [-0.5, 0.5]
     const float tolerance = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(
         0.0, 1.0, 0.0, 1.0, dims[1], -0.5, 0.5);
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));

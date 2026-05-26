@@ -8,8 +8,8 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -167,7 +167,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // Compute reference result manually: (conv(X, W) + 5.0) * 2.0
     // Step 1: Perform convolution
     Tensor<float> tempConvOutput(yDims, TensorLayout::NHWC);
-    CpuFpReferenceConvolution::fprop<float, float, float, float>(
+    CpuReferenceConvolution::fprop<float, float, float, float>(
         refXTensor, refWTensor, tempConvOutput, strides, dilation, padding);
 
     // Step 2: Add constant (5.0) to convolution result
@@ -192,7 +192,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     }
 
     // Validate results
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor, yTensor));
 }

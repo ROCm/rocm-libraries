@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
@@ -19,7 +19,7 @@ using hipdnn_test_sdk::detail::safeTestTypeCast;
 // Hand-computed golden reference tests
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation2D)
+TEST(TestCpuReferenceLayernormFp64, FpropSanityValidation2D)
 {
     // Input shape: [2, 4] — normalize over last dim (4 features per sample)
     // x = [[1, 2, 3, 4],
@@ -57,7 +57,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation2D)
         bias.setHostValue(0.5, i);
     }
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -82,7 +82,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation2D)
     EXPECT_NEAR(y.getHostValue(1, 3), 3.18327485, 1e-5);
 }
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation3D)
+TEST(TestCpuReferenceLayernormFp64, FpropSanityValidation3D)
 {
     // Input shape: [1, 2, 3] — normalize over last 2 dims (2x3 = 6 features)
     // x = [[[1, 2, 3], [4, 5, 6]]]
@@ -112,7 +112,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation3D)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -138,7 +138,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation3D)
 // Corner case: all zeros input
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropAllZeros)
+TEST(TestCpuReferenceLayernormFp64, FpropAllZeros)
 {
     // All-zero input: mean=0, var=0, rstd=1/sqrt(epsilon)
     // xhat = (0 - 0) * rstd = 0
@@ -160,7 +160,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllZeros)
     }
 
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
     // rstd = 1/sqrt(eps) is large, so float precision causes larger absolute error
@@ -183,7 +183,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllZeros)
 // Corner case: all ones input
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropAllOnes)
+TEST(TestCpuReferenceLayernormFp64, FpropAllOnes)
 {
     // All-one input: mean=1, var=0, rstd=1/sqrt(epsilon)
     // xhat = (1 - 1) * rstd = 0
@@ -201,7 +201,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllOnes)
     bias.fillWithValue(0.25);
 
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
     // rstd = 1/sqrt(eps) is large, so float precision causes larger absolute error
@@ -224,7 +224,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllOnes)
 // Corner case: constant input (all same non-trivial value)
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropConstantInput)
+TEST(TestCpuReferenceLayernormFp64, FpropConstantInput)
 {
     // All elements = 7.0: mean=7, var=0
     // Same behavior as all-ones but shifted — output should still be bias
@@ -241,7 +241,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropConstantInput)
     bias.fillWithValue(-1.0);
 
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -260,7 +260,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropConstantInput)
 // Corner case: single element per normalized group
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropSingleFeature)
+TEST(TestCpuReferenceLayernormFp64, FpropSingleFeature)
 {
     // Shape [3, 1]: normalize over dim of size 1
     // mean = x, var = 0, xhat = 0, y = bias
@@ -280,7 +280,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSingleFeature)
     bias.setHostValue(1.0, 0);
 
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -298,7 +298,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSingleFeature)
 // Corner case: identity transform (scale=1, bias=0) — output should be xhat
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropIdentityTransform)
+TEST(TestCpuReferenceLayernormFp64, FpropIdentityTransform)
 {
     // With scale=1, bias=0, output should be the standardized values
     // Verify that the output has zero mean and unit variance
@@ -321,7 +321,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropIdentityTransform)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -351,7 +351,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropIdentityTransform)
 // Corner case: negative values and mixed signs
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropNegativeAndMixedValues)
+TEST(TestCpuReferenceLayernormFp64, FpropNegativeAndMixedValues)
 {
     // Test with negative and mixed-sign values to ensure correct handling
     // x = [-3, -1, 1, 3]
@@ -374,7 +374,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNegativeAndMixedValues)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -398,7 +398,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNegativeAndMixedValues)
 // Corner case: large epsilon
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropLargeEpsilon)
+TEST(TestCpuReferenceLayernormFp64, FpropLargeEpsilon)
 {
     // Large epsilon dominates variance, effectively suppressing normalization
     // x = [1, 2, 3, 4], mean=2.5, var=1.25
@@ -421,7 +421,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeEpsilon)
     bias.fillWithValue(0.0);
 
     const double largeEpsilon = 100.0;
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, largeEpsilon, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, largeEpsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -441,7 +441,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeEpsilon)
 // Numerical stability: large values with small variance
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
+TEST(TestCpuReferenceLayernormFp64, FpropLargeValueNumericalStability)
 {
     // Values clustered around 1e15 with small relative differences.
     // Naive one-pass (E[x²] - E[x]²) would suffer catastrophic cancellation here
@@ -468,7 +468,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop<double, double, double, double, double>(
+    CpuReferenceLayernorm::fprop<double, double, double, double, double>(
         x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
@@ -490,7 +490,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
 // No scale/bias (optional tensors not provided)
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutScaleBias)
+TEST(TestCpuReferenceLayernormFp64, FpropWithoutScaleBias)
 {
     // Without scale and bias, output should be pure xhat
     // x = [1, 2, 3, 4], mean=2.5, var=1.25
@@ -506,7 +506,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutScaleBias)
     x.setHostValue(3.0, 0, 2);
     x.setHostValue(4.0, 0, 3);
 
-    CpuFpReferenceLayernorm::fprop<double, double, double, double>(
+    CpuReferenceLayernorm::fprop<double, double, double, double>(
         x,
         static_cast<TensorBase<double>*>(nullptr),
         static_cast<TensorBase<double>*>(nullptr),
@@ -532,7 +532,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutScaleBias)
 // Realistic shape: typical transformer hidden dim
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp32, FpropTypicalTransformerShape)
+TEST(TestCpuReferenceLayernormFp32, FpropTypicalTransformerShape)
 {
     // Batch=2, SeqLen=8, Hidden=64 — normalize over last dim (hidden)
     Tensor<float> x({2, 8, 64});
@@ -546,7 +546,7 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropTypicalTransformerShape)
     scale.fillWithValue(1.0f);
     bias.fillWithValue(0.0f);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     // With identity scale/bias, verify output properties per normalized group:
     // - output mean ≈ 0
@@ -581,7 +581,7 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropTypicalTransformerShape)
 // Transformer padding: PAD (zero) positions don't affect real token outputs
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
+TEST(TestCpuReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
 {
     // Simulates a typical NLP scenario with variable-length sequences zero-padded
     // to a fixed length. With normalizedDimCount=1, LayerNorm normalizes each
@@ -662,7 +662,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
     bias.fillWithValue(0.0);
 
     const double epsilon = 1e-5;
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     const auto tolerance = 1e-6;
 
@@ -722,13 +722,13 @@ using LayernormFpropTypes = ::testing::Types<TypePair<float, float>,
                                              TypePair<double, double>>;
 
 template <class T>
-class CpuFpReferenceLayernormFpropTyped : public ::testing::Test
+class CpuReferenceLayernormFpropTyped : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceLayernormFpropTyped, LayernormFpropTypes, );
+TYPED_TEST_SUITE(CpuReferenceLayernormFpropTyped, LayernormFpropTypes, );
 
-TYPED_TEST(CpuFpReferenceLayernormFpropTyped, FpropRunsWithoutError)
+TYPED_TEST(CpuReferenceLayernormFpropTyped, FpropRunsWithoutError)
 {
     using XType = typename TypeParam::First;
     using ScaleType = typename TypeParam::Second;
@@ -745,7 +745,7 @@ TYPED_TEST(CpuFpReferenceLayernormFpropTyped, FpropRunsWithoutError)
     bias.fillWithValue(safeTestTypeCast<ScaleType>(0.0));
 
     // Should not throw
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     // All identical values -> all normalized to 0 -> y = bias = 0
     for(int b = 0; b < 2; b++)
@@ -765,7 +765,7 @@ TYPED_TEST(CpuFpReferenceLayernormFpropTyped, FpropRunsWithoutError)
 // Multi-dim normalization: normalize over last 2 dims
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropNormalizeLastTwoDims)
+TEST(TestCpuReferenceLayernormFp64, FpropNormalizeLastTwoDims)
 {
     // Shape [2, 3, 4], normalize over last 2 dims (3x4 = 12 features)
     // Each of the 2 batches is independently normalized over 12 elements
@@ -798,7 +798,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNormalizeLastTwoDims)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -827,7 +827,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNormalizeLastTwoDims)
 // Corner case: "diagonal-like" pattern — one hot-per-row
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropOneHotRows)
+TEST(TestCpuReferenceLayernormFp64, FpropOneHotRows)
 {
     // Shape [3, 3], each row is a one-hot vector
     // Row 0: [1, 0, 0], mean=1/3, var=(4/9+1/9+1/9)/3=2/9
@@ -851,7 +851,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropOneHotRows)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -880,7 +880,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropOneHotRows)
 // Verify per-feature scale and bias
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
+TEST(TestCpuReferenceLayernormFp64, FpropPerFeatureScaleBias)
 {
     // Verify that different scale/bias per feature are applied correctly
     // x = [[1, 2, 3, 4]]
@@ -908,7 +908,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
     bias.setHostValue(20.0, 2);
     bias.setHostValue(30.0, 3);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -934,7 +934,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
 // Without mean/rstd outputs (optional outputs not provided)
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutMeanRstdOutputs)
+TEST(TestCpuReferenceLayernormFp64, FpropWithoutMeanRstdOutputs)
 {
     Tensor<double> x({2, 4});
     Tensor<double> y({2, 4});
@@ -954,7 +954,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutMeanRstdOutputs)
     bias.fillWithValue(0.5);
 
     // Call without mean/rstd pointers — should work fine
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1);
 
     // Verify same results as the golden test (Sample 0)
     auto tolerance = layernorm::getTolerance<double>();
@@ -968,7 +968,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutMeanRstdOutputs)
 // Error handling: invalid dimensions
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
+TEST(TestCpuReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
 {
     const Tensor<float> x({2, 4});
     Tensor<float> y({2, 4});
@@ -976,11 +976,11 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
     Tensor<float> bias({4});
 
     // normalizedDimCount = 0 is invalid
-    EXPECT_THROW(CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 0),
+    EXPECT_THROW(CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 0),
                  std::runtime_error);
 
     // normalizedDimCount > ndim is invalid
-    EXPECT_THROW(CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 3),
+    EXPECT_THROW(CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 3),
                  std::runtime_error);
 }
 
@@ -988,14 +988,14 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
 // Error handling: scalar (0D) tensor
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnScalarTensor)
+TEST(TestCpuReferenceLayernormFp32, FpropThrowsOnScalarTensor)
 {
     const Tensor<float> x({});
     Tensor<float> y({});
     Tensor<float> scale({});
     Tensor<float> bias({});
 
-    EXPECT_THROW(CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1),
+    EXPECT_THROW(CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1),
                  std::runtime_error);
 }
 
@@ -1003,7 +1003,7 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnScalarTensor)
 // Dimensionality coverage: 1D tensor
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, Fprop1D)
+TEST(TestCpuReferenceLayernormFp64, Fprop1D)
 {
     // Shape [5] — normalize entire 1D tensor (single group, no batch dim)
     // x = [2, 4, 6, 8, 10]
@@ -1026,7 +1026,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop1D)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1055,7 +1055,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop1D)
 // Dimensionality coverage: 4D tensor
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast1)
+TEST(TestCpuReferenceLayernormFp64, Fprop4DNormalizeLast1)
 {
     // Shape [2, 3, 2, 4], normalizedDimCount=1: normalize over last dim (4)
     // Batch dims = [2, 3, 2], 12 independent groups of 4 elements each
@@ -1087,7 +1087,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast1)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1122,7 +1122,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast1)
     EXPECT_NEAR(mean.getHostValue(0, 0, 0), 2.5, tolerance);
 }
 
-TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast3)
+TEST(TestCpuReferenceLayernormFp64, Fprop4DNormalizeLast3)
 {
     // Shape [2, 3, 2, 4], normalizedDimCount=3: normalize over last 3 dims (3*2*4=24)
     // Batch dims = [2], 2 independent groups of 24 elements each
@@ -1154,7 +1154,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast3)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 3, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 3, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1186,7 +1186,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast3)
 // Full-tensor normalization (normalizedDimCount == ndim)
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, FpropFullTensorNormalization)
+TEST(TestCpuReferenceLayernormFp64, FpropFullTensorNormalization)
 {
     // Shape [2, 3], normalizedDimCount=2 means normalize entire tensor per "batch"
     // But there are no batch dims here, so entire tensor is one group
@@ -1208,7 +1208,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropFullTensorNormalization)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2);
 
     // Verify output has zero mean (sum to 0)
     double sum = 0.0;
@@ -1237,7 +1237,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropFullTensorNormalization)
 // Dimensionality coverage: 5D tensor
 // ============================================================================
 
-TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2)
+TEST(TestCpuReferenceLayernormFp64, Fprop5DNormalizeLast2)
 {
     // Shape [2, 2, 3, 4, 5], normalizedDimCount=2: normalize over last 2 dims (4*5=20)
     // Batch dims = [2, 2, 3], 12 independent groups of 20 elements each
@@ -1253,7 +1253,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
+    CpuReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 

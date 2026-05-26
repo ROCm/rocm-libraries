@@ -9,8 +9,8 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceReduction.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
 
@@ -60,12 +60,12 @@ TEST_F(TestReductionPlan, ExecutePlan)
     variantPack[1] = planTensorBundle.xTensor.memory().hostData();
     variantPack[2] = planTensorBundle.yTensor.memory().hostData();
 
-    CpuFpReferenceReduction::reduce<float, float, float>(
+    CpuReferenceReduction::reduce<float, float, float>(
         directTensorBundle.xTensor, directTensorBundle.yTensor, ReductionMode::ADD);
 
     patient.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(1e-5f, 1e-5f);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(1e-5f, 1e-5f);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
 }

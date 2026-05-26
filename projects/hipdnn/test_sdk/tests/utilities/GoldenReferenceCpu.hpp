@@ -10,7 +10,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>

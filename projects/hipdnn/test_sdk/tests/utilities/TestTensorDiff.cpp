@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <sstream>
 
@@ -197,7 +197,7 @@ TEST(TestValidateAndReport, PassingValidationPrintsSuccessful)
         impl.setHostValue(refView.getHostValue(indices), indices);
     });
 
-    const CpuFpReferenceValidation<float> validator(1e-5f, 1e-5f);
+    const CpuReferenceValidation<float> validator(1e-5f, 1e-5f);
 
     std::ostringstream oss;
     const bool result = validateAndReport<float>(oss, "y", validator, ref, impl, 1e-5f, 1e-5f);
@@ -220,7 +220,7 @@ TEST(TestValidateAndReport, FailingValidationPrintsDiff)
     ref.setHostValue(0.0f, std::vector<int64_t>{1, 1});
     impl.setHostValue(100.0f, std::vector<int64_t>{1, 1});
 
-    const CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
+    const CpuReferenceValidation<float> validator(0.0f, 0.0f);
 
     std::ostringstream oss;
     const bool result = validateAndReport<float>(oss, "output", validator, ref, impl, 0.0f, 0.0f);
@@ -236,7 +236,7 @@ TEST(TestValidateAndReport, ShapeMismatchPrintsShapeError)
     Tensor<float> ref({2, 3});
     Tensor<float> impl({3, 2});
 
-    const CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
+    const CpuReferenceValidation<float> validator(0.0f, 0.0f);
 
     std::ostringstream oss;
     const bool result = validateAndReport<float>(oss, "x", validator, ref, impl, 0.0f, 0.0f);

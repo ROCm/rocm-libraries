@@ -10,8 +10,8 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
@@ -93,7 +93,7 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
         params.epsilonTensor, "Epsilon");
 
-    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
+    CpuReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
                                                       *shallowScaleTensor,
                                                       *shallowBiasTensor,
                                                       *shallowMeanTensor,
@@ -105,7 +105,7 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
         std::move(params));
     fwdPlan.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));

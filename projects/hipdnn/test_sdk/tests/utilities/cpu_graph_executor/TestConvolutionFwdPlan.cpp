@@ -7,8 +7,8 @@
 #include "ConvolutionTensorBundles.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/CpuReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
@@ -69,7 +69,7 @@ TEST_F(TestConvolutionFwdPlan, ExecutePlan)
     variantPack[2] = planTensorBundle.wTensor.memory().hostData();
     variantPack[3] = planTensorBundle.yTensor.memory().hostData();
 
-    CpuFpReferenceConvolution::fprop<float, float, float, float>(directTensorBundle.xTensor,
+    CpuReferenceConvolution::fprop<float, float, float, float>(directTensorBundle.xTensor,
                                                                  directTensorBundle.wTensor,
                                                                  directTensorBundle.yTensor,
                                                                  strides,
@@ -78,7 +78,7 @@ TEST_F(TestConvolutionFwdPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceFwd<float>(),
+    const CpuReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceFwd<float>(),
                                                                  conv::getToleranceFwd<float>());
 
     EXPECT_TRUE(
