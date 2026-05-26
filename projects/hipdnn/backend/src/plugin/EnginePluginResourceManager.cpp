@@ -280,48 +280,34 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
 EnginePluginResourceManager::~EnginePluginResourceManager()
 {
-    auto safeDestroyHandle
-        = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) noexcept {
-              try
-              {
-                  plugin->destroyHandle(handle);
-              }
-              catch(const std::exception& e)
-              {
-                  try
-                  {
-                      HIPDNN_BACKEND_LOG_WARN(
-                          "Failed to destroy handle for plugin '{}' during cleanup: {}",
-                          plugin->name(),
-                          e.what());
-                  }
-                  catch(...)
-                  {
-                  }
-              }
-              catch(...)
-              {
-                  try
-                  {
-                      HIPDNN_BACKEND_LOG_WARN(
-                          "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
-                          plugin->name());
-                  }
-                  catch(...)
-                  {
-                  }
-              }
-          };
+    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
+        try
+        {
+            plugin->destroyHandle(handle);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                                    plugin->name(),
+                                    e.what());
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
+                plugin->name());
+        }
+    };
 
-    try
+    for(const auto& [handle, plugin] : _handleToPlugin)
     {
-        for(const auto& [handle, plugin] : _handleToPlugin)
+        try
         {
             safeDestroyHandle(plugin, handle);
         }
-    }
-    catch(...)
-    {
+        catch(...)
+        {
+        }
     }
 }
 
