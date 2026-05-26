@@ -1,10 +1,5 @@
 /************************************************************************
- * Derived from the BSD3-licensed
- * LAPACK routine (version 3.7.0) --
- *     Univ. of Tennessee, Univ. of California Berkeley,
- *     Univ. of Colorado Denver and NAG Ltd..
- *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +32,6 @@
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_datatype2string.hpp"
 #include "lib_device_helpers.hpp"
-#include "print_matrix.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -46,7 +40,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 // one batch.
 // If batch_count > 1, max_parallel = 1.
 // If batch_count = 1, max_parallel = ceildiv( nt, 2 ).
-// todo: if needed, limit max_parallel to limit workspace.
+// If needed, we can limit max_parallel to limit workspace memory.
 //
 template <bool BATCHED, typename T, typename I = rocblas_int>
 void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
@@ -73,7 +67,7 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     *size_workArr = 0;
 
     // quick return if no workspace needed
-    if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
+    if(m == 0 || n == 0 || batch_count == 0)
         return;
 
     I nz = (side == rocblas_side_left ? n : m);  // cols in Z
@@ -92,7 +86,6 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     *size_Z = sizeof(T) * kd * nz * bc;
     *size_T = sizeof(T) * kd * kd * bc;
     *size_W = sizeof(T) * 2*kd * kd * bc;
-    // todo: is BATCHED mean pointer-batched, or also strided-batched?
     *size_workArr = batched ? sizeof(T*) * 2 * bc: 0;
 
     // extra space for larft calls
@@ -114,7 +107,7 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
     const I kd,
     T V,
     const I ldv,
-    U tau,  // why type U?
+    U tau,
     T C,
     const I ldc)
 {
@@ -141,7 +134,7 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
     }
 
     // 2. invalid size
-    if(m < 0 || n < 0 || kd < 0 || ldv < 3*kd - 1 || ldc < m)
+    if(m < 0 || n < 0 || ldv < 2*kd || ldc < m)
     {
         return rocblas_status_invalid_size;
     }
@@ -150,14 +143,8 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_status_continue;
 
-    // Skip pointer check if quick return.
-    // todo: no batch_count?
-    if (m == 0 || n == 0 || kd == 0)
-        return rocblas_status_continue;
-
     // 3. invalid pointers
-    // Usually: (m > 0 && n > 0 && kd > 0 && (!V || !tau || !C))
-    if(! V || ! tau || ! C)
+    if((m && n && ! V) || (m && n && ! tau) || (m && n && ! C))
     {
         return rocblas_status_invalid_pointer;
     }
@@ -175,13 +162,13 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     const I n,
     const I kd,
     U V,
-    const I shiftV,  // todo
+    const I shiftV,
     const I ldv,
     rocblas_stride strideV,
     T* tau,
     rocblas_stride strideTau,
     U C,
-    const I shiftC,  // todo
+    const I shiftC,
     const I ldc,
     rocblas_stride strideC,
     const I batch_count,
@@ -269,9 +256,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
         while (j < j_end)
         {
             // r is storage index of V{i,j} block.
-            // todo: multiply r by kd
             I i = 2*j - k;
-            I r = get_v_block_index( nt, i, j );
+            I r = get_v_block_index( nt, i, j ) * kd;
 
             // For side = left,  ii is top  row of C block.
             // For side = right, ii is left col of C block.
@@ -303,10 +289,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
             // Generate T, dim: (kv x kv)
             rocsolver_larft_template<T>(
                 handle, rocblas_forward_direction, rocblas_column_wise,
-                mv, kv,
-                V, r*kd*ldv, ldv, strideV,
-                &tau[ r*kd ], strideTau,
-                Tr, ldt, strideT,
+                mv, kv, // opts
+                V, r*ldv + shiftV, ldv, strideV, // V
+                &tau[ r ], strideTau, // tau
+                Tr, ldt, strideT, // T
                 bc, scalars, work, workArr );
 
             // Rest of code is equivalent to larfb to apply a block reflector,
@@ -317,10 +303,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                                 : rocblas_operation_conjugate_transpose;
             rocsolver_gemm(
                 handle, rocblas_operation_none, opT,
-                mv, kv, kv,
-                &one,  V,  r*kd*ldv, ldv, strideV,
-                        Tr, 0,        ldt, strideT,
-                &zero, W,  0,        ldw, strideW,
+                mv, kv, kv, // opts
+                &one,  V,  r*ldv + shiftV, ldv, strideV, // V
+                       Tr, 0,              ldt, strideT, // op(T)
+                &zero, W,  0,              ldw, strideW, // W
                 bc, workArr );
 
             if (left)
@@ -335,10 +321,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                     handle,
                     rocblas_operation_conjugate_transpose,
                     rocblas_operation_none,
-                    kv, n, mv,
-                    &one,  V, r*kd*ldv, ldv, strideV,  // (mv x kv)^H
-                            C, ii,       ldc, strideC,  // (mv x n)
-                    &zero, Z, 0,        ldz, strideZ,  // (kv x n)
+                    kv, n, mv, // opts
+                    &one,  V, r*ldv + shiftV, ldv, strideV,  // V^H (mv x kv)^H
+                           C, ii + shiftC,    ldc, strideC,  // C (mv x n)
+                    &zero, Z, 0,              ldz, strideZ,  // Z (kv x n)
                     bc, workArr );
 
                 // Ci -= W Z  (mv x n) = (mv x kv) (kv x n)
@@ -346,10 +332,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                     handle,
                     rocblas_operation_none,
                     rocblas_operation_none,
-                    mv, n, kv,
-                    &negone, W, 0,      ldw, strideW,  // (mv x kv)
-                                Z, 0,      ldz, strideZ,  // (kv x n)
-                    &one,    C, ii,     ldc, strideC,  // (mv x n)
+                    mv, n, kv, // opts
+                    &negone, W, 0,           ldw, strideW,  // W (mv x kv)
+                             Z, 0,           ldz, strideZ,  // Z (kv x n)
+                    &one,    C, ii + shiftC, ldc, strideC,  // C (mv x n)
                     bc, workArr );
             }
             else // right
@@ -361,16 +347,14 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                 // W = V op(T)^H, above.
 
                 // Z = Vr^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
-                // todo: perhaps different opA, opB would be better performance,
-                // but less important since side = right is not used in heev*.
                 rocsolver_gemm(
                     handle,
                     rocblas_operation_conjugate_transpose,
                     rocblas_operation_conjugate_transpose,
-                    kv, m, mv,
-                    &one,  V, r*kd*ldv, ldv, strideV,
-                            C, ii*ldc,   ldc, strideC,
-                    &zero, Z, 0,        ldz, strideZ,
+                    kv, m, mv, // opts
+                    &one,  V, r*ldv,  ldv, strideV, // V^H
+                           C, ii*ldc, ldc, strideC, // C^H
+                    &zero, Z, 0,      ldz, strideZ, // Z
                     bc, workArr );
 
                 // Ci -= Z^H W^H, dim: (m x mv) = (kv x m)^H (mv x kv)^H
@@ -378,10 +362,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                     handle,
                     rocblas_operation_conjugate_transpose,
                     rocblas_operation_conjugate_transpose,
-                    m, mv, kv,
-                    &negone, Z, 0,      ldz, strideZ,
-                                W, 0,      ldw, strideW,
-                    &one,    C, ii*ldc, ldc, strideC,
+                    m, mv, kv, // opts
+                    &negone, Z, 0,      ldz, strideZ, // Z^H
+                             W, 0,      ldw, strideW, // W^H
+                    &one,    C, ii*ldc, ldc, strideC, // C
                     bc, workArr );
             }
 

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +37,6 @@
 #include "common/misc/rocsolver_timer.hpp"
 #include "common/misc/generate.hpp"
 #include "common/misc/cpu_blas.hpp"
-#include "print_matrix.hpp"
 
 //------------------------------------------------------------------------------
 template <typename T, typename I = rocblas_int>
@@ -102,7 +101,6 @@ void ormtr_unmtr_hb2st_checkBadArgs(const rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
-// todo: why not merge this with ormtr_unmtr_hb2st_checkBadArgs?
 template <typename T, typename I = rocblas_int>
 void testing_ormtr_unmtr_hb2st_bad_arg()
 {
@@ -157,8 +155,6 @@ void ormtr_unmtr_hb2st_initData(
     Sh& hD,
     Sh& hE)
 {
-    // TODO: how to handle uplo? Easiest would be to convert upper to lower.
-
     if(CPU)
     {
         // Matrix Aband and Q are m-by-m on left, or n-by-n on right.
@@ -202,9 +198,9 @@ void ormtr_unmtr_hb2st_initData(
 //    || I - Q^H Q ||_1 / n
 //    I, Q, R are nq-by-nq.
 //
-// 1. Backwards error, where S is tridiagonal output of hb2st:
-//    || Q S Q^H - Aband ||_1 / (n || Aband ||_1)
-//    Aband, S, Q, R are nq-by-nq; Aband is banded, S is real symmetric tridiagonal.
+// 1. Backwards error, where Atri is tridiagonal output of hb2st:
+//    || Q Atri Q^H - Aband ||_1 / (n || Aband ||_1)
+//    Aband, Atri, Q, R are nq-by-nq; Aband is banded, Atri is real symmetric tridiagonal.
 //
 // 2. Compare multiplying random C by explicitly generated Q1 and by implicit Q2:
 //    || op(Q2) C - op(Q1) C ||_1 / (m || C ||_1)  for side=left  (nq = m), or
@@ -257,8 +253,6 @@ void ormtr_unmtr_hb2st_getError(
 
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
-    timer.start( stream );
 
     I idiag = kd - 1;
 
@@ -266,22 +260,20 @@ void ormtr_unmtr_hb2st_getError(
     rocblas_stride shift = 0;
     rocblas_stride stride = 0;
 
-    // todo: can we remove "_type" from these names. Doesn't seem to add anything.
     rocsolver_norm_type norm = rocsolver_norm_type_one;
 
     // cpu_lange, cpu_lanhb need rwork size n.
     std::vector<S> hrwork( nq );
 
     // cpu_gemm needs hW size nq*nq.
-    // todo: Should this be passed in?
     I ldw = nq;
     std::vector<T> hW( ldw * nq );
 
     // initialize data
     ormtr_unmtr_hb2st_initData<true, true, T, I>(
-        handle, side, trans, m, n, kd,
-        dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
-        hAband, hV, hTau, hC, hD, hE);
+        handle, side, trans, m, n, kd, // opts
+        dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE, // dev
+        hAband, hV, hTau, hC, hD, hE); // host
 
     // execute computations
     // Set Q = Identity, then generate Q = Q*I or I*Q. (Works for either side.)
@@ -309,10 +301,10 @@ void ormtr_unmtr_hb2st_getError(
         rocsolver_gemm(
             false, handle,
             rocblas_operation_conjugate_transpose, rocblas_operation_none,
-            nq, nq, nq,
-            &negone, dQ.data(), ldq, stride,
-                     dQ.data(), ldq, stride,
-            &one,    dR.data(), ldr, stride, 1 ));
+            nq, nq, nq, // opts
+            &negone, dQ.data(), ldq, stride, // Q^H
+                     dQ.data(), ldq, stride, // Q
+            &one,    dR.data(), ldr, stride, 1 )); // R
 
     // norm( R )
     CHECK_ROCBLAS_ERROR(
@@ -323,23 +315,25 @@ void ormtr_unmtr_hb2st_getError(
     errors[0] = hnorm[0][0] / nq;
 
     //--------------------
-    // TODO: use S instead of S?
-    // Check 1: || Q S Q^H - Aband ||_1 / (nq || Aband ||_1)
+    // Check 1: || Q Atri Q^H - Aband ||_1 / (nq || Aband ||_1)
     // Transfer Q to CPU. (We don't have needed band or tridiag kernels on GPU.)
-    // Multiply C = Q S, then add C -= Aband.
+    // Multiply C = Q Atri, then add C -= Aband.
     // Use only the diag and lower band of Aband; ignore that some part of the upper
     // band is also stored for hb2st.
     CHECK_HIP_ERROR(
         hQ.transfer_from( dQ ) );
 
-    // R = Q S
-    cpu_stmm( nq, nq, hQ.data(), ldq, hD.data(), hE.data(), hR.data(), ldr );
+    // R = Q Atri
+    cpu_stmm( nq, nq, hQ.data(), ldq, // Q
+            hD.data(), hE.data(), // Atri in {D, E}
+            hR.data(), ldr ); // R
 
-    // W = (Q S) Q^H
+    // W = (Q Atri) Q^H
     cpu_gemm( rocblas_operation_none, rocblas_operation_conjugate_transpose,
-              nq, nq, nq,
-              one, hR.data(), ldr, hQ.data(), ldq,
-              zero, hW.data(), ldw );
+              nq, nq, nq, // opts
+              one, hR.data(), ldr, // R
+                   hQ.data(), ldq, // Q^H
+              zero, hW.data(), ldw ); // W
 
     // W -= Aband
     cpu_hbadd( rocblas_fill_lower, nq, kd,
@@ -360,8 +354,8 @@ void ormtr_unmtr_hb2st_getError(
     // todo: normalize with m or n? LAWN 41 sec 7.1.3 has m in all 4 cases.
     CHECK_HIP_ERROR(
         hipMemcpy2DAsync(
-            dR[0], ldr*sizeof(T),
-            dC[0], ldc*sizeof(T),
+            dR[0], ldr*sizeof(T), // R
+            dC[0], ldc*sizeof(T), // C
             m*sizeof(T), n, hipMemcpyDefault, stream ) );
 
     // R = op(Q#) C  or  C op(Q#)  using implicit Q# via unmtr.
@@ -376,10 +370,10 @@ void ormtr_unmtr_hb2st_getError(
         assert( nq == m );
         CHECK_ROCBLAS_ERROR(
             rocsolver_gemm(
-                false, handle, trans, rocblas_operation_none, m, n, nq,
-                &negone, dQ.data(), ldq, stride,
-                         dC.data(), ldc, stride,
-                &one,    dR.data(), ldr, stride, 1 ));
+                false, handle, trans, rocblas_operation_none, m, n, nq, // opts
+                &negone, dQ.data(), ldq, stride, // op(Q)
+                         dC.data(), ldc, stride, // C
+                &one,    dR.data(), ldr, stride, 1 )); // R
     }
     else // right
     {
@@ -387,10 +381,10 @@ void ormtr_unmtr_hb2st_getError(
         assert( nq == n );
         CHECK_ROCBLAS_ERROR(
             rocsolver_gemm(
-                false, handle, rocblas_operation_none, trans, m, n, nq,
-                &negone, dC.data(), ldc, stride,
-                         dQ.data(), ldq, stride,
-                &one,    dR.data(), ldr, stride, 1 ));
+                false, handle, rocblas_operation_none, trans, m, n, nq, // opts
+                &negone, dC.data(), ldc, stride, // C
+                         dQ.data(), ldq, stride, // op(Q)
+                &one,    dR.data(), ldr, stride, 1 )); // R
     }
 
     // norm( R )
@@ -409,21 +403,6 @@ void ormtr_unmtr_hb2st_getError(
         hnorm.transfer_from( dnorm ) );
     if (hnorm[0][0] != 0)
         errors[2] /= hnorm[0][0];
-
-    timer.end( stream );
-    S eps = get_epsilon<T>();
-    std::cout << "# getError"
-            << ": m " << m << ", n " << n << ", kd " << kd
-            << ", side " << rocblas2char_side( side )
-            << ", trans " << rocblas2char_operation( trans )
-            << std::scientific << std::setprecision( 3 )
-            << ", ortho "   << errors[0]
-            << ", A-QBQ^h " << errors[1]
-            << ", QC-QC "   << errors[2]
-            << ", time " << timer.get_combined()
-            << (errors[0] < eps && errors[1] < eps && errors[2] < eps
-                ? " ok" : " FAILED")
-            << "\n\n";
 }
 
 //------------------------------------------------------------------------------
@@ -484,13 +463,10 @@ void ormtr_unmtr_hb2st_getPerfData(
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
             hAband, hV, hTau, hC, hD, hE);
 
-        start = get_time_us_sync( stream );
         CHECK_ROCBLAS_ERROR(
             rocsolver_ormtr_unmtr_hb2st(
                 handle, side, trans, m, n, kd,
                 dV.data(), ldv, dTau.data(), dC.data(), ldc));
-        time = get_time_us_sync(stream) - start;
-        printf( "m %d, n %d, kd %d, cold iter %d, time %.4f\n", m, n, kd, iter, time );
     }
 
     // gpu-lapack performance
@@ -512,14 +488,11 @@ void ormtr_unmtr_hb2st_getPerfData(
             hAband, hV, hTau, hC, hD, hE);
 
         timer.start(stream);
-        start = get_time_us_sync( stream );
         CHECK_ROCBLAS_ERROR(
             rocsolver_ormtr_unmtr_hb2st(
                 handle, side, trans, m, n, kd,
                 dV.data(), ldv, dTau.data(), dC.data(), ldc));
-        time = get_time_us_sync(stream) - start;
         timer.end(stream);
-        printf( "m %d, n %d, kd %d, hot  iter %d, time %.4f\n", m, n, kd, iter, time );
     }
     *gpu_time_used = timer.get_combined();
 }

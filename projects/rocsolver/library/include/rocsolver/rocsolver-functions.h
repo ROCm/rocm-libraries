@@ -4093,8 +4093,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
                 as returned by HB2ST.
     @param[in]
     ldv         rocblas_int.
-                Leading dimension of V.
-                todo: restriction: ldv >= ...
+                Leading dimension of V. ldv >= 2*kd.
     @param[in]
     tau         pointer to type. Array on the GPU containing the Householder scalars
                 as returned by HB2ST.
@@ -4175,8 +4174,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
                 as returned by HB2ST.
     @param[in]
     ldv         rocblas_int.
-                Leading dimension of V.
-                todo: restriction: ldv >= ...
+                Leading dimension of V. ldv >= 2*kd.
     @param[in]
     tau         pointer to type. Array on the GPU containing the Householder scalars
                 as returned by HB2ST.
@@ -10253,7 +10251,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_strided_batched_64(rocblas_hand
     \brief The SYTRS functions solve a system of ``n`` linear equations on ``n`` variables in its factorized form.
 
     \details
-    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite, 
+    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite,
     using one of the following factorizations that depends on the value of ``uplo``:
 
     \f[
@@ -10395,7 +10393,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_64(rocblas_handle handle,
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_batched "SYTRF_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
@@ -10550,7 +10548,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_batched_64(rocblas_handle handl
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_strided_batched "SYTRF_STRIDED_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 

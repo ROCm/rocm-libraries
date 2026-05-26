@@ -141,7 +141,7 @@ __global__ static void __launch_bounds__(LASET_MAX_THREADS) laset_kernel(char co
 
 // Initializes matrix on the device.
 template <typename T, typename I, typename Istride, typename UA>
-void laset(rocblas_handle handle,
+rocblas_status laset(rocblas_handle handle,
                   char const uplo_c,
                   I const m,
                   I const n,
@@ -177,6 +177,7 @@ void laset(rocblas_handle handle,
                                                               A_, shiftA, lda, strideA,
 
                                                               batch_count);
+    return rocblas_success;
 }
 
 ROCSOLVER_END_NAMESPACE
