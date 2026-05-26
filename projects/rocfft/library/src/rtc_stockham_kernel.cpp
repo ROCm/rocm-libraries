@@ -168,6 +168,31 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     bool unit_stride = node.inStride.front() == 1 && node.outStride.front() == 1;
 
+    std::function<const TreeNode*(const TreeNode*)> get_root_node;
+    get_root_node = [&get_root_node](const TreeNode* node) -> const TreeNode* {
+        if(node->parent == nullptr)
+            return node;
+        return get_root_node(node->parent);
+    };
+    auto get_transform_type = [](const TreeNode* root_node) -> rocfft_transform_type {
+        if((root_node->inArrayType != rocfft_array_type_real)
+           && (root_node->outArrayType != rocfft_array_type_real))
+            return (root_node->direction == -1) ? rocfft_transform_type_complex_forward
+                                                : rocfft_transform_type_complex_inverse;
+        else if((root_node->inArrayType == rocfft_array_type_real)
+                && (root_node->outArrayType != rocfft_array_type_real))
+            return rocfft_transform_type_real_forward;
+        else if((root_node->inArrayType != rocfft_array_type_real)
+                && (root_node->outArrayType == rocfft_array_type_real))
+            return rocfft_transform_type_real_inverse;
+        else
+            throw std::runtime_error("Invalid transform type");
+    };
+
+    // get the root node and transform type for that node
+    auto root_node        = get_root_node(&node);
+    specs->transform_type = get_transform_type(root_node);
+
     auto ppType = PartialPassType::PPT_NONE;
     if(node.isPartialPassEnabled())
     {
