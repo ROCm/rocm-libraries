@@ -30,9 +30,6 @@
 #include <half/half.hpp>
 using half = half_float::half;
 
-#include <miopen/bfloat16.hpp>
-using hip_bfloat16 = bfloat16;
-
 namespace miopen_hip_f8_impl {
 
 enum class BitOp

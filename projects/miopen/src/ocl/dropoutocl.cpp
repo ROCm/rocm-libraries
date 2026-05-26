@@ -32,12 +32,7 @@
 #include <miopen/kernel_cache.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/datatype.hpp>
-#include <vector>
-#include <numeric>
-#include <algorithm>
-#include <iostream>
-
-#include "../kernels/miopen_rocrand.hpp"
+#include <miopen_rocrand.hpp>
 
 #define DROPOUT_DEBUG 0
 
