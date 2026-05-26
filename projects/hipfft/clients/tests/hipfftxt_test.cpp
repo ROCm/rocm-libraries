@@ -248,10 +248,10 @@ static std::vector<directionformat_t> real_directionformat
     = {{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
        {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED}};
 
-// Complex/complex hipfftxt multi-gpu transforms use HIPFFT_XT_FORMAT_INPLACE for the space format,
-// and HIPFFT_XT_FORMAT_INPLACE_SHUFFLED for the frequency format.  Out-of-place transforms may use
-// HIPFFT_XT_FORMAT_INPUT/HIPFFT_XT_FORMAT_OUTPUT, but we do not currently support this
-// functionality.
+// Complex/complex hipfftxt multi-gpu transforms use either  HIPFFT_XT_FORMAT_INPLACE or
+// HIPFFT_XT_FORMAT_INPLACE_SHUFFLED for both space and frequency formats.
+// Out-of-place transforms may use HIPFFT_XT_FORMAT_INPUT/HIPFFT_XT_FORMAT_OUTPUT, but we do not
+// currently support this functionality.
 static std::vector<directionformat_t> complex_directionformat = {
     {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
     {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
