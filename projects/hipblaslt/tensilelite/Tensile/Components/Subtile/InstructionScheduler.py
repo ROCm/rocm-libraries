@@ -420,6 +420,7 @@ def instructionSchedule(emittedModules):
             rules.setupBufLoadSpreading(placer, pathInsts, order)
         placer.placePath(pathInsts, reverse=hasWaitGR)
 
+
     scheduled = Module()
     _emitPreMfma(scheduled)
     scheduled.add(placer.assemble(mfmas))
