@@ -760,7 +760,16 @@ class LogicalScheduler:
 
         cfg = self.config
         numK = cfg.numSubIterK
-        MAX_UNROLL = 8
+        # MAX_UNROLL bounds cycle detection in Phase 2.  The natural unroll
+        # period of the vgpr-tile free-list cycle is determined by lr_grans
+        # and MIWT shape; shapes with non-power-of-two MIWT (e.g. MIWT=[6,6]
+        # or MIWT=[4,18], which ship in F4BS) can need up to lcm of MIWT
+        # components iterations to close the cycle.  The historical cap of
+        # 8 was sized for pow2 MIWT only and trips on the F4BS-style shapes
+        # under FP8 R=2; raise it to 32 so we cover {6,10,12,14,18}-style
+        # MIWT pairings without affecting shapes that already converge in
+        # <=8 (they hit the convergence break and short-circuit unchanged).
+        MAX_UNROLL = 32
 
         lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
         if cfg.hasScale:
