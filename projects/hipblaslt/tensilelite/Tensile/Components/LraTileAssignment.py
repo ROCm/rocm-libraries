@@ -164,14 +164,11 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
         isSparseDenseMatrix = False
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and  tP["isA"]):
             isSparseDenseMatrix = True
-          if tP["isM"]:
-            inputPerThread = inputPerThread // 4
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
@@ -308,14 +305,11 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
         isSparseDenseMatrix = False
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and  tP["isA"]):
             isSparseDenseMatrix = True
-          elif tP["isM"]:
-            inputPerThread = inputPerThread // 4
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
@@ -533,10 +527,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
-        if kernel["ProblemType"]["Sparse"] and tP["isM"]:
-            inputPerThread = inputPerThread // 4
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
@@ -640,10 +631,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
-        if kernel["ProblemType"]["Sparse"] and tP["isM"]:
-            inputPerThread = inputPerThread // 4
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
@@ -772,8 +760,6 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # use MIInputPerThread if lrvw < MIInputPerThread
         if isgfx950 and tP["bpeDS"] == 0.5 and lrvw < kernel["MIInputPerThread%s"%tc]:
             inputPerThread = kernel["MIInputPerThread%s"%tc]
-        if kernel["ProblemType"]["Sparse"] and tP["isM"]:
-            inputPerThread = inputPerThread // 4
         LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
@@ -836,16 +822,9 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            if kernel["UseGeneralizedNLCOne%s"%tc] and perpStride > 1:
               strideK  = 8
            strideK1 = mt+LdsPad
-
-        # FIXME SPARSE
-        if kernel["ProblemType"]["Sparse"] != 0:
-            if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() > 16:
-                isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
-                strideK       = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
-            # GFX1250 Sparse
-            if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"] and (not isSparseTrack or tP["isM"]):
-                strideK *= 2
-
+        elif kernel["ProblemType"]["Sparse"]:
+            if tP["isM"]:
+                strideK //= 4
         # special case for new F8 MFMA, need to exclude wmma_v3
         elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and (not writer.states.asmCaps["HasWMMA_V3"]) and (not isgfx950mx):
             if umlds:
@@ -857,6 +836,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 strideK = 4
             else:
                 strideK = (mt + LdsPad) * 4
+        # sparse
+        if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"]:
+            if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isA"]) or tP["isM"]:
+                strideK *= 2
 
         strideBlock = matrixInstT * strideTile
         if ("MXS" in tc):
