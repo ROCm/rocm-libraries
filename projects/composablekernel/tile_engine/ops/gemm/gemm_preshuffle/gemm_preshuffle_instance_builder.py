@@ -90,15 +90,6 @@ class GemmPreshuffleKernelBuilder(GemmKernelBuilder):
             sampled = self._apply_sampling(kernel_dicts)
             work_items = [k["_work_item"] for k in sampled]
 
-        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
-        if self.max_instances is not None and len(work_items) > self.max_instances:
-            kernel_dicts = [
-                {"tile_config": item[0], "trait_combo": item[1], "_work_item": item}
-                for item in work_items
-            ]
-            sampled = self._apply_sampling(kernel_dicts)
-            work_items = [k["_work_item"] for k in sampled]
-
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
