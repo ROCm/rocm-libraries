@@ -24,6 +24,7 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -791,19 +792,12 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         const CDEElementwiseOp& cde_element_op,
         const ck::index_t split_k = 1)
     {
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-            for(const auto& s : strides)
-                if(s > TwoGB)
-                    return true;
-            return false;
-        };
-        bool ds_stride_ovf = false;
+        bool ds_ovf = false;
         for(index_t d = 0; d < NumDTensor; d++)
-            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_c_wis_strides[d]);
-        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_k_wos_strides) ||
-                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
-                                any_stride_exceeds_2gb(e_g_n_c_wis_strides) || ds_stride_ovf;
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_c_wis_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_c_wis_lengths) || ds_ovf;
         std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
         std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
         std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
@@ -901,8 +895,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
                                           a_element_op,
                                           b_element_op,
                                           cde_element_op,
-                                          split_k,
-                                          stride_ovf);
+                                          split_k);
     }
 
     std::unique_ptr<BaseArgument> MakeArgumentPointer(
@@ -929,19 +922,12 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         const CDEElementwiseOp& cde_element_op,
         const ck::index_t split_k = 1) override
     {
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
-            for(const auto& s : strides)
-                if(s > TwoGB)
-                    return true;
-            return false;
-        };
-        bool ds_stride_ovf = false;
+        bool ds_ovf = false;
         for(index_t d = 0; d < NumDTensor; d++)
-            ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_c_wis_strides[d]);
-        const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_k_wos_strides) ||
-                                any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
-                                any_stride_exceeds_2gb(e_g_n_c_wis_strides) || ds_stride_ovf;
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_c_wis_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_c_wis_lengths) || ds_ovf;
         std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
         std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
         std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
