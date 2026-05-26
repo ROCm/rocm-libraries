@@ -682,7 +682,7 @@ DEF_FORMAT(VIMAGE,
 )
 
 // VGLOBAL - global memory (96-bit encoding)
-// Used for: global_load_*, global_store_*, global_atomic_*
+// Used for: global_load_*, global_store_*, global_atomic_*, global_wb, global_inv
 DEF_FORMAT(VGLOBAL,
     .microcode = MC_VGLOBAL,
     .unit = GlobalMemory,

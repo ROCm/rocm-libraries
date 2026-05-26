@@ -34,6 +34,10 @@ namespace ck_tile {
  * @tparam StaticTileDistribution_  Thread distribution (mapping) into Tile dimensions
  * @tparam NumCoord                 TBD
  */
+// Tile window with pre-computed per-thread coordinates (pre_computed_coords_).
+// Construction pre-computes XOR address coordinates (~96 VALU), but subsequent
+// .load()/.store() calls reuse the pre-computed coordinates with no reconstruction.
+// Prefer this type for windows accessed repeatedly in a loop.
 template <typename BottomTensorView_,
           typename WindowLengths_,
           typename StaticTileDistribution_,
@@ -186,12 +190,12 @@ struct tile_window_with_static_distribution
     /**
      * @brief Load tile with elementwise function
      *
-     * @note Load tile with elementwise — during value loading, an
-     *       elementwise function is executed for each A0, A1, … AN.
-     *       The values A0, A1, … AN are read by the same thread. In this way, we
+     * @note Load tile with elementwise - during value loading, an
+     *       elementwise function is executed for each A0, A1, ... AN.
+     *       The values A0, A1, ... AN are read by the same thread. In this way, we
      *       reduce the amount of information loaded into the registers.
      *       The same thread, during vectorized reading, accesses the same set of
-     *       data from A0, A1, A2, … AN.
+     *       data from A0, A1, A2, ... AN.
      */
     template <typename... TileWindow_,
               typename ElementWise_,
@@ -1932,6 +1936,11 @@ CK_TILE_DEVICE void move_tile_window(TileWindowWithStaticDistributionType& windo
  *
  * @tparam BottomTensorView_    Class describing & holding device tensor memory.
  * @tparam WindowLengths_       Spatial sizes of windowed view on tensor.
+ *
+ * Tile window without pre-computed coordinates. Each store_tile() call constructs a
+ * tile_window_with_static_distribution internally, paying the full coordinate computation
+ * cost. Suitable for one-shot operations or when VGPR budget is too tight to hold the
+ * pre-computed coordinates for the window's lifetime.
  */
 template <typename BottomTensorView_, typename WindowLengths_>
 struct tile_window_with_static_lengths

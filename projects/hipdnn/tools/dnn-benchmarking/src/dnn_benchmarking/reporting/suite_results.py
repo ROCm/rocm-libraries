@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
+from ..metrics.arch import detect_arch
 from .statistics import BenchmarkStats
 
 
@@ -131,8 +132,9 @@ class ProviderEngineResult:
             scratchpad request. Note this is process-wide and may
             include cached allocations from previous engines on the
             same graph.
-        extra_metrics: Opt-in profiling payload from rocprofv3 trace
-            and perf. None when no opt-in profiling flag was supplied.
+        extra_metrics: Opt-in profiling payload from rocprofv3 PMC /
+            traces, perf, and rocprof-compute roofline. None when no
+            opt-in profiling flag was supplied.
 
     Note:
         Process RSS, host RAM availability, and the volatile parts of
@@ -166,7 +168,7 @@ class ProviderEngineResult:
     cpu_user_time_per_iter_us: Optional[float] = None
     cpu_kernel_time_per_iter_us: Optional[float] = None
     vram_used_mb: Optional[float] = None
-    # Opt-in profiling payload (rocprofv3 trace, perf).
+    # Opt-in profiling payload (rocprofv3 PMC / trace, perf, roofline).
     extra_metrics: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
@@ -193,6 +195,20 @@ class ProviderEngineResult:
             "engine_id": self.engine_id,
             "status": self.status,
         }
+        # extra_metrics is exclusively populated by the opt-in
+        # profiling orchestrator, which the suite runner only fires on
+        # the success path. Asserting the invariant here makes it
+        # load-bearing: if a future caller routes profiling onto a
+        # non-success status, the assertion fires and forces a
+        # decision (emit always when present, or gate explicitly)
+        # rather than silently dropping the slice from the JSON.
+        if self.status != "success":
+            assert self.extra_metrics is None, (
+                f"extra_metrics is set on status={self.status!r}; "
+                "the orchestrator only runs on success today, so this "
+                "indicates either a new caller or a regression in the "
+                "success-gating in suite_runner._run_single_provider_engine"
+            )
         if self.status == "success":
             d["cpu_build_time_ms"] = self.cpu_build_time_ms
             d["gpu_kernel_stats"] = (
@@ -326,6 +342,9 @@ class SuiteMetadata:
         error_combinations: Combinations that errored during execution.
         rocm_version: ROCm version string.
         gpu_model: GPU model name.
+        gpu_arch: GPU gfx target (e.g. "gfx90a", "gfx942"). Useful for
+            keying arch-specific PMC counter sets when analysing the
+            JSON downstream. "unknown" when detection failed.
         python_version: Python version string.
         hipdnn_version: hipDNN version string.
         cpu_model: CPU model string from /proc/cpuinfo.
@@ -358,6 +377,7 @@ class SuiteMetadata:
     error_combinations: int
     rocm_version: Optional[str] = None
     gpu_model: Optional[str] = None
+    gpu_arch: Optional[str] = None
     python_version: Optional[str] = None
     hipdnn_version: Optional[str] = None
     cpu_model: Optional[str] = None
@@ -387,6 +407,7 @@ class SuiteMetadata:
             "error_combinations": self.error_combinations,
             "rocm_version": self.rocm_version,
             "gpu_model": self.gpu_model,
+            "gpu_arch": self.gpu_arch,
             "python_version": self.python_version,
             "hipdnn_version": self.hipdnn_version,
             "cpu_model": self.cpu_model,
@@ -467,6 +488,7 @@ class SuiteResult:
             error_combinations=total_error,
             rocm_version=env_info.get("rocm_version"),
             gpu_model=env_info.get("gpu_model"),
+            gpu_arch=env_info.get("gpu_arch"),
             python_version=env_info.get("python_version"),
             hipdnn_version=env_info.get("hipdnn_version"),
             cpu_model=env_info.get("cpu_model"),
@@ -551,9 +573,16 @@ def collect_environment_info() -> Dict[str, Any]:
     except ImportError:
         pass
 
+    # gfx target via the same torch -> rocminfo -> "unknown" chain used
+    # by metrics.rocprof_pmc, so the JSON output and the PMC keying
+    # agree on what arch this run targeted. detect_arch() never raises —
+    # it returns "unknown" when no GPU is detectable.
+    gpu_arch = detect_arch()
+
     info: Dict[str, Any] = {
         "rocm_version": rocm_version,
         "gpu_model": gpu_model,
+        "gpu_arch": gpu_arch,
         "python_version": python_version,
         "hipdnn_version": hipdnn_version,
     }

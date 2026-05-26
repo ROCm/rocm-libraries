@@ -340,8 +340,57 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bmwcra_1,
-             amazon0312]
+  filename: [amazon0312]
+
+# bmwcra_1: ill-conditioned matrix — strict tolerance on all hardware except gfx1103.
+- name: spsm_coo_file
+  category: nightly
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  skip_hardware: gfx1103
+  filename: [bmwcra_1]
+
+# bmwcra_1: relaxed tolerance on gfx1103 (RDNA3 iGPU): floating-point operation
+# ordering differs from discrete GPUs, causing larger roundoff on ill-conditioned solves.
+- name: spsm_coo_file
+  category: nightly
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  hardware: [gfx1103]
+  tolm: 5
+  filename: [bmwcra_1]
 
 - name: spsm_coo_file
   category: nightly
@@ -427,8 +476,57 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bmwcra_1,
-             amazon0312]
+  filename: [amazon0312]
+
+# bmwcra_1: ill-conditioned matrix — strict tolerance on all hardware except gfx1103.
+- name: spsm_coo_file
+  category: nightly
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [4]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  skip_hardware: gfx1103
+  filename: [bmwcra_1]
+
+# bmwcra_1: relaxed tolerance on gfx1103 (RDNA3 iGPU): floating-point operation
+# ordering differs from discrete GPUs, causing larger roundoff on ill-conditioned solves.
+- name: spsm_coo_file
+  category: nightly
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [4]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  hardware: [gfx1103]
+  tolm: 5
+  filename: [bmwcra_1]
 
 - name: spsm_coo_file
   category: nightly
