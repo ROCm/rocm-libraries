@@ -40,10 +40,6 @@
     "source=${localEnv:HOME}/.ssh,target=/home/${localEnv:USER}/.ssh,type=bind,readonly"
   ],
 
-  "containerEnv": {
-    "HIP_VISIBLE_DEVICES": "all"
-  },
-
   "customizations": {
     "vscode": {
       "extensions": [
