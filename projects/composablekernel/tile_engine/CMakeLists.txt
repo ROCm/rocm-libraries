@@ -13,6 +13,7 @@ set(TILE_ENGINE_SAMPLING_SEED "" CACHE STRING
 
 add_subdirectory(ops/fmha EXCLUDE_FROM_ALL)
 add_subdirectory(ops/gemm EXCLUDE_FROM_ALL)
+add_subdirectory(ops/gemm_decode EXCLUDE_FROM_ALL)
 add_subdirectory(ops/gemm_streamk EXCLUDE_FROM_ALL)
 add_subdirectory(ops/pooling EXCLUDE_FROM_ALL)
 add_subdirectory(ops/reduce EXCLUDE_FROM_ALL)

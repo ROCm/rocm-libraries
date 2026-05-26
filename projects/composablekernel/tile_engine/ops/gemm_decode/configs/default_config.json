@@ -1,0 +1,29 @@
+{
+    "_comment": "P0 default sweep matrix for gemm_decode universal SmallM. The only entry below is hand-translated into universal/gemm_decode_universal_single_default.hpp; gemm_decode_instance_builder.py will consume this file once the multi-config sweep lands in P1+.",
+    "tile_config": {
+        "tile_m":         {"values": [1]},
+        "tile_n":         {"values": [1]},
+        "tile_k":         {"values": [512]},
+        "m_per_warp":     {"values": [1]},
+        "n_per_warp":     {"values": [1]},
+        "vector_size":    {"values": [8]},
+        "lanes_per_output": {"values": [64]},
+        "warps_per_block":  {"values": [1]},
+        "output_axis":    {"values": ["smallM"]},
+        "use_dot2":       {"values": [false]},
+        "use_packed_fp32": {"values": [false]}
+    },
+    "trait_config": {
+        "pipeline":  {"values": ["decode"]},
+        "scheduler": {"values": ["intrawave"]},
+        "epilogue":  {"values": ["default", "atomic_add"]},
+        "split_k":   {"values": [1, 2, 4]},
+        "pad_k":     {"values": [false]},
+        "persistent": {"values": [false]},
+        "has_bias":   {"values": [false]}
+    },
+    "datatypes": [
+        {"a": "bf16", "b": "bf16", "c": "bf16", "acc": "fp32"},
+        {"a": "fp16", "b": "fp16", "c": "fp16", "acc": "fp32"}
+    ]
+}
