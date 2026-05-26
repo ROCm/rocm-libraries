@@ -301,6 +301,10 @@ EnginePluginResourceManager::~EnginePluginResourceManager()
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
+        // Destructors are implicitly noexcept: a log call inside safeDestroyHandle
+        // (fmt formatting, sink I/O, allocation) can throw, which would call
+        // std::terminate. Swallow per-iteration so remaining handles still get
+        // cleaned up.
         try
         {
             safeDestroyHandle(plugin, handle);
