@@ -676,7 +676,7 @@ The transition from per-operation test classes to the generic runner is incremen
 | 2 | Connect three-level tolerance chain (TOML override -> bundle metadata -> per-operation default). Add pre-commit bundle verifier. | Old classes still active. Golden tests now use the same tolerance path as computed tests. |
 | 3 | Generate bundles for conv, matmul, and pointwise. Validate generic runner covers these operations end-to-end. | Old batchnorm classes can be removed once the generic runner has run green for a full release cycle. |
 | 4 | CI integration: DVC pull, per-tier minimum test count baseline, `--verification-mode auto` as default. | Old computed-only CI jobs unchanged. Golden CI jobs added alongside. |
-| 5 | Expand to remaining operations (SDPA, layernorm, RMS norm, reduction). Remove remaining per-operation golden test classes. | Generic runner is the sole golden test path. Computed tests (`IntegrationGraphVerificationHarness`) remain for operations without golden data. |
+| 5 | Expand to remaining operations (SDPA, layernorm, RMS norm, reduction). Remove remaining per-operation golden test classes. SDPA onboarding requires the matched-precision reference strategy, the forward-backward generation constraint, empirically calibrated tolerance for non-deterministic engine variants, and the tolerance calibration tool — see the relevant sections in Detailed Design. | Generic runner is the sole golden test path. Computed tests (`IntegrationGraphVerificationHarness`) remain for operations without golden data. |
 
 **Rollback**: At any phase, setting `--verification-mode cpu` (or `gpu`) disables golden tests entirely. Old per-operation classes are not removed until the generic runner has proven stable for that operation.
 
@@ -778,3 +778,4 @@ The following architectural forks were considered during design. Each records th
 4. **Reproducible generation**: Fixed seeds for random input generation so that regenerating a bundle produces the same inputs, isolating output differences to the reference source change.
 5. **Auto-tier classification**: The generator suggests the appropriate tier folder based on tensor element counts, matching the existing size conventions.
 6. **KnobSettings coverage**: Validate the same golden bundles under different engine KnobSettings configurations to catch regressions from tuning changes.
+7. **Tolerance calibration tool**: Extend the generation framework to run the target engine N times on each bundle, compute empirical p99.9 tolerance bounds, and write calibrated tolerance values to `meta.json`. Required before onboarding operations with non-deterministic engines (e.g., SDPA backward with atomic accumulation).
