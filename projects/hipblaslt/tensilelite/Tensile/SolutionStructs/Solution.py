@@ -27,7 +27,7 @@ import math
 import sys
 
 from enum import Enum
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Tuple
 
 from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
@@ -2480,7 +2480,7 @@ class Solution(collections.abc.Mapping):
 
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
-      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
+      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
         # SubtileImpl: LDS padding is disabled.
         # gfx950 subtile uses software swizzle+rotation for bank conflict avoidance instead.
         # gfx1250 subtile (TDM) currently has no bank conflict mitigation -- TDM hardware
