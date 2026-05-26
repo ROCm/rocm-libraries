@@ -79,6 +79,7 @@ ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\
+ROCSPARSE_DO_ROUTINE(spildlt0)				\
 ROCSPARSE_DO_ROUTINE(spilu0)				\
 ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\

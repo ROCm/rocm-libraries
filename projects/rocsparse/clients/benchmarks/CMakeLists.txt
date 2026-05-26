@@ -123,6 +123,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsric0.cpp
 ../testings/testing_bsrilu0.cpp
 ../testings/testing_csric0.cpp
+../testings/testing_spildlt0.cpp
 ../testings/testing_csrilu0.cpp
 ../testings/testing_csritilu0.cpp
 ../testings/testing_csritilu0_ex.cpp

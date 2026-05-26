@@ -274,6 +274,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_bsric0.hpp"
 #include "testing_bsrilu0.hpp"
 #include "testing_csric0.hpp"
+#include "testing_spildlt0.hpp"
 #include "testing_csrilu0.hpp"
 #include "testing_csritilu0.hpp"
 #include "testing_csritilu0_ex.hpp"
@@ -557,6 +558,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
         DEFINE_CASE_IJT_X(spitsv_csr, testing_spitsv_csr);
         DEFINE_CASE_IJT(spic0);
+        DEFINE_CASE_IJT(spildlt0);
         DEFINE_CASE_IJT(spilu0);
         DEFINE_CASE_IJT(sptrsv);
         DEFINE_CASE_T(csritsv);
