@@ -43,6 +43,9 @@ public:
                 "ROCm headers are not in include paths");
         }
 
+        // Kernels use C++17 features (if constexpr, scoped-enum brace-init).
+        _baseCompileOptions.emplace_back("-std=c++17");
+
         // Add device arch to compile options
         _baseCompileOptions.emplace_back(std::string("--offload-arch=") + deviceProps.gcnArchName);
 
