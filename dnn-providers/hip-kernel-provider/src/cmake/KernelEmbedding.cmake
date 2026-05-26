@@ -74,24 +74,24 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
 
     # Generate kernel source files
     configure_file(
-        ${CMAKE_SOURCE_DIR}/src/cmake/templates/kernel_sources.hpp.in
+        ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_sources.hpp.in
         ${OUTPUT_SRCS_HPP}
         @ONLY
     )
     configure_file(
-        ${CMAKE_SOURCE_DIR}/src/cmake/templates/kernel_sources.cpp.in
+        ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_sources.cpp.in
         ${OUTPUT_SRCS_CPP}
         @ONLY
     )
 
     # Generate kernel include files
     configure_file(
-        ${CMAKE_SOURCE_DIR}/src/cmake/templates/kernel_includes.hpp.in
+        ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_includes.hpp.in
         ${OUTPUT_INCS_HPP}
         @ONLY
     )
     configure_file(
-        ${CMAKE_SOURCE_DIR}/src/cmake/templates/kernel_includes.cpp.in
+        ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_includes.cpp.in
         ${OUTPUT_INCS_CPP}
         @ONLY
     )

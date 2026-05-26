@@ -88,7 +88,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     install_provider_ctest_files("hip_kernel_provider")
 endif()
 
-#
+# Process all kernels marked for inlining
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
