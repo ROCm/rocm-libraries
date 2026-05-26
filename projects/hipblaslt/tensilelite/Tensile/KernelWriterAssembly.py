@@ -640,6 +640,8 @@ class KernelWriterAssembly(KernelWriter):
   def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
     """Return GlobalReadIncs* SGPRs to the pool after tdmSetupIncrementWaveSeparated."""
     module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
+    if not self.isTdmWaveSeparated(kernel):
+      return module
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsA"))
     if self.states.b.numSgprGlobalReadIncs > 0:
