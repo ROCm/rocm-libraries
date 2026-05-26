@@ -580,7 +580,7 @@ void testing_spmm(const Arguments& arg)
           : orderD == HIPSPARSE_ORDER_COL ? ldg * N
                                           : ldg * M;
 
-    const size_t size_gate = arg.gate_residual ? stride_gate * num_batches : 0;
+    const size_t size_gate = arg.gate_residual ? (stride_gate == 0 ? (orderD == HIPSPARSE_ORDER_COL ? ldd * N : ldd * M) * num_batches : stride_gate * num_batches) : 0;
 
     device_vector<TGate> dGate(size_gate, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dGate.memcheck());

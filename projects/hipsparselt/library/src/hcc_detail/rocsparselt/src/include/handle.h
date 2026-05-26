@@ -197,6 +197,7 @@ struct _rocsparselt_matmul_descr
         , bias_stride(rhs.bias_stride)
         , bias_type(rhs.bias_type)
         , alpha_vector_scaling(rhs.alpha_vector_scaling)
+        , gate_residual_mat_pointer(rhs.gate_residual_mat_pointer)
         , m(rhs.m)
         , n(rhs.n)
         , k(rhs.k)
@@ -215,6 +216,7 @@ struct _rocsparselt_matmul_descr
         matrix_B     = rhs.matrix_B->clone();
         matrix_C     = rhs.matrix_C->clone();
         matrix_D     = rhs.matrix_D->clone();
+        gate_residual_desc = rhs.gate_residual_desc->clone();
         is_reference = false;
         is_init      = (uintptr_t)handle;
     };
