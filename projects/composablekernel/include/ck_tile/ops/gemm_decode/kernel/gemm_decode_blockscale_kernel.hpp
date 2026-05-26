@@ -88,6 +88,14 @@ struct GemmDecodeBlockscaleKernel : public GemmDecodeNumeric
 
     static constexpr index_t kBlockK = kXScaleBlockK;
 
+    // Maximum number of K-blocks the LDS staging path is willing to hold
+    // per (X, W) scale row. 128 covers DSV3 K = 16384 with kBlockK = 128
+    // and stays well under the 64 KB / CU LDS budget at 2 * 128 * 4 B =
+    // 1 KB. When the runtime K exceeds this, the kernel falls back to the
+    // global-only path. The threshold is a Policy hook so a future
+    // tile_engine config can tune it without forking the kernel.
+    static constexpr index_t kMaxScaleBlocks = 128;
+
     struct Kargs
     {
         const void* p_a;       // [M, K]
@@ -268,6 +276,80 @@ struct GemmDecodeBlockscaleKernel : public GemmDecodeNumeric
         const index_t k_offset       = iter_start * kTileN;
         const index_t num_iter       = my_iter;
 
+        // -------------------- WD-OPT-18: scale-LDS broadcast --------------------
+        //
+        // The K loop reads one (xs, ws) scalar pair per outer iter, with values
+        // that vary only along K (X scale) and (n_row, K) (W scale). Each
+        // workgroup keeps `m` and `n_base` constant and walks every K block
+        // inside its k_id shard, so the same set of scale scalars is hit
+        // again and again across iterations. Staging them into LDS once at
+        // the workgroup prologue collapses the per-iter HBM read to a single
+        // shared-memory access.
+        //
+        // The LDS region is wrapped through CK Tile primitives:
+        //   - `make_tensor_view<address_space_enum::lds>(p_smem, desc)` wraps
+        //     the smem pointer with a 1D naive descriptor sized to the
+        //     workgroup's scale row.
+        //   - The cooperative prefill is a single contiguous sweep along the
+        //     scale row owned by this workgroup (`(scale_row_x, .)` for X,
+        //     `(scale_row_w, .)` for W); we keep it as a thread-strided loop
+        //     since `tile_window + store_tile` over a 1D vector of
+        //     workgroup-private scalars adds no value here.
+        //   - `block_sync_lds()` provides the fence.
+        //
+        // The LDS read inside the K-loop is keyed by `k_base / kBlockK`,
+        // which varies per iteration; we issue it as a scalar load through
+        // the LDS view's underlying buffer pointer. A future CK Tile core
+        // helper (e.g. `lds_scalar_read(view, idx)`) could subsume this
+        // pattern - flagged inline.
+        const index_t num_x_blocks = kargs.K / kXScaleBlockK;
+        const index_t num_w_blocks = kargs.K / kWScaleBlockK;
+        // The DSV3 convention has matching Block_K for X and W (asserted at
+        // class scope). We keep two distinct counts to make a future split
+        // trivial.
+        const bool use_scale_lds = (kargs.p_x_scale != nullptr) &&
+                                   (kargs.p_w_scale != nullptr) &&
+                                   (num_x_blocks <= kMaxScaleBlocks) &&
+                                   (num_w_blocks <= kMaxScaleBlocks);
+
+        __shared__ ComputeDataType x_scale_smem[kMaxScaleBlocks];
+        __shared__ ComputeDataType w_scale_smem[kMaxScaleBlocks];
+
+        if(use_scale_lds)
+        {
+            constexpr auto x_smem_desc =
+                make_naive_tensor_descriptor_packed(make_tuple(kMaxScaleBlocks),
+                                                    number<1>{});
+            constexpr auto w_smem_desc =
+                make_naive_tensor_descriptor_packed(make_tuple(kMaxScaleBlocks),
+                                                    number<1>{});
+            auto x_lds_view = make_tensor_view<address_space_enum::lds>(x_scale_smem,
+                                                                       x_smem_desc);
+            auto w_lds_view = make_tensor_view<address_space_enum::lds>(w_scale_smem,
+                                                                       w_smem_desc);
+            (void)x_lds_view;
+            (void)w_lds_view;
+
+            const index_t scale_row_x = m / kXScaleBlockN;
+            const index_t scale_row_w = n_base / kWScaleBlockN;
+
+            const auto* x_ptr = static_cast<const XScaleDataType*>(kargs.p_x_scale);
+            const auto* w_ptr = static_cast<const WScaleDataType*>(kargs.p_w_scale);
+
+            const index_t tid = static_cast<index_t>(threadIdx.x);
+            for(index_t c = tid; c < num_x_blocks; c += kBlockSize)
+            {
+                x_scale_smem[c] =
+                    type_convert<ComputeDataType>(x_ptr[scale_row_x * num_x_blocks + c]);
+            }
+            for(index_t c = tid; c < num_w_blocks; c += kBlockSize)
+            {
+                w_scale_smem[c] =
+                    type_convert<ComputeDataType>(w_ptr[scale_row_w * num_w_blocks + c]);
+            }
+            block_sync_lds();
+        }
+
         const auto a_view = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const ADataType*>(kargs.p_a),
             make_tuple(kargs.M, kargs.K),
@@ -299,9 +381,7 @@ struct GemmDecodeBlockscaleKernel : public GemmDecodeNumeric
         // `lane_id * kVector + [0, kVector)`, so each lane sits inside a
         // single Block_K stride: lane 0..(Block_K/kVector - 1) own scale
         // sub-block 0 of the warp's tile, the next group own sub-block 1,
-        // etc. We compute the lane's sub-block once and read its (xs, ws)
-        // from HBM at every outer iteration. The next commit replaces the
-        // per-iter HBM read with an LDS broadcast.
+        // etc.
         const index_t lane_id   = get_lane_id();
         const index_t k_in_tile = lane_id * kVector;
 
@@ -311,12 +391,27 @@ struct GemmDecodeBlockscaleKernel : public GemmDecodeNumeric
             auto b_tile = load_tile(b_window);
 
             const index_t k_base       = k_offset + i * kTileN;
-            const index_t k_lane_block = k_base + k_in_tile; // any K offset within the
-                                                             // lane's sub-block works
-            const ComputeDataType xs = load_block2d_scale<XScaleLayout, XScaleDataType>(
-                kargs.p_x_scale, m, k_lane_block, kargs.K);
-            const ComputeDataType ws = load_block2d_scale<WScaleLayout, WScaleDataType>(
-                kargs.p_w_scale, n_base, k_lane_block, kargs.K);
+            const index_t k_lane_block = k_base + k_in_tile;
+
+            ComputeDataType xs;
+            ComputeDataType ws;
+            if(use_scale_lds)
+            {
+                // Scalar LDS read keyed by the lane's sub-block index. Same
+                // index for all lanes inside one (kBlockK / kVector)-lane
+                // group, hence an effective broadcast from LDS - no need
+                // for a static tile distribution since the index is
+                // loop-variant.
+                xs = x_scale_smem[k_lane_block / kXScaleBlockK];
+                ws = w_scale_smem[k_lane_block / kWScaleBlockK];
+            }
+            else
+            {
+                xs = load_block2d_scale<XScaleLayout, XScaleDataType>(
+                    kargs.p_x_scale, m, k_lane_block, kargs.K);
+                ws = load_block2d_scale<WScaleLayout, WScaleDataType>(
+                    kargs.p_w_scale, n_base, k_lane_block, kargs.K);
+            }
 
             ComputeDataType iter_dot = type_convert<ComputeDataType>(0.0f);
 

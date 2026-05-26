@@ -744,6 +744,22 @@ TEST(GemmDecodeBlockscaleFp8, Fp8Fp8ToBf16BlockscaleMatrix)
 {
     RunBlockscaleMatrix<fp8_t, fp8_t, bf16_t>("FP8/FP8/BF16 1x128/128x128");
 }
+
+TEST(GemmDecodeBlockscaleFp8, ScaleLdsBroadcastVsGlobal)
+{
+    // The kernel falls back to the global-only path when num K-blocks
+    // exceeds kMaxScaleBlocks (= 128 -> K > 128 * 128 = 16384). We exercise
+    // both:
+    //   - K = 7168  (56 K-blocks)   - LDS path
+    //   - K = 8192  (64 K-blocks)   - LDS path, larger sweep
+    //   - K = 24576 (192 K-blocks)  - global fallback (> kMaxScaleBlocks)
+    EXPECT_TRUE((RunBlockscaleCase<fp8_t, fp8_t, bf16_t>("LDS K=7168",
+                                                          DecodeShape{1, 4096, 7168}, 1)));
+    EXPECT_TRUE((RunBlockscaleCase<fp8_t, fp8_t, bf16_t>("LDS K=8192",
+                                                          DecodeShape{2, 2048, 8192}, 2)));
+    EXPECT_TRUE((RunBlockscaleCase<fp8_t, fp8_t, bf16_t>("global K=24576",
+                                                          DecodeShape{1, 2048, 24576}, 1)));
+}
 #endif // CK_TILE_USE_OCP_FP8
 
 TEST(GemmDecodeUniversalNegative, RejectsNullPointers)
