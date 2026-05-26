@@ -47,7 +47,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spmm_bsr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int64_t              mb         = 10;
     int64_t              kb         = 10;
     int64_t              n          = 10;
@@ -196,7 +196,7 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spmm_bsr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     J                    m         = argus.M;
     J                    n         = argus.N;
     J                    k         = argus.K;
@@ -214,17 +214,6 @@ void testing_spmm_bsr(Arguments argus)
 
     hipsparseOrder_t blockOrder
         = (block_dir == HIPSPARSE_DIRECTION_ROW) ? HIPSPARSE_ORDER_ROW : HIPSPARSE_ORDER_COL;
-
-    // BSR SpMM on the rocSPARSE backend currently only supports non-transpose A.
-    if(transA != HIPSPARSE_OPERATION_NON_TRANSPOSE)
-    {
-        return;
-    }
-
-    if(blockDim < 1)
-    {
-        return;
-    }
 
     // Index and data type
     hipsparseIndexType_t typeI = getIndexType<I>();
