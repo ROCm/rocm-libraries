@@ -2087,10 +2087,10 @@ class LogicalScheduler:
         # The boundary load MUST sit after WaitGR (the dwordx4 OOB write to
         # LDS@boundary has retired) and before SyncOp (other waves stay in
         # sync). For non-bf16 / non-Subtile paths this is a no-op Module.
-        #preamble.append(TailBoundaryLoadOp(tensor='B'))
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
         preamble.append(TailBoundaryLoadOp(tensor='A'))
+        preamble.append(TailBoundaryLoadOp(tensor='B'))
         preamble.append(SyncOp())
 
         # Loop over partitions to re-use vgpr tile maps.
