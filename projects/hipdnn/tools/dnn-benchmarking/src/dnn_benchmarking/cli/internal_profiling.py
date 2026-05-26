@@ -4,10 +4,10 @@
 """Hidden ``--internal-profiling-run`` sub-mode.
 
 This is the workload that the profiling orchestrator wraps under
-rocprofv3 / perf. We deliberately re-exec the whole process (rather
-than running another loop in-place) because the outer profiler
-expects a fresh process tree and a clean address space — that is how
-kernel-trace events scope what they record.
+rocprofv3 / perf / rocprof-compute. We deliberately re-exec the whole
+process (rather than running another loop in-place) because the outer
+profiler expects a fresh process tree and a clean address space — that
+is how kernel-trace / PMC counters scope what they record.
 
 Short-circuits relative to the full CLI:
   * No ``gpu_check`` — the parent already verified GPU availability.
@@ -42,27 +42,29 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
 
     try:
         import hipdnn_frontend as hipdnn
-
-        if args.plugin_path is not None:
-            hipdnn.set_engine_plugin_paths([str(args.plugin_path)])
-        handle = hipdnn.Handle()
-
-        loader = GraphLoader()
-        graph_json = loader.load_json(graph_path)
-        loader.validate(graph_json)
-        tensor_infos = loader.extract_tensor_info(graph_json)
     except ImportError:
         print(
             "internal-profiling-run: hipdnn_frontend not importable",
             file=sys.stderr,
         )
         return 1
+
+    try:
+        if args.plugin_path is not None:
+            hipdnn.set_engine_plugin_paths([str(args.plugin_path)])
+        handle = hipdnn.Handle()
     except RuntimeError as e:
         print(
             f"internal-profiling-run: failed to create hipDNN handle: {e}",
             file=sys.stderr,
         )
         return 1
+
+    try:
+        loader = GraphLoader()
+        graph_json = loader.load_json(graph_path)
+        loader.validate(graph_json)
+        tensor_infos = loader.extract_tensor_info(graph_json)
     except GraphLoadError as e:
         print(f"internal-profiling-run: graph load failed: {e}", file=sys.stderr)
         return 1
@@ -71,6 +73,12 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
     # if we left them on, polluting the inner run. Force tier=off for
     # the inner pass; the parent already collected basic metrics on the
     # timed pass.
+    #
+    # `plugin_path` is forwarded so the child's SuiteConfig matches the
+    # parent's. hipdnn.set_engine_plugin_paths above is what actually
+    # loads the plugin today, but any future code that reads
+    # config.plugin_path from inside _run_single_provider_engine would
+    # otherwise silently see None in the child.
     suite_config = SuiteConfig(
         warmup_iters=args.warmup,
         benchmark_iters=args.iters,
@@ -80,6 +88,7 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         reference_provider="none",
         verbose=False,
         metrics=MetricsConfig(tier="off"),
+        plugin_path=args.plugin_path,
     )
 
     try:

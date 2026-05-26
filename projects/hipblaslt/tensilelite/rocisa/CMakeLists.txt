@@ -122,31 +122,50 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
 
-    # Locate stinkytofu: prefer the monorepo sibling, fall back to installed package.
+    # Locate stinkytofu: prefer installed package, fall back to monorepo sibling.
     if(NOT TARGET stinkytofu)
-        set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-        if(IS_DIRECTORY "${_stinkytofu_sibling}")
-            set(STINKYTOFU_ENABLE_WERROR ON)
-            add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+        find_package(stinkytofu QUIET)
+        if(NOT stinkytofu_FOUND)
+            set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+            if(IS_DIRECTORY "${_stinkytofu_sibling}")
+                set(STINKYTOFU_ENABLE_WERROR ON)
+                add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+                set(_stinkytofu_from_subdirectory TRUE)
+            else()
+                message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory")
+            endif()
+        endif()
+    endif()
+
+    if(NOT DEFINED _stinkytofu_from_subdirectory)
+        get_target_property(_st_imported stinkytofu IMPORTED)
+        if(_st_imported)
+            set(_stinkytofu_from_subdirectory FALSE)
         else()
-            find_package(stinkytofu REQUIRED)
+            set(_stinkytofu_from_subdirectory TRUE)
         endif()
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
     target_link_libraries(_rocisa PRIVATE hip::host stinkytofu)
-    # rocisa conversion sources include stinkytofu public headers that
-    # transitively include generated files (hardware/gfxIsa.inc) from
-    # stinkytofu's build directory.
-    target_include_directories(_rocisa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
+    if(_stinkytofu_from_subdirectory)
+        # Source-built stinkytofu via add_subdirectory: generated headers are in
+        # the stinkytofu/ subdirectory of the binary dir.
+        target_include_directories(_rocisa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
+        set(_st_build_rpath "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
+    else()
+        # Installed stinkytofu: include dirs come from the exported target.
+        get_target_property(_st_loc stinkytofu IMPORTED_LOCATION)
+        if(_st_loc)
+            cmake_path(GET _st_loc PARENT_PATH _st_build_rpath)
+        else()
+            set(_st_build_rpath "")
+        endif()
+    endif()
     set_target_properties(_rocisa PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
-        # At install time (wheel/site-packages): libstinkytofu.so sits next to
-        # _rocisa.so in the same rocisa/ directory.
         INSTALL_RPATH "$ORIGIN"
-        # At build time: libstinkytofu.so is in the stinkytofu/ subdirectory of
-        # the binary dir, not co-located with _rocisa.so.
-        BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
+        BUILD_RPATH "${_st_build_rpath}"
     )
     # On Windows there is no RPATH; copy stinkytofu.dll next to _rocisa.pyd
     # so the dynamic linker can find it at runtime.
