@@ -45,7 +45,7 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
                          *tensorMap.at(nodeAttributes->o_tensor_uid()),
                          std::nullopt,
                          /*leftBound=*/-1,
-                         /*rightBound-=*/-1,
+                         /*rightBound=*/-1,
                          /*topLeftAlignment=*/true);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -94,7 +94,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
                          *tensorMap.at(nodeAttributes->o_tensor_uid()),
                          std::nullopt,
                          /*leftBound=*/-1,
-                         /*rightBound-=*/0,
+                         /*rightBound=*/0,
                          /*topLeftAlignment=*/true);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -119,6 +119,79 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
+}
+
+TEST(TestSdpaFwdPlanBuilder, ExecutePlanWithAsymmetricWindow)
+{
+    // Regression test for a bug where SdpaFwdPlanBuilder forwarded the same value
+    // (left_bound) for both leftBound and rightBound to CpuFpReferenceSdpa::forward,
+    // ignoring right_bound. With leftBound == rightBound (e.g. for symmetric windows
+    // or causal masks where both are -1/0), that bug is invisible. This test uses an
+    // asymmetric window (leftBound=2, rightBound=1) so that any confusion of the two
+    // bounds produces a different attention pattern and a divergent output.
+    //
+    // Compares the output of the dispatched plan (graph → SdpaFwdPlanBuilder →
+    // SdpaFwdPlan::execute) against a direct call to CpuFpReferenceSdpa::forward
+    // with the same asymmetric window parameters.
+    //
+    // [B=1, H=2, Sq=4, Skv=4, D=8] with leftBound=2, rightBound=1, TopLeft alignment.
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+    constexpr int64_t LEFT_BOUND = 2;
+    constexpr int64_t RIGHT_BOUND = 1;
+
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> planTensorBundle(qDims, kDims, vDims, seed);
+    SdpaFwdTensorBundle<float> directTensorBundle(qDims, kDims, vDims, seed);
+
+    auto graphTuple = buildSdpaFwdGraph(planTensorBundle,
+                                        DataType::FLOAT,
+                                        /*causalMask=*/false,
+                                        /*leftBound=*/LEFT_BOUND,
+                                        /*rightBound=*/RIGHT_BOUND,
+                                        hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+    auto& graph = std::get<0>(graphTuple);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+    // Build the plan through SdpaFwdPlanBuilder so the dispatcher's left/right bound
+    // extraction is exercised (this is where the original bug lived).
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+
+    const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[nodeAttributes->q_tensor_uid()] = planTensorBundle.qTensor.memory().hostData();
+    variantPack[nodeAttributes->k_tensor_uid()] = planTensorBundle.kTensor.memory().hostData();
+    variantPack[nodeAttributes->v_tensor_uid()] = planTensorBundle.vTensor.memory().hostData();
+    variantPack[nodeAttributes->o_tensor_uid()] = planTensorBundle.oTensor.memory().hostData();
+    plan->execute(variantPack);
+
+    // Direct CPU reference with the same asymmetric window parameters.
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
+                                                            directTensorBundle.kTensor,
+                                                            directTensorBundle.vTensor,
+                                                            directTensorBundle.oTensor,
+                                                            std::nullopt,
+                                                            noMask,
+                                                            LEFT_BOUND,
+                                                            RIGHT_BOUND,
+                                                            /*topLeftAlignment=*/true);
+
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor))
+        << "Plan output (via SdpaFwdPlanBuilder) does not match direct CpuFpReferenceSdpa "
+           "with leftBound="
+        << LEFT_BOUND << ", rightBound=" << RIGHT_BOUND
+        << ". This indicates the dispatcher is not forwarding the two bounds distinctly.";
 }
 
 TEST(TestSdpaFwdPlanBuilder, PlanConstruction)

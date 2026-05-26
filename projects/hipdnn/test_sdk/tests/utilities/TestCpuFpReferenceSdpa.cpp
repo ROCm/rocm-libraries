@@ -586,6 +586,52 @@ TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricTopLeft)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (2.0 + 3.0 + 4.0 + 5.0) / 4.0, 1e-5);
 }
 
+TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricBottomRight)
+{
+    // Generic sliding window with leftBound=2, rightBound=1 (BottomRight alignment).
+    // Asymmetric window (wider on the left) with Sq=4, Skv=5.
+    // diagonal offset = Skv - Sq = 1.
+    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    //         iff (sq - 1)                  <= skv <= (sq + 2)
+    //
+    // Expected mask (1=unmasked):
+    //    _____kv______
+    // q | 1 1 1 0 0    sq=0: skv ∈ [-1, 2] → {0, 1, 2}      → mean(1,2,3)     = 2.0
+    //   | 1 1 1 1 0    sq=1: skv ∈ [ 0, 3] → {0, 1, 2, 3}   → mean(1,2,3,4)   = 2.5
+    //   | 0 1 1 1 1    sq=2: skv ∈ [ 1, 4] → {1, 2, 3, 4}   → mean(2,3,4,5)   = 3.5
+    //   | 0 0 1 1 1    sq=3: skv ∈ [ 2, 5] → {2, 3, 4}      → mean(3,4,5)     = 4.0
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 5, 1});
+    Tensor<double> v({1, 1, 5, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+    v.setHostValue(5.0, 0, 0, 4, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/2,
+                                /*rightBound=*/1,
+                                /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0 + 4.0) / 4.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (2.0 + 3.0 + 4.0 + 5.0) / 4.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0 + 5.0) / 3.0, 1e-5);
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, GenericWindowBottomRightLargerSkv)
 {
     // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.

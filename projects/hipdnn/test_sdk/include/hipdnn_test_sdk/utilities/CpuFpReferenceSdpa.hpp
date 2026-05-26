@@ -38,7 +38,7 @@ public:
     ///                         -1 is no mask to the left
     /// @param rightBound        Number of sequence elements to the right that are unmasked
     ///                         -1 is no mask to the right
-    /// @param topLeftAlighment If true, diagonal is measured from top left
+    /// @param topLeftAlignment If true, diagonal is measured from top left
     ///                         If false, diagonal is measured from bottom right
     /// @param lse              Optional log-sum-exp output [B, H, Sq] (always float type).
     ///                         Stores maxVal + log(sumExp) for each query position.

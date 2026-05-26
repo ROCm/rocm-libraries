@@ -224,12 +224,20 @@ public:
         int64_t leftBound = (nodeAttributes->left_bound().has_value())
                                 ? nodeAttributes->left_bound().value()
                                 : -1;
-        int64_t rightBound = (nodeAttributes->left_bound().has_value())
-                                 ? nodeAttributes->left_bound().value()
+        int64_t rightBound = (nodeAttributes->right_bound().has_value())
+                                 ? nodeAttributes->right_bound().value()
                                  : -1;
 
         bool isTopLeft = nodeAttributes->diagonal_alignment()
                          == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+
+        // Validate mutually exclusive deprecated attributes
+        if(nodeAttributes->causal_mask() && nodeAttributes->causal_mask_bottom_right())
+        {
+            throw std::invalid_argument("Cannot set both causal_mask and causal_mask_bottom_right. "
+                                        "Use diagonal_alignment={TOP_LEFT|BOTTOM_RIGHT} with "
+                                        "left_bound=-1, right_bound=0 instead.");
+        }
 
         // Check deprecated attributes
         if(nodeAttributes->causal_mask())
