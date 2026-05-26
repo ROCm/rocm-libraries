@@ -1746,6 +1746,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
+        - SwapGlobalReadOrder: [1]  # rocm-libraries-2bww (strict): TN
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
