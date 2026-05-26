@@ -523,9 +523,6 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         auto       devbuf  = mydesc->descriptor->data[igpu];
         auto       hipret  = hipMemset(devbuf, 0, bufsize);
         EXPECT_EQ(hipret, hipSuccess) << "hipMemset failed";
-        std::vector<char> hostbufpart(bufsize);
-        hipret = hipMemcpy(hostbufpart.data(), devbuf, bufsize, hipMemcpyDeviceToHost);
-        EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
     }
 
     // Labmda for initializing the host buffer.  We do not care about Hermitian symmetry in 2D/3D,
@@ -551,7 +548,9 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                         if(isreal)
                         {
                             auto hostdat = reinterpret_cast<double*>(hostbuf.data());
-                            hostdat[pos] = xidx + 0.01 * yidx;
+                            const auto yscale
+                                = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
+                            hostdat[pos] = xidx + yscale * yidx;
                         }
                         else
                         {
@@ -580,13 +579,20 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                             if(isreal)
                             {
                                 auto hostdat = reinterpret_cast<double*>(hostbuf.data());
-                                hostdat[pos] = xidx + 0.01 * yidx + +0.0001 * zidx;
+                                const auto yscale
+                                    = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
+                                const auto zscale
+                                    = yscale
+                                    * std::pow(10.0, -std::ceil(std::log10(batchlengths[3]))) ;
+                                hostdat[pos] = xidx + yscale  * yidx  + zscale * zidx;
                             }
                             else
                             {
                                 auto hostdat
                                     = reinterpret_cast<std::complex<double>*>(hostbuf.data());
-                                hostdat[pos] = std::complex<double>(xidx + 0.01 * yidx, zidx);
+                                const auto yscale
+                                    = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
+                                hostdat[pos] = std::complex<double>(xidx + yscale * yidx, zidx);
                             }
                         }
                     }
