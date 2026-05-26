@@ -216,16 +216,105 @@ Hypotheses still to investigate:
    with the K_remain-1 load below it; an aliasing / dependence bug
    could be writing the wrong K_local value.
 
-### Next steps
+### A-vs-B isolation experiment (Phase A1.e diagnostic)
 
-- Either: dump the actual LDS bytes via a CPU-readable scratch
-  buffer at the end of the tail loop (= add a temporary debug
-  store) to confirm WHICH byte is wrong.
-- Or: hard-code a known constant into the K_remain-2 narrow load
-  (= write 0xDEAD to the target byte) and inspect D's error
-  pattern to confirm the byte IS the one the LR consumer reads.
-- Or: revert the K_remain-2 emit and ship only Phase 2
-  (= K_remain=1 align-UP fallback + single K_remain-1 narrow load
-  for the K_remain odd >= 3 partial repair). This restores
-  MT 128×128 K=1 (the dominant failing shape) and accepts the
-  remaining MT 128×128 K=3 etc. failures as documented limitation.
+Disabled the K_remain-2 narrow load for **B only** (= A still fires
+both K_remain-2 + K_remain-1; B fires only K_remain-1) and re-ran
+`subtile_bf16_anyk_odd.yaml`. Result on MT 128×128:
+
+| K (= K_remain) | A-only K_remain-2 | A+B K_remain-2 (full A1.e) |
+|---|---|---|
+| K=3 (=K_remain=3)   | **PASS**       | FAIL (203 errors) |
+| K=7 (=K_remain=7)   | FAIL (~110)    | FAIL |
+| K=17 (=K_remain=17) | FAIL           | FAIL |
+| K=31 (=K_remain=31) | FAIL           | FAIL |
+
+The **B-side K_remain-2 narrow load is the regressing piece**: when
+enabled on MT 128×128, it ADDS ~92 errors beyond the K_remain-1-only
+baseline. When disabled, K_remain=3 passes (= A-side K_remain-2 alone
+is sufficient for that geometry; the K_remain-2 + K_remain-1 pair
+both live in the same lane chunk for K_remain=3 case, so A's repair
+covers both).
+
+For K_remain ∈ {7, 17, 31} the K_remain-2 sits in a different
+lane chunk than K_remain-1 (because K_remain-2 falls on the prior
+elementsPerLane=8 stripe), so A-side K_remain-2 alone doesn't cover
+those cases.
+
+Despite the GR-side narrow-load descriptor matching the LR-side
+oracle for byte 32738 (= the predicted slot for B[127, K=1] on
+MT 128×128), enabling the B-side write to byte 32738 corrupts the
+test result. Two non-exclusive hypotheses remain after 3 narrow
+diagnostic attempts:
+
+1. **LR oracle is wrong for B's sId0_LR=3 on MT 128×128 wg=(2,2).**
+   The harness's formula-equality oracle says byte 32738 = K=1 of
+   B[127] is the LR-reader slot, but the actual ASM's
+   `_lraTileAssignment_legacy` may read a *different* byte. Writing
+   to byte 32738 then corrupts whatever the actual LR reads there.
+   The same harness passes for MT 64×64 and MT 128×32 (different
+   sId0_LR / wave_partition values), so the discrepancy is specific
+   to the MT 128×128 corner case.
+
+2. **A subtle race / double-buffer half mismatch on B's LDS region.**
+   The kernel double-buffers LDS via SwapA/SwapB; on MT 128×128 the
+   B-side LDS partition layout may put the K_remain-2 narrow-load
+   target on the *opposite* half from where the LR ds_read points.
+
+Either hypothesis points to a difference between the formula-equality
+harness and the actual kernel-emitted LDS layout. Resolving requires
+either (a) a runtime LDS dump (= write the suspect bytes to a known
+global location and read back from the host), or (b) a step-by-step
+audit of `_lraTileAssignment_legacy` for MT 128×128 B's sId0_LR=3
+case, line-by-line against my Python oracle.
+
+### Phase A1.e final state (committed, NOT pushed)
+
+After exhausting the diagnostic budget without localizing the
+B-side bug:
+
+- **Phase 2 (K_remain=1 align-UP fallback)**: KEPT. This is the
+  dominant win — the K_remain=1 page-fault-concern shapes (K=1,
+  K=65, K=129) now pass via align-UP, matching pre-Option-A
+  behavior exactly.
+- **Phase 1 (two narrow loads)**: REVERTED to single narrow load
+  (K=K_remain-1 only). The `computeNarrowLoadDescriptorsForBoundary`
+  function returns a one-entry list; the second entry (K_remain-2)
+  is computable via `_computeNarrowLoadDescriptorForKLocal` but is
+  NOT emitted.
+
+Gauntlet results with this final state (`subtile_bf16_anyk_odd.yaml`):
+
+| MT          | K_remain    | Status |
+|---|---|---|
+| 64×64       | 1, 3, 7, …  | PASS  (all) |
+| 128×32      | 1, 3, 7, …  | PASS  (all) |
+| 128×128     | 1, 35, 65, 129 | PASS  (Phase 2 fallback or K-pads-evenly) |
+| 128×128     | 3, 7, 17, 31, 33, 97 | **FAIL** (= same as pre-A1.e Option A behavior) |
+
+The MT 128×128 K_remain odd ≥ 3 failures match the pre-A1.e Option A
+state — A1.e did NOT regress those, and A1.e Phase 2 made K_remain=1
+work that didn't pre-A1.e.
+
+### Open question and merge recommendation
+
+The branch as it stands is strictly BETTER than pre-A1.e Option A
+(K_remain=1 now passes) but strictly WORSE than pre-Option-A
+align-UP (which was 117/117 on `subtile_bf16_anyk_odd.yaml`). Two
+paths forward:
+
+1. **Land this branch as-is**: gauntlet has ~6 MT 128×128 K_remain odd
+   ≥ 3 shapes failing. Reviewer-facing pitch: "align-DOWN structurally
+   closes the page-fault concern; K_remain=1 fallback to align-UP
+   makes the K_remain=1 case match pre-Option-A; K_remain ≥ 3 odd
+   cases on MT 128×128 lose some K-element repairs due to a B-side
+   LR-oracle discrepancy we couldn't localize within the diagnostic
+   budget; SAFE to land because the failure mode is bf16 accuracy
+   loss, not page-fault."
+2. **Revert this branch entirely**: ship nothing. The page-fault
+   concern stays at pre-Option-A levels (= the audit note's bpr-1
+   over-read claim remains live but empirically rare).
+
+Recommended: (1) if the reviewer accepts bf16 accuracy loss on a
+narrow subset of shapes in exchange for structurally closing the
+page-fault concern; (2) if not.

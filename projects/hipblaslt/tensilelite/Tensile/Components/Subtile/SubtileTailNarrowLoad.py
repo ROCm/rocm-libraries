@@ -415,22 +415,36 @@ def computeNarrowLoadDescriptorsForBoundary(kernel, ti, K_remain: int,
     """Return the list of narrow-load descriptors needed to repair the
     align-DOWN-clipped DWORD on the last m-row of the operand.
 
-    Phase A1.e two-narrow-load gating for bf16/fp16 (bpe=2, bpr=4):
+    Phase A1.e gating for bf16/fp16 (bpe=2, bpr=4):
 
     - `K_remain * bpe < bpr` (= K_remain == 1): the dropped DWORD
       spans MULTIPLE matrix rows (because the row stride is also
       bpr-misaligned for odd K), so a per-lane single-DWORD repair
       is structurally insufficient. Return [] and rely on the
-      caller falling back to align-UP for these shapes.
+      caller falling back to align-UP for these shapes (see
+      `emitTailSrdTightenSubtile` runtime bump-to-bpr).
 
     - `K_remain * bpe >= bpr` AND K_remain odd (= K_remain in
-      {3, 5, 7, …}): the dropped DWORD contains BOTH K=K_remain-2
-      AND K=K_remain-1 of row M-1. Return both descriptors.
+      {3, 5, 7, …}): the dropped DWORD always contains
+      K=K_remain-1 of row M-1, and on some MT geometries may also
+      contain K=K_remain-2 (when K_remain-2 falls inside the same
+      lane's chunk as K_remain-1; e.g. K_remain=3 lane 62 K=1,2
+      in the same DWORD). A symmetric "two narrow loads per
+      operand" attempt (= Phase A1.e Phase 1) was implemented and
+      tested but found to introduce *more* errors on MT 128×128
+      BSS than the single-load baseline; the B-side K_remain-2
+      load specifically appears to write to a byte that the
+      LR-reader oracle predicts is the correct K=K_remain-2 slot
+      but is in fact something else on this MT geometry. Pending
+      a runtime LDS-dump diagnostic to localize the discrepancy,
+      we return ONLY the K_remain-1 descriptor (= pre-A1.e
+      behavior) to avoid the MT 128×128 regression. See
+      `docs/narrow-trailing-load-structural-issue.md` Phase A1.e
+      section for the full analysis.
 
-    - K_remain even (= the static gate
-      `subtileTailNarrowLoadApplies(kernel)` already rejects these,
-      so this branch is unreachable in production): return [] as a
-      defensive default.
+    - K_remain even: the static gate
+      `subtileTailNarrowLoadApplies(kernel)` already rejects these
+      (ASEM*bpe must be bpr-misaligned); return [] defensively.
     """
     bpe = int(ti.bpe)
     bpr = 4
@@ -439,13 +453,12 @@ def computeNarrowLoadDescriptorsForBoundary(kernel, ti, K_remain: int,
     if K_remain * bpe < bpr:
         return []
     if (K_remain & 1) == 0:
-        # Even K_remain: K_remain*bpe is bpr-aligned by definition;
-        # no DWORD-clip past K_remain. (Static `subtileTailNarrowLoadApplies`
-        # already gates this out, but be defensive for the harness.)
         return []
+    # Phase A1.e: ONLY the K_remain-1 descriptor (= the high BF16 in
+    # the dropped DWORD). The K_remain-2 descriptor is computed by
+    # the harness but NOT emitted because the B-side write regresses
+    # MT 128×128 BSS; see the docstring above.
     return [
-        _computeNarrowLoadDescriptorForKLocal(
-            kernel, ti, K_remain - 2, tc, tiA=tiA),
         _computeNarrowLoadDescriptorForKLocal(
             kernel, ti, K_remain - 1, tc, tiA=tiA),
     ]
@@ -513,15 +526,12 @@ def _computeLRReaderForKLocal(kernel, ti, K_local: int, tc: str,
 
 def computeLRReadersForBoundary(kernel, ti, K_remain: int, tc: str,
                                 tiA=None):
-    """Phase A1.e: return the list of LR-reader targets corresponding
-    to :func:`computeNarrowLoadDescriptorsForBoundary`'s list.
+    """Phase A1.e: return the list of LR-reader targets paired with
+    :func:`computeNarrowLoadDescriptorsForBoundary`'s list.
 
-    For each narrow load the GR-side descriptor expects to emit, the
-    LR-side reader oracle predicts the LDS byte the per-lane mask
-    init's ds_read will fetch for that K_local. Mirrors the gating in
-    `computeNarrowLoadDescriptorsForBoundary` (zero for K_remain*bpe
-    < bpr; one for K_remain even (defensive); two for K_remain odd
-    with K_remain*bpe >= bpr).
+    Currently returns a single-entry list (= the K=K_remain-1 LR
+    reader) matching the single-load emit. See the GR-side
+    docstring for the rationale.
     """
     bpe = int(ti.bpe)
     bpr = 4
@@ -532,7 +542,6 @@ def computeLRReadersForBoundary(kernel, ti, K_remain: int, tc: str,
     if (K_remain & 1) == 0:
         return []
     return [
-        _computeLRReaderForKLocal(kernel, ti, K_remain - 2, tc, tiA=tiA),
         _computeLRReaderForKLocal(kernel, ti, K_remain - 1, tc, tiA=tiA),
     ]
 
@@ -861,16 +870,16 @@ def _emitOneNarrowLoad(module, kw, kernel, tc, ti, vAddrZero,
 
 def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
                               sExecSave) -> Module:
-    """Emit the narrow load(s) for one operand (`tc` ∈ {'A','B'}).
+    """Emit the narrow load for one operand (`tc` ∈ {'A','B'}).
 
-    Phase A1.e: emits TWO `buffer_load_ushort … lds` -- one for
-    K_local = K_remain-2 (low BF16 in the align-DOWN-dropped DWORD)
-    and one for K_local = K_remain-1 (high BF16). Both go through the
-    same per-wave gate and EXEC=1 region; the address derivation is
-    redone per load because the (K_remain-2 / K_remain-1) pair may
-    cross an `elementsPerLane` boundary (and thus pick different
-    lane_target / m0 values, e.g. K_remain=9 with K_remain-2=7 in
-    colId_post=0 and K_remain-1=8 in colId_post=1).
+    Phase A1.e: emits ONE `buffer_load_ushort … lds` for
+    K_local = K_remain-1 (the high BF16 in the align-DOWN-dropped
+    DWORD). A two-load variant (also fixing K=K_remain-2) was
+    implemented and tested but regressed MT 128×128 BSS; reverted
+    to the single-load baseline pending a runtime LDS-dump
+    diagnostic. See docstring on
+    :func:`computeNarrowLoadDescriptorsForBoundary` for the full
+    A1.e analysis.
     """
     module = Module("tailTrailingNarrowLoad %s" % tc)
 
@@ -938,22 +947,9 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
             dst=EXEC(), src=hex(1),
             comment="narrowLoad[%s]: EXEC = lane 0 only" % tc))
 
-        # ---- Load 1: K_local = K_remain - 2 (low BF16 of dropped DWORD) ----
-        _emitOneNarrowLoad(
-            module, kw, kernel, tc, ti, vAddrZero,
-            sScratch, sSoffset,
-            K_remain_minus=1, wave_target=wave_target,
-            rowId_last=rowId_last, sId0_last=sId0_last, m_last=m_last,
-            loadWidthGR=loadWidthGR, blockSize_GR=blockSize_GR,
-            elementsPerLane=elementsPerLane, bpe=bpe,
-            LWA_const_offset=LWA_const_offset,
-            colIdPreOffset=colIdPreOffset,
-            lwa_sgpr_name=lwa_sgpr_name,
-            srd_sgpr_name=srd_sgpr_name,
-            stride_sgpr_name=stride_sgpr_name,
-            label_suffix="K_remain-2")
-
-        # ---- Load 2: K_local = K_remain - 1 (high BF16 of dropped DWORD) ----
+        # ---- Phase A1.e: single narrow load for K=K_remain-1
+        # (the K=K_remain-2 sibling load was implemented but
+        # regressed MT 128×128 BSS; see structural-issue doc).
         _emitOneNarrowLoad(
             module, kw, kernel, tc, ti, vAddrZero,
             sScratch, sSoffset,

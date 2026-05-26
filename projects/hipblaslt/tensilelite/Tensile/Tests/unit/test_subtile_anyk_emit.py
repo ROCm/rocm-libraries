@@ -879,17 +879,18 @@ class TestNarrowTrailingLoadEmit:
 
     def test_asem1_emits_buffer_load_ushort_lds(self):
         """ASEM=1 bf16 emit must contain a `buffer_load_ushort … lds`
-        inside an EXEC-guarded block. Phase A1.e: TWO ushort loads
-        per operand (K_remain-2 and K_remain-1), both under one
-        EXEC=1 region.
+        inside an EXEC-guarded block. Phase A1.e: ONE ushort load
+        per operand (= K_remain-1 = the high BF16 in the dropped
+        DWORD); the K_remain-2 sibling was implemented but reverted
+        pending root-cause investigation.
         """
         tail = _extract_tail_section(_emit_anyk_tail_asm(asem=1, pgr=0))
         assert tail
-        # Positive pins: 2 loads × 2 operands = 4 buffer_load_ushort.
+        # Positive pins: 1 load × 2 operands = 2 buffer_load_ushort.
         ushort_loads = re.findall(r"buffer_load_ushort[^\n]*lds", tail)
-        assert len(ushort_loads) == 4, (
-            f"ASEM=1 tail must emit 4 `buffer_load_ushort … lds` "
-            f"(K_remain-2 + K_remain-1 for each of A and B); got "
+        assert len(ushort_loads) == 2, (
+            f"ASEM=1 tail must emit 2 `buffer_load_ushort … lds` "
+            f"(K_remain-1 for each of A and B); got "
             f"{len(ushort_loads)}. Tail head:\n" + tail[:2000]
         )
         assert re.search(
