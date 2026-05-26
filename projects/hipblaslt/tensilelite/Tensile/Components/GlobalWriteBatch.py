@@ -1776,7 +1776,6 @@ class GlobalWriteBatchWriter:
 
     # --- M mask: per-lane-group selection via right-shift ---
     isWave32 = self.wavelen == 32
-    maskSgprC = self.laneSGPRC  # 1 for wave32, 2 for wave64
     if isWave32:
       module.add(SMovB32(dst=sgpr(tmpS), src=-1, comment="mask = full"))
     else:
