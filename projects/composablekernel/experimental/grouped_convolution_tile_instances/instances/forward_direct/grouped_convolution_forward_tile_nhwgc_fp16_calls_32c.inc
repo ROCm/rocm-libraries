@@ -103,14 +103,3 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<43, dir
 ////////////////////////////////////////////////////////////////////////
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<45, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<47, direct_conv::Version::v3>, SIGNATURE>);
-
-////////////////////////////////////////////////////////////////////////
-// Non-grouped convolution v3 — CyclicShift 1x1 filter
-// Fprop configs 49,51 (2-wave), 53,55 (8-wave), 57,59 (16-wave)
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<49, direct_conv::Version::v3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<51, direct_conv::Version::v3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<53, direct_conv::Version::v3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<55, direct_conv::Version::v3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<57, direct_conv::Version::v3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<59, direct_conv::Version::v3>, SIGNATURE>);
