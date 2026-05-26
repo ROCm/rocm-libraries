@@ -87,3 +87,21 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
     install_provider_ctest_files("hip_kernel_provider")
 endif()
+
+#
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
+# Generate embedded kernel sources and includes at configure time
+embed_kernel_sources(
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.hpp
+)
+
+set(HIP_KERNEL_ENGINE_GENERATED_SOURCES
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp)
+
+set_source_files_properties(${HIP_KERNEL_ENGINE_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+
+target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_ENGINE_GENERATED_SOURCES}")

@@ -26,6 +26,10 @@ add_executable(
     hip/TestHipKernelCompileOptions.cpp
 )
 
+# Add the dummy kernel for running the tests
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
+add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
+
 target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
