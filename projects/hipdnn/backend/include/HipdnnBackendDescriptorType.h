@@ -295,4 +295,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR = 32,
 
+    /**
+     * @brief RMSNorm backward operation descriptor
+     *
+     * Represents an RMS normalization backward operation with gradient
+     * input (DY), input (X), scale, inverse RMS, and outputs
+     * DX, DScale, DBias (optional).
+     */
+    HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT = 33,
+
 } hipdnnBackendDescriptorType_t;

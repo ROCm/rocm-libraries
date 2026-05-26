@@ -64,7 +64,7 @@ enum class FusedOp
     CBA
 };
 
-std::ostream& operator<<(std::ostream& os, TypeKey tk)
+static std::ostream& operator<<(std::ostream& os, TypeKey tk)
 {
     std::vector<const char*> keyMap{"x",
                                     "y",
@@ -79,7 +79,7 @@ std::ostream& operator<<(std::ostream& os, TypeKey tk)
     return os;
 }
 
-std::ostream& operator<<(std::ostream& os, FusedOp op)
+static std::ostream& operator<<(std::ostream& os, FusedOp op)
 {
     std::vector<const char*> keyMap{"CA", "CBA"};
     os << keyMap[static_cast<size_t>(op)];
@@ -254,17 +254,17 @@ protected:
     bool _isApplicable;
 };
 
-test_conv_common::ConvTestCase validConvTestCase4d()
+static test_conv_common::ConvTestCase validConvTestCase4d()
 {
     return {{2, 3, 4, 4}, {1, 3, 2, 2}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, 0};
 }
 
-test_conv_common::ConvTestCase validConvTestCase5d()
+static test_conv_common::ConvTestCase validConvTestCase5d()
 {
     return {{2, 3, 4, 4, 4}, {1, 3, 2, 2, 2}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 0};
 };
 
-test_activation_common::ActivTestCase validActivTestCase()
+static test_activation_common::ActivTestCase validActivTestCase()
 {
     return {hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.0,
@@ -275,7 +275,7 @@ test_activation_common::ActivTestCase validActivTestCase()
             std::nullopt};
 };
 
-std::vector<ConvolutionBiasActivationTestParam> testParams()
+static std::vector<ConvolutionBiasActivationTestParam> testParams()
 {
     using Param = ConvolutionBiasActivationTestParam;
     using DataType = hipdnn_frontend::DataType;
@@ -589,7 +589,7 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
     auto [graphBuffer, serErr] = _graphObj.to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
 
     // Per ROCm/rocm-libraries#6979: when this case expects an applicable engine
     // but the device's MIOpen has no CBA solver, skip rather than fail.
@@ -604,7 +604,7 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
 
     if(_isApplicable)
     {
-        HipdnnMiopenSettings settings;
+        const HipdnnMiopenSettings settings;
         EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings));
 
         HipdnnMiopenContext ctx;
@@ -621,42 +621,42 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
 {
     {
         auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
 }
@@ -664,15 +664,15 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForWrongNodeCountGraph)
 {
     {
-        MockGraph mockGraph;
+        const MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
         EXPECT_FALSE(applicable);
     }
     {
-        MockGraph mockGraph;
+        const MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
-        bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
+        const bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
         EXPECT_FALSE(applicable);
     }
 }
@@ -680,18 +680,18 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForWrongNo
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNodeCountGraph)
 {
     {
-        MockGraph mockGraph;
+        const MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
 
-        HipdnnMiopenSettings settings;
+        const HipdnnMiopenSettings settings;
         EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
-        MockGraph mockGraph;
+        const MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
 
-        HipdnnMiopenSettings settings;
+        const HipdnnMiopenSettings settings;
         EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
@@ -700,20 +700,20 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    HipdnnMiopenSettings settings;
+    const HipdnnMiopenSettings settings;
     EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, graph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGraph)
 {
-    MockEngineConfig mockConfig;
+    const MockEngineConfig mockConfig;
 
     {
-        MockGraph mockGraph;
+        const MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
         HipdnnMiopenContext ctx;
 
@@ -722,7 +722,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
         EXPECT_FALSE(ctx.hasValidPlan());
     }
     {
-        MockGraph mockGraph;
+        const MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
         HipdnnMiopenContext ctx;
 
@@ -735,10 +735,10 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     HipdnnMiopenContext ctx;
-    MockEngineConfig mockConfig;
+    const MockEngineConfig mockConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);

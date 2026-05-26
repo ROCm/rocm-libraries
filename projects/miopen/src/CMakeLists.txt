@@ -233,13 +233,11 @@ set( MIOpen_Source
     solver/conv/conv_mlir_igemm_wrw.cpp
     solver/conv/conv_mlir_igemm_wrw_xdlops.cpp
     solver/conv/conv_multipass_wino3x3WrW.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_1x1.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
+
     solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
     solver/conv/conv_hip_dir2D11x11.cpp
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
-    solver/conv/conv_ocl_dir2Dfwdgen.cpp
     solver/conv/conv_wino_fury_RxS.cpp
     solver/conv/conv_wino_rage_RxS.cpp
     solver/conv/conv_winoRxS.cpp
@@ -550,7 +548,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUni.cl
         kernels/MIOpenConvDirBatchNormActiv.cl
-        kernels/MIOpenConvDirGenFwd.cl
         kernels/MIOpenGLU.cpp
         kernels/MIOpenGroupNorm.cpp
         kernels/MIOpenGetitem.cpp
@@ -583,11 +580,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenIm3d2Col.cpp
         kernels/MIOpenCol2Im2d.cpp
         kernels/MIOpenCol2Im3d.cpp
-        kernels/MIOpenConvBwdWrWS2.cl
-        kernels/MIOpenGroupConvBwdWrWS2.cl
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
         kernels/MIOpenConvFwd_LxL_11.cpp
 
         kernels/MIOpenConvFFT.cpp

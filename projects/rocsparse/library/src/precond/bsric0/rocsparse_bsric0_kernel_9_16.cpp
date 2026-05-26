@@ -215,14 +215,14 @@ namespace rocsparse
                             T v1      = bsr_val[idx2 + block_dim * q + p];
                             T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * tidy + p]
                                                            : static_cast<T>(0);
-                            local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                            local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
                         else
                         {
                             T v1      = bsr_val[idx2 + block_dim * p + q];
                             T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * p + tidy]
                                                            : static_cast<T>(0);
-                            local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                            local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
                     }
 
@@ -259,7 +259,7 @@ namespace rocsparse
                 {
                     T v1      = local_values[k][p];
                     T v2      = values[tidy][p];
-                    local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                    local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                 }
 
                 // Compute the Cholesky factor and writes it to global memory

@@ -52,6 +52,27 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
+# Default to a ROCm Clang toolchain when the user hasn't supplied one. When we
+# provide the default, treat this as a standalone build and pull third-party
+# deps via FetchContent (see cmake/ThirdParty.cmake).
+#
+# CMake limitation: the toolchain file is processed *before* this CMakeLists.txt
+# is evaluated, so this assignment only takes effect on subsequent `cmake`
+# invocations (the cache value is then picked up). On the very first configure
+# run the toolchain file is not applied. Re-running `cmake` from the same build
+# directory (or passing -DCMAKE_TOOLCHAIN_FILE=... explicitly) activates it.
+if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+        CACHE FILEPATH "Toolchain file")
+    set(_MIOPEN_STANDALONE_DEFAULT ON)
+else()
+    set(_MIOPEN_STANDALONE_DEFAULT OFF)
+endif()
+option(MIOPEN_STANDALONE_BUILD
+    "Fetch third-party dependencies via FetchContent for a standalone build"
+    ${_MIOPEN_STANDALONE_DEFAULT})
+unset(_MIOPEN_STANDALONE_DEFAULT)
+
 project(MIOpen CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -86,6 +107,10 @@ set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 option(BUILD_SHARED_LIBS "Create shared libraries" ON)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
+if(MIOPEN_STANDALONE_BUILD)
+    include(cmake/ThirdParty.cmake)
+endif()
 
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen now depends on SQLite as well
@@ -135,7 +160,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.1)
+rocm_setup_version(VERSION 3.5.2)
 
 include(TargetFlags)
 

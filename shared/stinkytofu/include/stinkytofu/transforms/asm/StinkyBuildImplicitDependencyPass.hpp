@@ -31,16 +31,21 @@ namespace stinkytofu {
 class Pass;
 
 /**
- * @brief Attaches LDS pseudo-registers to instructions for implicit dependency tracking.
+ * @brief Attaches implicit registers to instructions for dependency tracking.
  *
- * Adds RegType::LDS pseudo-registers (keyed by MemTokenData token IDs) to LDS-related
- * instructions so that the def-use chain enforces barrier ordering:
+ * Two kinds of implicit dependencies are materialized as registers so that the
+ * def-use chain builder can see them:
  *
- *   LDS writers (tensor_load, ds_write) — token to dest (defines)
- *   LDS readers (ds_read)               — token to src  (uses)
- *   Barriers                            — token to both src and dest
+ * 1) Special registers (SCC, VCC, EXEC) declared via HW flags
+ *    (Flags.def: IF_ImplicitRead/WriteSCC, IF_ImplicitReadVCC,
+ *     IF_ImplicitRead/WriteEXEC). The corresponding singleton register is
+ *    added to src/dest if not already present.
  *
- * This creates the dependency chain:  writer → barrier → reader.
+ * 2) RegType::LDS pseudo-registers keyed by MemTokenData token IDs:
+ *      LDS writers (tensor_load, ds_write) — token to dest (defines)
+ *      LDS readers (ds_read)               — token to src  (uses)
+ *      Barriers                            — token to both src and dest
+ *    This creates the dependency chain:  writer → barrier → reader.
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass();
 
