@@ -507,3 +507,141 @@ class TestSubtileBf16LargeMTNoTailLoopDerive:
             f"DepthU={state['DepthU']}, "
             f"ASEM % DepthU == 0 → {no_tail_loop_derived}."
         )
+
+
+# ── Single-wave WG=(1,1) + large WT VGPR-budget reject ─────────────────────
+
+# (label, mi-9-tuple, depthU). MT = mi_m*wt_m*wg_m × mi_n*wt_n*wg_n.
+# Surfaced by the MT x DU x WG sweep on PR #7661: every WG=(1,1) shape
+# below builds at NoTailLoop=True (ASEM==DepthU) but the with-tail kernel
+# (ASEM<DepthU) overflows the wave-64 256-VGPR budget at codegen with
+# vgprs in [272, 280]. None of these are in production yamls today
+# (largest WG=(1,1) wavetile in subtile_bf16*.yaml is (4,4), area 16).
+# The Solution-level reject preempts the late-stage codegen overflow
+# warning so the build set never carries an unbuildable kernel.
+_SINGLE_WAVE_REGRESSION_SHAPES = [
+    ("MT_112x240_WT_7x15",  [16, 16, 32, 1, 1,  7, 15, 1, 1], 64),
+    ("MT_128x208_WT_8x13",  [16, 16, 32, 1, 1,  8, 13, 1, 1], 64),
+    ("MT_208x128_WT_13x8",  [16, 16, 32, 1, 1, 13,  8, 1, 1], 64),
+    ("MT_240x112_WT_15x7",  [16, 16, 32, 1, 1, 15,  7, 1, 1], 64),
+    ("MT_160x160_WT_10x10", [16, 16, 32, 1, 1, 10, 10, 1, 1], 128),
+]
+
+
+class TestSubtileBf16SingleWaveLargeWtRejected:
+    """The MT x DU sweep on PR #7661 surfaced 5 (MT, DU, WG=(1,1), WT)
+    tuples where the no-tail kernel builds cleanly (ASEM==DepthU,
+    NoTailLoop=True) but the with-tail kernel overflows the wave-64
+    256-VGPR budget at codegen (vgprs in [272, 280]). The
+    `Solution.assignProblemIndependentDerivedParameters` gate rejects
+    these proactively so the build never carries a kernel that the
+    assembler would later drop with a confusing
+    `overflowed resources, msg="too many vgprs"` warning.
+
+    Predicate: `MIWaveGroup == [1, 1] and AssertSummationElementMultiple
+    < DepthU and MIWaveTile area >= 100`. The area threshold of 100
+    captures the 5 shapes (areas 100, 104, 104, 105, 105) while leaving
+    every WG=(1,1) wavetile <= (9, 9) (area 81) accepted -- the largest
+    WG=(1,1) wavetile in any current production yaml is (4, 4) so the
+    gate is structurally above the production envelope.
+    """
+
+    @pytest.mark.parametrize("label,mi,depthU", _SINGLE_WAVE_REGRESSION_SHAPES)
+    @pytest.mark.parametrize("asem", [1, 2])
+    def test_single_wave_with_tail_is_rejected(self, label, mi, depthU, asem):
+        state = _build_largemt_state(mi=mi, asem=asem, pgr=2, depthU=depthU)
+        _run_assign_problem_independent(state)
+        assert state.get("Valid") is False, (
+            f"{label} ASEM={asem} DepthU={depthU}: expected Solution-level "
+            f"reject (state['Valid']=False) because single-wave WG=(1,1) + "
+            f"WT area >= 100 + tail overflows the 256-VGPR budget at "
+            f"codegen. Got state['Valid']={state.get('Valid')}."
+        )
+
+
+class TestSubtileBf16SingleWaveLargeWtAcceptedAtAsemEqDu:
+    """The reject predicate gates on `ASEM < DepthU`. With `ASEM ==
+    DepthU` the kernel emits with `NoTailLoop=True` (no tail body) and
+    the no-tail baseline fits within the 256-VGPR budget (e.g. MT
+    112x240 builds at 249 VGPRs in this mode). The Solution gate must
+    NOT reject these `ASEM==DepthU` configurations -- they're the
+    aligned-K hot path and represent the kernels actually useful to
+    ship for these problem shapes (a producer who wants these MTs
+    would simply pin ASEM to the K alignment).
+    """
+
+    @pytest.mark.parametrize("label,mi,depthU", _SINGLE_WAVE_REGRESSION_SHAPES)
+    def test_single_wave_no_tail_is_accepted(self, label, mi, depthU):
+        state = _build_largemt_state(mi=mi, asem=depthU, pgr=2, depthU=depthU)
+        _run_assign_problem_independent(state)
+        assert state.get("Valid") is not False, (
+            f"{label} ASEM={depthU} DepthU={depthU}: expected the "
+            f"NoTailLoop=True (aligned-K) path to be accepted at the "
+            f"Solution gate. The reject predicate must gate on "
+            f"ASEM<DepthU, not on the (MT, WG) shape alone, so the "
+            f"aligned-K kernel remains buildable for downstream "
+            f"producers who pin K to the DepthU alignment. Got "
+            f"state['Valid']={state.get('Valid')}."
+        )
+
+
+class TestSubtileBf16MultiWaveLargeWtNotRejected:
+    """The reject predicate gates specifically on `MIWaveGroup ==
+    [1, 1]`. Multi-wave large-MT shapes (e.g. MT 320x320 with
+    WG=(2,2)+WT=(10,10), area 100; MT 320x288 with WG=(4,1)+WT=(5,18),
+    area 90) must NOT be rejected by this gate -- their D-accumulator
+    is split across multiple waves so the per-wave VGPR footprint is
+    well below the budget even with the tail scaffold. Pinning this
+    explicitly is the dual to `TestSubtileBf16LargeMTNotRejected`
+    above: that test pins acceptance over `WG != (1,1)` shapes against
+    the pre-existing gates; this test pins it against the NEW
+    single-wave gate.
+    """
+
+    @pytest.mark.parametrize("label,mi", _LARGE_MT_SHAPES)
+    @pytest.mark.parametrize("asem", [1, 2, 8])
+    def test_multi_wave_large_wt_not_rejected_by_single_wave_gate(
+        self, label, mi, asem
+    ):
+        state = _build_largemt_state(mi=mi, asem=asem, pgr=2)
+        _run_assign_problem_independent(state)
+        assert state.get("Valid") is not False, (
+            f"Multi-wave large MT {label} ASEM={asem}: state['Valid'] = "
+            f"{state.get('Valid')}. The new single-wave WG=(1,1) reject "
+            f"gate must not catch multi-wave shapes -- the per-wave "
+            f"D-accumulator pressure for WG != (1, 1) is well below "
+            f"the 256-VGPR budget even with the tail scaffold's "
+            f"persistent state."
+        )
+
+
+class TestSubtileBf16SmallSingleWaveNotRejected:
+    """The reject predicate gates on `MIWaveTile area >= 100`. The
+    current production envelope uses WG=(1,1) only with small
+    wavetiles (largest is (4, 4) at MT 64x64 in `subtile_bf16*.yaml`).
+    These small WG=(1,1) shapes must NOT be caught by the gate -- they
+    have a small D-accumulator that leaves ample room for the tail
+    scaffold. Pinning the (4, 4) case (area 16, well under 100) and
+    a midrange (8, 8) case (area 64, still under 100) catches a
+    regression that lowered the area threshold and accidentally
+    rejected production shapes.
+    """
+
+    @pytest.mark.parametrize(
+        "label,mi",
+        [
+            ("MT_64x64_WT_4x4",   [16, 16, 32, 1, 1, 4, 4, 1, 1]),
+            ("MT_128x128_WT_8x8", [16, 16, 32, 1, 1, 8, 8, 1, 1]),
+        ],
+    )
+    @pytest.mark.parametrize("asem", [1, 2, 8])
+    def test_small_single_wave_with_tail_accepted(self, label, mi, asem):
+        state = _build_largemt_state(mi=mi, asem=asem, pgr=2, depthU=64)
+        _run_assign_problem_independent(state)
+        assert state.get("Valid") is not False, (
+            f"Small single-wave {label} ASEM={asem}: state['Valid'] = "
+            f"{state.get('Valid')}. The new WG=(1,1) + WT area >= 100 "
+            f"reject must not catch wavetiles below the threshold; "
+            f"the production envelope (WG=(1,1) with WT <= (4,4)) "
+            f"must remain buildable."
+        )

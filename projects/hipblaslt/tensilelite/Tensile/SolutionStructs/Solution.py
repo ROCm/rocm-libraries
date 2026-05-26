@@ -873,6 +873,38 @@ class Solution(collections.abc.Mapping):
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
 
+      # Single-wave WG=(1,1) + large asymmetric wavetile + a K-tail
+      # overflows the wave-64 256-VGPR budget at codegen. The subtile
+      # tail scaffold's persistent state (per-mmak A/B slice + per-(
+      # operand, mmak, ir) byte-mask precompute + mask init invariants)
+      # adds ~30 VGPRs of high-water on top of the no-tail baseline,
+      # and a single-wave kernel's full D-accumulator already eats the
+      # remainder of the budget for WT areas >= 100 (e.g. WT 7x15, 8x13,
+      # 13x8, 15x7, 10x10). The MT x DU sweep on PR #7661 surfaced 5
+      # specific (MT, DU, WG=(1,1), WT) tuples that build at NoTailLoop=
+      # True (ASEM=DU, 249 VGPRs for MT 112x240) but overflow at ASEM<DU
+      # (with-tail, 280 VGPRs). None of these shapes are in any
+      # subtile_bf16*.yaml today (the largest production WG=(1,1) WT is
+      # (4,4), area 16). Reject early at the Solution gate so the
+      # build doesn't drop the kernel late with a confusing
+      # `overflowed resources, msg="too many vgprs"` warning. The
+      # multi-wave large-MT shapes (e.g. MT 320x320 WG=(2,2) WT=(10,10),
+      # MT 320x288 WG=(4,1) WT=(5,18)) are NOT affected -- their wave
+      # tile area per wave is much smaller and they keep their tail
+      # acceptance (pinned by TestSubtileBf16LargeMTNotRejected).
+      wg = state["MIWaveGroup"]
+      wt = state["MIWaveTile"]
+      asem = state["AssertSummationElementMultiple"]
+      du = state["DepthU"]
+      if (wg == [1, 1] and asem < du and (wt[0] * wt[1]) >= 100):
+        reject(state, printRejectionReason,
+               "UseSubtileImpl=1 single-wave WG=(1,1) + large wavetile "
+               "WT=%s (area %d >= 100) + K-tail (ASEM=%d < DU=%d) "
+               "overflows the wave-64 256-VGPR budget at codegen "
+               "(MT x DU sweep on PR #7661); no production yaml uses "
+               "this combination."
+               % (wt, wt[0] * wt[1], asem, du))
+
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
       if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
