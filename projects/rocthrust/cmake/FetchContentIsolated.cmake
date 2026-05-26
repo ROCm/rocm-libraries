@@ -29,8 +29,8 @@ function(fetch_content_isolated proj_name)
   cmake_parse_arguments(FC_ISO "" "" "CMAKE_ARGS" ${ARGN})
 
   if(COMMAND rocm_check_toolchain_var)
+    # Suppress ROCMChecks WARNING on third-party dependencies
     function(rocm_check_toolchain_var)
-      # Suppress ROCMChecks WARNING on third-party dependencies
     endfunction()
   endif()
 
