@@ -7,26 +7,26 @@
 
 TEST(TestHipKernelContext, ConstructsSuccessfully)
 {
-    HipKernelContext context;
+    const HipKernelContext context;
 }
 
 TEST(TestHipKernelContext, HasNoPlanByDefault)
 {
-    HipKernelContext context;
+    const HipKernelContext context;
 
     EXPECT_FALSE(context.hasValidPlan());
 }
 
 TEST(TestHipKernelContext, GetPlanThrowsWhenNoPlan)
 {
-    HipKernelContext context;
+    const HipKernelContext context;
 
     EXPECT_THROW(context.plan(), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestHipKernelContext, ExecutionSettingsAccessible)
 {
-    HipKernelContext context;
+    const HipKernelContext context;
 
     const auto& settings = context.executionSettings();
     (void)settings;

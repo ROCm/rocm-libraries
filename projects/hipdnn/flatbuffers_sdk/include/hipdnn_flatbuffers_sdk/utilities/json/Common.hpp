@@ -33,10 +33,6 @@ void from_json(const BasicJsonType& j, std::optional<T>& opt)
 NLOHMANN_JSON_NAMESPACE_END
 #endif
 
-// These inline overloads mirror data_sdk's Common.hpp. Both SDKs need them independently
-// because the json headers are consumed directly (no transitive include path). Identical
-// inline definitions across TUs are explicitly permitted by C++ and do not violate ODR.
-// Once data_sdk drops its flatbuffers dependency, these become the sole definitions.
 namespace flatbuffers
 {
 
@@ -110,6 +106,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::FP6_E2M3, "fp6_e2m3"},
                                  {DataType::FP6_E3M2, "fp6_e3m2"},
                                  {DataType::INT64, "int64"},
+                                 {DataType::BOOLEAN, "boolean"},
+                                 {DataType::FP8_E4M3_FNUZ, "fp8_e4m3_fnuz"},
+                                 {DataType::FP8_E5M2_FNUZ, "fp8_e5m2_fnuz"},
                              }
 
 )
@@ -124,6 +123,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
                                  {TensorValue::Int32Value, "Int32Value"},
                                  {TensorValue::Int64Value, "Int64Value"},
                                  {TensorValue::Float64Value, "Float64Value"},
+                                 {TensorValue::BoolValue, "BoolValue"},
                              }
 
 )

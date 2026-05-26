@@ -22,8 +22,9 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
 {
     HIPDNN_PLUGIN_LOG_INFO("Compiling kernel: " << kernelFileName);
 
-    // Load embedded kernel source and include headers
-    auto kernelSrc = getKernelSrc(kernelFileName.c_str());
+    // Load embedded kernel source and include headers (convert to std::string
+    // to guarantee null-termination required by hiprtcCreateProgram)
+    std::string kernelSrc(getKernelSrc(kernelFileName.c_str()));
 
     std::vector<std::string_view> includeTexts;
     std::vector<const char*> includeNames;
@@ -46,7 +47,7 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
                                      includeTextPtrs.data(),
                                      includeNames.data()));
 
-    hipdnn_data_sdk::utilities::ScopedResource programGuard(
+    const hipdnn_data_sdk::utilities::ScopedResource programGuard(
         program, [](hiprtcProgram p) { hiprtcDestroyProgram(&p); });
 
     // Convert compiler options to C-strings
@@ -58,7 +59,7 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
     }
 
     // Compile the program
-    hiprtcResult compileResult
+    const hiprtcResult compileResult
         = hiprtcCompileProgram(program, static_cast<int>(optionPtrs.size()), optionPtrs.data());
 
     if(compileResult != HIPRTC_SUCCESS)
@@ -86,15 +87,21 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
     HIPDNN_PLUGIN_LOG_INFO("Kernel compiled and loaded: " << kernelFileName);
 }
 
-HipCompiledProgram::~HipCompiledProgram()
+HipCompiledProgram::~HipCompiledProgram() noexcept
 {
-    if(_module != nullptr)
+    try
     {
-        auto result = hipModuleUnload(_module);
-        if(result != hipSuccess)
+        if(_module != nullptr)
         {
-            HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
+            auto result = hipModuleUnload(_module);
+            if(result != hipSuccess)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
+            }
         }
+    }
+    catch(...) // NOLINT(bugprone-empty-catch)
+    {
     }
 }
 

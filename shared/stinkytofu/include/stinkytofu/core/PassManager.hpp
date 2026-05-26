@@ -28,9 +28,11 @@
 #include <set>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/core/AnalysisManager.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassInstrumentation.hpp"
@@ -51,12 +53,12 @@ class BasicBlockFilterBuilder {
    public:
     // Filter by label prefix
     static BasicBlockFilter byLabelPrefix(const std::string& prefix) {
-        return [prefix](const BasicBlock& bb) { return bb.getLabel().rfind(prefix, 0) == 0; };
+        return [prefix](const BasicBlock& bb) { return bb.getLabel().starts_with(prefix); };
     }
 
     // Filter by exact label names
     static BasicBlockFilter byLabels(const std::set<std::string>& labels) {
-        return [labels](const BasicBlock& bb) { return labels.count(bb.getLabel()) > 0; };
+        return [labels](const BasicBlock& bb) { return labels.contains(bb.getLabel()); };
     }
 
     // Filter by custom predicate
@@ -99,16 +101,17 @@ class Pass {
     virtual ID getPassID() const = 0;
     virtual const char* getName() const = 0;
 
-    virtual void run(Function& func, PassContext& passCtx) = 0;
+    virtual PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) = 0;
 };
 
 // The PassContext serves as the central state and resource manager for
 // the StinkyTofu pass execution framework.
 //
 // It does not own a Function; the Function is passed to PassManager::run(Function&).
-class PassContext {
+class STINKYTOFU_EXPORT PassContext {
     GemmTileConfig gemmConfig;
     PassFeatureConfig passConfig;
+    AsmCapsConfig asmCapsConfig;
     uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
@@ -137,6 +140,14 @@ class PassContext {
         return passConfig;
     }
 
+    void setAsmCapsConfig(const AsmCapsConfig& config) {
+        asmCapsConfig = config;
+    }
+
+    const AsmCapsConfig& getAsmCapsConfig() const {
+        return asmCapsConfig;
+    }
+
     /// Set global BasicBlock filter for all StinkyInstPass instances.
     /// This filter determines which BasicBlocks should be processed by passes.
     void setBasicBlockFilter(BasicBlockFilter filter) {
@@ -149,7 +160,7 @@ class PassContext {
     }
 };
 
-bool isDebugOnlyEnabled(const char* TYPE);
+STINKYTOFU_EXPORT bool isDebugOnlyEnabled(const char* TYPE);
 
 #define DEBUG_WITH_TYPE(TYPE, X)        \
     do {                                \
@@ -257,8 +268,11 @@ class STINKYTOFU_EXPORT PassManager {
     // Set pass feature configuration
     void setPassFeatureConfig(const PassFeatureConfig& config);
 
+    // Set assembler capability configuration (propagated from rocisa asmCaps)
+    void setAsmCapsConfig(const AsmCapsConfig& config);
+
     void setBasicBlockFilter(BasicBlockFilter filter) {
-        passCtx.setBasicBlockFilter(filter);
+        passCtx.setBasicBlockFilter(std::move(filter));
     }
 
     // Get access to the PassContext (for advanced usage)
@@ -270,8 +284,13 @@ class STINKYTOFU_EXPORT PassManager {
         return passCtx;
     }
 
+    AnalysisManager& getAnalysisManager() {
+        return analysisManager;
+    }
+
    protected:
     PassContext passCtx;
+    AnalysisManager analysisManager;
 
     // List of passes to run.
     //

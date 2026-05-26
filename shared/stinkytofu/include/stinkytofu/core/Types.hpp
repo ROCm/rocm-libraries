@@ -95,4 +95,18 @@ struct PassFeatureConfig {
     DagFeatures dagFeatures;
     PassOrderSnapshotConfig passOrderSnapshot;
 };
+
+/// VGPR MSB encoding mode supported by the toolchain.
+enum class VgprMsbMode : uint8_t {
+    None,   ///< Toolchain does not support `s_set_vgpr_msb`
+    Msb8,   ///< 8-bit form only (`s_set_vgpr_msb 0`)
+    Msb16,  ///< 16-bit form (`s_set_vgpr_msb 0x0101`) — packs prev + curr MSB
+};
+
+/// Toolchain capabilities discovered by probing the assembler (via comgr or
+/// rocisa's initAsmCaps).  Populated either by the rocisa conversion layer or
+/// by ToolchainCaps::probe() for the standalone path.
+struct AsmCapsConfig {
+    VgprMsbMode vgprMsbMode = VgprMsbMode::None;
+};
 }  // namespace stinkytofu

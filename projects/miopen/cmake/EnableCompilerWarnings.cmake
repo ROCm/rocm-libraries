@@ -38,7 +38,6 @@ set(__default_cxx_compile_options
     -Wundef
     -Wuninitialized
     -Wunreachable-code
-    -Wunused
     -Wno-ignored-qualifiers
     -Wno-sign-compare
 )
@@ -52,40 +51,26 @@ set(__clang_cxx_compile_options
     -Wno-exit-time-destructors
     -Wno-extra-semi
     -Wno-extra-semi-stmt
-    -Wno-gnu-zero-variadic-macro-arguments
     -Wno-missing-prototypes
-    -Wno-nested-anon-types
-    -Wno-option-ignored
     -Wno-padded
-    -Wno-sign-conversion
-    -Wno-unknown-warning-option
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
-    -Wno-unused-result
     -Wno-unsafe-buffer-usage
-    -Wno-deprecated-declarations
     -Wno-global-constructors
     -Wno-reserved-identifier
-    -Wno-deprecated
     -Wno-old-style-cast
-    -Wno-language-extension-token
     -Wno-c++11-narrowing
-    -Wno-redundant-parens
-    -Wno-suggest-destructor-override
     -Wno-switch-enum
     -Wno-suggest-override
     -Wno-nonportable-system-include-path
     -Wno-documentation
-    -Wno-enum-constexpr-conversion
-    -Wno-unused-parameter
     -Wmissing-noreturn)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
         -Wno-unique-object-duplication
-        -Wno-switch-default
-        -Wno-nontrivial-memcall)
+        -Wno-switch-default)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
@@ -99,7 +84,15 @@ endif()
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions
-        -fms-compatibility)
+        -fms-compatibility
+        )
+    # AMD clang reports `__declspec(dllexport)` as "not supported" on the
+    # x86_64-pc-windows-msvc target, even though the attribute is honored
+    # (verified via llvm-readobj --coff-exports on MIOpen.dll). This produces
+    # ~150k spurious warnings from the CMake-generated MIOPEN_EXPORT and
+    # MIOPEN_INTERNALS_EXPORT macros. Suppress until the compiler issue is
+    # resolved upstream.
+    list(APPEND __clang_cxx_compile_options -Wno-ignored-attributes)
 endif()
 
 add_compile_options(

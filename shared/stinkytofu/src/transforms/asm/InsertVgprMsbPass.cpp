@@ -25,6 +25,7 @@
 #include <cassert>
 #include <string>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -117,7 +118,7 @@ std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
 }
 
 void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
-                         GfxArchID archId, IRBase* insertBefore) {
+                         GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
     if (!hasVgpr || requiredSetVal == currentMsb) {
         if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
         return;
@@ -130,8 +131,10 @@ void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
     }
 
     int combinedSetVal = requiredSetVal;
-    if (currentMsb != VgprMsbState::NOT_REQUIRED && currentMsb != VgprMsbState::LABEL_BEGIN)
+    if (msbMode == VgprMsbMode::Msb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
+        currentMsb != VgprMsbState::LABEL_BEGIN) {
         combinedSetVal += (currentMsb << 8);
+    }
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
     assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
@@ -158,9 +161,12 @@ class InsertVgprMsbPassImpl : public Pass {
         return &InsertVgprMsbPassImpl::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         auto arch = passCtx.getGemmTileConfig().arch;
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+
+        VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
+        if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
@@ -179,9 +185,11 @@ class InsertVgprMsbPassImpl : public Pass {
                 if (isPseudoInst(inst)) continue;
 
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst);
+                emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
+                                    msbMode);
             }
         }
+        return preserveCFGAnalyses();
     }
 };
 

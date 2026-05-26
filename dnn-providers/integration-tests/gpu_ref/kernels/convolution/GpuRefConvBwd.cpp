@@ -8,6 +8,8 @@
 
 #include "GpuRefTypes.h"
 
+using namespace gpu_ref;
+
 extern "C" __global__ void convBwdRef1d(ConvBwdArgs1d args)
 {
     auto* dx = static_cast<X_TYPE*>(args.dx);
