@@ -280,6 +280,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
 EnginePluginResourceManager::~EnginePluginResourceManager()
 {
+    // Lambda to safely destroy a handle, catching all errors
     auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
         try
         {
@@ -299,6 +300,7 @@ EnginePluginResourceManager::~EnginePluginResourceManager()
         }
     };
 
+    // Destroy plugin handles
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
         // Destructors are implicitly noexcept: a log call inside safeDestroyHandle
