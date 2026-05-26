@@ -2568,7 +2568,7 @@ class Solution(collections.abc.Mapping):
             optPadA //= 2
             readRegsA //= 2
         if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 6 or readRegsB > 6):
-          reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b192, reject")
+          reject(state, "LocalReadVectorWidth results in attempting to read LDS larger than b192, reject")
           return ldsPadA, ldsPadB, ldsPadM, 0, 0
         if state["EnableMatrixInstruction"]:
           # MI16x16xNx1 needs double padding to avoid bank conflict:
@@ -4147,10 +4147,10 @@ class Solution(collections.abc.Mapping):
 
         if not subCheckLdsBlockSizePerPad(tc, idx) and not state["UseGeneralizedNLCOne%s"%tc]:
           if auto_LdsBlockSizePerPad:
-            printWarning("Padded address is inconisstent, set LdsBlockSizePerPad%s=0."%tc)
+            printWarning("Padded address is inconsistent, set LdsBlockSizePerPad%s=0."%tc)
             state["LdsBlockSizePerPad%s"%tc] = 0
           else:
-            reject(state, printRejectionReason, "%s's padded address is inconisstent"%tc)
+            reject(state, printRejectionReason, "%s's padded address is inconsistent"%tc)
 
     if(not (state["CustomKernelName"] and state["CustomKernelName"] != "")): #don't check the custom kernel.
       checkLdsBlockSizePerPad("A")

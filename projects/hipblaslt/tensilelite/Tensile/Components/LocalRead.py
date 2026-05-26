@@ -569,9 +569,7 @@ class LocalReadMFMA(LocalRead):
         bpr              = 4 # bytes/register
 
         vectorWidth      = kernel["VectorWidth%s"%tc]
-        LdsPad           = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
         mxUnit: int      = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{mxTc}"]
-        matrixInstT      = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
