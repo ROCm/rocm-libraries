@@ -6,12 +6,12 @@
 from typing import Dict, List, Optional, Union
 
 import numpy as np
-import torch
 
 from ..common.exceptions import ExecutionError
 from ..graph.tensor_info import TensorInfo
 
-# Map data type strings to numpy dtypes (bfloat16 handled separately via torch)
+
+# Map data type strings to numpy dtypes (bfloat16 handled separately).
 DTYPE_MAP = {
     "float": np.float32,
     "half": np.float16,
@@ -25,7 +25,10 @@ DTYPE_MAP = {
 def _generate_bfloat16_bytes(
     dims: List[int], rng: np.random.RandomState = None
 ) -> bytes:
-    """Generate random data in bfloat16 format using torch.
+    """Generate random data in bfloat16 format.
+
+    bfloat16 = upper 16 bits of float32. Truncates (matches torch's default
+    `.bfloat16()` cast). Assumes little-endian host (x86/ARM).
 
     Args:
         dims: Tensor dimensions.
@@ -36,15 +39,16 @@ def _generate_bfloat16_bytes(
     """
     if rng is None:
         rng = np.random.RandomState()
-    data_f32 = rng.uniform(0.0, 1.0, dims).astype(np.float32)
-    t = torch.from_numpy(data_f32).bfloat16()
-    # Get raw bfloat16 bytes via untyped_storage
-    storage = t.untyped_storage()
-    return bytes(storage)
+    f32_bits = rng.uniform(0.0, 1.0, dims).astype(np.float32).view(np.uint32)
+    bf16 = (f32_bits >> np.uint32(16)).astype(np.uint16)
+    return bf16.tobytes()
 
 
 def _bfloat16_bytes_to_ndarray(data_bytes: bytes, dims: List[int]) -> np.ndarray:
-    """Convert raw bfloat16 bytes to a float32 numpy array via torch.
+    """Convert raw bfloat16 bytes to a float32 numpy array.
+
+    Inverse of `_generate_bfloat16_bytes`: pads each bf16 value into the
+    upper 16 bits of a uint32, then reinterprets as float32.
 
     Args:
         data_bytes: Raw bytes in bfloat16 format.
@@ -53,8 +57,9 @@ def _bfloat16_bytes_to_ndarray(data_bytes: bytes, dims: List[int]) -> np.ndarray
     Returns:
         Float32 numpy array with the bfloat16 values upcast.
     """
-    t = torch.frombuffer(bytearray(data_bytes), dtype=torch.bfloat16)
-    return t.float().numpy().reshape(dims)
+    bf16 = np.frombuffer(data_bytes, dtype=np.uint16)
+    f32_bits = bf16.astype(np.uint32) << np.uint32(16)
+    return f32_bits.view(np.float32).reshape(dims)
 
 
 class BufferManager:

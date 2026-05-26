@@ -1,9 +1,22 @@
-# Build dnn-benchmark.pyz using shiv
+# Build dnn-benchmark.pyz using shiv in an isolated venv.
+# Honors BUNDLE_OUT_DIR for out-of-source builds; defaults to script dir.
+# Honors BUNDLE_VENV_DIR for a shared shiv venv; defaults to $OutDir\.venv.
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $PkgDir = Split-Path -Parent $ScriptDir
-$Out = Join-Path $ScriptDir 'dnn-benchmark.pyz'
+$OutDir = if ($env:BUNDLE_OUT_DIR) { $env:BUNDLE_OUT_DIR } else { $ScriptDir }
+New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+$Out = Join-Path $OutDir 'dnn-benchmark.pyz'
+$VenvDir = if ($env:BUNDLE_VENV_DIR) { $env:BUNDLE_VENV_DIR } else { Join-Path $OutDir '.venv' }
+$ShivVersion = '1.0.8'
 
-pip install shiv --quiet
-shiv -c dnn-benchmark -o $Out $PkgDir
+$Python = if ($env:PYTHON) { $env:PYTHON } else { 'python' }
+$ShivExe = Join-Path $VenvDir 'Scripts\shiv.exe'
+
+if (-not (Test-Path $ShivExe)) {
+    & $Python -m venv $VenvDir
+    & (Join-Path $VenvDir 'Scripts\pip.exe') install --quiet --disable-pip-version-check "shiv==$ShivVersion"
+}
+
+& $ShivExe -c dnn-benchmark -o $Out $PkgDir
 Write-Host "Built: $Out"
