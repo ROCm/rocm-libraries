@@ -69,7 +69,7 @@ List of supported input and output types:
     - bfloat8_fnuz
     - HIP_R_8F_E5M2_FNUZ
     - ✅
-    - ❌  
+    - ❌
   *
     - int16
     - Not supported
