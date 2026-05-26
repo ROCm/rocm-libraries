@@ -356,6 +356,12 @@ globalParameters["StinkyTofuDebugPass"] = ""
 # Note: multiple kernels may overwrite the same file unless you use a unique path per build.
 globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 
+# StinkyTofu optimization remarks (stderr).  Unlike PASS_DEBUG (for compiler
+# developers), remarks are for kernel developers who want to understand generated
+# code quality — e.g. how many regions a loop was split into, what caused the
+# splits, and how many s_nop cycles were wasted.
+globalParameters["StinkyTofuEnableRemarks"] = False
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)

@@ -40,6 +40,7 @@
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
@@ -130,6 +131,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     pm.addPass(createMemTokenConsistencyCheckPass());
     if (optLevel != OptLevel::O0) {
         pm.addPass(createInsertDelayAluPass());
+        pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
     if (moduleOptions.EnableSwPrefetchInsertion) {
