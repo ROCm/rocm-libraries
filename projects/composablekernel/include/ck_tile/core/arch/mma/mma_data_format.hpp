@@ -12,7 +12,6 @@
 namespace ck_tile::core::arch::mma {
 
 /**
- * @struct MatrixFmtCode
  * @brief Maps a data type to its hardware matrix format code used by f8f6f4 builtins.
  *
  * Format codes are used by `__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4`,
