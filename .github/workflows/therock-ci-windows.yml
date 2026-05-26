@@ -3,6 +3,9 @@ name: TheRock CI Windows
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
       cmake_options:
         type: string
       projects_to_test:

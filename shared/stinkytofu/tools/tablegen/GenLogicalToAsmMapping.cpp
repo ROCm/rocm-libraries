@@ -91,6 +91,7 @@ bool genLogicalToAsmMappingsImpl(GpuArchManager& manager, const std::string& out
 }  // namespace
 
 namespace stinkytofu {
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genLogicalToAsmMappings(GpuArchManager& manager, const std::string& outdir) {
     return genLogicalToAsmMappingsImpl(manager, outdir);
 }

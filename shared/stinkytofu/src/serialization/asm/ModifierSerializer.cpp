@@ -166,6 +166,19 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
     return true;
 }
 
+// CacheScopeModifiers — dedicated cache-scope carrier for SOPP-format memory
+// fences (global_wb / global_inv on gfx1250+). Serialized so the .stir IR
+// roundtrip preserves the scope token; otherwise a fence written out and
+// reparsed would silently lose its scope (worst-case fence-scope demotion).
+bool serializeVisit(const CacheScopeModifiers& mod, std::ostream& os) {
+    os << ", mod.cache_scope = {";
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
+    return true;
+}
+
 // SMEMModifiers
 bool serializeVisit(const SMEMModifiers& mod, std::ostream& os) {
     os << ", mod.smem = {";
@@ -390,10 +403,10 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
     return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
-                          SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers,
-                          True16Modifiers, EXEC, VCC, SWaitCntData, SWaitTensorCntData,
-                          SWaitStoreCntData, SDelayAluData, SWaitAluData, MFMAModifiers,
-                          MatrixFmtModifiers, MemTokenData>(mod, os);
+                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
+                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
+                          SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
+                          MFMAModifiers, MatrixFmtModifiers, MemTokenData>(mod, os);
 }
 
 /*
@@ -423,6 +436,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
                            getBool(fields, "nt", false), getBool(fields, "lds", false), false,
                            false, false, false, scope));
+    } else if (attrKey == "mod.cache_scope") {
+        inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
         inst->addModifier(SMEMModifiers(getBool(fields, "glc", false), getBool(fields, "nv", false),
                                         getInt(fields, "offset", 0)));
