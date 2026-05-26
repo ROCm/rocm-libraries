@@ -2434,3 +2434,70 @@ def test_data_gr_inc_lr_inc_emit_split_R2():
     assert calls_r1 == ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A'], (
         f"R=1: expected SRD + GR-swap + LR-swap each per body copy, "
         f"got {calls_r1}")
+
+
+def test_scheduler_extend_unroll_tile_maps_natural_uf1_R2():
+    """_extend_unroll_tile_maps brings unroll_factor up to lcm(natural_uf, R).
+
+    Builds an R=2 MT256x256x128 FP8 config and verifies the extension's
+    output contract.  The natural assign-pass converges with some
+    unroll_factor; if it's not a multiple of R, _extend_unroll_tile_maps
+    appends additional tile maps to bring the count to lcm(natural_uf, R).
+    Whether or not the extension actually runs for this geometry, the
+    invariants below must hold or InstructionEmitter.populate will index
+    out-of-range when emitting the R-th body copy.
+
+    Tighter version of the natural_uf=1 R=2 test described in review:
+    we can't easily force natural_uf=1 from outside (it's a function of
+    LR/GR granularities), so we instead pin the post-extension invariants
+    and additionally check the lcm contract against an R=1 baseline run.
+    """
+    from math import gcd
+
+    common = dict(
+        numMFMATilesM=8,
+        numMFMATilesN=8,
+        numSubIterK=1,
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=1),
+        lrSB=ReadGranularity(mn=2, k=1),
+        grSA=ReadGranularity(mn=8, k=1),
+        grSB=ReadGranularity(mn=8, k=1),
+    )
+
+    cfg_R1 = SchedulerConfig(scaleSchedulingPeriod=1, **common)
+    sched_R1 = LogicalScheduler(cfg_R1)
+    sched_R1.assign_vgpr_tiles()
+    natural_uf = sched_R1.unroll_factor
+    assert natural_uf >= 1
+
+    cfg_R2 = SchedulerConfig(scaleSchedulingPeriod=2, **common)
+    sched_R2 = LogicalScheduler(cfg_R2)
+    sched_R2.assign_vgpr_tiles()
+
+    R = 2
+    expected_uf = (natural_uf * R) // gcd(natural_uf, R)
+    assert sched_R2.unroll_factor == expected_uf, (
+        f"R=2 unroll_factor must be lcm(natural_uf={natural_uf}, R={R})="
+        f"{expected_uf} (the _extend_unroll_tile_maps lcm contract), "
+        f"got {sched_R2.unroll_factor}")
+    assert sched_R2.unroll_factor % R == 0, (
+        f"R=2 unroll_factor must be a multiple of R={R}, "
+        f"got {sched_R2.unroll_factor}")
+
+    for slots in sched_R2._partitions:
+        for slot in slots:
+            if slot.mfma:
+                for tensor, maps in slot.mfma.vgpr_tile_maps.items():
+                    assert len(maps) == sched_R2.unroll_factor, (
+                        f"MFMA tile-map count for tensor {tensor} must equal "
+                        f"unroll_factor={sched_R2.unroll_factor} after "
+                        f"_extend_unroll_tile_maps, got {len(maps)}")
+            for lr in slot.lrs:
+                assert len(lr.vgpr_tile_map) == sched_R2.unroll_factor, (
+                    f"LR vgpr_tile_map count for tensor {lr.tensor} must "
+                    f"equal unroll_factor={sched_R2.unroll_factor} after "
+                    f"_extend_unroll_tile_maps, got {len(lr.vgpr_tile_map)}")

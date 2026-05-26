@@ -123,3 +123,4 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]   # K = 1 * scaleDU (= 2 * data DU)
           - Exact: [256, 256, 1, 512]   # K = 2 * scaleDU
           - Exact: [256, 256, 1, 1024]  # K = 4 * scaleDU
+          - Exact: [256, 256, 1, 4096]  # K = 16 * scaleDU = 32 outer iters; exercises last-iter prefetch gate
