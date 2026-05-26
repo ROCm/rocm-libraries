@@ -259,7 +259,7 @@ HeaderFileExtensions: ['h','hpp']
 # This regex is a inclusion filter for the files to be checked. Its a Posix regex and
 # does not seem to support negative lookahead.
 HeaderFilterRegex: '.'
-ExcludeHeaderFilterRegex: '^(.*data_objects.*)$'
+ExcludeHeaderFilterRegex: '^(.*(data_objects|python3\.[0-9]+|nanobind|_deps).*)$'
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
