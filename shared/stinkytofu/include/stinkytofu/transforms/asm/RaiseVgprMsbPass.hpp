@@ -29,16 +29,20 @@
 namespace stinkytofu {
 class Pass;
 
-/// Creates a pass that inserts s_set_vgpr_msb instructions before VOP instructions
-/// whose VGPR operands require MSB configuration.
+/// Creates a pass that absorbs s_set_vgpr_msb side-channel state into operand
+/// register identity, then deletes the s_set_vgpr_msb instructions.
 ///
-/// For architectures with HasVgprMSB (e.g. gfx1250), VGPRs above index 255 require
-/// the hardware VGPR_OFF register to be configured via s_set_vgpr_msb. This pass
-/// scans instructions, computes the required MSB value per operand slot, and inserts
-/// s_set_vgpr_msb when the required value differs from the current state.
+/// Inverse of InsertVgprMsbPass. After this pass runs, every VGPR operand
+/// carries its full physical index in reg.reg.idx with reg.reg.offset = 0,
+/// and no s_set_vgpr_msb instructions remain in the IR.
 ///
-/// After a label (branch target), the pass conservatively resets MSB state and
-/// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
+/// Intended for the st-opt path when the input assembly was already lowered
+/// (i.e. contains s_set_vgpr_msb + encoded VGPR indices). Run before any
+/// def-use / dependency-analysis pass; re-lower with InsertVgprMsbPass before
+/// emit to preserve round-trip.
+///
+/// State is reset to MSB=0 at every label boundary (matching the convention
+/// in InsertVgprMsbPass).
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRaiseVgprMsbPass();
 
 }  // namespace stinkytofu

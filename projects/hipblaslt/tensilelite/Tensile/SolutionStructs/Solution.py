@@ -3946,7 +3946,12 @@ class Solution(collections.abc.Mapping):
             blockWidth = bw
             break
         if blockWidth == 0:
-          reject(state, printRejectionReason, "invalid local write block width")
+          reject(state, printRejectionReason,
+                 "invalid local write block width "
+                 "(nwcv=%s, bpe=%s, bpr=%s, localWriteWidth=%s). "
+                 "This typically means TransposeLDS=0 is incompatible with the selected "
+                 "DataType and MatrixInstruction (e.g. FP4 + [16,16,128] requires TransposeLDS=1)."
+                 % (nwcv, bpe, bpr, localWriteWidth))
 
         return blockWidth
 
@@ -3968,6 +3973,10 @@ class Solution(collections.abc.Mapping):
           nwpv = vw
 
         blockWidth = findValidWriteBlockWidth(nwcv, bpe, bpr)
+        if blockWidth == 0:
+          # Solution already rejected in findValidWriteBlockWidth; bail out to
+          # avoid ZeroDivisionError at "vw // nwcvpi" below.
+          return False
         nwcvpi = int(blockWidth * bpr / bpe)
 
         serials = []
