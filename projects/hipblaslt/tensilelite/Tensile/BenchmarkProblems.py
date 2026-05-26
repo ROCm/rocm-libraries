@@ -617,11 +617,12 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
-            libraryFile = os.path.join(str(sourcePath), cachedLibraryFile)
-            if not os.path.isfile(libraryFile):
+            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+            cachedLibraryFile = os.path.join(libraryDir(sourcePath, gfxName), "TensileLibrary" + libraryExt)
+            if not os.path.isfile(cachedLibraryFile):
                 printExit(
                     f"cache.yaml refers to a library file that no longer "
-                    f"exists on disk: {libraryFile}. The cache directory may "
+                    f"exists on disk: {cachedLibraryFile}. The cache directory may "
                     f"have been partially deleted; remove the parent caches/ "
                     f"directory and re-run without --use-cache.")
 
@@ -629,8 +630,8 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  sourcePath, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, gfxName,
-                                 libraryFile=libraryFile, probSolMap=probSolMap)
+                                 outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
+                                 probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case
