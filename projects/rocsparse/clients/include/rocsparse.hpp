@@ -1304,6 +1304,71 @@ REAL_COMPLEX_TEMPLATE(csric0,
                       rocsparse_solve_policy    policy,
                       void*                     temp_buffer);
 
+// csrildlt0
+REAL_COMPLEX_TEMPLATE(csrildlt0_buffer_size,
+                      rocsparse_handle          handle,
+                      rocsparse_int             m,
+                      rocsparse_int             nnz,
+                      const rocsparse_mat_descr descr,
+                      const T*                  csr_val,
+                      const rocsparse_int*      csr_row_ptr,
+                      const rocsparse_int*      csr_col_ind,
+                      rocsparse_mat_info        info,
+                      size_t*                   buffer_size);
+
+REAL_COMPLEX_TEMPLATE(csrildlt0_analysis,
+                      rocsparse_handle          handle,
+                      rocsparse_int             m,
+                      rocsparse_int             nnz,
+                      const rocsparse_mat_descr descr,
+                      const T*                  csr_val,
+                      const rocsparse_int*      csr_row_ptr,
+                      const rocsparse_int*      csr_col_ind,
+                      rocsparse_mat_info        info,
+                      rocsparse_analysis_policy analysis,
+                      rocsparse_solve_policy    solve,
+                      void*                     temp_buffer);
+
+// rocsparse_csrildlt0: diag is floating_data_t<T>* (real) — cannot use REAL_COMPLEX_TEMPLATE directly
+template <typename T>
+inline rocsparse_status (*rocsparse_csrildlt0)(rocsparse_handle          handle,
+                                               rocsparse_int             m,
+                                               rocsparse_int             nnz,
+                                               const rocsparse_mat_descr descr,
+                                               T*                        csr_val,
+                                               const rocsparse_int*      csr_row_ptr,
+                                               const rocsparse_int*      csr_col_ind,
+                                               floating_data_t<T>*       diag,
+                                               rocsparse_mat_info        info,
+                                               rocsparse_solve_policy    policy,
+                                               void*                     temp_buffer);
+template <>
+inline auto rocsparse_csrildlt0<float> = rocsparse_scsrildlt0;
+template <>
+inline auto rocsparse_csrildlt0<double> = rocsparse_dcsrildlt0;
+template <>
+inline auto rocsparse_csrildlt0<rocsparse_float_complex> = rocsparse_ccsrildlt0;
+template <>
+inline auto rocsparse_csrildlt0<rocsparse_double_complex> = rocsparse_zcsrildlt0;
+
+// rocsparse_csrildlt0_numeric_boost: boost_tol and boost_val are floating_data_t<T>*
+template <typename T>
+inline rocsparse_status (*rocsparse_csrildlt0_numeric_boost)(rocsparse_handle          handle,
+                                                             rocsparse_mat_info        info,
+                                                             int                       enable_boost,
+                                                             const floating_data_t<T>* boost_tol,
+                                                             const floating_data_t<T>* boost_val);
+template <>
+inline auto rocsparse_csrildlt0_numeric_boost<float> = rocsparse_scsrildlt0_numeric_boost;
+template <>
+inline auto rocsparse_csrildlt0_numeric_boost<double> = rocsparse_dcsrildlt0_numeric_boost;
+template <>
+inline auto
+    rocsparse_csrildlt0_numeric_boost<rocsparse_float_complex> = rocsparse_ccsrildlt0_numeric_boost;
+template <>
+inline auto rocsparse_csrildlt0_numeric_boost<
+    rocsparse_double_complex> = rocsparse_zcsrildlt0_numeric_boost;
+
 // csritilu0_compute_ex
 REAL_COMPLEX_TEMPLATE(csritilu0_compute_ex,
                       rocsparse_handle     handle,

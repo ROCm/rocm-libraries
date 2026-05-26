@@ -885,6 +885,21 @@ void host_csric0(rocsparse_int                     M,
                  rocsparse_int*                    singular_pivot,
                  double                            tol);
 
+template <typename T>
+void host_csrildlt0(rocsparse_int                     M,
+                    const std::vector<rocsparse_int>& csr_row_ptr,
+                    const std::vector<rocsparse_int>& csr_col_ind,
+                    std::vector<T>&                   csr_val,
+                    std::vector<floating_data_t<T>>&  diag,
+                    rocsparse_index_base              base,
+                    rocsparse_int*                    struct_pivot,
+                    rocsparse_int*                    numeric_pivot,
+                    rocsparse_int*                    singular_pivot,
+                    double                            tol,
+                    int                               boost = 0,
+                    floating_data_t<T> boost_tol            = static_cast<floating_data_t<T>>(0),
+                    floating_data_t<T> boost_val            = static_cast<floating_data_t<T>>(0));
+
 template <typename T, typename U>
 void host_csrilu0(rocsparse_int                     M,
                   const std::vector<rocsparse_int>& csr_row_ptr,
