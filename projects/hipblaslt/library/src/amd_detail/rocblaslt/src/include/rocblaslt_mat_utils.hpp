@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,124 @@
 #include "auxiliary.hpp"
 #include "handle.h"
 #include "utility.hpp"
+
+#include <Tensile/MXScaleFormatValidation.hpp>
+#include <rocisa/include/enum.hpp>
+
+#include <optional>
+
+// ----------------------------------------------------------------------------
+// MX scale-format combination validation helpers (gfx1250 v_wmma_scale rules).
+//
+// The AMDGPU assembler currently does not enforce the joint (A type, A scale,
+// B type, B scale) constraints for v_wmma_scale_f32_16x16x128_f8f6f4 - see
+// ROCm/llvm-project#2634 - so hipBLASLt must reject invalid combinations at
+// the API surface before the Tensile problem is built.
+// ----------------------------------------------------------------------------
+
+// Returns the matrix-scale dtype implied by the ScalingFormat, or std::nullopt
+// for non-block formats (None/Scalar/Vector) where the gfx1250 MX rules do not
+// apply.
+inline std::optional<rocisa::DataType>
+    rocblasltScalingFormatToMXScaleDataType(RocblasltContractionProblem::ScalingFormat fmt)
+{
+    switch(fmt)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return rocisa::DataType::E8;
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+        return rocisa::DataType::Float8;
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
+        return rocisa::DataType::E5M3;
+    case RocblasltContractionProblem::ScalingFormat::None:
+    case RocblasltContractionProblem::ScalingFormat::Scalar:
+    case RocblasltContractionProblem::ScalingFormat::Vector:
+    default:
+        return std::nullopt;
+    }
+}
+
+// Maps the subset of hipDataType values relevant to gfx1250 MX matrix classes
+// (FP8/BF8/FP6/BF6/FP4 and their fnuz variants) to rocisa::DataType. Other
+// types collapse to rocisa::DataType::None - the MX rules don't apply to
+// them, so the joint validator will accept any scale on that side.
+//
+// This intentionally mirrors only the cases needed by the MX validator so
+// the utility header does not have to pull in tensile_host.hpp.
+inline rocisa::DataType rocblasltHipDataTypeToMXMatrixDataType(hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_8F_E4M3:
+        return rocisa::DataType::Float8;
+    case HIP_R_8F_E5M2:
+        return rocisa::DataType::BFloat8;
+    case HIP_R_8F_E4M3_FNUZ:
+        return rocisa::DataType::Float8_fnuz;
+    case HIP_R_8F_E5M2_FNUZ:
+        return rocisa::DataType::BFloat8_fnuz;
+    case HIP_R_6F_E2M3:
+        return rocisa::DataType::Float6;
+    case HIP_R_6F_E3M2:
+        return rocisa::DataType::BFloat6;
+    case HIP_R_4F_E2M1:
+        return rocisa::DataType::Float4;
+    default:
+        return rocisa::DataType::None;
+    }
+}
+
+// Validates the joint (A type, A scale, B type, B scale) tuple against the
+// gfx1250 v_wmma_scale_f32_16x16x128_f8f6f4 rules. Sides whose ScalingFormat
+// is not a block MX format (None/Scalar/Vector) are skipped (treated as if
+// the matrix dtype on that side is non-MX), so this guard only fires for
+// real MX problems.
+//
+// Returns rocblaslt_status_continue when the tuple is legal (or the rules
+// do not apply) and rocblaslt_status_invalid_value otherwise. The diagnostic
+// is emitted via log_error so callers see a clean reason in the log.
+inline rocblaslt_status validateMXScaleFormatCombination(
+    hipDataType                                a_type,
+    hipDataType                                b_type,
+    RocblasltContractionProblem::ScalingFormat scaleAFmt,
+    RocblasltContractionProblem::ScalingFormat scaleBFmt)
+{
+    auto scaleADt = rocblasltScalingFormatToMXScaleDataType(scaleAFmt);
+    auto scaleBDt = rocblasltScalingFormatToMXScaleDataType(scaleBFmt);
+
+    // Neither side uses a block MX scale: the gfx1250 joint rules do not
+    // apply at all; let other validators handle scalar/vector scaling.
+    if(!scaleADt.has_value() && !scaleBDt.has_value())
+        return rocblaslt_status_continue;
+
+    // For each side, only feed real matrix/scale dtypes into the joint
+    // validator when that side actually carries a block MX scale. Sides
+    // that don't are reported as (None, None) so the FP4xFP4 joint rule
+    // doesn't trigger spuriously across non-MX sides.
+    rocisa::DataType aMatrixDt
+        = scaleADt.has_value() ? rocblasltHipDataTypeToMXMatrixDataType(a_type)
+                               : rocisa::DataType::None;
+    rocisa::DataType bMatrixDt
+        = scaleBDt.has_value() ? rocblasltHipDataTypeToMXMatrixDataType(b_type)
+                               : rocisa::DataType::None;
+    rocisa::DataType aScaleDt = scaleADt.value_or(rocisa::DataType::None);
+    rocisa::DataType bScaleDt = scaleBDt.value_or(rocisa::DataType::None);
+
+    if(!TensileLite::isValidMXScaleFormatCombination(aMatrixDt, aScaleDt, bMatrixDt, bScaleDt))
+    {
+        log_error(__func__,
+                  TensileLite::mxScaleFormatCombinationError(
+                      aMatrixDt, aScaleDt, bMatrixDt, bScaleDt)
+                      .c_str());
+        return rocblaslt_status_invalid_value;
+    }
+
+    return rocblaslt_status_continue;
+}
 
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
@@ -450,6 +568,15 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
 
     if(epilogue_status != rocblaslt_status_continue)
         return epilogue_status;
+
+    // gfx1250 MX scale-format combination guard. Reject invalid joint
+    // (A type, A scale, B type, B scale) tuples at the API surface so the
+    // caller sees rocblaslt_status_invalid_value instead of a silent
+    // miscompile when the assembler accepts a malformed wmma_scale combo.
+    auto mxScaleStatus = validateMXScaleFormatCombination(
+        matA->type, matB->type, matmul_descr->scaleAType, matmul_descr->scaleBType);
+    if(mxScaleStatus != rocblaslt_status_continue)
+        return mxScaleStatus;
 
     return rocblaslt_status_continue;
 }

@@ -28,6 +28,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/MXScaleFormatValidation.hpp>
 #include <Tensile/Utils.hpp>
 
 #include <cctype>
@@ -707,6 +708,8 @@ namespace TensileLite
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
+
+        validateMXScaleFormats();
     }
 
     void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride, bool padScaleTensor)
@@ -732,6 +735,60 @@ namespace TensileLite
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }
+
+        validateMXScaleFormats();
+    }
+
+    namespace
+    {
+        // Resolve the matrix-side / scale-side dtype pair seen by the gfx1250
+        // MX rules. When mxBlock == 0 the side has no MX scaling - turn both
+        // the matrix and the scale into None so the joint FP4xFP4 rule cannot
+        // trigger and the per-side rule short-circuits to "valid" (non-MX).
+        struct MXSide
+        {
+            rocisa::DataType matrix;
+            rocisa::DataType scale;
+        };
+
+        MXSide mxSide(int mxBlock, rocisa::DataType matrixDt, rocisa::DataType scaleDt)
+        {
+            if(mxBlock == 0)
+                return {rocisa::DataType::None, rocisa::DataType::None};
+            return {matrixDt, scaleDt};
+        }
+    } // namespace
+
+    bool ContractionProblemGemm::isValidMXScaleFormats() const
+    {
+        if(m_mxBlockA == 0 && m_mxBlockB == 0)
+            return true;
+
+        auto const& aTensor = m_tensors[ContractionProblemGemm::TENSOR::A];
+        auto const& bTensor = m_tensors[ContractionProblemGemm::TENSOR::B];
+
+        auto aSide = mxSide(m_mxBlockA, aTensor.dataType(), m_mxTypeA);
+        auto bSide = mxSide(m_mxBlockB, bTensor.dataType(), m_mxTypeB);
+
+        return TensileLite::isValidMXScaleFormatCombination(
+            aSide.matrix, aSide.scale, bSide.matrix, bSide.scale);
+    }
+
+    void ContractionProblemGemm::validateMXScaleFormats() const
+    {
+        if(m_mxBlockA == 0 && m_mxBlockB == 0)
+            return;
+
+        auto const& aTensor = m_tensors[ContractionProblemGemm::TENSOR::A];
+        auto const& bTensor = m_tensors[ContractionProblemGemm::TENSOR::B];
+
+        auto aSide = mxSide(m_mxBlockA, aTensor.dataType(), m_mxTypeA);
+        auto bSide = mxSide(m_mxBlockB, bTensor.dataType(), m_mxTypeB);
+
+        auto err = TensileLite::mxScaleFormatCombinationError(
+            aSide.matrix, aSide.scale, bSide.matrix, bSide.scale);
+        if(!err.empty())
+            throw std::runtime_error(err);
     }
 
     size_t ContractionProblemGemm::toAPos(size_t idx) const
@@ -1294,6 +1351,8 @@ namespace TensileLite
                     op.type = TensorOp::Type::None;
             }
         }
+
+        validateMXScaleFormats();
     }
 
     void ContractionProblemGemm::calcArithmeticIntensity()

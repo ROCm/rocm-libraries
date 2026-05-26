@@ -1124,6 +1124,20 @@ namespace TensileLite
             return m_mxTypeB;
         }
 
+        /// Validate the (A dtype, A mx-scale dtype, B dtype, B mx-scale dtype)
+        /// tuple against the gfx1250 v_wmma_scale_f32_16x16x128_f8f6f4 rules.
+        /// Throws std::runtime_error on failure. Sides that do not enable MX
+        /// scaling (mxBlock == 0) are skipped (treated as non-MX).
+        ///
+        /// See ROCm/llvm-project#2634 - the assembler does not enforce these
+        /// joint constraints, so the host stack must.
+        void validateMXScaleFormats() const;
+
+        /// Non-throwing variant of validateMXScaleFormats. Returns true if the
+        /// current (A, AScale, B, BScale) tuple is a legal gfx1250 MX combo,
+        /// or if neither side enables MX scaling.
+        bool isValidMXScaleFormats() const;
+
         bool swizzleTensorA() const
         {
             return m_swizzleTensorA;

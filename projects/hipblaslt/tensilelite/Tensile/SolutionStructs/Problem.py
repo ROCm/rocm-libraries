@@ -32,6 +32,7 @@ from Tensile.Activation import ActivationType
 from Tensile.Common import fastdeepcopy as deepcopy
 from Tensile.Common.Constants import INDEX_CHARS
 from Tensile.Common.DataType import DataType
+from Tensile.Common.MXScaleFormatValidation import mxScaleFormatCombinationError
 from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
@@ -861,6 +862,8 @@ class ProblemType(Mapping):
       print2("DataType == i8 and HPA == True; setting compute data type to int32")
       self["ComputeDataType"] = DataType('i')
 
+    self._checkMXScaleFormatCombination()
+
     if self["OperationType"] == "GEMM":
       self._checkIfSupportedGEMMType()
       self.initGEMM()
@@ -970,6 +973,33 @@ class ProblemType(Mapping):
         if (not self["Gradient"]):
           printWarning("ActivationNoGuard is set to False cause Gradient is off.")
           self["ActivationNoGuard"] = False
+
+  ################################################################################
+  # Function _checkMXScaleFormatCombination:
+  #   Enforces the gfx1250 v_wmma_scale_f32_16x16x128_f8f6f4 joint constraint
+  #   on (matrix_a_fmt, scale_a_fmt, matrix_b_fmt, scale_b_fmt). The AMDGPU
+  #   assembler does not currently reject illegal combinations (see
+  #   ROCm/llvm-project#2634), so the host stack guards against them here
+  #   before kernels are generated. Sides without MX scaling (MXBlock* == 0)
+  #   are excluded from the per-side rule by folding their matrix dtype to a
+  #   non-MX sentinel.
+  ################################################################################
+  def _checkMXScaleFormatCombination(self):
+    if self["MXBlockA"] == 0 and self["MXBlockB"] == 0:
+      return
+
+    # Use MacDataType* — the MAC compute-input type — to match what
+    # _checkIfSupportedGEMMType() consults, since the gfx1250 ISA
+    # constrains the MAC input, not the storage type.
+    nonMXSentinel = DataType(DataTypeEnum.Float)
+    aType = self["MacDataTypeA"] if self["MXBlockA"] else nonMXSentinel
+    bType = self["MacDataTypeB"] if self["MXBlockB"] else nonMXSentinel
+    scaleAType = self["DataTypeMXSA"]
+    scaleBType = self["DataTypeMXSB"]
+
+    err = mxScaleFormatCombinationError(aType, scaleAType, bType, scaleBType)
+    if err:
+      raise Exception(err)
 
   ################################################################################
    # Function checkIfSupportedGEMMType:

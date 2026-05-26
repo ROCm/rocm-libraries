@@ -1955,6 +1955,22 @@ namespace
             break;
         }
 
+        // Defensive gfx1250 MX scale-format guard. The API surface guard in
+        // rocblaslt_matmul_valid_args should already have rejected invalid
+        // combinations, so this is a belt-and-suspenders check that catches
+        // any path that bypasses the API validation. validateMXScaleFormats
+        // throws std::runtime_error on failure, which the caller of
+        // ConstructTensileProblem already handles via try/catch.
+        try
+        {
+            tensileProblem.validateMXScaleFormats();
+        }
+        catch(const std::exception& e)
+        {
+            log_error(__func__, e.what());
+            throw;
+        }
+
         if (prob.scaleA == nullptr && prob.scaleB == nullptr)
             tensileProblem.setUseScaleAB("");
         else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector
@@ -2250,6 +2266,23 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             tensileProblem.setMXScaleB(rocisa::DataType::E5M3, 16);
             break;
+        }
+
+        // Defensive gfx1250 MX scale-format guard. The API surface guard in
+        // rocblaslt_matmul_valid_args should already have rejected invalid
+        // combinations; this catches any path that bypasses it.
+        // validateMXScaleFormats throws std::runtime_error on failure; not
+        // all callers of updateTensileProblem wrap this in try/catch, but in
+        // practice the API guard should have filtered out invalid combos
+        // already, so this only fires on internal misuse.
+        try
+        {
+            tensileProblem.validateMXScaleFormats();
+        }
+        catch(const std::exception& e)
+        {
+            log_error(__func__, e.what());
+            throw;
         }
 
         if (prob.scaleA == nullptr && prob.scaleB == nullptr)
