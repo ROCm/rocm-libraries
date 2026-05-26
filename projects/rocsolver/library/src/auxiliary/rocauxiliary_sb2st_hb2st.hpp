@@ -313,6 +313,10 @@ __device__ void sb2st_hb2st_task(
     T* s_work,
     I round)
 {
+    // gemv implementation is faster than hemv,
+    // which is provided for comparison.
+    bool const use_hemv = false;
+
     const I tid = xid + yid * DIMX;
 
     I idiag = kd - 1;
@@ -378,16 +382,19 @@ __device__ void sb2st_hb2st_task(
         {
             // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
             // Using ldab-1 adjusts for band format.
-            #if 0
+            if constexpr (use_hemv)
+            {
                 sb2st_helarf( xid, yid, nc, s_housev, s_tau,
                                 Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
-            #else
+            }
+            else
+            {
                 sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
                             Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
                 __syncthreads();
                 sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
                             Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
-            #endif
+            }
 
             // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
         }
@@ -464,17 +471,20 @@ __device__ void sb2st_hb2st_task(
                 __syncthreads();
 
                 // Apply vc on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
-                #if 0
+                if constexpr (use_hemv)
+                {
                     sb2st_helarf( xid, yid, nc, s_housev, s_tau,
                                     Aband + idiag + jc*ldab, ldab-1, s_work );
-                #else
+                }
+                else
+                {
                     sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
                                 Aband + idiag + jc*ldab, ldab-1, s_work );
                     __syncthreads();
 
                     sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
                                 Aband + idiag + jc*ldab, ldab-1, s_work );
-                #endif
+                }
             }
         }
 
