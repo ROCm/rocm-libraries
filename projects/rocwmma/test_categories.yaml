@@ -11,9 +11,9 @@
 # entries, which is the only form ctest's script interpreter exposes
 # through `--print-labels` / `-L` at install time.
 #
-# Test types used by TheRock:
-# - quick/regression: regression_tests only (fast validation, ~12 min timeout)
-# - full: all tests (~60 min timeout)
+# Test types used by TheRock (test_runner.py):
+# - quick: ctest --test-dir …/rocwmma/regression with -L quick (emulation regression tree; ~12 min)
+# - standard/comprehensive/full: ctest --test-dir …/rocwmma with -L <tier> -LE <tier>_exclude
 #
 # Tier labels are applied automatically by parse_ctest_categories.py:
 #   quick         -> quick, standard, comprehensive, full so that tests in quick category will be run for all categories
@@ -26,9 +26,10 @@
 
 test_categories:
   quick:
-    description: "rocWMMA quick tests - regression tests only"
+    description: "rocWMMA quick tests - regression install tree (emulation + regression_tests)"
     test_patterns:
       - "regression_tests"
+      - ".* regression$"
     exclude:
       # Flaky/problematic tests excluded
       - ".*unpack_util_test.*"
