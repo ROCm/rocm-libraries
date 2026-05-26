@@ -16,6 +16,13 @@
 
 namespace ck_tile::core::arch::mma {
 
+// TODO: There seem to be some places requesting fp8/bf8 MFMA scale warpgemms with AttrNumAccess =
+// 1, even though they require AttrNumAccess >= 2 to function properly. However, the latter is only
+// true if non-trivial scale values are used and furthermore it's possible that WarpGemms gotten
+// this way are not actually used for MMA operations but just for some internal parameters.
+// Therefore, for now we will allow AttrNumAccessAB = 1 for these warpgemms, but this behavior needs
+// to be checked at some point. Marked these spots with "TODO AttrNumAccess".
+
 /**
  * @struct amdgcn_mma
  * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
@@ -195,7 +202,7 @@ struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, C
 {
     static constexpr const char* instruction_name =
         "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4";
-        
+    
     template <index_t opselA, index_t opselB>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)

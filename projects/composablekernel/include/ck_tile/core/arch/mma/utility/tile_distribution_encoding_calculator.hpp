@@ -15,12 +15,12 @@ namespace ck_tile::core::arch::mma {
  * that in case of compression or packed data types, the matrix minor dimension is effectively
  * shrunk by that factor. This is because tile distribution encodings always describe compressed /
  * packed *Datatype* elements, not logical / mathematical uncompressed *value* elements.
- * @tparam MmaOp          Intrinsic (amdgcn_mma).
- * @tparam CTranspose     Whether we are using CTranspose.
- * @tparam SFactor        Swizzle factor. Not implemented.
+ * @tparam MmaOp           Intrinsic (amdgcn_mma).
+ * @tparam CTranspose      Whether we are using CTranspose.
+ * @tparam SFactor         Swizzle factor. Not implemented.
  * @tparam kIter           K composition factor (consecutive intrinsic calls to form larger k dim).
  * @tparam AttrNumAccessAV Requested NumAccess for the A matrix. Must be multiple of "fundamental"
- *                        NumAccess for intrinsic. See details in amdgcn_mma.hpp.
+ *                         NumAccess for intrinsic. See details in amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Requested NumAccess for the B matrix.
  * @tparam UncompressedA   Give an uncompressed (full) layout for A instead. This is used at the
  *                         pipeline level, whereas the MmaOp level deals with pre-compressed A
@@ -62,7 +62,7 @@ struct TileDistrEncCalc
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize  * kIter>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize * kIter>>,
         tuple<sequence<0, 2, 1>>,
         tuple<sequence<0, 1, 0>>,
         sequence<2, 2>,
