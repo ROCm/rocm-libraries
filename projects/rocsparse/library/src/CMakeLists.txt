@@ -505,18 +505,9 @@ set(rocsparse_source
   src/precond/csrildlt0/rocsparse_csrildlt0.cpp
   src/precond/csrildlt0/rocsparse_csrildlt0_analysis.cpp
   src/precond/csrildlt0/rocsparse_csrildlt0_buffer_size.cpp
-  src/precond/csrildlt0/rocsparse_csrildlt0_clear.cpp
-  src/precond/csrildlt0/rocsparse_csrildlt0_get_tolerance.cpp
   src/precond/csrildlt0/rocsparse_csrildlt0_kernel_hash.cpp
   src/precond/csrildlt0/rocsparse_csrildlt0_kernel_binsearch.cpp
   src/precond/csrildlt0/rocsparse_csrildlt0_kernel_launch.cpp
-  src/precond/csrildlt0/rocsparse_csrildlt0_set_tolerance.cpp
-  src/precond/csrildlt0/rocsparse_csrildlt0_singular_pivot.cpp
-  src/precond/csrildlt0/rocsparse_csrildlt0_zero_pivot.cpp
-  src/precond/csrildlt0/rocsparse_xcsrildlt0_buffer_size.cpp
-  src/precond/csrildlt0/rocsparse_xcsrildlt0_analysis.cpp
-  src/precond/csrildlt0/rocsparse_xcsrildlt0.cpp
-  src/precond/csrildlt0/rocsparse_xcsrildlt0_numeric_boost.cpp
   #
   src/precond/bsric0/rocsparse_bsric0.cpp
   src/precond/bsric0/rocsparse_bsric0_analysis.cpp
