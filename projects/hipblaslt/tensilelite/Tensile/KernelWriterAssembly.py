@@ -17897,7 +17897,20 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmApplyStreamKOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
-    pass
+    mod = Module("TDM StreamK K-offset Wave Separated")
+    tcA: str = tPA["tensorChar"]
+    tcB: str = tPB["tensorChar"]
+    incSgprName = f"tdm{tcA}{tcB}Incs"
+    group0Name = f"tdm{tcA}Group0"
+
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      tmpSgpr = tmpSgprRes.idx
+      mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
+                       comment="StreamK K-offset = localStart * increment"))
+      mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
+                       comment="Apply StreamK K-offset to TDM global addr"))
+
+    return mod
 
   def tdmApplyStreamKOffsetSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
     """Apply StreamK K-offset to Address{tc} for subtile TDM path.
