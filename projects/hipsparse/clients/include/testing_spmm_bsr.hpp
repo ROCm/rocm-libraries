@@ -47,7 +47,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spmm_bsr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int64_t              mb         = 10;
     int64_t              kb         = 10;
     int64_t              n          = 10;
@@ -196,7 +196,7 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spmm_bsr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     J                    m         = argus.M;
     J                    n         = argus.N;
     J                    k         = argus.K;
@@ -221,13 +221,6 @@ void testing_spmm_bsr(Arguments argus)
         return;
     }
 
-    // // The host BSR matrix-matrix reference (host_bsrmm) requires column-major
-    // // B and C, and supports non-transpose / transpose B.
-    // if(orderB != HIPSPARSE_ORDER_COL || orderC != HIPSPARSE_ORDER_COL)
-    // {
-    //     return;
-    // }
-
     if(blockDim < 1)
     {
         return;
@@ -249,9 +242,16 @@ void testing_spmm_bsr(Arguments argus)
     // Initial Data on CPU
     srand(12345ULL);
 
-    I nnz_A;
+    I nnz;
     CHECK_GENERATE_MATRIX_ERROR(
-        generate_csr_matrix(filename, m, k, nnz_A, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
+        generate_csr_matrix(filename,
+                            (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
+                            (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
+                            nnz,
+                            hcsr_row_ptr,
+                            hcsr_col_ind,
+                            hcsr_val,
+                            idx_base));
 
     // Redefine sparse matrix values
     hipsparseInit<T>(hcsr_val, hcsr_val.size(), 1);
@@ -259,16 +259,16 @@ void testing_spmm_bsr(Arguments argus)
     J mb = (m + blockDim - 1) / blockDim;
     J kb = (k + blockDim - 1) / blockDim;
 
-    I              nnzb = 0;
+    I              nnzb_A = 0;
     std::vector<I> hbsr_row_ptr;
     std::vector<J> hbsr_col_ind;
     std::vector<T> hbsr_val;
 
     host_csr_to_bsr<I, J, T>(block_dir,
-                             m,
-                             k,
+                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
+                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
                              blockDim,
-                             nnzb,
+                             nnzb_A,
                              idx_base,
                              hcsr_row_ptr,
                              hcsr_col_ind,
@@ -277,24 +277,33 @@ void testing_spmm_bsr(Arguments argus)
                              hbsr_row_ptr,
                              hbsr_col_ind,
                              hbsr_val);
+    m = mb * blockDim;
+    k = kb * blockDim;
 
-    // BSR matrix dimensions in terms of scalar rows/cols.
-    J A_m = mb * blockDim;
-    J A_k = kb * blockDim;
-    J B_m = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? A_k : n;
-    J B_n = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : A_k;
-    J C_m = A_m;
-    J C_n = n;
+    // Some matrix properties
+    J A_mb = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? mb : kb;
+    J A_nb = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? kb : mb;
+    J B_m  = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : n;
+    J B_n  = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : k;
+    J C_m  = m;
+    J C_n  = n;
 
-    // Column-major leading dimensions.
-    int64_t ldb = static_cast<int64_t>(B_m);
-    int64_t ldc = static_cast<int64_t>(C_m);
+    int64_t ldb = (orderB == HIPSPARSE_ORDER_COL)
+                      ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : n)
+                      : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : k);
+    int64_t ldc = (orderC == HIPSPARSE_ORDER_COL) ? m : n;
 
     ldb = std::max(int64_t(1), ldb);
     ldc = std::max(int64_t(1), ldc);
 
-    int64_t nnz_B = ldb * static_cast<int64_t>(B_n);
-    int64_t nnz_C = ldc * static_cast<int64_t>(C_n);
+    int64_t nrowB = (orderB == HIPSPARSE_ORDER_COL) ? ldb : B_m;
+    int64_t ncolB = (orderB == HIPSPARSE_ORDER_COL) ? B_n : ldb;
+    int64_t nrowC = (orderC == HIPSPARSE_ORDER_COL) ? ldc : C_m;
+    int64_t ncolC = (orderC == HIPSPARSE_ORDER_COL) ? C_n : ldc;
+
+    int64_t nnz_A = int64_t(nnzb_A) * blockDim * blockDim;
+    int64_t nnz_B = nrowB * ncolB;
+    int64_t nnz_C = nrowC * ncolC;
 
     // Allocate host memory for dense matrices
     std::vector<T> hB(nnz_B);
@@ -310,15 +319,15 @@ void testing_spmm_bsr(Arguments argus)
 
     // allocate memory on device
     auto dbsr_row_ptr_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(I) * (mb + 1)), device_free};
-    auto dbsr_col_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnzb), device_free};
-    auto dbsr_val_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnzb * blockDim * blockDim), device_free};
-    auto dB_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_B), device_free};
-    auto dC_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
-    auto dC_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
-    auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
-    auto d_beta_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(I) * (A_mb + 1)), device_free};
+    auto dbsr_col_ind_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnzb_A), device_free};
+    auto dbsr_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_A), device_free};
+    auto dB_managed       = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_B), device_free};
+    auto dC_1_managed     = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
+    auto dC_2_managed     = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
+    auto d_alpha_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
+    auto d_beta_managed   = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
 
     I* dbsr_row_ptr = (I*)dbsr_row_ptr_managed.get();
     J* dbsr_col_ind = (J*)dbsr_col_ind_managed.get();
@@ -330,12 +339,11 @@ void testing_spmm_bsr(Arguments argus)
     T* d_beta       = (T*)d_beta_managed.get();
 
     // copy data from CPU to device
-    CHECK_HIP_ERROR(
-        hipMemcpy(dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(I) * (mb + 1), hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(J) * nnzb, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(
-        dbsr_val, hbsr_val.data(), sizeof(T) * nnzb * blockDim * blockDim, hipMemcpyHostToDevice));
+        dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(I) * (A_mb + 1), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(J) * nnzb_A, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dbsr_val, hbsr_val.data(), sizeof(T) * nnz_A, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dB, hB.data(), sizeof(T) * nnz_B, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dC_1, hC_1.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dC_2, hC_2.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
@@ -345,9 +353,9 @@ void testing_spmm_bsr(Arguments argus)
     // Create BSR matrix
     hipsparseSpMatDescr_t matA;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateBsr(&matA,
-                                             mb,
-                                             kb,
-                                             nnzb,
+                                             A_mb,
+                                             A_nb,
+                                             nnzb_A,
                                              blockDim,
                                              blockDim,
                                              dbsr_row_ptr,
@@ -403,9 +411,9 @@ void testing_spmm_bsr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
         // Host SpMM reference using the int-projection of the BSR matrix.
-        host_bsrmm<I, J, T>(mb,
+        host_bsrmm<I, J, T>(A_mb,
                             n,
-                            kb,
+                            A_nb,
                             blockDim,
                             block_dir,
                             transA,
@@ -451,12 +459,12 @@ void testing_spmm_bsr(Arguments argus)
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gflop_count = bsrmm_gflop_count(static_cast<int>(n),
-                                               static_cast<int>(nnzb),
+                                               static_cast<int>(nnzb_A),
                                                static_cast<int>(blockDim),
                                                static_cast<int>(C_m * C_n),
                                                h_beta != make_DataType<T>(0));
-        double gbyte_count = bsrmm_gbyte_count<T>(static_cast<int>(mb),
-                                                  static_cast<int>(nnzb),
+        double gbyte_count = bsrmm_gbyte_count<T>(static_cast<int>(A_mb),
+                                                  static_cast<int>(nnzb_A),
                                                   static_cast<int>(blockDim),
                                                   static_cast<int>(B_m * B_n),
                                                   static_cast<int>(C_m * C_n),
@@ -476,7 +484,7 @@ void testing_spmm_bsr(Arguments argus)
                             display_key_t::direction,
                             hipsparse_direction2string(block_dir),
                             display_key_t::nnzb,
-                            nnzb,
+                            nnzb_A,
                             display_key_t::transA,
                             transA,
                             display_key_t::transB,
