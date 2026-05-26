@@ -5,6 +5,7 @@ set(GEMM_ROWCOLQUANT_DATATYPE "fp8;bf8" CACHE STRING "List of datatypes for GEMM
 set(GEMM_ROWCOLQUANT_LAYOUT "rcr" CACHE STRING "List of layouts for GEMM RowColQuant (semicolon-separated)")
 set(GEMM_ROWCOLQUANT_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 option(ENABLE_CCACHE_GEMM_ROWCOLQUANT "Enable ccache for GEMM RowColQuant ops compilation" OFF)
+set(GEMM_ROWCOLQUANT_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 
 # Store the directory path for use in functions
 set(GEMM_ROWCOLQUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -15,10 +16,6 @@ function(create_individual_gemm_rowcolquant_target datatype layout trait tile_co
     if(NOT GEMM_ROWCOLQUANT_GPU_TARGETS_INDIVIDUAL)
         message(FATAL_ERROR "BUG: create_individual_gemm_rowcolquant_target called with no GPU targets")
     endif()
-
-    # Parse tile configuration: format is tile_mxtile_nxtile_k_warp_mxwarp_nxwarp_k_warp_tile_mxwarp_tile_nxwarp_tile_k
-    string(REPLACE "_" ";" config_groups ${tile_config})
-    list(GET config_groups 0 tile_dims)
 
     set(target_name "benchmark_gemm_rowcolquant_${datatype}_${layout}_${trait}_${tile_config}")
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
@@ -109,6 +106,19 @@ function(build_individual_gemm_rowcolquant_targets datatype layout)
     # Create working directory
     file(MAKE_DIRECTORY ${working_path})
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${GEMM_ROWCOLQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_ROWCOLQUANT_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # List kernels
     message(VERBOSE " Listing RowColQuant kernel configurations for ${datatype} ${layout}...")
     execute_process(
@@ -119,6 +129,7 @@ function(build_individual_gemm_rowcolquant_targets datatype layout)
             --config_json ${json_blob}
             --gpu_target "${GEMM_ROWCOLQUANT_GPU_TARGETS_INDIVIDUAL}"
             --list_kernels
+            ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -218,6 +229,19 @@ else()
     foreach(pipeline IN LISTS GEMM_ROWCOLQUANT_PIPELINES)
         add_custom_target(benchmark_gemm_rowcolquant_${pipeline}_pipeline)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GEMM_ROWCOLQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_ROWCOLQUANT_DATATYPE num_datatypes)
+        list(LENGTH GEMM_ROWCOLQUANT_LAYOUT num_layouts)
+        math(EXPR num_combos "${num_datatypes} * ${num_layouts}")
+        if(num_combos GREATER 0)
+            math(EXPR GEMM_ROWCOLQUANT_MAX_INSTANCES "${GEMM_ROWCOLQUANT_MAX_INSTANCES} / ${num_combos}")
+            message(STATUS "gemm_rowcolquant: per-combo budget = ${GEMM_ROWCOLQUANT_MAX_INSTANCES} (${num_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_ROWCOLQUANT_DATATYPE)
