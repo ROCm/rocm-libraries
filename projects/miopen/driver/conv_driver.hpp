@@ -32,6 +32,7 @@
 
 #include <set>
 #include <ranges>
+#include <optional>
 
 // Declare hidden function for MIGraphX to smoke test it.
 extern "C" MIOPEN_EXPORT miopenStatus_t

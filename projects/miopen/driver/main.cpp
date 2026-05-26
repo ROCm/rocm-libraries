@@ -24,8 +24,8 @@
  *
  *******************************************************************************/
 
-#include "registry_driver_maker.hpp"
 #include "sys_info.hpp"
+#include "registry_driver_maker.hpp"
 #include <miopen/stringutils.hpp>
 
 #include <iostream>
