@@ -264,6 +264,8 @@ struct UniversalInvoker
                                              GemmConfig::NumWaveGroups,
                                              GemmConfig::Preshuffle,
                                              VectorSize,
+                                             GemmConfig::DataCachePrefetchA,
+                                             GemmConfig::DataCachePrefetchB,
                                              GemmConfig::Async>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
