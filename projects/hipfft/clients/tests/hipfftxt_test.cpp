@@ -24,9 +24,10 @@
 #include <complex>
 #include <gtest/gtest.h>
 
-// For test parameters (eg verbose)
 #include "../../shared/test_params.h"
 #include "../hipfft_params.h"
+#include "../../shared/rocfft_hip.h"
+
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 DISABLE_WARNING_PUSH
@@ -132,16 +133,6 @@ static std::string directionname(const int direction)
     }
 }
 
-// We may run tests on all visible devices; query how many devices with this function.
-static auto getdevcount()
-{
-    int        deviceCount = 0;
-    const auto ret         = hipGetDeviceCount(&deviceCount);
-    if(ret != hipSuccess)
-        throw std::runtime_error("hipGetDeviceCount failed");
-    return deviceCount;
-}
-
 #ifdef __HIP_PLATFORM_AMD__
 static constexpr bool rocfft_backend = true;
 #else
@@ -157,11 +148,11 @@ TEST_P(hipfftxtunit, plancreation)
 {
     // Test whether we can just make plans.
 
-    size_t ngpus = getdevcount();
+    const size_t ngpus = rocfft_scoped_device::device_count();
     if(ngpus < 2)
         GTEST_SKIP();
 
-    // FIXME: 3D, single-precision
+    // TODO: 3D, single-precision
 
     const int Nx = 32;
     const int Ny = 32;
@@ -887,9 +878,9 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Combine(::testing::ValuesIn(all_directionformat()),
                            ::testing::ValuesIn(multidims),
 #ifdef __HIP_PLATFORM_NVIDIA__
-                           ::testing::Range(2, getdevcount() + 1)
+                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1)
 #else
-                           ::testing::Range(1, getdevcount() + 1)
+                           ::testing::Range(1, rocfft_scoped_device::device_count() + 1)
 #endif
                                ),
         [](const std::tuple<std::tuple<bool, directionformat_t>, size_t, int>& t) {
@@ -926,7 +917,7 @@ class hipfftxtformats : public ::testing::TestWithParam<std::tuple<bool, int, hi
 // Test that we support exactly all of the data formats / FFT setups that we have implemented.
 TEST_P(hipfftxtformats, supportlistsinglebatch)
 {
-    size_t ngpus = getdevcount();
+    const size_t ngpus = rocfft_scoped_device::device_count();
 #ifdef __HIP_PLATFORM_NVIDIA__
     if(ngpus == 1)
         GTEST_SKIP() << "Need at least 2 gpus for this test";
