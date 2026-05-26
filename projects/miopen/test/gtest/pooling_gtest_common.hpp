@@ -9,7 +9,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
-#include <<miopen/verify.hpp>
+#include <miopen/verify.hpp>
 
 #include "get_handle.hpp"
 #include "cpu_conv.hpp"
