@@ -604,6 +604,9 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
 
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)
+  assert numRegs % REGS_PER_DS_READ == 0, (
+    f"numRegs ({numRegs}) must be a multiple of REGS_PER_DS_READ "
+    f"({REGS_PER_DS_READ}) so each ds_read_b128 maps to a whole tile chunk")
   numReadsForTile = numRegs // REGS_PER_DS_READ
 
   module = Module()

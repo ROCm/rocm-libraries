@@ -905,8 +905,6 @@ class LogicalScheduler:
         Faithful continuation of Phase 2 of assign_vgpr_tiles — appends one
         tile_map per extra iter, does not change semantics.
         """
-        from collections import deque  # match Phase 2's import scope
-
         for extra_iter in range(self.unroll_factor, target_uf):
             active = dict(carry_active)
             for t in self.tensors:
