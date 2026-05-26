@@ -49,7 +49,7 @@ from typing import NamedTuple, Optional
 from rocisa.code import Label, Module
 from rocisa.container import EXEC, MUBUFModifiers, sgpr, vgpr, mgpr
 from rocisa.instruction import (
-    BufferLoadU16,
+    BufferLoadB32, BufferLoadU16,
     SAddU32, SAndB32, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, SCmpLgU32,
     SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SOrB32,
     SSubU32, SWaitCnt,
@@ -871,6 +871,20 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
         # vaddr=0 (lane 0 only, no per-lane offset); soffset carries
         # the global byte offset for A[m_last, K_local]; m0 holds the
         # absolute LDS byte address.
+        #
+        # NOTE: a 4-byte `buffer_load_dword` variant was attempted to
+        # cover the K_remain-2 + K_remain-1 dropped pair under
+        # align-DOWN's per-DWORD clip, but it WORSENED the K_remain=1
+        # gauntlet shape (errors went from 214 → 430 / 16384) because
+        # the K_remain=1 case has a multi-ROW cross-DWORD clip that
+        # the 4-byte load corrupts (the 4 bytes span 2 row's K=0
+        # values with stride=1, and writing them to lane 62's LDS
+        # chunk plants row 126's K=0 into row 127's slot). See
+        # `docs/narrow-trailing-load-structural-issue.md` for the
+        # full diagnosis. Reverting to ushort keeps K_remain=1 at the
+        # 214-error baseline while still partially fixing K_remain
+        # in {3, 5, 7, ...} (one element per row repaired; K_remain-2
+        # remains zero).
         mubuf = MUBUFModifiers(offen=True, offset12=0, lds=True,
                                glc=False, slc=False, nt=False)
         module.add(BufferLoadU16(
