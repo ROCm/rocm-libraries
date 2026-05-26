@@ -8572,7 +8572,19 @@ class KernelWriterAssembly(KernelWriter):
           bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB, unrollLoopIdx)
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
-
+          # Precisely setting reuse bit
+          if kernel["MIWaveTile"][outer]==1 and kernel["MIWaveTile"][inner]==1:
+            reuseA   = False
+            reuseB   = False
+          elif kernel["MIWaveTile"][outer]>1 and kernel["MIWaveTile"][inner]==1:
+            reuseA   = True if tPB["tile01Idx"] and idx1 < (kernel["MIWaveTile"][outer]-1) else False
+            reuseB   = True if not tPB["tile01Idx"] and idx1 < (kernel["MIWaveTile"][outer]-1) else False
+          elif kernel["MIWaveTile"][outer]==1 and kernel["MIWaveTile"][inner]>1:
+            reuseA   = True if not tPB["tile01Idx"] and idx0 < (kernel["MIWaveTile"][inner]-1) else False
+            reuseB   = True if tPB["tile01Idx"] and idx0 < (kernel["MIWaveTile"][inner]-1) else False
+          else:
+            reuseA   = True if not tPB["tile01Idx"] and idx0 < (kernel["MIWaveTile"][inner]-1) else False
+            reuseB   = True if tPB["tile01Idx"] and idx0 < (kernel["MIWaveTile"][inner]-1) else False
           if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             if idxInner not in shiftedIndicesA:
               imod.add(_shiftLrElements(aStr_base, vgprPerInputA, idxInner))
@@ -8758,12 +8770,12 @@ class KernelWriterAssembly(KernelWriter):
                                        mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                        a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                                       mxsa=srcMX0, mxsb=srcMX1, block=block,
+                                       mxsa=srcMX0, mxsb=srcMX1, block=block, reuseA=reuseA, reuseB=reuseB, \
                                        comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag, reuseA=reuseA, reuseB=reuseB, \
                                        comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
             prevAccIdx = accIdx
 
