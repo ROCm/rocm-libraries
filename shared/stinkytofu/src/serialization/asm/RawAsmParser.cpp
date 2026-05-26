@@ -1190,28 +1190,45 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
         // This lets raw .s files carry token group hints without affecting the assembler.
         std::vector<int> lineTokens;
 
-        // When preserveComments is enabled, capture a trailing "// ..." or ";"
-        // comment so we can re-attach it to the parsed instruction/directive.
-        // Note: if the comment turns out to be a "st.token:" annotation we
-        // discard lineComment below (after the token parser populates
-        // lineTokens) so that hidden annotations are not echoed as comments.
+        // Find first '//' or ';' line-comment delimiter that is OUTSIDE any
+        // /* ... */ block. Naive line.find("//") / find(';') would truncate
+        // inside a block like `/* foo//bar */`, dropping the closing `*/` and
+        // leaving an unterminated comment that the assembler would extend
+        // across subsequent instructions.
+        // Out-param `kind`: 0 = '//', 1 = ';'. Returns npos if none found.
+        auto findLineCommentOutsideBlock = [](const std::string& s, int& kind) -> size_t {
+            size_t i = 0;
+            while (i < s.size()) {
+                if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '*') {
+                    size_t end = s.find("*/", i + 2);
+                    if (end == std::string::npos)
+                        return std::string::npos;  // unclosed; leave whole line
+                    i = end + 2;
+                    continue;
+                }
+                if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '/') {
+                    kind = 0;
+                    return i;
+                }
+                if (s[i] == ';') {
+                    kind = 1;
+                    return i;
+                }
+                ++i;
+            }
+            return std::string::npos;
+        };
+
+        // Capture trailing "// ..." or ";" text so the emitter can re-attach
+        // it to the parsed instruction. If the captured text is actually a
+        // "st.token:" annotation, the token parser below populates lineTokens
+        // and we clear lineComment so hidden annotations are not echoed back.
         std::string lineComment;
         if (options.preserveComments) {
-            size_t pos = std::string::npos;
-            size_t skip = 0;
-            for (size_t i = 0; i + 1 < line.size(); ++i) {
-                if (line[i] == '/' && line[i + 1] == '/') {
-                    pos = i;
-                    skip = 2;
-                    break;
-                }
-            }
-            size_t semi = line.find(';');
-            if (semi != std::string::npos && (pos == std::string::npos || semi < pos)) {
-                pos = semi;
-                skip = 1;
-            }
+            int kind = -1;
+            size_t pos = findLineCommentOutsideBlock(line, kind);
             if (pos != std::string::npos) {
+                size_t skip = (kind == 0) ? 2 : 1;
                 lineComment = line.substr(pos + skip);
                 size_t f = lineComment.find_first_not_of(" \t");
                 if (f == std::string::npos)
@@ -1222,15 +1239,15 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
                 if (l != std::string::npos) lineComment.resize(l + 1);
             }
         }
-        for (size_t i = 0; i + 1 < line.size(); ++i) {
-            if (line[i] == '/' && line[i + 1] == '/') {
-                std::string comment = line.substr(i + 2);
-                // Search for "st.token:" anywhere in the comment so that other
-                // comment text (e.g. "// load A // st.token:0") is tolerated.
+        {
+            int kind = -1;
+            size_t pos = findLineCommentOutsideBlock(line, kind);
+            if (pos != std::string::npos && kind == 0) {
+                // '//' line comment — also parse 'st.token:' annotation
+                std::string comment = line.substr(pos + 2);
                 size_t tokPos = comment.find("st.token:");
                 if (tokPos != std::string::npos) {
                     std::string tokenList = comment.substr(tokPos + 9);
-                    // Parse comma-separated integers
                     size_t p = 0;
                     while (p < tokenList.size()) {
                         while (p < tokenList.size() &&
@@ -1248,13 +1265,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
                         if (p < tokenList.size() && tokenList[p] == ',') ++p;
                     }
                 }
-                line = line.substr(0, i);
-                break;
+                line = line.substr(0, pos);
+            } else if (pos != std::string::npos && kind == 1) {
+                line = line.substr(0, pos);
             }
-        }
-        {
-            size_t semi = line.find(';');
-            if (semi != std::string::npos) line = line.substr(0, semi);
         }
 
         // Trim leading/trailing whitespace
