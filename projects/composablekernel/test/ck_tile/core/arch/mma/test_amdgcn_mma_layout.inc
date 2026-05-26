@@ -286,9 +286,9 @@ struct MmaLayoutTestKernel
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
-               int scale_A = 125;
-               int scale_B = 129;
-                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
+                int scale_A = 0x7D7D7D7D; // E8M0 = 125 in every byte
+                int scale_B = 0x81818181; // E8M0 = 129 in every byte
+                c_frag      = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
             }
             else
             {
