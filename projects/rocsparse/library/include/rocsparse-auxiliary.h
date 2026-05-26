@@ -2023,7 +2023,7 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
 *  \brief Create SpILDLT0 descriptor.
 *
 *  \details
-*  \p rocsparse_spildlt0_descr_create creates the descriptor of the configuration of the sparse Incomplete LDL^H of level 0.
+*  \p rocsparse_spildlt0_descr_create creates the descriptor of the configuration of the sparse Incomplete \f$LDL^H\f$ of level 0.
  *  @param[in]
  *  handle  the handle to the rocSPARSE library context.
 *  @param[out]
@@ -2044,7 +2044,7 @@ rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle         handle
 *  \brief Destroy SpILDLT0 descriptor.
 *
 *  \details
-*  \p rocsparse_spildlt0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete LDL^H of level 0.
+*  \p rocsparse_spildlt0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete \f$LDL^H\f$ of level 0.
 *
  *  @param[in]
  *  handle  the handle to the rocSPARSE library context.
