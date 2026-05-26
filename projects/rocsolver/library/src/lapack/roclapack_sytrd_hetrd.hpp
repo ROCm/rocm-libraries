@@ -78,15 +78,17 @@ void rocsolver_sytrd_hetrd_getMemorySize(const rocblas_int n,
     rocsolver_sytd2_hetd2_getMemorySize<BATCHED, T>(n, batch_count, size_scalars, &w2, &n2, &s2,
                                                     size_workArr);
 
-    if(n > xxTRD_xxTD2_SWITCHSIZE)
+    // Panel size used for LATRD (0 = no LATRD call for this n, pure SYTD2)
+    rocblas_int eff_k = (n <= 128) ? 0 : (n <= 256) ? 32 : xxTRD_BLOCKSIZE;
+
+    if(eff_k > 0)
     {
-        // size required to store temporary matrix W
-        s1 = n * xxTRD_BLOCKSIZE;
-        s1 *= sizeof(T) * batch_count;
+        // size required to store temporary matrix W (n rows x eff_k cols)
+        s1 = (size_t)n * eff_k * sizeof(T) * batch_count;
 
         // extra requirements to call latrd_forsytrd
-        rocsolver_latrd_forsytrd_getMemorySize<BATCHED, T>(n, xxTRD_BLOCKSIZE, batch_count,
-                                                           size_scalars, &w1, &n1, size_workArr);
+        rocsolver_latrd_forsytrd_getMemorySize<BATCHED, T>(n, eff_k, batch_count, size_scalars, &w1,
+                                                           &n1, size_workArr);
     }
 
     *size_tmptau_W = std::max(s1, s2);
@@ -165,14 +167,32 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    rocblas_int k = env_sytrd_blocksize;
-    rocblas_int kk = xxTRD_xxTD2_SWITCHSIZE;
 
-    // if the matrix is too small, use the unblocked variant of the algorithm
-    if(n <= kk)
+    // n <= 128: SYTD2 handles everything directly (small kernel, no LATRD overhead).
+    // 128 < n <= 256: LATRD panel k=32, trailing remainder <= 32 goes to SYTD2 small kernel.
+    // 256 < n <= 2048: LATRD panel k=64, trailing remainder <= 32 goes to SYTD2 small kernel.
+    // n > 2048: unchanged (k=env_sytrd_blocksize, kk=xxTRD_xxTD2_SWITCHSIZE).
+    if(n <= 128)
         return rocsolver_sytd2_hetd2_template(handle, uplo, n, A, shiftA, lda, strideA, D, strideD,
                                               E, strideE, tau, strideP, batch_count, scalars,
                                               work_Acpy, norms, tmptau_W, workArr);
+
+    rocblas_int k, kk;
+    if(n <= 256)
+    {
+        k = 32;
+        kk = 32;
+    }
+    else if(n <= 2048)
+    {
+        k = env_sytrd_blocksize;
+        kk = 32;
+    }
+    else
+    {
+        k = env_sytrd_blocksize;
+        kk = xxTRD_xxTD2_SWITCHSIZE;
+    }
 
     // everything must be executed with scalars on the device
     rocblas_pointer_mode old_mode;
@@ -381,14 +401,32 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    rocblas_int k = env_sytrd_blocksize;
-    rocblas_int kk = xxTRD_xxTD2_SWITCHSIZE;
 
-    // if the matrix is too small, use the unblocked variant of the algorithm
-    if(n <= kk)
+    // n <= 128: SYTD2 handles everything directly (small kernel, no LATRD overhead).
+    // 128 < n <= 256: LATRD panel k=32, trailing remainder <= 32 goes to SYTD2 small kernel.
+    // 256 < n <= 2048: LATRD panel k=64, trailing remainder <= 32 goes to SYTD2 small kernel.
+    // n > 2048: unchanged (k=env_sytrd_blocksize, kk=xxTRD_xxTD2_SWITCHSIZE).
+    if(n <= 128)
         return rocsolver_sytd2_hetd2_template(handle, uplo, n, A, shiftA, lda, strideA, D, strideD,
                                               E, strideE, tau, strideP, batch_count, scalars,
                                               work_Acpy, norms, tmptau_W, workArr);
+
+    rocblas_int k, kk;
+    if(n <= 256)
+    {
+        k = 32;
+        kk = 32;
+    }
+    else if(n <= 2048)
+    {
+        k = env_sytrd_blocksize;
+        kk = 32;
+    }
+    else
+    {
+        k = env_sytrd_blocksize;
+        kk = xxTRD_xxTD2_SWITCHSIZE;
+    }
 
     // everything must be executed with scalars on the device
     rocblas_pointer_mode old_mode;
