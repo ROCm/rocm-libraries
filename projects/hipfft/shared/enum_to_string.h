@@ -22,6 +22,8 @@
 #define ENUM_TO_STRING_H
 
 #include "fft_params.h"
+#include "../library/include/hipfft/hipfft.h"
+#include "../library/include/hipfft/hipfftXt.h"
 
 // Return the string of the hipError code.
 static std::string hipError_to_string(const hipError_t ret)
@@ -76,6 +78,44 @@ static std::string hipError_to_string(const hipError_t ret)
         return "hipErrorTbd";
     default:
         throw std::runtime_error("unknown hipError");
+    }
+}
+
+static std::string subformat_to_name(const hipfftXtSubFormat_t subformat)
+{
+    switch(subformat)
+    {
+    case HIPFFT_XT_FORMAT_INPUT:
+        return "HIPFFT_XT_FORMAT_INPUT";
+    case HIPFFT_XT_FORMAT_OUTPUT:
+        return "HIPFFT_XT_FORMAT_OUTPUT";
+    case HIPFFT_XT_FORMAT_INPLACE:
+        return "HIPFFT_XT_FORMAT_INPLACE";
+    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+        return "HIPFFT_XT_FORMAT_INPLACE_SHUFFLED";
+    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+        return "HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED";
+    case HIPFFT_FORMAT_UNDEFINED:
+        return "HIPFFT_FORMAT_UNDEFINED";
+    }
+}
+
+static std::string hipffttype_to_name(const hipfftType txtype)
+{
+    switch(txtype)
+    {
+    case HIPFFT_R2C:
+        return "HIPFFT_R2C";
+    case HIPFFT_C2R:
+        return "HIPFFT_C2R";
+    case HIPFFT_C2C:
+        return "HIPFFT_C2C";
+    case HIPFFT_D2Z:
+        return "HIPFFT_D2Z";
+    case HIPFFT_Z2D:
+        return "HIPFFT_Z2D";
+    case HIPFFT_Z2Z:
+        return "HIPFFT_Z2Z";
     }
 }
 #endif
