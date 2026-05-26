@@ -28,7 +28,7 @@
 #include "miopen_cstdint.hpp"
 #include "miopen_limits.hpp"
 
-#include <miopen/bfloat16.hpp>
+#include "../include/miopen/bfloat16.hpp"
 using hip_bfloat16 = bfloat16;
 
 #ifndef MIOPEN_ENABLE_F8_DEVICE_CODE
