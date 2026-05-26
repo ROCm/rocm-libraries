@@ -75,6 +75,15 @@ class InstructionEmitter:
             self.tileInfoMap['SA'] = scaleTileInfoA
             self.tileInfoMap['SB'] = scaleTileInfoB
 
+        # Per-uid k-window size: numSubIterK / numUnroll[t] = grGran[t].k
+        self._per_uid_k = {
+            'A': config.grA.k,
+            'B': config.grB.k,
+        }
+        if self.hasScale:
+            self._per_uid_k['SA'] = config.grSA.k
+            self._per_uid_k['SB'] = config.grSB.k
+
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
             'mfma':     lambda em, ui: self.emit_mfma(em.source, ui),
@@ -83,7 +92,7 @@ class InstructionEmitter:
             'wait_gr':  lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':  lambda em, ui: self.emit_wait_lr(),
             'sync':     lambda em, ui: self.emit_sync(),
-            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source),
+            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source, ui),
             'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source),
             'skip':     lambda em, ui: self.emit_skip(em.source),
         }
@@ -135,10 +144,12 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             vgprTiles = self.vgprTilesA if tensor == 'A' else self.vgprTilesB
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
+            per_uid_k = self._per_uid_k[tensor]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
-                    subtileK = k // self.subtileShapeK
-                    subIterK_within = k % self.subtileShapeK
+                    local_k = k % per_uid_k
+                    subtileK = local_k // self.subtileShapeK
+                    subIterK_within = local_k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile))
@@ -168,9 +179,10 @@ class InstructionEmitter:
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
+            uid_k_base = placement.unrollId * grGran.k
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
-                    subtileK = k // self.subtileShapeK
+                    subtileK = (k - uid_k_base) // self.subtileShapeK
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
@@ -204,8 +216,10 @@ class InstructionEmitter:
     def emit_sync(self):
         return [SBarrier(comment="Barrier")]
 
-    def emit_lr_inc(self, source):
+    def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor."""
+        if getattr(source, 'alt_unroll', False) and unroll_iter % 2 == 0:
+            return []
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
@@ -217,10 +231,11 @@ class InstructionEmitter:
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
-        if tensor in ('SA', 'SB'):
-            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
-        else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
+        if not getattr(source, 'swap_only', False):
+            if tensor in ('SA', 'SB'):
+                module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+            else:
+                module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 

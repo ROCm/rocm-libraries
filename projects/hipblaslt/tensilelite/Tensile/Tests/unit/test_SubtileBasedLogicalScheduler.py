@@ -97,8 +97,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
 
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
-                         grSA_k=2, grSA_mn=8, grSB_k=2, grSB_mn=8, pgr=2):
-    """Build FP4 config with scale tensors. k_gran applies to LR A/B."""
+                         grSA_k_gran=1, grSA_mn_gran=1, grSB_k_gran=1, grSB_mn_gran=1, pgr=2):
+    """Build FP4 config with scale tensors. k_gran applies to LR A/B.
+    grSA/SB_k and grSA/SB_mn are multipliers on the tile-info-derived values."""
     kernel = create_kernel(256, 256, fp4=True, depthU=depthU)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
@@ -114,8 +115,10 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
         grB=ReadGranularity(mn=1, k=2),
         lrSA=ReadGranularity(mn=2, k=2),
         lrSB=ReadGranularity(mn=2, k=2),
-        grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
-        grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
+        grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0] * grSA_mn_gran,
+                             k=scaleTiA.localMMATileGrid[1] * grSA_k_gran),
+        grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0] * grSB_mn_gran,
+                             k=scaleTiB.localMMATileGrid[1] * grSB_k_gran),
         numPartitionsM=numPartM,
         numPartitionsN=numPartN,
         pgr=pgr,
@@ -265,11 +268,14 @@ def _assert_lr(slot, tensor, mt, k_start, k_end, tile_start, tile_end):
     assert lr.tiles.tileId_end == tile_end
 
 
-def _assert_gr(slot, tensor, k_start, k_end, tile_start, tile_end, mt=2, idx=0):
+def _assert_gr(slot, tensor, k_start, k_end, tile_start, tile_end, mt=2, idx=0, uid=None):
     """Assert a GR placement matches expected values."""
-    grs = [gr for gr in slot.grs if gr.tensor == tensor]
+    if uid is not None:
+        grs = [gr for gr in slot.grs if gr.tensor == tensor and gr.unrollId == uid]
+    else:
+        grs = [gr for gr in slot.grs if gr.tensor == tensor]
     assert len(grs) > idx, \
-        f"Expected at least {idx+1} GR(s) for {tensor} in slot {slot.subIterK}, got {len(grs)}"
+        f"Expected at least {idx+1} GR(s) for {tensor} (uid={uid}) in slot {slot.subIterK}, got {len(grs)}"
     gr = grs[idx]
     assert gr.mtIteration == mt, \
         f"GR {tensor}[{idx}] in slot {slot.subIterK}: expected mt={mt}, got {gr.mtIteration}"
@@ -280,12 +286,18 @@ def _assert_gr(slot, tensor, k_start, k_end, tile_start, tile_end, mt=2, idx=0):
 
 
 def _dep_refs(placement):
-    """Return list of (type, tensor, partition, subIterK_slot, mt_offset) for deps."""
+    """Return list of dep tuples.
+
+    GR: (type, tensor, partition, subIterK_slot, mt_offset, unrollId)
+    LR: (type, tensor, partition, subIterK_slot, mt_offset)
+    """
     result = []
     for dep in placement.deps:
         p = dep.ref
-        kind = 'LR' if isinstance(p, LRPlacement) else 'GR'
-        result.append((kind, p.tensor, p.partition, p.subIterK_slot, dep.mt_offset))
+        if isinstance(p, LRPlacement):
+            result.append(('LR', p.tensor, p.partition, p.subIterK_slot, dep.mt_offset))
+        else:
+            result.append(('GR', p.tensor, p.partition, p.subIterK_slot, dep.mt_offset, p.unrollId))
     return result
 
 
@@ -725,6 +737,29 @@ class TestAssignVgprTiles:
         assert not sched.needs_unrolling
         self._assert_no_conflict_and_unrolling(sched)
 
+    def test_multi_du_unroll2_AB(self):
+        """Multi-DU: numSubIterK=4, A/B k_gran=1 → 4 distinct k_chunks.
+        uid=0 covers k=[0,1], uid=1 covers k=[2,3]. No key collision."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        slots = sched._partitions[0]
+        assert len(slots) == 4
+
+        # All 4 slots have MFMA tile maps for A, B, SA, SB
+        for slot in slots:
+            for tensor in ('A', 'B', 'SA', 'SB'):
+                assert len(slot.mfma.vgpr_tile_maps[tensor]) > 0
+
+        # Within each slot, MFMA read and LR write use different VGPRs
+        # (verified by the generic helper)
+        self._assert_no_conflict_and_unrolling(sched)
+
+        # Peaks: same as single-DU (no uid collision inflating counts)
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['SA'] == 8
+
 
 # ══════════════════════════════════════════════════════════════
 # Step 3: Place GRs
@@ -822,6 +857,38 @@ class TestPlaceGRs:
             _assert_slot_grs(parts[pi][0], ['B'], f"P{pi} s0")
             _assert_gr(parts[pi][0], 'B', 0, 2, b_idx, b_idx+1, mt=2)
 
+    def test_1x1_multi_du_unroll2_AB(self):
+        """grSA/SB k_gran=2 → numSubIterK expanded 2→4, numUnroll={A:2, B:2, SA:1, SB:1}.
+        PGR clamped to 1 → GR at MT1.
+
+        uid=0: A/B k=[0,2) only (uid's own k range), SA/SB k=[0,4).
+        uid=1: A/B k=[2,4) (second data read), SA/SB skipped.
+        """
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        assert cfg.numSubIterK == 4
+        assert cfg.numUnroll == {'A': 2, 'B': 2, 'SA': 1, 'SB': 1}
+
+        sched = LogicalScheduler(cfg)
+        slots = sched.place_GRs()
+        assert len(slots) == 4
+
+        # uid=0: A k=[0,2) split across s0/s1, B k=[0,2) + SA/SB @s2
+        _assert_gr(slots[0], 'A', 0, 2, 0, 4, mt=1, uid=0)
+        _assert_gr(slots[1], 'A', 0, 2, 4, 8, mt=1, uid=0)
+        _assert_gr(slots[2], 'B', 0, 2, 0, 8, mt=1, uid=0)
+
+        # SA/SB uid=0 @s2
+        _assert_gr(slots[2], 'SA', 0, 4, 0, 8, mt=1, uid=0)
+        _assert_gr(slots[2], 'SB', 0, 4, 0, 8, mt=1, uid=0)
+
+        # uid=1: consolidated into last existing slot (s3) so the
+        # instruction scheduler interleaves them with MFMAs
+        _assert_gr(slots[3], 'A', 2, 4, 0, 4, mt=1, uid=1)
+        _assert_gr(slots[3], 'A', 2, 4, 4, 8, mt=1, uid=1, idx=1)
+        _assert_gr(slots[3], 'B', 2, 4, 0, 8, mt=1, uid=1)
+        assert not any(gr.tensor in ('SA', 'SB') and gr.unrollId == 1
+                       for slot in slots for gr in slot.grs)
+
     def test_pgr1_gr_before_corresponding_lr(self):
         """PGR=1: GR(T, mt=X) must be placed strictly before first LR(T, mt=X)."""
         cfg = make_cfg_bf16_pgr1()
@@ -874,9 +941,9 @@ class TestAnnotateDeps:
         assert len(mfma0_deps) == 4
 
         # LR A @s0 → GR A @s0 (MT-2)
-        assert _dep_refs(_get_lr(s0, 'A')) == [('GR', 'A', 0, 0, -2)]
+        assert _dep_refs(_get_lr(s0, 'A')) == [('GR', 'A', 0, 0, -2, 0)]
         # LR B @s0 → last GR B @s1 (MT-2)
-        assert _dep_refs(_get_lr(s0, 'B')) == [('GR', 'B', 0, 1, -2)]
+        assert _dep_refs(_get_lr(s0, 'B')) == [('GR', 'B', 0, 1, -2, 0)]
 
         # GR A @s0 → LR A collision (MT 0)
         gr_a0 = [gr for gr in s0.grs if gr.tensor == 'A'][0]
@@ -907,6 +974,66 @@ class TestAnnotateDeps:
         mfma_p3_s0 = _dep_refs(parts[3][0].mfma)
         assert ('LR', 'A', 0, 3, 0) in mfma_p3_s0
         assert ('LR', 'SA', 0, 2, 0) in mfma_p3_s0
+
+    def test_1x1_multi_du_unroll2_AB(self):
+        """Multi-DU: uid=0 and uid=1 GRs get correct collision deps.
+        PGR=1 → GR at MT1, deps relative to MT1."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.annotate_deps()
+        slots = sched._partitions[0]
+
+        # LR A k=[1] @s0 → GR A uid=0 k=[0,2) @s1, MT-1
+        assert _dep_refs(_get_lr(slots[0], 'A')) == [('GR', 'A', 0, 1, -1, 0)]
+
+        # LR B k=[1] @s0 → GR B uid=0 k=[0,2) @s2, MT-1
+        assert _dep_refs(_get_lr(slots[0], 'B')) == [('GR', 'B', 0, 2, -1, 0)]
+
+        # LR A k=[2] @s1 → GR A uid=1 @s3, MT-1
+        assert _dep_refs(_get_lr(slots[1], 'A')) == [('GR', 'A', 0, 3, -1, 1)]
+
+        # LR B k=[2] @s1 → GR B uid=1 @s3, MT-1
+        assert _dep_refs(_get_lr(slots[1], 'B')) == [('GR', 'B', 0, 3, -1, 1)]
+
+        # LR A k=[3] @s2 → GR A uid=1 @s3, MT-1
+        assert _dep_refs(_get_lr(slots[2], 'A')) == [('GR', 'A', 0, 3, -1, 1)]
+
+        # LR B k=[3] @s2 → GR B uid=1 @s3, MT-1
+        assert _dep_refs(_get_lr(slots[2], 'B')) == [('GR', 'B', 0, 3, -1, 1)]
+
+        # LR A k=[0] @s3 → GR A uid=0 k=[0,2) @s1, MT 0 (same iter)
+        assert _dep_refs(_get_lr(slots[3], 'A')) == [('GR', 'A', 0, 1, 0, 0)]
+
+        # LR B k=[0] @s3 → GR B uid=0 k=[0,2) @s2, MT 0 (same iter)
+        assert _dep_refs(_get_lr(slots[3], 'B')) == [('GR', 'B', 0, 2, 0, 0)]
+
+        # LR SA k=[2,3] @s0 → GR SA uid=0 k=[0,4) @s2, MT-1
+        assert _dep_refs(_get_lr(slots[0], 'SA')) == [('GR', 'SA', 0, 2, -1, 0)]
+
+        # LR SB k=[2,3] @s1 → GR SB uid=0 k=[0,4) @s2, MT-1
+        assert _dep_refs(_get_lr(slots[1], 'SB')) == [('GR', 'SB', 0, 2, -1, 0)]
+
+        # LR SA k=[0,1] @s3 → GR SA uid=0 k=[0,4) @s2, MT 0 (same iter)
+        assert _dep_refs(_get_lr(slots[3], 'SA')) == [('GR', 'SA', 0, 2, 0, 0)]
+
+        # LR SB k=[0,1] @s3 → GR SB uid=0 k=[0,4) @s2, MT 0 (same iter)
+        assert _dep_refs(_get_lr(slots[3], 'SB')) == [('GR', 'SB', 0, 2, 0, 0)]
+
+        # GR A uid=0 @s0 → collision LR A @s0, MT-1
+        gr_a_uid0_s0 = [gr for gr in slots[0].grs if gr.tensor == 'A' and gr.unrollId == 0][0]
+        assert _dep_refs(gr_a_uid0_s0) == [('LR', 'A', 0, 0, -1)]
+
+        # GR A uid=1 @s3 (consolidated) (k=[2,4)) → collision LR A @s2, MT-1
+        gr_a_uid1_s3 = [gr for gr in slots[3].grs if gr.tensor == 'A' and gr.unrollId == 1][0]
+        assert _dep_refs(gr_a_uid1_s3) == [('LR', 'A', 0, 2, -1)]
+
+        # GR B uid=1 @s3 (consolidated) (k=[2,4)) → collision LR B @s2, MT-1
+        gr_b_uid1_s3 = [gr for gr in slots[3].grs if gr.tensor == 'B' and gr.unrollId == 1][0]
+        assert _dep_refs(gr_b_uid1_s3) == [('LR', 'B', 0, 2, -1)]
+
+        # No uid=1 GRs for SA or SB
+        all_grs = [gr for slot in slots for gr in slot.grs]
+        assert not any(gr.tensor in ('SA', 'SB') and gr.unrollId == 1 for gr in all_grs)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1094,6 +1221,95 @@ class TestInsertGrLrInc:
         assert len(gr_a_p2) == 1
         assert _preop_inc_tensors(gr_a_p2[0], 'gr_inc') == ['A']
 
+    def test_1x1_multi_du_gr_inc(self):
+        """Multi-DU PGR=1: gr_inc as postOps on the globally last GR per (tensor, uid).
+
+        With multi-DU, GRInc must fire AFTER all loads for a uid complete
+        (not before the first load), because uid=0 and uid=1 loads are
+        interleaved across slots and share the same SRD.
+        """
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.insert_gr_lr_inc()
+        slots = sched._partitions[0]
+
+        # No preOp gr_inc on any GR (multi-DU PGR=1 uses postOps)
+        all_preop_gr_inc = [op for slot in slots for gr in slot.grs
+                            for op in gr.preOps if op.kind == 'gr_inc']
+        assert len(all_preop_gr_inc) == 0
+
+        # postOp gr_inc on the globally last GR of each (tensor, uid)
+        all_postop_gr_inc = [op for slot in slots for gr in slot.grs
+                             for op in gr.postOps if op.kind == 'gr_inc']
+        postop_keys = [(op.tensor, op.unrollId) for op in all_postop_gr_inc]
+        assert ('A', 0) in postop_keys
+        assert ('A', 1) in postop_keys
+        assert ('B', 0) in postop_keys
+        assert ('B', 1) in postop_keys
+        assert ('SA', 0) in postop_keys
+        assert ('SB', 0) in postop_keys
+        # SA/SB have numUnroll=1, no uid=1
+        assert ('SA', 1) not in postop_keys
+        assert ('SB', 1) not in postop_keys
+
+    def test_1x1_multi_du_lr_inc_at_uid_boundary(self):
+        """Multi-DU: lr_inc inserted at uid boundary to match GRIncOp swaps.
+
+        numUnroll[A]=numUnroll[B]=2, per_uid_k=2 for A/B, per_uid_k=4 for SA/SB.
+
+        LR layout (k values, rotated offset):
+          s0: LR A k=1 (uid=0), LR B k=1 (uid=0), LR SA k=2 (uid=0)
+          s1: LR A k=2 (uid=1), LR B k=2 (uid=1), LR SB k=2 (uid=0)
+          s2: LR A k=3 (uid=1), LR B k=3 (uid=1)
+          s3: LR A k=0 (uid=0, mt=1), LR B k=0 (uid=0, mt=1),
+              LR SA k=0 (mt=1), LR SB k=0 (mt=1)
+
+        Expected lr_inc:
+          - s1: LR A/B get lr_inc (uid boundary: k=1→k=2, uid 0→1)
+          - s3: LR A/B/SA/SB get lr_inc (MT transition: mt=0→mt=1)
+          No first-LR lr_inc at s0 (MT transition already covers it).
+        """
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2)
+        sched = LogicalScheduler(cfg)
+        sched.insert_gr_lr_inc()
+        slots = sched._partitions[0]
+
+        # s0: no lr_inc (first LRs for A/B, but MT transition will cover them)
+        lr_a0 = _get_lr(slots[0], 'A')
+        lr_b0 = _get_lr(slots[0], 'B')
+        assert _preop_inc_tensors(lr_a0, 'lr_inc') == []
+        assert _preop_inc_tensors(lr_b0, 'lr_inc') == []
+
+        # s1: uid boundary for A and B (k=1→k=2, uid 0→1) → lr_inc
+        lr_a1 = _get_lr(slots[1], 'A')
+        lr_b1 = _get_lr(slots[1], 'B')
+        assert _preop_inc_tensors(lr_a1, 'lr_inc') == ['A']
+        assert _preop_inc_tensors(lr_b1, 'lr_inc') == ['B']
+
+        # s2: no lr_inc (same uid=1 as s1)
+        lr_a2 = _get_lr(slots[2], 'A')
+        lr_b2 = _get_lr(slots[2], 'B')
+        assert _preop_inc_tensors(lr_a2, 'lr_inc') == []
+        assert _preop_inc_tensors(lr_b2, 'lr_inc') == []
+
+        # s3: MT transition (mt=0→mt=1) → lr_inc for all tensors
+        lr_a3 = _get_lr(slots[3], 'A')
+        lr_b3 = _get_lr(slots[3], 'B')
+        lr_sa3 = _get_lr(slots[3], 'SA')
+        lr_sb3 = _get_lr(slots[3], 'SB')
+        assert _preop_inc_tensors(lr_a3, 'lr_inc') == ['A']
+        assert _preop_inc_tensors(lr_b3, 'lr_inc') == ['B']
+        assert _preop_inc_tensors(lr_sa3, 'lr_inc') == ['SA']
+        assert _preop_inc_tensors(lr_sb3, 'lr_inc') == ['SB']
+
+        # Total lr_inc: 2 per A, 2 per B, 1 per SA, 1 per SB = 6
+        # Matches gr_inc count (2 per A/B, 1 per SA, 1 per SB = 6)
+        all_lr_inc = [op for slot in slots for lr in slot.lrs
+                      for op in lr.preOps if op.kind == 'lr_inc']
+        all_gr_inc = [op for slot in slots for gr in slot.grs
+                      for op in gr.preOps if op.kind == 'gr_inc']
+        assert len(all_lr_inc) == len(all_gr_inc) == 6
+
 
 # ══════════════════════════════════════════════════════════════
 # Step 7: Compute inflight loads
@@ -1274,6 +1490,49 @@ class TestBuildPreloop:
         # (LR data is loaded fresh, not from a previous MT iteration)
         assert 'lr_inc' not in all_ops
 
+    def test_multi_du_preloop(self):
+        """Multi-DU: PGR=1 preloop loads per-uid with GRIncOps between uids."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_preloop()
+
+        preloop = sched._preloop_emitted
+        all_ops = [em.opType for partition in preloop
+                   for group in partition for em in group]
+
+        grs = [em.source for partition in preloop
+               for group in partition for em in group if em.opType == 'gr']
+
+        # MT=0 GRs: A uid=0, A uid=1, B uid=0, B uid=1, SA uid=0, SB uid=0
+        mt0 = [(g.tensor, g.unrollId) for g in grs if g.mtIteration == 0]
+        assert ('A', 0) in mt0
+        assert ('A', 1) in mt0
+        assert ('B', 0) in mt0
+        assert ('B', 1) in mt0
+        assert ('SA', 0) in mt0
+        assert ('SB', 0) in mt0
+        assert ('SA', 1) not in mt0
+        assert ('SB', 1) not in mt0
+
+        # PGR=1: no MT=1 GRs, no SkipToNGLL
+        assert not any(g.mtIteration == 1 for g in grs)
+
+        # gr_inc between uid groups (SRD advance + LDS buffer swap)
+        gr_incs = [em.source for partition in preloop
+                   for group in partition for em in group
+                   if em.opType == 'gr_inc']
+        inc_keys = [(op.tensor, op.unrollId) for op in gr_incs]
+        assert ('A', 0) in inc_keys
+        assert ('A', 1) in inc_keys
+        assert ('B', 0) in inc_keys
+        assert ('B', 1) in inc_keys
+        # SA/SB (numUnroll=1) need GR_inc at uid=0 to advance scale SRD
+        # and swap scale LDS write buffer between DU rounds.
+        assert ('SA', 0) in inc_keys
+        assert ('SB', 0) in inc_keys
+
 
 class TestBuildNGLL:
 
@@ -1294,6 +1553,17 @@ class TestBuildNGLL:
         assert 'lr' in all_ops
         # NGLL should not have gr_inc
         assert 'gr_inc' not in all_ops
+
+    def test_multi_du_ngll(self):
+        """Multi-DU: PGR=1 — NGLL is empty."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_ngll()
+
+        ngll = sched._ngll_emitted
+        assert ngll == [[[]]]
 
 
 class TestBuildNLL:
@@ -1316,6 +1586,30 @@ class TestBuildNLL:
         assert 'gr' not in all_ops
         assert 'gr_inc' not in all_ops
         assert 'lr_inc' not in all_ops
+
+    def test_multi_du_nll(self):
+        """Multi-DU: NLL strips GRs, gr_inc, iteration-boundary lr_inc,
+        but keeps uid_swap lr_inc (needed to switch LDS read buffer between uids)."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_nll()
+
+        nll = sched._nll_emitted
+        all_ops = [em.opType for partition in nll
+                   for group in partition for em in group]
+        all_sources = [em.source for partition in nll
+                       for group in partition for em in group]
+
+        assert 'mfma' in all_ops
+        assert 'gr' not in all_ops
+        assert 'gr_inc' not in all_ops
+        uid_swap_lr_incs = [s for op, s in zip(all_ops, all_sources)
+                            if op == 'lr_inc' and s.uid_swap]
+        non_uid_lr_incs = [s for op, s in zip(all_ops, all_sources)
+                           if op == 'lr_inc' and not s.uid_swap]
+        assert len(uid_swap_lr_incs) > 0, "uid_swap lr_inc must be kept in NLL"
+        assert len(non_uid_lr_incs) == 0, "iteration-boundary lr_inc must be removed in NLL"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1955,6 +2249,24 @@ class TestPGR0Config:
                 grA=ReadGranularity(mn=1, k=2), grB=ReadGranularity(mn=1, k=2),
                 pgr=0, numPartitionsN=2,
             )
+
+    def test_gr_gran_k_must_divide_max(self):
+        """grGran[t].k must divide max(grGran.k) — e.g. k=3 vs k=2 is rejected."""
+        with pytest.raises(AssertionError, match=r"grGran\[A\]\.k=3 must divide max\(grGran\.k\)=4"):
+            SchedulerConfig(
+                numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+                lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+                grA=ReadGranularity(mn=1, k=3), grB=ReadGranularity(mn=1, k=4),
+            )
+
+    def test_gr_gran_k_divides_max_accepted(self):
+        """grGran.k values that divide max(grGran.k) are accepted."""
+        cfg = SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=2), grB=ReadGranularity(mn=1, k=4),
+        )
+        assert cfg.numUnroll == {'A': 2, 'B': 1}
 
 
 class TestPlaceLRs_PLR0:

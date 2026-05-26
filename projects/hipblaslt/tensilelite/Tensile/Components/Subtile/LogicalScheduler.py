@@ -129,7 +129,7 @@ class SchedulerConfig:
     """Configuration for the MFMATile-based scheduler."""
     numMFMATilesM: int    # MFMA tiles in M dimension (for A)
     numMFMATilesN: int    # MFMA tiles in N dimension (for B)
-    numSubIterK: int      # subIterK steps within the macrotile
+    numSubIterK: int      # subIterK steps within the macrotile (may be expanded in __post_init__)
     lrA: ReadGranularity
     lrB: ReadGranularity
     grA: ReadGranularity
@@ -144,8 +144,31 @@ class SchedulerConfig:
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
+
+        grans = {'A': self.grA, 'B': self.grB}
+        if self.hasScale:
+            grans['SA'] = self.grSA
+            grans['SB'] = self.grSB
+
+        maxGrK = max(g.k for g in grans.values())
+        for t, g in grans.items():
+            assert maxGrK % g.k == 0, \
+                f"grGran[{t}].k={g.k} must divide max(grGran.k)={maxGrK}"
+        assert self.numSubIterK % maxGrK == 0 or maxGrK % self.numSubIterK == 0, \
+            f"numSubIterK={self.numSubIterK} and max(grGran.k)={maxGrK} must be multiples of each other"
+
+        defaultReads = {t: self.numSubIterK // g.k for t, g in grans.items()}
+
+        self.numSubIterK = max(self.numSubIterK, maxGrK)
+
+        self.numUnroll = {}
+        for t, g in grans.items():
+            reads = self.numSubIterK // g.k
+            self.numUnroll[t] = reads // (defaultReads[t] if defaultReads[t] != 0 else 1)
+
+        maxUnroll = max(self.numUnroll.values()) if self.numUnroll else 1
+
         self.plr = 0 if self.pgr == 0 else 1
-        # Forcing offsetPartition to 1.
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
@@ -249,6 +272,7 @@ class GRPlacement(Emittable):
     tiles: MFMATileRange
     subIterK_slot: int         # which subIterK this GR is placed in
     partition: int = 0         # which partition this GR belongs to
+    unrollId: int = 0          # which inner-DU iteration (0 for single-DU configs)
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -257,8 +281,9 @@ class GRPlacement(Emittable):
         self.kind = 'gr'
 
     def __str__(self):
+        uid = f" uid={self.unrollId}" if self.unrollId else ""
         return (f"GR {self.tensor} (MT {fmt_mt(self.mtIteration)}, "
-                f"subIterK {self.tiles.fmt_k()}) ids {self.tiles.fmt_tiles()}")
+                f"subIterK {self.tiles.fmt_k()}) ids {self.tiles.fmt_tiles()}{uid}")
 
 
 # ── Per-subIterK container ──────────────────────────────────
@@ -269,7 +294,15 @@ class SubIterKSlot:
     subIterK: int
     mfma: Optional[MFMAPlacement] = None
     lrs: List[LRPlacement] = field(default_factory=list)
-    grs: List[GRPlacement] = field(default_factory=list)
+    grs_by_unroll: Dict[int, List[GRPlacement]] = field(default_factory=lambda: {0: []})
+
+    @property
+    def grs(self) -> List[GRPlacement]:
+        """All GRs across all unrollIds, in uid order."""
+        result = []
+        for uid in sorted(self.grs_by_unroll.keys()):
+            result.extend(self.grs_by_unroll[uid])
+        return result
 
 
 # ── Dependency types ────────────────────────────────────────
@@ -338,6 +371,8 @@ class SyncOp(BaseOp):
 class LRIncOp(BaseOp):
     """LDS buffer swap for local reads on a specific tensor."""
     tensor: str = ""
+    uid_swap: bool = False
+    alt_unroll: bool = False
 
     def __post_init__(self):
         self.kind = 'lr_inc'
@@ -350,12 +385,15 @@ class LRIncOp(BaseOp):
 class GRIncOp(BaseOp):
     """Pointer update + LDS swap for global reads on a specific tensor."""
     tensor: str = ""
+    unrollId: int = 0
+    swap_only: bool = False
 
     def __post_init__(self):
         self.kind = 'gr_inc'
 
     def __str__(self):
-        return f"gr_inc({self.tensor})"
+        uid = f" uid={self.unrollId}" if self.unrollId else ""
+        return f"gr_inc({self.tensor}{uid})"
 
 
 @dataclass
@@ -817,7 +855,7 @@ class LogicalScheduler:
 
     # ── Place GRs ─────────────────────────────────────────
 
-    def _build_gr_list(self, part_ranges, offsetMT, offsetPartition):
+    def _build_gr_list(self, part_ranges, offsetMT, offsetPartition, unrollId=0):
         """Phase 1: Build ordered GR list from placed MFMAs.
 
         For each partition × subIterK, derive target partition/MT from
@@ -855,7 +893,18 @@ class LogicalScheduler:
                     items.append(('SB', target_range['B'], cfg.grSB))
 
                 for tensor, (t_start, t_end), gr_gran in items:
-                    tr = gr_gran.tile_range(k, t_start, t_end)
+                    def _valid_k_for_unroll(k, uid):
+                        nu = cfg.numUnroll.get(tensor, 1)
+                        if uid >= nu:
+                            return False
+                        if nu > 1:
+                            return k < gr_gran.k
+                        return k + uid * gr_gran.k < cfg.numSubIterK
+
+                    if not _valid_k_for_unroll(k, unrollId):
+                        continue
+                    k_shifted = k + unrollId * gr_gran.k
+                    tr = gr_gran.tile_range(k_shifted, t_start, t_end)
 
                     key = (tensor, mt_val, tr.tileId_start, tr.tileId_end,
                            tr.subIterK_start, tr.subIterK_end)
@@ -922,7 +971,7 @@ class LogicalScheduler:
                 return True
         return False
 
-    def _distribute_grs(self, gr_list, gr_slot_bounds):
+    def _distribute_grs(self, gr_list, gr_slot_bounds, unrollId=0):
         """Phase 2: Distribute GR atoms across partition × subIterK slots.
 
         Explodes GR entries into atomic loads, distributes them into flat
@@ -966,10 +1015,12 @@ class LogicalScheduler:
             pi = flat // numK
             si = flat % numK
             target_slot = self._partitions[pi][si]
+            uid = unrollId
+            gr_list_for_uid = target_slot.grs_by_unroll.setdefault(uid, [])
             for atom in bucket:
                 tensor, mt_val, ts, te, ks, ke = atom
-                if target_slot.grs:
-                    prev = target_slot.grs[-1]
+                if gr_list_for_uid:
+                    prev = gr_list_for_uid[-1]
                     if (prev.tensor == tensor and
                             prev.mtIteration == mt_val and
                             prev.tiles.subIterK_start == ks and
@@ -977,11 +1028,12 @@ class LogicalScheduler:
                             prev.tiles.tileId_end == ts):
                         prev.tiles = MFMATileRange(ks, ke, prev.tiles.tileId_start, te)
                         continue
-                target_slot.grs.append(GRPlacement(
+                gr_list_for_uid.append(GRPlacement(
                     tensor=tensor, mtIteration=mt_val,
                     tiles=MFMATileRange(ks, ke, ts, te),
                     subIterK_slot=si,
-                    partition=pi))
+                    partition=pi,
+                    unrollId=uid))
 
     def place_GRs(self) -> List[SubIterKSlot]:
         """Place Global Reads by iterating MFMAs across partitions.
@@ -1002,12 +1054,53 @@ class LogicalScheduler:
 
         pgr = self.config.pgr
         offsetMT = 0 if pgr == 0 else 1
-        gr_list = self._build_gr_list(part_ranges, offsetMT, self.config.offsetPartition)
-        gr_slot_bounds = self._build_gr_slot_bounds()
-        self._distribute_grs(gr_list, gr_slot_bounds)
+
+        maxUnroll = max(self.config.numUnroll.values())
+        for uid in range(maxUnroll):
+            gr_list = self._build_gr_list(part_ranges, offsetMT,
+                                          self.config.offsetPartition, unrollId=uid)
+            gr_slot_bounds = self._build_gr_slot_bounds()
+            self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
+
+        if maxUnroll > 1 and pgr == 1:
+            self._consolidate_uid_grs(maxUnroll)
 
         self._completed.add(Pass.GR)
         return self._partitions[0]
+
+    def _consolidate_uid_grs(self, maxUnroll):
+        """Move uid>0 GRs into the last existing slot of the last partition.
+
+        For multi-DU, all GR loads for uid=0 must complete before the
+        GRInc that advances the SRD for uid=1.  Since all tensors share
+        a single SRD, the ordering must hold *globally* across partitions:
+
+            all uid=0 GRs (all partitions) → GRInc(uid=0) → all uid=1 GRs
+
+        We collect every uid>0 GR from every partition and merge them
+        into the last existing subIterK slot.  The _gr_sort_key places
+        uid=0 before uid=1, and group_lr_gr chains them so uid=1 GRs
+        follow the GRInc(uid=0) postOp.  Because the target slot has
+        an MFMA, the instruction scheduler interleaves uid=1 GRs with
+        compute — avoiding the stale-LDS-read that occurs when uid=1
+        GRs land in a separate MFMA-less slot after the scheduled block.
+        """
+        last_pi = len(self._partitions) - 1
+        last_partition = self._partitions[last_pi]
+        target_slot = last_partition[-1]
+
+        for pi, slots in enumerate(self._partitions):
+            for si, slot in enumerate(slots):
+                if pi == last_pi and si == len(last_partition) - 1:
+                    continue
+                for uid in range(1, maxUnroll):
+                    if uid in slot.grs_by_unroll and slot.grs_by_unroll[uid]:
+                        target_list = target_slot.grs_by_unroll.setdefault(uid, [])
+                        for gr in slot.grs_by_unroll[uid]:
+                            gr.subIterK_slot = target_slot.subIterK
+                            gr.partition = last_pi
+                        target_list.extend(slot.grs_by_unroll[uid])
+                        slot.grs_by_unroll[uid] = []
 
     # ── Annotate dependencies ─────────────────────────────
 
@@ -1137,7 +1230,12 @@ class LogicalScheduler:
                 return deps
             def _exec_order(dep):
                 return (dep.mt_offset, dep.ref.partition, dep.ref.subIterK_slot)
-            return [max(deps, key=_exec_order)]
+            by_uid = {}
+            for dep in deps:
+                uid = getattr(dep.ref, 'unrollId', 0)
+                if uid not in by_uid or _exec_order(dep) > _exec_order(by_uid[uid]):
+                    by_uid[uid] = dep
+            return list(by_uid.values())
 
         for k, slot in enumerate(slots):
             # MFMA: depends on the most recent LR per tensor (tile-overlapping).
@@ -1196,7 +1294,7 @@ class LogicalScheduler:
             for slot in slots:
                 for gr in slot.grs:
                     if gr.tensor == tensor:
-                        key = (gr.mtIteration, gr.partition, gr.subIterK_slot)
+                        key = (gr.mtIteration, gr.partition, gr.subIterK_slot, gr.unrollId)
                         slot_members.setdefault(key, []).append(gr)
 
         gr_intra_rank = {}
@@ -1460,6 +1558,10 @@ class LogicalScheduler:
 
         self._completed.add(Pass.REMOVE_DEPS)
 
+    def _per_uid_k(self, tensor: str) -> int:
+        """Number of subIterK slots per unrollId for a tensor."""
+        return self.config.numSubIterK // self.config.numUnroll.get(tensor, 1)
+
     def insert_gr_lr_inc(self):
         """Insert gr_inc/lr_inc preOps at MacroTile iteration transitions.
 
@@ -1469,54 +1571,90 @@ class LogicalScheduler:
         changes, inserts a BaseOp into that placement's preOps:
           - lr_inc for LR placements
           - gr_inc for GR placements
+
+        For multi-DU configs, also inserts lr_inc at uid boundaries so that
+        each GRIncOp (which swaps the GR write buffer) has a matching LRIncOp
+        (which swaps the LR read buffer), keeping the ping-pong in sync.
         """
         self._ensure_pass(Pass.REMOVE_DEPS)
 
         last_lr_mt = {}  # tensor -> mtIteration for LR only
-        last_gr_mt = {}  # tensor -> mtIteration for GR only
+        last_lr_uid = {}  # tensor -> effective uid for LR (derived from k range)
+        last_gr_mt = {}  # (tensor, unrollId) -> mtIteration for GR only
         first_lr = {}  # tensor -> first LR placement seen
         last_lr = {}  # tensor -> last LR placement seen
-        lr_inc_tensors = set()  # tensors that already received lr_inc
+        last_gr = {}  # (tensor, unrollId) -> globally last GR placement seen
+        lr_inc_tensors = set()  # tensors that already received lr_inc via MT transition
+
+        maxUnroll = max(self.config.numUnroll.values()) if self.config.numUnroll else 1
+        multiDU = maxUnroll > 1 and self.config.pgr == 1
 
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
                 for lr in slot.lrs:
                     tensor = lr.tensor
                     mt = lr.mtIteration
+                    per_uid_k = self._per_uid_k(tensor)
+                    lr_uid = lr.tiles.subIterK_start // per_uid_k
                     if tensor not in first_lr:
                         first_lr[tensor] = lr
-                    if tensor in last_lr_mt and last_lr_mt[tensor] != mt:
+                    mt_changed = tensor in last_lr_mt and last_lr_mt[tensor] != mt
+                    uid_changed = tensor in last_lr_uid and last_lr_uid[tensor] != lr_uid
+                    if mt_changed and uid_changed:
+                        lr.preOps.append(LRIncOp(tensor=tensor, uid_swap=True))
+                        lr_inc_tensors.add(tensor)
+                    elif mt_changed:
                         lr.preOps.append(LRIncOp(tensor=tensor))
                         lr_inc_tensors.add(tensor)
+                    elif uid_changed:
+                        lr.preOps.append(LRIncOp(tensor=tensor, uid_swap=True))
                     last_lr[tensor] = lr
                     last_lr_mt[tensor] = mt
+                    last_lr_uid[tensor] = lr_uid
                 for gr in slot.grs:
                     tensor = gr.tensor
+                    uid = gr.unrollId
                     mt = gr.mtIteration
-                    if tensor in last_gr_mt:
-                        prev_mt = last_gr_mt[tensor]
-                    else:
-                        prev_mt = 0
-                    if prev_mt != mt:
-                        if gr.tiles.tileId_start == 0:
-                            gr.preOps.append(GRIncOp(tensor=tensor))
-                    last_gr_mt[tensor] = mt
+                    key = (tensor, uid)
+                    last_gr[key] = gr
+                    if not multiDU:
+                        if key in last_gr_mt:
+                            prev_mt = last_gr_mt[key]
+                        else:
+                            prev_mt = 0
+                        if prev_mt != mt:
+                            if gr.tiles.tileId_start == 0:
+                                gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
+                    last_gr_mt[key] = mt
+
+        if multiDU:
+            for (tensor, uid), gr in last_gr.items():
+                gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
 
         if self.config.pgr == 0:
-            last_gr_per_tensor = {}
+            last_gr_per_key = {}
             for slots in self._partitions:
                 for slot in slots:
                     for gr in slot.grs:
-                        last_gr_per_tensor[gr.tensor] = gr
+                        last_gr_per_key[(gr.tensor, gr.unrollId)] = gr
             for tensor in self._LR_GR_ORDER:
                 if tensor in last_lr and tensor in last_lr_mt:
                     last_lr[tensor].postOps.append(LRIncOp(tensor=tensor))
-                if tensor in last_gr_per_tensor and tensor in last_gr_mt:
-                    last_gr_per_tensor[tensor].postOps.append(GRIncOp(tensor=tensor))
+            for (tensor, uid), gr in last_gr_per_key.items():
+                if (tensor, uid) in last_gr_mt:
+                    gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
         else:
             for tensor, lr in first_lr.items():
                 if tensor not in lr_inc_tensors:
                     lr.preOps.append(LRIncOp(tensor=tensor))
+
+            maxUnroll = max(self.config.numUnroll.values()) if self.config.numUnroll else 1
+            if maxUnroll > 1:
+                for tensor, lr in first_lr.items():
+                    per_uid_k = self._per_uid_k(tensor)
+                    first_uid = lr.tiles.subIterK_start // per_uid_k
+                    if first_uid != 0:
+                        lr.preOps.insert(0, LRIncOp(tensor=tensor, uid_swap=True))
 
         self._completed.add(Pass.GR_INC)
 
@@ -1533,11 +1671,13 @@ class LogicalScheduler:
           1. MT iteration      — earlier MT loads first (n+1 before n+2)
           2. subIterK start    — lower min K first
           3. Tensor            — A, B, SA, SB (hardcoded order)
-          4. Tile id start     — lower tile range first
+          4. Unroll id         — lower uid first
+          5. Tile id start     — lower tile range first
         """
         return (gr.mtIteration,
                 gr.tiles.subIterK_start,
                 LogicalScheduler._TENSOR_ORDER[gr.tensor],
+                gr.unrollId,
                 gr.tiles.tileId_start)
 
     @staticmethod
@@ -1990,7 +2130,9 @@ class LogicalScheduler:
                         removed.add(em.moduleId)
                     elif em.opType == 'lr' and src.mtIteration == 1:
                         removed.add(em.moduleId)
-                    elif em.opType in ('gr_inc', 'lr_inc'):
+                    elif em.opType == 'gr_inc':
+                        removed.add(em.moduleId)
+                    elif em.opType == 'lr_inc' and not src.uid_swap:
                         removed.add(em.moduleId)
 
                 # Zero inflight counts on remaining WaitGR.
@@ -2030,14 +2172,18 @@ class LogicalScheduler:
         return [EmittedModule(moduleId=mid, source=op) for mid, op in enumerate(ops)]
 
     def _make_gr_all_tensors(self, mt: int, tiles: dict) -> List[GRPlacement]:
-        """Create GR placements for all tensors at the given MT iteration.
+        """Create GR placements for all tensors and uids at the given MT iteration.
 
         tiles: {'A': MFMATileRange, 'B': MFMATileRange}
         """
-        return [GRPlacement(tensor=tensor, mtIteration=mt,
-                            tiles=tiles['A' if tensor in ('A', 'SA') else 'B'],
-                            subIterK_slot=0)
-                for tensor in self.tensors]
+        result = []
+        for tensor in self.tensors:
+            tile = tiles['A' if tensor in ('A', 'SA') else 'B']
+            for uid in range(self.config.numUnroll.get(tensor, 1)):
+                result.append(GRPlacement(tensor=tensor, mtIteration=mt,
+                                          tiles=tile, subIterK_slot=0,
+                                          unrollId=uid))
+        return result
 
     def _make_lr_all_tensors(self, tiles: dict) -> List[LRPlacement]:
         """Create LR placements for first partition.
@@ -2061,14 +2207,111 @@ class LogicalScheduler:
         return placements
 
     def _make_depops_all_tensors(self, cls) -> List[BaseOp]:
-        """Create a BaseOp subclass instance for each tensor."""
+        """Create a BaseOp subclass instance for each tensor (and uid for GRIncOp)."""
+        if cls is GRIncOp:
+            return [GRIncOp(tensor=t, unrollId=uid)
+                    for t in self.tensors
+                    for uid in range(self.config.numUnroll.get(t, 1))]
         return [cls(tensor=tensor) for tensor in self.tensors]
+
+    def _make_gr_all_tensors_uid(self, mt: int, tiles: dict, uid: int) -> List[GRPlacement]:
+        """Create GR placements for a single uid across all tensors.
+
+        Only emits for tensors where uid < numUnroll[tensor]. Each uid gets
+        its own K-slice: k=[uid*grGran.k, (uid+1)*grGran.k).
+        """
+        cfg = self.config
+        result = []
+        for tensor in self.tensors:
+            nUnroll = cfg.numUnroll.get(tensor, 1)
+            if uid >= nUnroll:
+                continue
+            tile = tiles['A' if tensor in ('A', 'SA') else 'B']
+            gr = {'A': cfg.grA, 'B': cfg.grB,
+                  'SA': cfg.grSA, 'SB': cfg.grSB}.get(tensor, cfg.grA)
+            if nUnroll > 1:
+                k_start = uid * gr.k
+                k_end = (uid + 1) * gr.k
+                uid_tile = MFMATileRange(k_start, k_end,
+                                         tile.tileId_start, tile.tileId_end)
+            else:
+                uid_tile = tile
+            result.append(GRPlacement(tensor=tensor, mtIteration=mt,
+                                      tiles=uid_tile, subIterK_slot=0,
+                                      unrollId=uid))
+        return result
+
+    def _make_depops_uid(self, cls, uid: int, last_uid_swap_only=False) -> List[BaseOp]:
+        """Create a BaseOp subclass instance for a single uid across all tensors.
+
+        Only emits for tensors where uid < numUnroll[tensor].
+        When last_uid_swap_only=True and uid is the tensor's last uid:
+        - nUnroll>1: GRIncOp gets swap_only=True (LDS swap to toggle back,
+          no SRD advance).
+        - nUnroll==1: GRIncOp is omitted entirely (no prior GR_inc moved the
+          write pointer, so no toggle-back is needed).
+        """
+        result = []
+        for tensor in self.tensors:
+            nUnroll = self.config.numUnroll.get(tensor, 1)
+            if uid >= nUnroll:
+                continue
+            if cls is GRIncOp:
+                is_last = last_uid_swap_only and (uid == nUnroll - 1)
+                if is_last and nUnroll == 1:
+                    continue
+                result.append(GRIncOp(tensor=tensor, unrollId=uid,
+                                      swap_only=(is_last and nUnroll > 1)))
+            else:
+                result.append(cls(tensor=tensor))
+        return result
 
     def _make_preloop_mt1_grs(self) -> List[GRPlacement]:
         """Create MT1 GRs for the PGR=2 preloop, ordered to match the mainloop.
 
         Covers partitions 0..offsetPartition-1 with proper deduplication.
-        Each unique (tensor, tile-range, k-range) appears exactly once.
+        Each unique (tensor, uid, tile-range, k-range) appears exactly once.
+        """
+        self._ensure_pass(Pass.LR)
+        cfg = self.config
+
+        seen = set()
+        result = []
+        maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+        for uid in range(maxUnroll):
+            for pi in range(cfg.offsetPartition):
+                target_range = self._partition_tile_range(pi)
+                for slot in self._partitions[0]:
+                    k = slot.mfma.subIterK
+                    items = [('A', target_range['A'], cfg.grA),
+                             ('B', target_range['B'], cfg.grB)]
+                    if cfg.hasScale:
+                        items.append(('SA', target_range['A'], cfg.grSA))
+                        items.append(('SB', target_range['B'], cfg.grSB))
+                    for tensor, (t_start, t_end), gr_gran in items:
+                        if uid >= cfg.numUnroll.get(tensor, 1):
+                            continue
+                        tr = gr_gran.tile_range(k, t_start, t_end)
+                        key = (tensor, uid, tr.tileId_start, tr.tileId_end,
+                               tr.subIterK_start, tr.subIterK_end)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        result.append(GRPlacement(
+                            tensor=tensor,
+                            mtIteration=1,
+                            tiles=tr,
+                            subIterK_slot=k,
+                            partition=pi,
+                            unrollId=uid,
+                        ))
+        return result
+
+    def _make_preloop_mt1_grs_uid(self, uid: int) -> List[GRPlacement]:
+        """Create MT1 GRs for a single uid in the PGR=2 preloop.
+
+        Filters _make_preloop_mt1_grs logic to one uid, skipping tensors
+        where uid >= numUnroll[tensor].
         """
         self._ensure_pass(Pass.LR)
         cfg = self.config
@@ -2085,8 +2328,16 @@ class LogicalScheduler:
                     items.append(('SA', target_range['A'], cfg.grSA))
                     items.append(('SB', target_range['B'], cfg.grSB))
                 for tensor, (t_start, t_end), gr_gran in items:
+                    nUnroll = cfg.numUnroll.get(tensor, 1)
+                    if uid >= nUnroll:
+                        continue
+                    if nUnroll > 1:
+                        uid_k_start = uid * gr_gran.k
+                        uid_k_end = (uid + 1) * gr_gran.k
+                        if k < uid_k_start or k >= uid_k_end:
+                            continue
                     tr = gr_gran.tile_range(k, t_start, t_end)
-                    key = (tensor, tr.tileId_start, tr.tileId_end,
+                    key = (tensor, uid, tr.tileId_start, tr.tileId_end,
                            tr.subIterK_start, tr.subIterK_end)
                     if key in seen:
                         continue
@@ -2097,6 +2348,7 @@ class LogicalScheduler:
                         tiles=tr,
                         subIterK_slot=k,
                         partition=pi,
+                        unrollId=uid,
                     ))
         return result
 
@@ -2139,24 +2391,58 @@ class LogicalScheduler:
             lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
 
         if cfg.pgr == 1:
-            emitted = self._to_emitted([
-                *self._make_gr_all_tensors(0, all_tiles),
-                WaitGROp(wait_gr_counts=WaitGRCounts()),
-                SyncOp(),
-                *self._make_lr_all_tensors(lr_tiles),
-                SkipOp(compare='LE', value=1, target='NLL'),
-            ])
+            maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+            if maxUnroll > 1:
+                preloop_ops = []
+                for uid in range(maxUnroll):
+                    preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
+                    preloop_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                emitted = self._to_emitted([
+                    *preloop_ops,
+                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                ])
+            else:
+                emitted = self._to_emitted([
+                    *self._make_gr_all_tensors(0, all_tiles),
+                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                ])
         else:
-            emitted = self._to_emitted([
-                *self._make_gr_all_tensors(0, all_tiles),
-                *self._make_depops_all_tensors(GRIncOp),
-                WaitGROp(wait_gr_counts=WaitGRCounts()),
-                SyncOp(),
-                *self._make_lr_all_tensors(lr_tiles),
-                SkipOp(compare='LE', value=1, target='NLL'),
-                *self._make_preloop_mt1_grs(),
-                SkipOp(compare='LE', value=2, target='NGLL'),
-            ])
+            maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+            if maxUnroll > 1:
+                preloop_ops = []
+                for uid in range(maxUnroll):
+                    preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
+                    preloop_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                mt1_ops = []
+                for uid in range(maxUnroll):
+                    mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
+                    mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                emitted = self._to_emitted([
+                    *preloop_ops,
+                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                    *mt1_ops,
+                    SkipOp(compare='LE', value=2, target='NGLL'),
+                ])
+            else:
+                emitted = self._to_emitted([
+                    *self._make_gr_all_tensors(0, all_tiles),
+                    *self._make_depops_all_tensors(GRIncOp),
+                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                    *self._make_preloop_mt1_grs(),
+                    SkipOp(compare='LE', value=2, target='NGLL'),
+                ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
@@ -2177,7 +2463,9 @@ class LogicalScheduler:
         for pi, partition_emitted in enumerate(emitted_3d):
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
-                if schedule and em_list:
+                has_mfma = any(em.opType == 'mfma' for em in em_list)
+
+                if schedule and em_list and has_mfma:
                     scheduled = instructionSchedule(em_list)
                     module.add(scheduled)
                 else:
@@ -2604,8 +2892,9 @@ class LogicalScheduler:
         slot = p.subIterK_slot if hasattr(p, 'subIterK_slot') else '?'
         part = p.partition if hasattr(p, 'partition') else 0
         kind = 'LR' if isinstance(p, LRPlacement) else 'GR'
+        uid = f" uid={p.unrollId}" if isinstance(p, GRPlacement) and p.unrollId else ""
         mt = f" (MT{dep.mt_offset})" if dep.mt_offset != 0 else ""
-        return f"{kind} {p.tensor} @P{part}:subIterK={slot}{mt}"
+        return f"{kind} {p.tensor} @P{part}:subIterK={slot}{uid}{mt}"
 
 
     def print_emit(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
