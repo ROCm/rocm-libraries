@@ -713,6 +713,24 @@ class Solution(collections.abc.Mapping):
                 reject(state, printRejectionReason,
                        f"{_ratioKey}>1 requires MXBlock{_tc}>0 (MX scaled inputs)")
 
+    # Cross-tensor R constraints: catch unsupported R configs at Solution time
+    # so the user sees a clear reject reason, not a downstream assertion in
+    # SchedulerConfig.__post_init__ (LogicalScheduler.py) or _div_r (Kernel.py).
+    _rA = int(state.get("ScaleDepthURatioA", 1))
+    _rB = int(state.get("ScaleDepthURatioB", 1))
+    if (_rA > 1 or _rB > 1):
+        if int(state.get("PrefetchGlobalRead", 0)) == 1:
+            reject(state, printRejectionReason,
+                   "ScaleDepthURatio{A,B}>1 requires PrefetchGlobalRead>=2: "
+                   "last-iter prefetch gate is only wired for PGR>=2; PGR==1 "
+                   "with R>1 can over-fetch on the final outer iteration")
+        if _rA != _rB:
+            reject(state, printRejectionReason,
+                   f"ScaleDepthURatioA ({_rA}) must equal ScaleDepthURatioB "
+                   f"({_rB}): scheduler aggregates R = max(R_A, R_B) but "
+                   "InstructionEmitter gates SA and SB on the same modulus; "
+                   "asymmetric R would over-gate one tensor's scale ops")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1

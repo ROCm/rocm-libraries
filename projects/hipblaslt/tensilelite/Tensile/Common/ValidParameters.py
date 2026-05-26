@@ -419,8 +419,10 @@ validParameters = { # we need to make sure this matches develop
     # For UseSubtileImpl=1 MX subtile path: multiplies scale GR/LR DepthU by
     # this factor so the scale fetch cadence runs at 1/R of the data cadence.
     # Default 1 (no decoupling).
-    "ScaleDepthURatioA": [1, 2, 4, 8],
-    "ScaleDepthURatioB": [1, 2, 4, 8],
+    # R>2 requires a wider op_sel byte scheme; see
+    # LogicalScheduler.SchedulerConfig.__post_init__ (asserts R*numSubIterK_data<=2).
+    "ScaleDepthURatioA": [1, 2],
+    "ScaleDepthURatioB": [1, 2],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
