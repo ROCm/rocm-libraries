@@ -539,7 +539,8 @@ class MasterSolutionLibrary:
                     placeholderName += '_M' + str(problemType.f32XdlMathOp)
                 if problemType.supportDeviceUserArguments:
                     placeholderName += '_UA'
-
+                if problemType.useGateResidual:
+                    placeholderName += '_GateRes'      
             return library, placeholderName
 
         # end library creation functions

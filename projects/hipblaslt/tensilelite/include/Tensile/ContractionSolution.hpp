@@ -86,6 +86,10 @@ namespace TensileLite
         void*    e;
         uint32_t strideE1;
         uint32_t strideE2;
+        void*    gateResidual;
+        uint32_t gate_type;
+        uint32_t strideGate1;
+        uint32_t strideGate2;
         TAct     act0;
         TAct     act1;
         int      activationType;

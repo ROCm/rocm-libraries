@@ -719,6 +719,8 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
             problemTypeState["ComputeDataType"].value
     problemTypeState["BiasDataTypeList"] = \
             [btype.value for btype in problemTypeState["BiasDataTypeList"]]
+    problemTypeState["GateResidualDataTypeList"] = \
+            [btype.value for btype in problemTypeState["GateResidualDataTypeList"]]            
     problemTypeState["ActivationComputeDataType"] = \
             problemTypeState["ActivationComputeDataType"].value
     problemTypeState["ActivationType"] = \

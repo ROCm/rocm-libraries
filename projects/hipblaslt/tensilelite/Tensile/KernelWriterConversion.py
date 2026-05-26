@@ -901,7 +901,9 @@ class KernelWriterConversion(KernelWriterBase):
     elif state["ProblemType"]["UseScaleAB"] == "Vector":
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
-    name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
+    name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""  
+    if state["ProblemType"]["UseGateResidual"]:
+      name += "_GateR"    
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)

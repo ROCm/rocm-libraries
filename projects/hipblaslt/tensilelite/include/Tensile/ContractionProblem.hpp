@@ -597,6 +597,7 @@ namespace TensileLite
                                TensorDescriptor const& scaleC,
                                TensorDescriptor const& scaleD,
                                TensorDescriptor const& scaleAlphaVec,
+                               TensorDescriptor const& gate,
                                FreeIndices const&      freeIndices,
                                BatchIndices const&     batchIndices,
                                BoundIndices const&     boundIndices,
@@ -615,6 +616,7 @@ namespace TensileLite
                                TensorDescriptor const& scaleC,
                                TensorDescriptor const& scaleD,
                                TensorDescriptor const& scaleAlphaVec,
+                               TensorDescriptor const& gate,
                                FreeIndices const&      freeIndices,
                                BatchIndices const&     batchIndices,
                                BoundIndices const&     boundIndices,
@@ -776,6 +778,11 @@ namespace TensileLite
             return m_useGateResidual;
         }
 
+        rocisa::DataType gateType() const
+        {
+            return m_gateType;
+        }
+
         std::string useScaleAB() const
         {
             return m_useScaleAB;
@@ -860,13 +867,14 @@ namespace TensileLite
                              std::vector<size_t> const& strides)
         {
             // Default type to A's datatype when caller passes None
-            rocisa::DataType gateType
+            rocisa::DataType resolvedType
                 = (type == rocisa::DataType::None) ? m_tensors[TENSOR::A].dataType() : type;
+            m_gateType = resolvedType;
             if(m_useGateResidual)
             {
                 m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL]
                     = {"gate",
-                       gateType,
+                       resolvedType,
                        sizes.begin(),
                        sizes.end(),
                        strides.begin(),
@@ -1445,6 +1453,7 @@ namespace TensileLite
         bool             m_swizzleTensorB          = false;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
+        rocisa::DataType m_gateType               = rocisa::DataType::None;
         std::string      m_useScaleAB              = "";
         bool             m_useScaleCD              = false;
         int              m_useScaleAlphaVec        = 0;
