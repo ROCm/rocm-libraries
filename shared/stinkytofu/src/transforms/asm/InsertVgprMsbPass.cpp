@@ -118,7 +118,7 @@ std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
 }
 
 void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
-                         GfxArchID archId, IRBase* insertBefore, bool hasVgprMsb16) {
+                         GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
     if (!hasVgpr || requiredSetVal == currentMsb) {
         if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
         return;
@@ -131,7 +131,7 @@ void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
     }
 
     int combinedSetVal = requiredSetVal;
-    if (hasVgprMsb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
+    if (msbMode == VgprMsbMode::Msb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
         currentMsb != VgprMsbState::LABEL_BEGIN) {
         combinedSetVal += (currentMsb << 8);
     }
@@ -165,7 +165,8 @@ class InsertVgprMsbPassImpl : public Pass {
         auto arch = passCtx.getGemmTileConfig().arch;
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-        bool hasVgprMsb16 = passCtx.getAsmCapsConfig().hasVgprMsb16;
+        VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
+        if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
@@ -185,7 +186,7 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
-                                    hasVgprMsb16);
+                                    msbMode);
             }
         }
         return preserveCFGAnalyses();
