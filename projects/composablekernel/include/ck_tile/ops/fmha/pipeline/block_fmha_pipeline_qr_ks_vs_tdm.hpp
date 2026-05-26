@@ -407,14 +407,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_dram_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            if constexpr(k0_loops == 1)
-            {
-                s_wait_tensorcnt_barrier<0>();
-            }
-            else
-            {
-                s_wait_tensorcnt_barrier<0>();
-            }
+            s_wait_tensorcnt_barrier<0>();
 
             auto k_tile = load_tile(k_lds_read_window);
 
