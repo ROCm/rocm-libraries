@@ -35,11 +35,8 @@
 /// >>>            CMakeFiles/MIOpenDriver.dir/conv3.cpp.o:(.text+0x10)
 
 #include <miopen/random.hpp>
-#include <miopen/bfloat16.hpp>
 #include <hip_float8.hpp>
-#include <half/half.hpp>
 
-using half    = half_float::half;
 using float16 = half_float::half;
 
 using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;

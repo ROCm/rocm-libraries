@@ -28,6 +28,9 @@
 #include "miopen_cstdint.hpp"
 #include "miopen_limits.hpp"
 
+#include <miopen/bfloat16.hpp>
+using hip_bfloat16 = bfloat16;
+
 #ifndef MIOPEN_ENABLE_F8_DEVICE_CODE
 #define MIOPEN_ENABLE_F8_DEVICE_CODE 0
 #endif
@@ -53,8 +56,6 @@
 #ifndef MIOPEN_FP8_IEEE_EXPONENT_BIAS
 #define MIOPEN_FP8_IEEE_EXPONENT_BIAS 1
 #endif
-
-using hip_bfloat16 = bfloat16;
 
 namespace miopen_hip_f8_impl {
 
