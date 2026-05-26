@@ -380,12 +380,9 @@ class rocsolver_dispatcher
         // Map for functions that support only single and double precisions
         static const func_map map_real = {
             // auxiliaries
-            {"sb2st", testing_sb2st_hb2st<T>},
             {"sterf", testing_sterf<T>},
             {"stebz", testing_stebz<T>},
             {"bdsvdx", testing_bdsvdx<T>},
-            {"sy2sb", testing_sy2sb_he2hb<T, rocblas_int>},
-            {"sy2sb_64", testing_sy2sb_he2hb<T, int64_t>},
             // orgxx
             {"org2r", testing_orgxr_ungxr<T, 0>},
             {"orgqr", testing_orgxr_ungxr<T, 1>},
@@ -411,6 +408,10 @@ class rocsolver_dispatcher
             {"sytrd", testing_sytxx_hetxx<false, false, 1, T>},
             {"sytrd_batched", testing_sytxx_hetxx<true, true, 1, T>},
             {"sytrd_strided_batched", testing_sytxx_hetxx<false, true, 1, T>},
+            {"sy2sb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"sy2sb_64", testing_sy2sb_he2hb<T, int64_t>},
+            {"sb2st", testing_sb2st_hb2st<T, rocblas_int>},
+            {"sb2st", testing_sb2st_hb2st<T, int64_t>},
             // sygst
             {"sygs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"sygs2_batched", testing_sygsx_hegsx<true, true, 0, T>},
@@ -521,7 +522,8 @@ class rocsolver_dispatcher
             {"hetrd_strided_batched", testing_sytxx_hetxx<false, true, 1, T>},
             {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
             {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
-            {"hb2st", testing_sb2st_hb2st<T>},
+            {"hb2st", testing_sb2st_hb2st<T, rocblas_int>},
+            {"hb2st", testing_sb2st_hb2st<T, int64_t>},
             // hegst
             {"hegs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"hegs2_batched", testing_sygsx_hegsx<true, true, 0, T>},
