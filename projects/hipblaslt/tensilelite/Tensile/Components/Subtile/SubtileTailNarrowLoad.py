@@ -893,12 +893,11 @@ def _emitOneNarrowLoad(module, kw, kernel, tc, ti, vAddrZero,
     kw.vgprPool.checkIn(vDsAddr)
 
 
-# Diagnostic sentinel (None = disabled). 0x4400 = +192 BF16 if
-# re-enabled. Kept here for future diagnostics of B-side narrow
-# load issues. The real fix for the K_remain-2 regression is the
-# 2-step "buffer_load → VGPR ; ds_write_b16 → LDS" sequence in
-# `_emitOneNarrowLoad` (= bypass the buffer_load_*_lds quirk).
+# Diagnostic sentinels. None disables. Useful for diagnosing
+# whether the ds_write_b16 to the K_remain-2 LDS byte is reaching
+# the LR-reader slot. Set both to None before pushing.
 _SENTINEL_B_K_REMAIN_MINUS_2 = None
+_SENTINEL_A_K_REMAIN_MINUS_2 = None
 
 
 def _emitSentinelLDSStoreForBKRemain2(module, kw, ti, sScratch, sSoffset,
@@ -1117,8 +1116,11 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
             stride_sgpr_name=stride_sgpr_name,
             label_suffix="K_remain-1")
 
-        # ---- DIAGNOSTIC SENTINEL (disabled): see `_SENTINEL_B_K_REMAIN_MINUS_2`.
-        if tc == 'B' and _SENTINEL_B_K_REMAIN_MINUS_2 is not None:
+        # ---- DIAGNOSTIC SENTINEL (per-operand) ----
+        sentinel_for_this_tc = (
+            _SENTINEL_B_K_REMAIN_MINUS_2 if tc == 'B'
+            else _SENTINEL_A_K_REMAIN_MINUS_2)
+        if sentinel_for_this_tc is not None:
             _emitSentinelLDSStoreForBKRemain2(
                 module, kw, ti, sScratch, sSoffset,
                 rowId_last=rowId_last,
@@ -1127,7 +1129,7 @@ def _emitNarrowLoadForOperand(kw, kernel, tc, ti, tiA, vAddrZero,
                 LWA_const_offset=LWA_const_offset,
                 colIdPreOffset=colIdPreOffset,
                 lwa_sgpr_name=lwa_sgpr_name,
-                sentinel_value=_SENTINEL_B_K_REMAIN_MINUS_2)
+                sentinel_value=sentinel_for_this_tc)
 
         # ---- Restore EXEC ----
         module.add(SMovB64(
