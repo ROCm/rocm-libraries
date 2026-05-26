@@ -40,40 +40,6 @@
 #include "print_matrix.hpp"
 
 //------------------------------------------------------------------------------
-// todo: where should these go?
-inline rocblas_status rocblas_copy(
-    rocblas_handle handle, rocblas_int n,
-    float const* x, rocblas_int incx,
-    float* y, rocblas_int incy )
-{
-    return rocblas_scopy( handle, n, x, incx, y, incy );
-}
-
-inline rocblas_status rocblas_copy(
-    rocblas_handle handle, rocblas_int n,
-    double const* x, rocblas_int incx,
-    double* y, rocblas_int incy )
-{
-    return rocblas_dcopy( handle, n, x, incx, y, incy );
-}
-
-inline rocblas_status rocblas_copy(
-    rocblas_handle handle, rocblas_int n,
-    rocblas_float_complex const* x, rocblas_int incx,
-    rocblas_float_complex* y, rocblas_int incy )
-{
-    return rocblas_ccopy( handle, n, x, incx, y, incy );
-}
-
-inline rocblas_status rocblas_copy(
-    rocblas_handle handle, rocblas_int n,
-    rocblas_double_complex const* x, rocblas_int incx,
-    rocblas_double_complex* y, rocblas_int incy )
-{
-    return rocblas_zcopy( handle, n, x, incx, y, incy );
-}
-
-//------------------------------------------------------------------------------
 template <typename T, typename I = rocblas_int>
 void ormtr_unmtr_hb2st_checkBadArgs(const rocblas_handle handle,
                                     const rocblas_side side,
@@ -174,7 +140,6 @@ void ormtr_unmtr_hb2st_initData(
     const I n,
     const I kd,
 
-    // todo: dAband is not actually used, but hAband with ldab is used.
     Td& dAband,
     const I ldab,
     Td& dV,
@@ -202,28 +167,19 @@ void ormtr_unmtr_hb2st_initData(
         gerand( m, n, hC[0], ldc );
         hbrand( nq, kd, hAband[0], ldab );
 
-        // Call hb2st on GPU to compute dV. (dTau stored in dV.)
+        // Call hb2st on GPU to compute dV and dTau.
         CHECK_HIP_ERROR(dAband.transfer_from(hAband));
         CHECK_ROCBLAS_ERROR(
             rocsolver_sb2st_hb2st(
                 handle, rocblas_fill_lower, nq, kd,
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
-                dV.data(), ldv ) );
+                dV.data(), ldv, dTau.data() ) );
 
         // copy data from device to CPU
         CHECK_HIP_ERROR(hV.transfer_from(dV));
         CHECK_HIP_ERROR(hD.transfer_from(dD));
         CHECK_HIP_ERROR(hE.transfer_from(dE));
-
-        I nt = ceildiv( nq - 1, kd );
-        I nv_blocks = nt*(nt + 1)/2;
-        I nv = nv_blocks*kd;
-
-        // todo: remove Tau from V in hb2st
-        CHECK_ROCBLAS_ERROR(
-            rocblas_copy(
-                handle, nv, &dV[0][ldv-1], ldv, dTau[0], 1 ) );
         CHECK_HIP_ERROR(hTau.transfer_from(dTau));
     }
 
@@ -234,6 +190,7 @@ void ormtr_unmtr_hb2st_initData(
         CHECK_HIP_ERROR(dD.transfer_from(hD));
         CHECK_HIP_ERROR(dE.transfer_from(hE));
         CHECK_HIP_ERROR(dV.transfer_from(hV));
+        CHECK_HIP_ERROR(dTau.transfer_from(hTau));
     }
 }
 
@@ -269,7 +226,7 @@ void ormtr_unmtr_hb2st_getError(
     const I ldab,
     Td& dV,
     const I ldv,
-    Td& dTau,  // unused
+    Td& dTau,
     Td& dC,
     const I ldc,
     Sd& dD,
@@ -282,7 +239,7 @@ void ormtr_unmtr_hb2st_getError(
 
     Th& hAband,
     Th& hV,
-    Th& hTau,  // unused
+    Th& hTau,
     Th& hC,
     Sh& hD,
     Sh& hE,
