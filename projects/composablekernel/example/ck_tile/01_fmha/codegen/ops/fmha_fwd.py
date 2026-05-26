@@ -1383,15 +1383,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx1250 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
+            # NOTE: sink is not yet implemented in qr_tdm — only emit sink="f"
+            # so sink workloads fall through to qr.
             if hdim == 128 and hdim_v == 128:
-                for logits, mask, lse, sink in itertools.product(
+                for logits, mask, lse in itertools.product(
                     ["t", "f"],
                     get_mask_map(mask_impl).keys(),
                     ["t", "f"],
-                    ["t", "f"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, "no", lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, "no", lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, "no", lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, "no", lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
             # qr_tdm (e.g., bias, dropout, skip, d!=128).

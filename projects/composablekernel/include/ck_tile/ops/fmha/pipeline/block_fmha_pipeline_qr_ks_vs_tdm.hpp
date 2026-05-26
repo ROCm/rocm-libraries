@@ -73,6 +73,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     !kHasLogitsSoftCap)) ||
                   (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
 
+    // qr_tdm has not yet implemented bias, dropout, or sink. The codegen
+    // restricts emitted instances to these settings; assert here so a future
+    // codegen change can't silently dispatch unsupported workloads.
+    static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
+                  "qr_tdm pipeline does not yet support attention bias");
+    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
+    static_assert(!kHasSink, "qr_tdm pipeline does not yet support sink attention");
+
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
     static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
