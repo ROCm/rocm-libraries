@@ -175,6 +175,11 @@ try
             "                           This will produce matrices that are singular, non positive-definite, etc.\n"
             "                           ")
 
+        ("verbose",
+         value<rocblas_int>(&argus.verbose)->default_value(0),
+            "Verbosity level. 0 (default) is minimal output, 1 = matrix dimensions, 2 = matrix values.\n"
+            "                           ")
+
         ("verify,v",
          value<rocblas_int>(&argus.norm_check)->default_value(0),
             "Validate GPU results with CPU? 0 = No, 1 = Yes.\n"

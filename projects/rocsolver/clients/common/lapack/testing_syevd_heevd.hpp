@@ -37,6 +37,8 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
+#include "print_matrix.hpp"
+
 template <bool STRIDED, typename T, typename S, typename U>
 void syevd_heevd_checkBadArgs(const rocblas_handle handle,
                               const rocblas_evect evect,
@@ -160,6 +162,7 @@ void syevd_heevd_default_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
+        std::cout << "initData default (randint)\n";
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
@@ -213,6 +216,7 @@ void syevd_heevd_identity_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
+        std::cout << "initData identity\n";
         for(rocblas_int b = 0; b < bc; ++b)
         {
             for(rocblas_int j = 0; j < n; ++j)
@@ -267,6 +271,7 @@ void syevd_heevd_eig7_initData(const rocblas_handle handle,
 
     if(CPU)
     {
+        std::cout << "initData eig7\n";
         rocblas_init<T>(hA, true);
 
         for(rocblas_int b = 0; b < bc; ++b)
@@ -334,6 +339,7 @@ void syevd_heevd_wilkinson_initData(const rocblas_handle handle,
 
     if(CPU)
     {
+        std::cout << "initData wilkinson\n";
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
@@ -405,6 +411,7 @@ void syevd_heevd_toeplitz_initData(const rocblas_handle handle,
 
     if(CPU)
     {
+        std::cout << "initData toeplitz\n";
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
@@ -471,6 +478,7 @@ void syevd_heevd_clement_initData(const rocblas_handle handle,
 
     if(CPU)
     {
+        std::cout << "initData clement\n";
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
@@ -565,6 +573,7 @@ void syevd_heevd_initData(const rocblas_handle handle,
 template <bool STRIDED, typename T, typename Sd, typename Td, typename Id, typename Sh, typename Th, typename Ih>
 void syevd_heevd_getError(const rocblas_handle handle,
                           const std::string& matrix,
+                          const rocblas_int verbose,
                           const rocblas_evect evect,
                           const rocblas_fill uplo,
                           const rocblas_int n,
@@ -583,7 +592,8 @@ void syevd_heevd_getError(const rocblas_handle handle,
                           Sh& hDres,
                           Ih& hinfo,
                           Ih& hinfoRes,
-                          double* max_err,
+                          double* max_eigval_err,
+                          double* max_eigvec_err,
                           double* max_ortho_err)
 {
     constexpr bool COMPLEX = rocblas_is_complex<T>;
@@ -614,10 +624,19 @@ void syevd_heevd_getError(const rocblas_handle handle,
     // input data initialization
     syevd_heevd_initData<true, true, T>(handle, matrix, evect, n, dA, lda, bc, hA, A);
 
+    if (verbose == 2) {
+        print_matrix( "A", n, n, dA[0], lda );
+    }
+
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA,
                                               dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+
+    if (verbose >= 2) {
+        print_matrix( "D", n, 1, dD[0], n );
+        print_matrix( "V", n, n, dA[0], lda );
+    }
 
     CHECK_HIP_ERROR(hDres.transfer_from(dD));
     CHECK_HIP_ERROR(hinfoRes.transfer_from(dinfo));
@@ -629,14 +648,20 @@ void syevd_heevd_getError(const rocblas_handle handle,
         cpu_syevd_heevd(evect, uplo, n, hA[b], lda, hD[b], work.data(), lwork, hE.data(), sizeE,
                         iwork.data(), liwork, hinfo[b]);
 
+
+    if (verbose >= 3) {
+        print_matrix( "hD", n, 1, hD[0], n );
+        print_matrix( "hV", n, n, hA[0], lda );
+    }
+
     // Check info for non-convergence
-    *max_err = 0;
+    *max_eigval_err = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
         EXPECT_EQ(hinfo[b][0], hinfoRes[b][0]) << "where b = " << b;
         if(hinfo[b][0] != hinfoRes[b][0])
         {
-            *max_err += 1;
+            *max_eigval_err += 1;
         }
     }
 
@@ -648,17 +673,14 @@ void syevd_heevd_getError(const rocblas_handle handle,
 
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        if(evect != rocblas_evect_original)
-        {
-            // only eigenvalues needed; compare with LAPACK
+        // Compare eigenvalues with LAPACK
+        // error is ||hD - hDRes|| / ||hD||
+        // using frobenius norm
+        if(hinfo[b][0] == 0)
+            err = norm_error('F', 1, n, 1, hD[b], hDres[b]);
+        *max_eigval_err = rocblas_max_nan(err, *max_eigval_err);
 
-            // error is ||hD - hDRes|| / ||hD||
-            // using frobenius norm
-            if(hinfo[b][0] == 0)
-                err = norm_error('F', 1, n, 1, hD[b], hDres[b]);
-            *max_err = rocblas_max_nan(err, *max_err);
-        }
-        else
+        if(evect == rocblas_evect_original)
         {
             // both eigenvalues and eigenvectors needed; compare with input
             // matrix
@@ -674,7 +696,7 @@ void syevd_heevd_getError(const rocblas_handle handle,
                 // Diagonal matrix of size n by n with computed eigenvalues
                 auto D = HMat::Zeros(n, n).diag(d);
 
-                // Orthogonal error
+                // Orthogonality error
                 auto OE = U * adjoint(U) - HMat::Eye(n, n);
                 err = OE.max_col_norm();
                 *max_ortho_err = rocblas_max_nan(err, *max_ortho_err);
@@ -682,7 +704,7 @@ void syevd_heevd_getError(const rocblas_handle handle,
                 // Residual error
                 auto RE = M - U * D * adjoint(U);
                 err = RE.norm() / M.norm();
-                *max_err = rocblas_max_nan(err, *max_err);
+                *max_eigvec_err = rocblas_max_nan(err, *max_eigvec_err);
             }
         }
     }
@@ -691,6 +713,7 @@ void syevd_heevd_getError(const rocblas_handle handle,
 template <bool STRIDED, typename T, typename Sd, typename Td, typename Id, typename Sh, typename Th, typename Ih>
 void syevd_heevd_getPerfData(const rocblas_handle handle,
                              const std::string& matrix,
+                             const rocblas_int verbose,
                              const rocblas_evect evect,
                              const rocblas_fill uplo,
                              const rocblas_int n,
@@ -798,7 +821,8 @@ void testing_syevd_heevd(Arguments& argus)
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
-    std::string matrix = argus.get<std::string>("matrix");
+    rocblas_int verbose = argus.get<rocblas_int>("verbose", 0);
+    std::string matrix = argus.get<std::string>("matrix", "randint");
 
     rocblas_evect evect = char2rocblas_evect(evectC);
     rocblas_fill uplo = char2rocblas_fill(uploC);
@@ -845,7 +869,8 @@ void testing_syevd_heevd(Arguments& argus)
     size_t size_Ares = (argus.unit_check || argus.norm_check) ? size_A : 0;
     size_t size_Dres = (argus.unit_check || argus.norm_check) ? size_D : 0;
 
-    double max_error = 0, max_ortho_error = 0, gpu_time_used = 0, cpu_time_used = 0;
+    double max_eigval_error = 0, max_eigvec_error = 0, max_ortho_error = 0,
+           gpu_time_used = 0, cpu_time_used = 0;
 
     // check invalid sizes
     bool invalid_size = (n < 0 || lda < n || bc < 0);
@@ -929,15 +954,15 @@ void testing_syevd_heevd(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            syevd_heevd_getError<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD,
+            syevd_heevd_getError<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD, stD,
                                              dE, stE, dinfo, bc, hA, hAres, hD, hDres, hinfo,
-                                             hinfoRes, &max_error, &max_ortho_error);
+                                             hinfoRes, &max_eigval_error, &max_eigvec_error, &max_ortho_error);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD,
+            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD,
                                                 stD, dE, stE, dinfo, bc, hA, hD, hinfo,
                                                 &gpu_time_used, &cpu_time_used, hot_calls,
                                                 argus.profile, argus.profile_kernels, argus.perf);
@@ -968,15 +993,15 @@ void testing_syevd_heevd(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            syevd_heevd_getError<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD,
+            syevd_heevd_getError<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD, stD,
                                              dE, stE, dinfo, bc, hA, hAres, hD, hDres, hinfo,
-                                             hinfoRes, &max_error, &max_ortho_error);
+                                             hinfoRes, &max_eigval_error, &max_eigvec_error, &max_ortho_error);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD,
+            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD,
                                                 stD, dE, stE, dinfo, bc, hA, hD, hinfo,
                                                 &gpu_time_used, &cpu_time_used, hot_calls,
                                                 argus.profile, argus.profile_kernels, argus.perf);
@@ -987,10 +1012,16 @@ void testing_syevd_heevd(Arguments& argus)
     // using 10 * n * machine_precision as tolerance
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, max_error, 10 * n);
+        ROCSOLVER_TEST_CHECK(T, max_eigval_error, 10 * n);
         if(evect != rocblas_evect_none)
+        {
+            ROCSOLVER_TEST_CHECK(T, max_eigvec_error, 10 * n);
             ROCSOLVER_TEST_CHECK(T, max_ortho_error, 10 * n);
+        }
     }
+
+printf( "timing %d, perf %d, BATCHED %d, STRIDED %d, norm_check %d, evect == none %d\n",
+        argus.timing, argus.perf, BATCHED, STRIDED, argus.norm_check, evect == rocblas_evect_none );
 
     // output results for rocsolver-bench
     if(argus.timing)
@@ -1017,8 +1048,16 @@ void testing_syevd_heevd(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "orthogonality");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error, max_ortho_error);
+                if (evect == rocblas_evect_none)
+                {
+                    rocsolver_bench_output("cpu_time_us", "gpu_time_us", "eigval error");
+                    rocsolver_bench_output(cpu_time_used, gpu_time_used, max_eigval_error);
+                }
+                else
+                {
+                    rocsolver_bench_output("cpu_time_us", "gpu_time_us", "eigval error", "eigvec error", "orthogonality");
+                    rocsolver_bench_output(cpu_time_used, gpu_time_used, max_eigval_error, max_eigvec_error, max_ortho_error);
+                }
             }
             else
             {
@@ -1030,9 +1069,16 @@ void testing_syevd_heevd(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error, max_ortho_error);
+            {
+                if (evect == rocblas_evect_none)
+                    rocsolver_bench_output(gpu_time_used, max_eigval_error);
+                else
+                    rocsolver_bench_output(gpu_time_used, max_eigval_error, max_eigvec_error, max_ortho_error);
+            }
             else
+            {
                 rocsolver_bench_output(gpu_time_used);
+            }
         }
     }
 
