@@ -109,10 +109,9 @@ function(apply_ctest_category_labels yaml_file)
     )
     if(NOT EXISTS "${PARSE_SCRIPT}")
         message(
-            WARNING
+            FATAL_ERROR
             "Test category parser script not found: ${PARSE_SCRIPT}"
         )
-        return()
     endif()
 
     # Check if optional install_test_file parameter was provided. When
