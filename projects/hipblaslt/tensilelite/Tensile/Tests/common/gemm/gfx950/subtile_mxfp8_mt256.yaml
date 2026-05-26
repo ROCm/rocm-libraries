@@ -85,6 +85,11 @@ BenchmarkProblems:
 
   ########################################
   # FP8 TN — PGR=2 (scheduler path), MT 256x256, DU=128, ScaleDepthURatio{A,B}=2
+  # Covers MIWaveGroup permutations [2,2] (baseline), [1,4], [4,1] per
+  # sebvince review comment #9.  MIWaveTile compensates to keep MT 256x256:
+  #   WG [2,2] → MIWT  8x 8  (numPartitionsM=1, numPartitionsN candidates {1,2,4,8})
+  #   WG [1,4] → MIWT 16x 4  (numPartitionsM=1, numPartitionsN candidates {1,2,4})
+  #   WG [4,1] → MIWT  4x16  (numPartitionsN=1, numPartitionsM candidates {1,2,4})
   ########################################
   -
     - # ProblemType
@@ -106,7 +111,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 128, 1,  1,  8,  8,  2, 2]  # MT 256x256, WG 2x2 (baseline)
+          - [16, 16, 128, 1,  1, 16,  4,  1, 4]  # MT 256x256, WG 1x4 (N-partition geometry)
+          - [16, 16, 128, 1,  1,  4, 16,  4, 1]  # MT 256x256, WG 4x1 (M-partition geometry)
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [128]                 # data DU = MI_K (half native)
@@ -124,3 +131,19 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 512]   # K = 2 * scaleDU
           - Exact: [256, 256, 1, 1024]  # K = 4 * scaleDU
           - Exact: [256, 256, 1, 4096]  # K = 16 * scaleDU = 32 outer iters; exercises last-iter prefetch gate
+
+  ########################################
+  # FP8 TN — sebvince review comment #10: larger DU on smaller MT
+  # ----------------------------------------------------------------
+  # Considered: MT 128x128 with DU=256 (data DU = 2*MI_K) and
+  # ScaleDepthURatio{A,B}=2 (scaleDU = 512).  Rejected by the scheduler
+  # constraint R*numSubIterK_data <= 2 in MFMASchedulerConfig.__post_init__
+  # (scale VGPR holds at most 2 K-bytes per M parity; R*numSubIterK_data
+  # would be 2*2=4 here, overflowing the op_sel byte index in emit_mfma).
+  #
+  # The baseline coverage (MT 128x128 + DU=256 + ScaleDepthURatio=1, i.e.
+  # the no-decoupled-scale path) already lives in subtile_mxfp8.yaml — no
+  # new yaml entry is added.  R=2 on small-MT/large-DU would require either
+  # widening the scale VGPR holding to 4+ K-bytes or splitting MI_K — both
+  # are out of scope for this PR.
+  ########################################

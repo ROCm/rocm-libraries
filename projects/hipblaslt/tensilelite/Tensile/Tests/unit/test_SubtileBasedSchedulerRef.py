@@ -1292,3 +1292,115 @@ def test_320x320_bf16_preloop_1x5_offset_all():
         f"--- Expected ---\n{EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL}\n"
         f"--- Actual ---\n{actual}"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# ScaleDepthURatio R=2 reference snapshot — MT256x256x128 FP8
+# ══════════════════════════════════════════════════════════════
+# Mirrors the subtile_mxfp8_mt256.yaml regression geometry (data DU=128
+# paired with scaleDU=256 via ScaleDepthURatio{A,B}=2): data-side
+# numSubIterK=1, R=2 forces unroll_factor to a multiple of 2 so two body
+# copies appear per outer iter.  This snapshot pins the deduplicated
+# dependency-order output and serves as a reference test for the R=2
+# scheduler under the Phase-2 ui_slot tagging refactor.
+#
+# Review request: sebvince asked for a reference test covering R=2.
+
+def make_256x256_fp8_R2():
+    return SchedulerConfig(
+        numMFMATilesM=8,                       # MT0=256 / MI_M=16 / WG_M=2
+        numMFMATilesN=8,                       # MT1=256 / MI_N=16 / WG_N=2
+        numSubIterK=1,                         # data DU=128 / MI_K=128 = 1
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=1),       # scale LR k=1 matches Kernel.py _div_r
+        lrSB=ReadGranularity(mn=2, k=1),
+        grSA=ReadGranularity(mn=8, k=1),
+        grSB=ReadGranularity(mn=8, k=1),
+        scaleSchedulingPeriod=2,
+        numPartitionsM=1,
+        numPartitionsN=1,
+    )
+
+
+EXPECTED_EMIT_DEP_ORDER_256x256_FP8_R2 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [9]
+      preMFMA path 0:
+        [ 9] wait_lr    wait_lr
+      path 0:
+        [10] wait_gr    wait_gr(A=8,B=8,SA=1,SB=1)
+        [11] sync       sync
+        [12] lr_inc     lr_inc(A)
+        [13] lr_inc     lr_inc(B)
+        [14] lr_inc     lr_inc(SA)
+        [15] lr_inc     lr_inc(SB)
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7]
+        [ 3] lr         LR B  (MT n+1, subIterK [0]) [0-7]
+        [ 2] lr         LR SA (MT n+1, subIterK [0]) [0-7]
+        [ 4] lr         LR SB (MT n+1, subIterK [0]) [0-7]
+      path 1:
+        [16] sync       sync
+        [17] gr_inc     gr_inc(A)
+        [ 5] gr         GR A (MT n+2, subIterK [0,1]) ids [0-7]
+        [18] gr_inc     gr_inc(B)
+        [ 6] gr         GR B (MT n+2, subIterK [0,1]) ids [0-7]
+        [19] gr_inc     gr_inc(SA)
+        [ 7] gr         GR SA (MT n+2, subIterK [0]) ids [0-7]
+        [20] gr_inc     gr_inc(SB)
+        [ 8] gr         GR SB (MT n+2, subIterK [0]) ids [0-7]
+"""
+
+
+def test_256x256_fp8_R2_reference():
+    """Reference snapshot for MT256x256x128 FP8 with ScaleDepthURatio=2.
+
+    Pins the dep-order schedule for the central R=2 regression geometry
+    so any future change to scheduler placement, scale-op anchoring, or
+    Phase-2 ui_slot tagging that perturbs the schedule shape will diff
+    against this expected output.
+    """
+    cfg = make_256x256_fp8_R2()
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_R2, (
+        f"R=2 reference schedule mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_FP8_R2}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
+def test_256x256_fp8_R2_ui_slot_tagging():
+    """Phase-2 contract: ``_assign_ui_slots`` tags scale ops with the
+    body-copy slot they should fire in under R>1.
+
+    Verifies the cadence the scheduler hands to ``InstructionEmitter.populate``:
+      - scale ``gr`` / ``gr_inc`` → ui_slot == 0    (start of R-period)
+      - scale ``lr_inc``          → ui_slot == R-1  (end of R-period)
+      - data ops / mfma / lr      → ui_slot is None (every body copy)
+    """
+    cfg = make_256x256_fp8_R2()
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    R = cfg.scaleSchedulingPeriod
+    for partition_emitted in sched._emitted:
+        for emitted in partition_emitted:
+            for em in emitted:
+                tensor = getattr(em.source, 'tensor', None)
+                if tensor in ('SA', 'SB') and em.opType in ('gr', 'gr_inc'):
+                    assert em.ui_slot == 0, (
+                        f"scale {em.opType}({tensor}) must carry ui_slot=0, "
+                        f"got {em.ui_slot}")
+                elif tensor in ('SA', 'SB') and em.opType == 'lr_inc':
+                    assert em.ui_slot == R - 1, (
+                        f"scale lr_inc({tensor}) must carry ui_slot={R-1}, "
+                        f"got {em.ui_slot}")
+                else:
+                    assert em.ui_slot is None, (
+                        f"non-scale-gated op {em.opType}({tensor}) must keep "
+                        f"ui_slot=None, got {em.ui_slot}")
