@@ -280,7 +280,7 @@ float moe_gemm(const ck_tile::MoeFlatmmHostArgs<ScaleM, ScaleN>& args,
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
-        const dim3 grids      = Kernel::GridSize(kargs);
+        const dim3 grids  = Kernel::GridSize(kargs);
         const dim3 blocks = Kernel::BlockSize();
 
         if(!Kernel::IsSupportedArgument(kargs))
@@ -463,7 +463,7 @@ float mx_moe_gemm(const MoeFlatmmHostArgs& args, const ck_tile::stream_config& s
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
-        const dim3 grids      = Kernel::GridSize(kargs);
+        const dim3 grids  = Kernel::GridSize(kargs);
         const dim3 blocks = Kernel::BlockSize();
 
         if(!Kernel::IsSupportedArgument(kargs))
@@ -612,7 +612,7 @@ float a16w4_moe_gemm(const MoeFlatmmHostArgs& args, const ck_tile::stream_config
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
-        const dim3 grids      = Kernel::GridSize(kargs);
+        const dim3 grids  = Kernel::GridSize(kargs);
         const dim3 blocks = Kernel::BlockSize();
 
         if(!Kernel::IsSupportedArgument(kargs))

@@ -2214,7 +2214,8 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                     // warp GEMM
-                    WG{}.template operator()<OpSelA<ikxdl * MXdlPack + imxdl>, OpSelB<ikxdl * NXdlPack + inxdl>>(
+                    WG{}.template
+                    operator()<OpSelA<ikxdl * MXdlPack + imxdl>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         c_warp_tensor,
                         a_warp_tensor(number<AwarpIter>{}),
                         b_warp_tensor_ping(nIter_pack * number<NXdlPack>{} +
@@ -2283,7 +2284,8 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                     // warp GEMM
-                    WG{}.template operator()<OpSelA<ikxdl * MXdlPack + imxdl>, OpSelB<ikxdl * NXdlPack + inxdl>>(
+                    WG{}.template
+                    operator()<OpSelA<ikxdl * MXdlPack + imxdl>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         //  operator()<MXdlPack + imxdl, ikxdl * NXdlPack + inxdl>(
                         c_warp_tensor,
                         a_warp_tensor(number<AwarpIter>{}),
