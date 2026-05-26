@@ -121,6 +121,22 @@ globalParameters["ExitOnFails"] = (
 globalParameters["CpuThreads"] = (
     -1
 )  # How many CPU threads to use for kernel generation.  0=no threading, -1 == nproc, N=min(nproc,N).  TODO - 0 sometimes fails with a kernel name error?  0 does not check error codes correctly
+# If True: after each kernel is assembled, verify that StinkyTofu's total instruction encoding
+# size (sum of each instruction's encoded byte length from the Stinky pass pipeline) matches the
+# compiled total instruction size (ELF ``.text`` size of the ``.o``, via llvm-readelf/readelf). In
+# other words: computed encoding total == compiled total instruction size.
+#
+# Why: command-processor (CP) prefetch uses that computed total so the right amount of
+# kernel code is prefetched. When you add instructions, literals, or passes, this catches mistakes
+# where the pipeline’s instruction-size analysis no longer matches real assembly output.
+#
+# Scope: only kernels emitted through the StinkyTofu assembly path carry the embedded total in the
+# generated ``.s`` and participate in this check; that same encoding total feeds
+# ``.amdhsa_inst_pref_size`` in ``.amdhsa_kernel`` metadata for CP instruction prefetch.
+# Currently this applies to gfx1250 only (StinkyTofu gfx1250 emitter and CP prefetch on that arch).
+# Testing: ``tox`` turns on ``CheckASMCodeSize=True`` for the default Tensile pytest runs (see
+# ``tox.ini``), so gfx1250 kernels built during those tests are verified automatically.
+globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output
 globalParameters["ParallelGpuExecution"] = 1  # Number of GPUs for parallel client execution (0=auto-detect, 1=serial, N=use N GPUs)
@@ -375,14 +391,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
-    {"LdsPadMXSA": [ -1 ] },
+    {"LdsPadMXSA": [ 0 ] },
     {"LdsPadB": [-1]},
-    {"LdsPadMXSB": [ -1 ] },
+    {"LdsPadMXSB": [ 0 ] },
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
-    {"LdsBlockSizePerPadMXSA": [ -1 ] },
+    {"LdsBlockSizePerPadMXSA": [ 0 ] },
     {"LdsBlockSizePerPadB": [-1]},
-    {"LdsBlockSizePerPadMXSB": [ -1 ] },
+    {"LdsBlockSizePerPadMXSB": [ 0 ] },
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
@@ -421,6 +437,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
     {"DirectToLds": [0]},
+    {"DirectToLdsMetadata": [1]},
     {"UseSubtileImpl": [False]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
@@ -508,6 +525,7 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
     {"ClusterDim": [[1, 1]]},
+    {"HalfPLR": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

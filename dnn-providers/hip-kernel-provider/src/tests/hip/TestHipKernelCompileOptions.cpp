@@ -82,7 +82,11 @@ protected:
     }
 };
 
-TEST_F(TestHipKernelCompileOptions, VerifiesOptionsForFp32Nchw)
+class TestHipKernelCompileOptionsNchwFp32 : public TestHipKernelCompileOptions
+{
+};
+
+TEST_F(TestHipKernelCompileOptionsNchwFp32, VerifiesOptions)
 {
     setUpTestCase(DataType::FLOAT, TensorLayout::NCHW);
 
@@ -96,7 +100,11 @@ TEST_F(TestHipKernelCompileOptions, VerifiesOptionsForFp32Nchw)
     EXPECT_TRUE(hasOption(options, "--offload-arch=gfx942"));
 }
 
-TEST_F(TestHipKernelCompileOptions, VerifiesOptionsForBFp16Nhwc)
+class TestHipKernelCompileOptionsNhwcBfp16 : public TestHipKernelCompileOptions
+{
+};
+
+TEST_F(TestHipKernelCompileOptionsNhwcBfp16, VerifiesOptions)
 {
     setUpTestCase(DataType::BFLOAT16, TensorLayout::NHWC);
 

@@ -160,6 +160,7 @@ def _rmtree(path: Path):
         "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "reconfigure": "Delete CMake cache to force a fresh configure (keeps compiled objects).",
         "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
@@ -173,6 +174,7 @@ def build(
     static=False,
     jobs=None,
     clean=False,
+    reconfigure=False,
     gcc=False,
     rocm_path=None,
 ):
@@ -180,6 +182,11 @@ def build(
 
     if clean and bld.exists():
         _rmtree(bld)
+    elif reconfigure and bld.exists():
+        for name in ("CMakeCache.txt",):
+            p = bld / name
+            if p.exists():
+                p.unlink()
 
     bld.mkdir(parents=True, exist_ok=True)
 

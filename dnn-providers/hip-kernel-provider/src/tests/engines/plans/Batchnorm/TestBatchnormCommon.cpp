@@ -13,7 +13,7 @@ using namespace hip_kernel_provider::batchnorm;
 // getLocalConfigNHWC - computes local workgroup size for NHWC layout
 // ============================================================================
 
-TEST(TestGetLocalConfigNHWC, ForFP32DataType)
+TEST(TestGetLocalConfigNhwcFp32, ProducesSquareWorkgroup)
 {
     size_t x = 0;
     size_t y = 0;
@@ -23,7 +23,7 @@ TEST(TestGetLocalConfigNHWC, ForFP32DataType)
     EXPECT_EQ(y, 16);
 }
 
-TEST(TestGetLocalConfigNHWC, IfNotFP32DataType)
+TEST(TestGetLocalConfigNhwc, MixedPrecisionUsesWiderX)
 {
     size_t x = 0;
     size_t y = 0;
@@ -33,7 +33,7 @@ TEST(TestGetLocalConfigNHWC, IfNotFP32DataType)
     EXPECT_EQ(y, 8);
 }
 
-TEST(TestGetLocalConfigNHWC, HandlesVectorsizeScaling)
+TEST(TestGetLocalConfigNhwc, HandlesVectorsizeScaling)
 {
     size_t x = 0;
     size_t y = 0;
@@ -44,7 +44,7 @@ TEST(TestGetLocalConfigNHWC, HandlesVectorsizeScaling)
     EXPECT_EQ(y, 8);
 }
 
-TEST(TestGetLocalConfigNHWC, HandlesIncreasedMinWorkgroups)
+TEST(TestGetLocalConfigNhwc, HandlesIncreasedMinWorkgroups)
 {
     size_t xSmallWG = 0;
     size_t ySmallWG = 0;
@@ -59,7 +59,7 @@ TEST(TestGetLocalConfigNHWC, HandlesIncreasedMinWorkgroups)
     EXPECT_LT(yLargeWG, ySmallWG);
 }
 
-TEST(TestGetLocalConfigNHWC, HandlesSmallChannels)
+TEST(TestGetLocalConfigNhwc, HandlesSmallChannels)
 {
     size_t x = 0;
     size_t y = 0;
@@ -69,7 +69,7 @@ TEST(TestGetLocalConfigNHWC, HandlesSmallChannels)
     EXPECT_EQ(y, 128);
 }
 
-TEST(TestGetLocalConfigNHWC, HandlesSmallInitialMaxLocalsize)
+TEST(TestGetLocalConfigNhwc, HandlesSmallInitialMaxLocalsize)
 {
     size_t x = 0;
     size_t y = 0;
@@ -83,7 +83,7 @@ TEST(TestGetLocalConfigNHWC, HandlesSmallInitialMaxLocalsize)
 // getSpatialMultipleConfig - computes workgroup configuration for spatial multiple implementation
 // ====================================================================================================
 
-TEST(TestGetSpatialMultipleConfig, NHWCReturnsDefaultOnMisalignment)
+TEST(TestGetSpatialMultipleConfig, NhwcReturnsDefaultOnMisalignment)
 {
     size_t x = 0;
     size_t y = 0;
@@ -93,7 +93,7 @@ TEST(TestGetSpatialMultipleConfig, NHWCReturnsDefaultOnMisalignment)
     EXPECT_EQ(y, 1);
 }
 
-TEST(TestGetSpatialMultipleConfig, NCHWReturnsDefaultOnMisalignment)
+TEST(TestGetSpatialMultipleConfig, NchwReturnsDefaultOnMisalignment)
 {
     size_t x = 0;
     size_t y = 0;
@@ -103,7 +103,7 @@ TEST(TestGetSpatialMultipleConfig, NCHWReturnsDefaultOnMisalignment)
     EXPECT_EQ(y, 1);
 }
 
-TEST(TestGetSpatialMultipleConfig, NHWCCalculatesWorkgroupSize)
+TEST(TestGetSpatialMultipleConfig, NhwcCalculatesWorkgroupSize)
 {
     size_t x = 0;
     size_t y = 0;
@@ -113,7 +113,7 @@ TEST(TestGetSpatialMultipleConfig, NHWCCalculatesWorkgroupSize)
     EXPECT_EQ(y, 8);
 }
 
-TEST(TestGetSpatialMultipleConfig, NCHWHandlesLargeSpatial)
+TEST(TestGetSpatialMultipleConfig, NchwHandlesLargeSpatial)
 {
     size_t x = 0;
     size_t y = 0;
@@ -123,7 +123,7 @@ TEST(TestGetSpatialMultipleConfig, NCHWHandlesLargeSpatial)
     EXPECT_EQ(y, 1024);
 }
 
-TEST(TestGetSpatialMultipleConfig, NCHWScalesDownForSmallSpatial)
+TEST(TestGetSpatialMultipleConfig, NchwScalesDownForSmallSpatial)
 {
     size_t x = 0;
     size_t y = 0;
@@ -141,13 +141,13 @@ TEST(TestGetSpatialMultipleConfig, NCHWScalesDownForSmallSpatial)
 // isSpatialMultipleApplicable - checks if spatial multiple implementation can be used
 // ========================================================================================
 
-TEST(TestIsSpatialMultipleApplicable, NHWCVectorAlignmentFail)
+TEST(TestIsSpatialMultipleApplicable, NhwcVectorAlignmentFail)
 {
     // If C is not divisible by vectorsize with NHWC layout, it should fail immediately
     EXPECT_FALSE(isSpatialMultipleApplicable(64, 63, 16, 16, true, true, 4, 32, 64, 1, 64));
 }
 
-TEST(TestIsSpatialMultipleApplicable, NCHWSpatialAlignmentFail)
+TEST(TestIsSpatialMultipleApplicable, NchwSpatialAlignmentFail)
 {
     // If H*W is not divisible by vectorsize with NCHW layout, it should fail immediately
     EXPECT_FALSE(isSpatialMultipleApplicable(64, 64, 3, 5, false, true, 4, 32, 64, 1, 64));
@@ -206,7 +206,7 @@ TEST(TestUseMultiple, ForwardTrainingMixedPrecisionHeuristic)
     EXPECT_FALSE(useMultiple(128, 32, 32, true, false, Direction::FORWARD_TRAINING));
 }
 
-TEST(TestUseMultiple, NHWCAlwaysReturnsTrue)
+TEST(TestUseMultiple, NhwcAlwaysReturnsTrue)
 {
     EXPECT_TRUE(useMultiple(2, 8, 8, false, true, Direction::FORWARD_TRAINING));
 }
@@ -225,7 +225,7 @@ TEST(TestGetStashMethod, ReturnsMethodOneWhenBatchStashRequired)
     EXPECT_EQ(getStashMethod(false, true, 32, 64, 64, 10, 64, 1, 64), 1);
 }
 
-TEST(TestGetStashMethod, ReturnsMethodTwoForNHWCOddCMixedPrecision)
+TEST(TestGetStashMethod, ReturnsMethodTwoForNhwcOddCMixedPrecision)
 {
     EXPECT_EQ(getStashMethod(true, false, 16, 65, 64, 1024, 1024, 1, 64), 2);
 }
@@ -239,7 +239,7 @@ TEST(TestGetStashMethod, MixedPrecisionScalesStashValues)
 // defaultConfigSpatialSingle - provides default configuration for spatial single implementation
 // ====================================================================================================
 
-TEST(TestDefaultConfigSpatialSingle, NHWCDefaultVariantOne)
+TEST(TestDefaultConfigSpatialSingle, NhwcDefaultVariantOne)
 {
     KernelConfig config;
 
@@ -248,7 +248,7 @@ TEST(TestDefaultConfigSpatialSingle, NHWCDefaultVariantOne)
     EXPECT_EQ(config.vectorsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialSingle, NCHWBackwardSmallSpatialSmallBatch)
+TEST(TestDefaultConfigSpatialSingle, NchwBackwardSmallSpatialSmallBatch)
 {
     KernelConfig config;
 
@@ -257,7 +257,7 @@ TEST(TestDefaultConfigSpatialSingle, NCHWBackwardSmallSpatialSmallBatch)
     EXPECT_EQ(config.vectorsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialSingle, NCHWBackwardSmallSpatialLargeBatch)
+TEST(TestDefaultConfigSpatialSingle, NchwBackwardSmallSpatialLargeBatch)
 {
     KernelConfig config;
 
@@ -266,7 +266,7 @@ TEST(TestDefaultConfigSpatialSingle, NCHWBackwardSmallSpatialLargeBatch)
     EXPECT_EQ(config.vectorsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialSingle, NCHWBackwardMidSpatialSmallBatch)
+TEST(TestDefaultConfigSpatialSingle, NchwBackwardMidSpatialSmallBatch)
 {
     KernelConfig config;
 
@@ -275,7 +275,7 @@ TEST(TestDefaultConfigSpatialSingle, NCHWBackwardMidSpatialSmallBatch)
     EXPECT_EQ(config.vectorsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialSingle, NCHWForwardLargeSpatialOrMixed)
+TEST(TestDefaultConfigSpatialSingle, NchwForwardLargeSpatialOrMixed)
 {
     KernelConfig config;
 
@@ -284,7 +284,7 @@ TEST(TestDefaultConfigSpatialSingle, NCHWForwardLargeSpatialOrMixed)
     EXPECT_EQ(config.vectorsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialSingle, NCHWForwardSmallDefault)
+TEST(TestDefaultConfigSpatialSingle, NchwForwardSmallDefault)
 {
     KernelConfig config;
 
@@ -297,7 +297,7 @@ TEST(TestDefaultConfigSpatialSingle, NCHWForwardSmallDefault)
 // defaultConfigSpatialMultiple - provides default configuration for spatial multiple implementation
 // ====================================================================================================
 
-TEST(TestDefaultConfigSpatialMultiple, NHWCFullConfigCheck)
+TEST(TestDefaultConfigSpatialMultiple, NhwcFullConfigCheck)
 {
     KernelConfig config;
 
@@ -310,7 +310,7 @@ TEST(TestDefaultConfigSpatialMultiple, NHWCFullConfigCheck)
     EXPECT_EQ(config.zlocalsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialMultiple, NHWCFallbackConfigCheck)
+TEST(TestDefaultConfigSpatialMultiple, NhwcFallbackConfigCheck)
 {
     KernelConfig config;
 
@@ -323,7 +323,7 @@ TEST(TestDefaultConfigSpatialMultiple, NHWCFallbackConfigCheck)
     EXPECT_EQ(config.zlocalsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialMultiple, NCHWFullConfigCheck)
+TEST(TestDefaultConfigSpatialMultiple, NchwFullConfigCheck)
 {
     KernelConfig config;
 
@@ -336,7 +336,7 @@ TEST(TestDefaultConfigSpatialMultiple, NCHWFullConfigCheck)
     EXPECT_EQ(config.zlocalsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialMultiple, NCHWSingleVectorConfig)
+TEST(TestDefaultConfigSpatialMultiple, NchwSingleVectorConfig)
 {
     KernelConfig config;
 
@@ -349,7 +349,7 @@ TEST(TestDefaultConfigSpatialMultiple, NCHWSingleVectorConfig)
     EXPECT_EQ(config.zlocalsize, 1);
 }
 
-TEST(TestDefaultConfigSpatialMultiple, NCHWOddSpatialFallback)
+TEST(TestDefaultConfigSpatialMultiple, NchwOddSpatialFallback)
 {
     KernelConfig config;
 
