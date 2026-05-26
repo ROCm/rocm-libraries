@@ -14,7 +14,6 @@
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
 
 #include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
 
 #include <cstdint>
 #include <cstring>
