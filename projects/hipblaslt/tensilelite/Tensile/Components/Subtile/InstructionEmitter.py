@@ -270,19 +270,14 @@ class InstructionEmitter:
     def populate(self, emitted, unroll_iter=0, strip_prefetch=False):
         """Walk emitted partitions and fill em.instructions.
 
-        Per-ui emission cadence under R>1 (R==1: every gate is "fire"):
-
-          Scale (SA/SB) — gated here via _scale_op_gated_out:
-            gr, gr_inc : ui%R == 0     (DTL + SRD advance + LW swap)
-            lr_inc     : ui%R == R-1   (LR swap after all R reads;
-                                        insert_gr_lr_inc rewrites MT-
-                                        transition preOp->postOp under
-                                        PGR>0; see LogicalScheduler.py)
-            lr         : every copy    (same 4B reload, op_sel picks byte)
-
-          Data (A/B) — gated INSIDE emit_gr_inc / emit_lr_inc because
-          SRD advance and LDS swap have different cadences (see those
-          docstrings): SRD/LW/LR swaps all fire every copy.
+        Per-iter emission cadence is owned by the *scheduler*: each
+        EmittedModule carries ``em.ui_slot`` (an ``int`` or ``None``) set
+        by ``LogicalScheduler._assign_ui_slots``.  This emitter is dumb
+        about R-period gating — it just fires every op whose ``ui_slot``
+        matches ``unroll_iter % R`` (or is ``None`` = "fire on every body
+        copy", e.g. data ops, mfma, lr).  Under R==1 every op has
+        ``ui_slot=None`` so populate is bit-identical to the legacy
+        no-gating path.
 
         strip_prefetch (R>1 + PGR>=2 last outer iter): only the scale `gr`
         DTL is stripped because after the last iter
@@ -298,7 +293,7 @@ class InstructionEmitter:
                     handler = self._dispatch.get(em.opType)
                     if handler is None:
                         continue
-                    if R > 1 and self._scale_op_gated_out(em, unroll_iter, R):
+                    if em.ui_slot is not None and (unroll_iter % R) != em.ui_slot:
                         em.instructions = []
                         continue
                     if strip_prefetch and self._is_prefetch_only(em):
@@ -313,18 +308,3 @@ class InstructionEmitter:
             return False
         tensor = getattr(em.source, 'tensor', None)
         return tensor in ('SA', 'SB')
-
-    @staticmethod
-    def _scale_op_gated_out(em, unroll_iter: int, R: int) -> bool:
-        """Return True for scale ops that should NOT emit in this ui.
-
-        Cadence rationale: see populate().
-        """
-        tensor = getattr(em.source, 'tensor', None)
-        if tensor not in ('SA', 'SB'):
-            return False
-        if em.opType in ('gr', 'gr_inc'):
-            return (unroll_iter % R) != 0
-        if em.opType == 'lr_inc':
-            return (unroll_iter % R) != (R - 1)
-        return False

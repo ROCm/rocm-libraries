@@ -436,11 +436,20 @@ class EmittedModule:
 
     Compatible with SubtileBasedInstructionScheduler.instructionSchedule().
     Instructions are left empty at the logical level — filled during emission.
+
+    ``ui_slot`` tags an op with the body-copy slot it should fire in (R>1
+    only): scale gr / gr_inc carry ``ui_slot=0`` (DTL + SRD advance + LW
+    swap at the START of the R-period) and scale lr_inc carries
+    ``ui_slot=R-1`` (LDS read-side swap AFTER all period reads).  Data
+    ops and R==1 leave ``ui_slot=None`` (fire on every body copy).
+    ``InstructionEmitter.populate`` reads this tag — the per-iter gating
+    decision is owned by the scheduler, not the emitter (review #5).
     """
     moduleId: int = -1
     instructions: list = field(default_factory=list)
     before: Optional[int] = None   # moduleId that must complete before this module
     source: Optional[Emittable] = None
+    ui_slot: Optional[int] = None  # ui%R slot for scale-op cadence under R>1
 
     @property
     def opType(self) -> str:
@@ -2080,8 +2089,42 @@ class LogicalScheduler:
             all_partitions.append(partition_emitted)
 
         self._emitted = all_partitions
+        self._assign_ui_slots(all_partitions)
         self._completed.add(Pass.EMIT)
         return all_partitions
+
+    def _assign_ui_slots(self, emitted_3d: List[List[List[EmittedModule]]]) -> None:
+        """Tag scale ops with the body-copy slot they should fire in (R>1).
+
+        The scheduler owns the per-iter cadence decision — the emitter is
+        oblivious to R-period gating and simply emits every op whose
+        ``ui_slot`` matches the current ``unroll_iter % R`` (or whose
+        ``ui_slot`` is ``None``, meaning "fire on every body copy").
+
+        Cadence under R>1:
+          - scale ``gr`` / ``gr_inc`` → ``ui_slot=0`` (DTL + SRD advance +
+            LW swap at the START of the period)
+          - scale ``lr_inc``          → ``ui_slot=R-1`` (LDS read-side swap
+            AFTER all R-period scale reads)
+          - data ops / mfma / lr      → ``ui_slot=None`` (every body copy)
+
+        R==1 is a no-op: every op stays ``ui_slot=None`` and the populate
+        path is bit-identical to the pre-refactor "scale_op_gated_out=False"
+        case.
+        """
+        R = self.config.scaleSchedulingPeriod
+        if R <= 1:
+            return
+        for partition_emitted in emitted_3d:
+            for emitted in partition_emitted:
+                for em in emitted:
+                    tensor = getattr(em.source, 'tensor', None)
+                    if tensor not in ('SA', 'SB'):
+                        continue
+                    if em.opType in ('gr', 'gr_inc'):
+                        em.ui_slot = 0
+                    elif em.opType == 'lr_inc':
+                        em.ui_slot = R - 1
 
     def build(self):
         """Build mainloop """
@@ -2331,6 +2374,7 @@ class LogicalScheduler:
             ])
 
         self._preloop_emitted = [[emitted]]
+        self._assign_ui_slots(self._preloop_emitted)
         return self._preloop_emitted
 
     def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):

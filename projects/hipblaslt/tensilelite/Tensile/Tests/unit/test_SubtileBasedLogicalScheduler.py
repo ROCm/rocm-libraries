@@ -2254,16 +2254,17 @@ def test_scheduler_R2_FP8_MT256():
         "Schedule must place at least one scale inc per period "
         f"(got {scale_inc_count_per_copy})")
 
-    # Simulate the populate-time gating predicate explicitly.  This is
-    # what InstructionEmitter.populate uses to decide whether to call the
-    # handler or set em.instructions = [] for the given unroll iter.
-    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+    # After the Phase-2 refactor, the per-iter cadence decision lives on
+    # the EmittedModule as ``em.ui_slot`` (set by
+    # ``LogicalScheduler._assign_ui_slots`` at schedule time).  Walk the
+    # scheduled ops and verify the same gating semantics that the old
+    # ``InstructionEmitter._scale_op_gated_out`` enforced at populate time.
     gated_by_ui = {ui: [] for ui in range(R)}
     for ui in range(R):
         for partition_emitted in sched._emitted:
             for emitted in partition_emitted:
                 for em in emitted:
-                    if InstructionEmitter._scale_op_gated_out(em, ui, R):
+                    if em.ui_slot is not None and (ui % R) != em.ui_slot:
                         gated_by_ui[ui].append(
                             (em.opType, getattr(em.source, 'tensor', None)))
     # ui=0 (first copy of an R-period) must emit scale GR + scale gr_inc
