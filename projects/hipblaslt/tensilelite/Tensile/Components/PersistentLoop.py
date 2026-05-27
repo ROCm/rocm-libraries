@@ -143,7 +143,8 @@ class PersistentLoopOn(PersistentLoop):
             module.add(streamk.computeTotalIters(writer, kernel, sTmp))
             module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Check if done all StreamK iterations"))
             writer.sgprPool.checkIn(sTmp)
+            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
         else:
             module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
-        module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
+            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
         return module
