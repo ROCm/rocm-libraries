@@ -245,6 +245,8 @@ class GemmKernelBuilder:
             default_pipeline = "compv4"
         elif self.kernel_name_prefix == "gemm_multi_d":
             default_pipeline = "compv4"
+        elif self.kernel_name_prefix == "gemm_multi_abd":
+            default_pipeline = "compv4"
         elif self.kernel_name_prefix == "gemm_preshuffle":
             default_pipeline = "preshufflev2"
         elif self.kernel_name_prefix == "grouped_gemm":
@@ -421,6 +423,7 @@ class GemmKernelBuilder:
         if self.kernel_name_prefix in [
             "gemm_universal",
             "gemm_multi_d",
+            "gemm_multi_abd",
             "grouped_gemm",
             "batched_contraction",
         ]:
