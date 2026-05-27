@@ -32,9 +32,9 @@
 #include "rtc_cache.h"
 #include "solution_map.h"
 #include "tuning_helper.h"
-#include <atomic>
 #include <fcntl.h>
 #include <memory>
+#include <mutex>
 
 /*******************************************************************************
  * Static handle data
@@ -51,7 +51,9 @@ int log_graph_fd    = -1;
 extern const char* ROCFFT_VERSION_STRING;
 // Counter incremented (resp. decremented) at every call to
 // rocfft_setup (resp. rocfft_cleanup)
-static std::atomic<size_t> rocfft_usage_count{0};
+static size_t rocfft_usage_count = 0;
+// Serializes setup/final-cleanup transitions that mutate global state.
+static std::mutex rocfft_setup_cleanup_mutex;
 
 /**
  *  @brief Logging function
@@ -90,7 +92,9 @@ static void open_log_stream(const char* environment_variable_name, int& log_fd)
 rocfft_status rocfft_setup()
 try
 {
-    if(rocfft_usage_count++ > 0)
+    std::lock_guard<std::mutex> lock(rocfft_setup_cleanup_mutex);
+
+    if(++rocfft_usage_count > 1)
         return rocfft_status_success;
 
     rocfft_ostream::setup();
@@ -164,6 +168,8 @@ catch(...)
 rocfft_status rocfft_cleanup()
 try
 {
+    std::lock_guard<std::mutex> lock(rocfft_setup_cleanup_mutex);
+
     // Only the last call to rocfft_cleanup does the cleanup
     if(rocfft_usage_count == 0)
     {
