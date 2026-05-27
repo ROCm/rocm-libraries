@@ -11,40 +11,30 @@
 2. [Problem Statement](#2-problem-statement)
 3. [Regressions Captured](#3-regressions-captured)
 4. [Current System Overview](#4-current-system-overview)
-5. [Proposed Design](#5-proposed-design)
-6. [TOML Schema](#6-toml-schema)
-7. [Failure Detection](#7-failure-detection)
-8. [Condensation Heuristic](#8-condensation-heuristic)
-9. [Auto-Generation Tool](#9-auto-generation-tool)
-10. [Sharding](#10-sharding)
-11. [Workflow](#11-workflow)
-12. [CI Integration](#12-ci-integration)
-13. [Alternatives Considered](#13-alternatives-considered)
-14. [Risks](#14-risks)
-15. [Open Questions and Future Work](#15-open-questions-and-future-work)
-16. [Glossary](#16-glossary)
+5. [TOML Schema](#5-toml-schema)
+6. [Failure Detection](#6-failure-detection)
+7. [Condensation Heuristic](#7-condensation-heuristic)
+8. [Auto-Generation Tool](#8-auto-generation-tool)
+9. [Sharding](#9-sharding)
+10. [Workflow and CI](#10-workflow-and-ci)
+11. [Alternatives Considered](#11-alternatives-considered)
+12. [Risks](#12-risks)
+13. [Open Questions and Future Work](#13-open-questions-and-future-work)
+14. [Glossary](#14-glossary)
 
 ## 1. Executive Summary
 
-This RFC proposes adding **structured engine-support claims**, scoped per-asic, to each per-engine integration-test config. Claims live in a hand-edited main TOML plus a machine-managed sidecar; both are loaded together. Each claim asserts a cross-product of `(op_chain, io_dtype, layout)` tuples the engine must support on the named arch. At the end of each integration-test run the verifier compares actual engine support against the claims and fails on one delta:
+This RFC adds **structured engine-support claims** to each per-engine integration-test config. Claims are scoped per-asic and live in a machine-managed sidecar (`<EngineName>.supported.toml`) paired with the hand-edited main TOML. Each claim asserts a cross-product of `(op_chain, io_dtype, layout)` tuples the engine must support on the named arch. The verifier runs after `RUN_ALL_TESTS()` and fails the build when a claimed test loses engine support.
 
-- **Supported claim broken**: a test whose `(op_chain, io_dtype, layout)` properties match a `[[supported.matchers]]` entry for the current arch, but the engine returned no support. The contract regressed.
+Claims are exact-string lists, not globs — no wildcards. The `op_chain` strings are produced by the existing `describeGraph()`; `io_dtypes` and `layouts` are enumerations. This eliminates an entire class of test-name glob hazards (platform-divergent matchers, char-class collisions, fixture-naming fragility, `TEST_F`/`TYPED_TEST` format misclassification, `DISABLED_` prefix).
 
-Tests not covered by any matcher are unenforced — adding a new op or test family that the engine happens to support is silent and doesn't force a TOML update. The TOML records *intentional* contracts, not capability inventory.
-
-Claims are **structured, not glob-based**. The matcher's `op_chains` is an exact list of strings (e.g. `"ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD"`) produced by the existing `describeGraph()`; `io_dtypes` and `layouts` are exact enumerations. No wildcards anywhere. This kills five classes of test-name-glob hazard at once: cross-platform `fnmatch`/`PathMatchSpecA` divergence, char-class collisions in parameter strings, fixture-naming-convention fragility, `TEST_F`/`TYPED_TEST` format misclassification, and `DISABLED_` prefix interaction.
-
-Each engine TOML pairs with a single-engine assumption: the verifier refuses `--enforce-support-claims` when multiple plugins are loaded simultaneously (the multi-engine RFC 0006 case is out of v1 scope). Sharded runs are also refused under v1 with an explicit pointer at the future per-shard-reduce design (§10).
-
-The auto-generation tool (`--write-support-claims`) is C++-only, embedded in `hipdnn_integration_tests`. It writes the sidecar `<EngineName>.supported.toml` for the current asic from observed runtime support, using a simple set-grouping algorithm (§8). Engineer reviews via `git diff`.
+The auto-generation tool (`--write-support-claims`, embedded in `hipdnn_integration_tests`, C++-only) observes runtime support and rewrites the sidecar for the current asic. Engineer reviews via `git diff`. v1 is single-engine and unsharded — multi-engine attribution (per RFC 0006) and sharded enforcement are deferred (§9, §13).
 
 ## 2. Problem Statement
 
-The integration suite already records which engines support which graphs (`SupportMatrixCollector` in `dnn-providers/integration-tests/src/harness/SupportMatrixCollector.hpp`) and emits a markdown matrix on demand via `--generate-support-matrix`. But this output is advisory only — nothing fails if a row flips between runs.
+The integration suite already records which engines support which graphs (`SupportMatrixCollector`) and emits a markdown matrix via `--generate-support-matrix`, but the output is advisory — nothing fails if a row flips between runs. When MIOpen's solver coverage shifts and a previously-supported conv shape becomes unsupported on gfx942, the integration test cleanly `GTEST_SKIP`s (no engine supports the graph) and CI passes.
 
-When MIOpen's solver coverage shifts and a previously-supported conv shape becomes unsupported on gfx942, the integration test cleanly `GTEST_SKIP`s (see `IntegrationGraphVerificationHarness::verifyGraph` — the harness skips when no engine supports the graph) and CI passes. We need a CI gate that fails the moment a supported test stops being supported on the asics where we've claimed support — without forcing exhaustive TOML maintenance for every other test or asic the engineer isn't actively working on.
-
-The existing `[[test_skips]]` mechanism already conflates two distinct things: tests the engine *doesn't* support (no kernel) and tests the engine *does* support but that are currently broken. This RFC separates those: support claims live in their own section; `[[test_skips]]` stays for the "engine supports but broken" case with its required `reason`.
+We need a CI gate that fails the moment a supported test stops being supported on the asics we've claimed — without forcing exhaustive TOML maintenance for every other test or asic the engineer isn't actively working on. The existing `[[test_skips]]` mechanism conflates "engine doesn't support" with "engine supports but is broken"; this RFC separates them.
 
 ## 3. Regressions Captured
 
@@ -87,58 +77,22 @@ SupportMatrixCollector::get().recordGraphSupport(
     _testCaseLayout);
 ```
 
-`describeGraph()` (`src/harness/GraphDescription.hpp`) walks graph nodes via `to_string(NodeType)` (`src/harness/NodeTypeNames.hpp`) and serializes a structured op chain plus dtype tags. The layout is set by fixtures via `setTestCaseLayout(...)`. The data structured selectors need is already produced; this RFC routes it through a typed channel rather than parsing the stringified form.
+`describeGraph()` walks graph nodes and serializes a structured op chain plus dtype tags. The layout is set by fixtures via `setTestCaseLayout(...)`. Recording happens **after** `[[test_skips]]` has short-circuited any pre-skipped tests in `SetUp()`. The structured data this RFC needs is already produced — implementation routes it through a typed channel instead of re-parsing the string.
 
-Recording happens **after** `[[test_skips]]` has already short-circuited the test in `SetUp()`, so the records correspond to tests not pre-skipped on this arch/platform.
+`TestSettings` parses the per-engine TOML via `tomlplusplus`; this RFC extends it with sidecar discovery and `[[supported]]` parsing.
 
-### 4.2 TOML config today
+## 5. TOML Schema
 
-`TestSettings` (`src/harness/TestSettings.hpp`) parses the per-engine TOML using `tomlplusplus`. Current sections: `[meta] version`, `[[tolerance_overrides]]`, `[[test_skips]]`. CLI plumbing in `src/main.cpp` (`--test-config`) stores a single `TestSettings` instance via `TestConfig::initialize`.
+The schema spans two paired files per engine. The main file is hand-edited; the sidecar is wholly machine-managed and rewritten in full by `--write-support-claims`. Both are loaded together and unioned at parse time.
 
-### 4.3 Where the new check fits
-
-| Component | Existing role | New role |
-|-----------|--------------|----------|
-| `describeGraph` | Returns a flat string. | Refactored to return a typed `GraphDescription { op_chain, io_dtype, compute_dtype, intermediate_dtype }`; existing string form derived for the markdown matrix. |
-| `recordGraphSupport` | Captures the stringified description. | Captures the typed form *plus* the layout *plus* engine IDs. |
-| `TestSettings` | Parses tolerance + skips. | Also parses sidecar `<Engine>.supported.toml`; exposes `findMatchingMatcher(graphProps, arch, platform)`. |
-| `SupportMatrixCollector` | Singleton record store. | Same; consumed by the verifier and auto-gen tool. |
-| `main.cpp` | Owns final exit code. | Runs `SupportClaimVerifier` after `RUN_ALL_TESTS()`; hosts `--write-support-claims`. |
-
-## 5. Proposed Design
-
-### 5.1 Goals
-
-1. **Per-asic contracts.** A developer working on gfx942 updates only the gfx942 block. No need to know other asics.
-2. **Structured selectors, no wildcards.** Match on parsed graph properties, not test-name strings. Eliminates the entire class of glob-portability and naming-convention issues.
-3. **Per-engine supported TOML** Verifier fails if multiple engines are loaded during a test run.
-4. **Tiny by construction.** Each matcher claims a cross-product; engines with broad uniform support use few matchers. Auto-gen output is in the dozens of lines per asic.
-5. **Per-test failure granularity.** The verifier checks every observed test against matchers and reports per-test failures.
-6. **Low maintenance ceiling.** Only claim-broken triggers a failure. Adding new tests or new ops doesn't force TOML edits anywhere.
-7. **Graceful local degradation.** Partial runs (filter / fewer binaries / one tier) are checked over only what was observed; absent claims are not enforced;
-8. **Auto-gen via the test binary itself.** `--write-support-claims` is a single C++ command. No Python, no JSON sidecar, no cross-language pipeline. Writes a separate `.supported.toml` sidecar file.  Generating the support claims will not respect filters and will run the entire suite.
-9. **Backward compatible.** Engines without a `[[supported]]` block (or without a sidecar) behave exactly as today.
-
-### 5.2 Non-goals
-
-- **Unclaimed-gain detection.** §3.2.
-- **Catalog-shrink detection.** §3.2.
-- **`[[unsupported]]` section.** Absence from `[[supported]]` is the implicit unsupported state.
-- **Multi-asic blocks.** Each `[[supported]]` block names exactly one asic via `arch = "<single>"`. Sharing across asics is by duplication.
-- **Multi-engine claims.** Each plugin's TOML is independent; runtime multi-engine is out of v1 scope (§5.3, §10).
-- **Wildcards in matchers.** `op_chains`, `io_dtypes`, `layouts` are exact-string lists; no `*` or glob semantics. Wildcards would be claims about untested values.
-- **Changes to `--generate-support-matrix`.** Markdown matrix is unchanged.
-
-## 6. TOML Schema
-
-### 6.1 Existing TOML File.
+### 5.1 Main file (hand-edited)
 
 ```toml
 # MIOPEN_ENGINE.toml — never touched by --write-support-claims
 
 [meta]
 version = 1
-engine  = "MIOPEN_ENGINE"        # NEW; verifier checks the running plugin matches
+engine  = "MIOPEN_ENGINE"        # required when [[supported]] is in use
 
 [[tolerance_overrides]]
 filters = ["Full/*BatchnormBackwardCalcStats3d*.Correctness/0"]
@@ -151,18 +105,17 @@ filters = ["*ConvFwdBiasActiv*"]
 reason  = "Engine returns wrong results on gfx90a — ROCm/rocm-libraries#6979"
 ```
 
-`[meta] engine` is new and required for any TOML using `[[supported]]`. The verifier compares it against the loaded plugin's engine name reported by `hipdnnGetEngineCount_ext` / `getEngineInfo`. Mismatch → refuse to enforce.
+`[meta] engine` is checked at load against the loaded plugin's engine name (from `getEngineInfo`). Mismatch → refuse to enforce.
 
-### 6.2 Sidecar auto generated supported file
-Below is an example of what this support file could look like and does not represent current support.
+### 5.2 Sidecar file (machine-managed)
 
 ```toml
 # MIOPEN_ENGINE.supported.toml — wholesale rewritten by --write-support-claims.
-# Do not hand-edit.
+# Do not hand-edit. Both files MUST be committed together (CI lints this).
 
 [meta]
 version = 1
-engine  = "MIOPEN_ENGINE"        # must match main file's [meta] engine
+engine  = "MIOPEN_ENGINE"
 
 # ─── gfx942 ──────────────────────────────────────────────────────────────
 
@@ -203,22 +156,7 @@ op_chains = [
 io_dtypes = ["fp16", "fp32", "bf16"]
 layouts   = ["NCHW", "NHWC"]
 
-# Batchnorm variants
-[[supported.matchers]]
-op_chains = [
-    "Batchnorm", "BatchnormInference", "BatchnormBackward",
-    "BatchnormInferenceVarianceExt",
-]
-io_dtypes = ["fp16", "fp32", "bf16"]
-layouts   = ["NCHW", "NHWC"]
-
-# Matmul
-[[supported.matchers]]
-op_chains = ["Matmul"]
-io_dtypes = ["fp16", "fp32", "bf16"]
-layouts   = ["NCHW", "NHWC"]
-
-# ─── gfx90a (no CBA — wrong results; see test_skips in main file) ────────
+# ─── gfx90a (no CBA — see test_skips in main file) ───────────────────────
 
 [[supported]]
 arch = "gfx90a"
@@ -228,9 +166,6 @@ op_chains = ["ConvFprop", "ConvDgrad", "ConvWgrad",
              "Batchnorm", "BatchnormInference", "BatchnormBackward"]
 io_dtypes = ["fp16", "fp32", "bf16"]
 layouts   = ["NCHW", "NHWC"]
-
-# Note: no Conv+Pointwise matcher. CBA tests on gfx90a are pre-skipped
-# via [[test_skips]] in the main file and never reach the verifier.
 
 # ─── gfx10 (no CK fusion kernels) ────────────────────────────────────────
 
@@ -242,278 +177,106 @@ op_chains = ["ConvFprop", "ConvDgrad", "ConvWgrad",
              "Batchnorm", "BatchnormInference"]
 io_dtypes = ["fp16", "fp32", "bf16"]
 layouts   = ["NCHW", "NHWC"]
-
-# No Conv+Pointwise matcher. CBA tests run; engine returns empty support;
-# harness GTEST_SKIPs. No matcher claims them → §3.2 default-silent.
 ```
 
-### 6.3 Field semantics
+### 5.3 Field semantics
 
-- **`arch`** (required, string). Matched against `TestConfig::getCurrentArch()` (raw `gcnArchName` like `"gfx942:sramecc+:xnack-"`). The verifier tokenizes the raw arch at the first `:` and compares the prefix exact-equal to the matcher's `arch`. **Substring matching is NOT used** (that would collide families: `"gfx10"` would match `gfx1030`, `gfx1100`, etc.). Singular by design — one block per asic.
-- **`platform`** (optional, string, default = any). Exact match against `TestConfig::getCurrentPlatform()` (`"windows"` or `"linux"`).
-- **`[[supported.matchers]]`** (required, ≥1 per block). Each matcher claims a cross-product:
-  - **`op_chains`** (required, non-empty array of strings). Each string is an exact match against the observed test's `describeGraph().op_chain_string()`. No wildcards.
-  - **`io_dtypes`** (required, non-empty array of strings). Each is a dtype name as printed by `to_string(DataType)` (e.g. `"fp16"`, `"fp32"`, `"bf16"`). No wildcards.
-  - **`layouts`** (required, non-empty array of strings). Each is a layout label as passed by fixtures to `setTestCaseLayout` (e.g. `"NCHW"`, `"NHWC"`, `"NCDHW"`). No wildcards.
+- **`arch`** (required, string). Compared against `TestConfig::getCurrentArch()` (raw `gcnArchName` like `gfx942:sramecc+:xnack-`) by tokenizing at the first `:` and exact-matching the prefix. Substring matching is rejected — it would collide families (`"gfx10"` would match `gfx1030`, `gfx1100`). One block per asic.
+- **`platform`** (optional, string, default = any). Exact match against `"windows"` or `"linux"`.
+- **`op_chains` / `io_dtypes` / `layouts`** (required, non-empty arrays of strings). Each value is matched exactly against the corresponding field of the observed test's `(op_chain, io_dtype, layout)` tuple. No wildcards anywhere — schema rejects `*`.
 
-Schema rejects any wildcard, any whole-element `*`, and any empty array.
+A test **matches** a matcher iff its `op_chain ∈ op_chains` AND `io_dtype ∈ io_dtypes` AND `layout ∈ layouts`. A test is **claimed** iff it matches ≥1 matcher in the asic's block.
 
-### 6.4 Matching algorithm
+Schema versioning: `[meta] version = 1`. Unknown keys are logged-and-ignored for forward compatibility; semantic changes bump the version, and v1 readers refuse v2 files loudly.
 
-For each observed test (registered, not pre-skipped, reached `recordGraphSupport`), the verifier picks the single `[[supported]]` block whose `arch` (tokenized at `:`) and `platform` match the current run. At most one block applies per `(arch, platform)`; load-time check rejects duplicates.
+## 6. Failure Detection
 
-A test **matches** a `[[supported.matchers]]` entry iff:
-- its `op_chain` is in the entry's `op_chains`,
-- AND its `io_dtype` is in the entry's `io_dtypes`,
-- AND its `layout` is in the entry's `layouts`.
+### 6.1 The five rules
 
-The test is **claimed** iff it matches ≥1 matcher in the block.
+**Rule A — claim broken.** Observed claimed test with empty `supportingEngineIds` → **FAIL**.
 
-### 6.5 Schema versioning policy
+**Rule B — issue before the test runs.** Post-`RUN_ALL_TESTS()`, walk `UnitTest::GetInstance()`. Any registered test with status != `PASSED` / `SKIPPED` and no record in `SupportMatrixCollector` → **FAIL** ("errored before record; fix the underlying error first"). Conservative: a test that crashed in `SetUp` has unknown graph properties, so we treat unknown as broken. To support this, `recordGraphSupport` is moved to the **very first statement** of `verifyGraph` (before any `ASSERT_*`).
 
-`[meta] version` follows these rules:
+**Rule C — zero-coverage matcher.** Any `[[supported.matchers]]` whose cross-product matches zero observed tests → **FAIL** in full unfiltered CI runs (informational only in filtered/sharded local runs, where partial coverage is expected). Either test detection broke or the matcher is stale; engineer regenerates via `--write-support-claims` or hand-edits.
 
-- **Unknown keys** in `[meta]`, `[[supported]]`, or `[[supported.matchers]]` are ignored with an info log. This permits forward-compatible additions in minor revisions.
-- **Field semantics never change in v1**; if the semantics of `op_chains` / `io_dtypes` / `layouts` ever change, the version bumps to 2 and v1 readers refuse to load v2 files (loud error, not silent).
-- **Mixed-version repository state** (some engine TOMLs at v1, others at v2 during rollout) is supported by: v2 readers load v1 files normally; v1 readers refuse v2. New TOML version rollout is a coordinated PR across the affected engine TOMLs.
-- `version` defaults to `1` if absent (backward compat for existing files without `[meta]`).
+**Rule D — engine over-claim on a failing test.** When a test fails AND the engine returned non-empty `supportingEngineIds` AND no matcher covers it, the verifier annotates the existing test-failure report with an "engine over-claim" note. No new failure mechanism — the test failure itself already fails CI; the annotation sharpens triage toward `get_ranked_engine_ids` rather than test data.
 
-## 7. Failure Detection
+**Rule E — unclaimed gain on a passing test (warning).** When a test passes AND the engine returned support AND no matcher covers it, log a **warning** ("claimed support != actual support for `<op_chain, io_dtype, layout>` on `<arch>`; consider adding it to the matcher list"). Not a failure — avoids forcing TOML PRs on every new test family — but surfaces the gap with concrete fix steps.
 
-### 7.1 The five rules
+### 6.2 Local partial runs
 
-**Rule A — claim broken.** For each observed test whose `(op_chain, io_dtype, layout)` is claimed by ≥1 matcher: if `supportingEngineIds` is empty → **FAIL**.
+Rules A, B, D, E fire only over observed records — partial runs are checked against the partial set they actually exercised. Rule C is the one rule that depends on completeness; the verifier detects "full CI mode" by checking `--gtest_filter` is unset, no shard env vars are set, and `--enforce-support-claims` is in effect. Outside that mode Rule C downgrades to informational stderr.
 
-**Rule B — issue before the test runs.** Post-`RUN_ALL_TESTS()`, walk `UnitTest::GetInstance()`. For any registered test with status != `PASSED` and != `SKIPPED` and no record in `SupportMatrixCollector` → **FAIL** with "errored before record; fix the underlying error first."
-
-Rule B is conservative. A test that crashed in `SetUp()` or threw in graph construction has unknown graph properties; we treat unknown as broken so a real regression that manifests as a crash isn't silently passed over. The cost is occasional false-positive verifier failures when unrelated infrastructure breaks — but the underlying test failure will be louder than the verifier's message, so the engineer fixes the test first and the verifier noise resolves with it.
-
-`recordGraphSupport` is moved to the **very first statement** of `verifyGraph` (before any `ASSERT_*`) so that anything that gets a graph constructed gets a record. Tests that fail before producing a graph fall under Rule B.
-
-**Rule C — zero-coverage matcher.** After processing observations, any `[[supported.matchers]]` entry whose cross-product matches zero observed tests → **FAIL** in full unfiltered CI runs. A zero-coverage matcher is invalid — either the test suite changed in a way that broke detection (fixture renamed, `INSTANTIATE_TEST_SUITE_P` deleted, `op_chain` string drifted because `describeGraph` output changed) or the matcher is stale and needs revising. In either case the engineer needs to act: regenerate via `--write-support-claims` or hand-edit the matcher to match reality. In partial local runs (`--gtest_filter` set, sharded, fewer binaries built) this rule degrades to informational stderr only — partial coverage is expected and benign.
-
-**Rule D — engine over-claim on a failing test.** When a test fails (`UnitTest::GetInstance` status == `FAILED`) AND `SupportMatrixCollector` shows the engine returned non-empty `supportingEngineIds` AND no `[[supported.matchers]]` covers it, the verifier annotates the test-failure report with an "engine over-claim" note. This case is **already** caught by the existing test framework (the test failing fails CI today, with or without this RFC); the verifier's annotation just sharpens triage so the engineer looks at `get_ranked_engine_ids` instead of the test data. Suggested remediation in the note: add a `[[test_skips]]` entry with a reason, or fix the engine's applicability logic. No new failure mechanism is introduced here — the rule exists to document the regression class as captured.
-
-**Rule E — unclaimed gain on a passing test (warning).** When a test passes AND `SupportMatrixCollector` shows the engine returned non-empty `supportingEngineIds` AND no `[[supported.matchers]]` covers it, the verifier logs a **warning** (not a failure): "claimed support != actual support for `<op_chain, io_dtype, layout>` on `<arch>`; consider adding it to the matcher list for this asic." This is the case from §3.2 row 1 — failing here would force a TOML PR on every new op or test family, so we surface the gap as a warning with concrete fix steps instead. The warning links to the engine's `<EngineName>.supported.toml` and the specific asic block needing the addition.
-
-### 7.2 Local partial runs
-
-Tests not observed (filtered out, in an unbuilt binary, in an unselected tier) contribute nothing. Rules A, B, D, E fire only over `recordGraphSupport` entries and the `UnitTest::GetInstance` walk — so CI full runs and local partial runs both behave correctly.
-
-Rule C is the one rule that depends on completeness: a zero-coverage matcher is only a regression in a run that *should* have exercised it. The verifier detects "full CI mode" by checking that `--gtest_filter` is unset, no shard env vars are present, and `--enforce-support-claims` is in effect. Outside that mode Rule C downgrades to an informational stderr line — partial-run friendliness wins because the engineer running locally already knows their coverage is partial.
-
-### 7.3 Example failure output
+### 6.3 Example failure output
 
 ```
-[SUPPORT CLAIMS] arch=gfx942 platform=linux engine=MIOPEN_ENGINE: 3 failures, 1 note, 2 warnings.
+[SUPPORT CLAIMS] arch=gfx942 platform=linux engine=MIOPEN_ENGINE: 3 failures, 1 note, 1 warning.
 
   CLAIM BROKEN (Rule A):
     Smoke/IntegrationGpuConvFwdBiasActiv.Correctness/NCHW_1x16x16x16_1x16x3x3_relu
       observed: op_chain="ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD"
                 io_dtype="fp32" layout="NCHW"
-      matched by [[supported.matchers]] op_chains[2] = "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD"
       engine returned no support for this graph
       Action: narrow op_chains to exclude this tuple, add a [[test_skips]] if
               it's broken-but-supported, or fix the engine.
 
   ISSUE BEFORE THE TEST RUNS (Rule B):
     Smoke/IntegrationGpuMatmul.Correctness/fp32_NCHW_32x32x32
-      status: FAILED
-      no SupportMatrixCollector record — likely SetUp() failure
-      Action: fix the underlying test failure first; verifier cannot determine
-              if the support claim was broken until the test runs.
+      status: FAILED, no SupportMatrixCollector record — likely SetUp() failure
+      Action: fix the underlying test failure first.
 
   ZERO-COVERAGE MATCHER (Rule C):
-    [[supported.matchers]] block #4 in MIOPEN_ENGINE.supported.toml for arch=gfx942
+    block #4 in MIOPEN_ENGINE.supported.toml for arch=gfx942
       op_chains[0] = "ConvFprop + Pointwise:LEAKY_RELU"  -- 0 observed tests
-      Most likely cause: fixture rename, INSTANTIATE_TEST_SUITE_P deletion,
-      or describeGraph output drift. Regenerate via --write-support-claims,
-      or hand-edit the matcher to remove this op_chain.
+      Action: regenerate via --write-support-claims, or hand-edit.
 
   ENGINE OVER-CLAIM (Rule D, note on existing test failure):
     Smoke/IntegrationGpuSdpaForward.Correctness/bf16_seq128_head16
-      test status: FAILED (numerical mismatch vs reference)
-      engine returned support: [MIOPEN_ENGINE]
-      no [[supported.matchers]] covers this graph
-      Note: engine claimed it could handle this graph but produced wrong
-            results. Either add a [[test_skips]] entry, or tighten the
-            engine's get_ranked_engine_ids logic to refuse this graph.
+      test FAILED; engine returned support: [MIOPEN_ENGINE]; no matcher covers this graph.
+      Note: engine over-claimed via get_ranked_engine_ids. Add a [[test_skips]]
+            or tighten the engine's applicability logic.
 
-  UNCLAIMED GAIN (Rule E, warning only):
+  UNCLAIMED GAIN (Rule E, warning):
     Smoke/IntegrationGpuLayernormForward.Correctness/fp16_NCHW_32x512x768
-      observed: op_chain="LayerNorm" io_dtype="fp16" layout="NCHW"
-      engine returned support: [MIOPEN_ENGINE]
-      no [[supported.matchers]] covers this graph
-      Note: claimed support != actual support for ("LayerNorm","fp16","NCHW") on gfx942.
+      observed: ("LayerNorm","fp16","NCHW"); engine returned support: [MIOPEN_ENGINE].
       Action: if intentional, add to MIOPEN_ENGINE.supported.toml under
-              [[supported]] arch="gfx942" — append "LayerNorm" to an existing
-              matcher's op_chains, or add a new matcher. Re-running
-              --write-support-claims will pick this up automatically.
+              [[supported]] arch="gfx942".
 ```
 
-Failures are grouped by `(matcher, op_chain)` when many tests share the same matcher cross-product to avoid drowning the log; the first three offending param strings are listed inline with a `--verbose-claim-failures` flag for the full list. Full lists also written to `support_claim_failures.txt` for CI artifact capture.
+Failures are grouped by `(matcher, op_chain)` when many tests share the same cross-product. Full lists are written to `support_claim_failures.txt` for CI artifact capture.
 
-### 7.4 Implementation sketch
-
-```cpp
-struct GraphDescription
-{
-    std::string op_chain;          // e.g. "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD"
-    std::string io_dtype;          // e.g. "fp32"
-    std::string compute_dtype;
-    std::string intermediate_dtype;
-};
-
-struct ClaimReport
-{
-    enum Kind {
-        ClaimBroken,         // Rule A — fatal
-        ErroredBeforeRecord, // Rule B — fatal
-        ZeroCoverageMatcher, // Rule C — fatal in full CI runs, info otherwise
-        EngineOverClaim,     // Rule D — note on existing test failure
-        UnclaimedGain,       // Rule E — warning only
-    } kind;
-    std::string testName;          // empty for ZeroCoverageMatcher
-    GraphDescription graphDesc;    // empty for ErroredBeforeRecord / ZeroCoverageMatcher
-    std::string layout;
-    std::string matchedReason;     // human-readable; for grouping
-
-    bool isFatal() const { return kind == ClaimBroken
-                                 || kind == ErroredBeforeRecord
-                                 || (kind == ZeroCoverageMatcher && fullCiMode); }
-    bool fullCiMode = false;
-};
-
-class SupportClaimVerifier
-{
-public:
-    std::vector<ClaimReport> diff(const TestSettings& settings,
-                                   std::string_view archRaw,
-                                   std::string_view platform,
-                                   std::span<const GraphSupportRecord> records,
-                                   const ::testing::UnitTest& unitTest) const;
-
-    static void writeReport(std::ostream& out,
-                            std::span<const ClaimReport> failures,
-                            bool verbose);
-};
-```
-
-Wired into `main.cpp` after `RUN_ALL_TESTS()`:
-
-```cpp
-const int gtestResult = RUN_ALL_TESTS();
-int verifyResult = 0;
-if(TestConfig::get().enforceSupportClaims())
-{
-    auto reports = SupportClaimVerifier{}.diff(/* ... */);
-    SupportClaimVerifier::writeReport(std::cerr, reports, /*verbose=*/false);
-    // Only fatal entries (Rules A, B, and C-in-full-CI-mode) set the exit code.
-    // Notes (Rule D) and warnings (Rule E) are reported but do not fail CI.
-    for(const auto& r : reports)
-    {
-        if(r.isFatal()) { verifyResult = 1; break; }
-    }
-}
-return gtestResult | verifyResult;
-```
-
-A `TestEventListener` for the verifier registers **before** any other listener so it owns `OnTestProgramEnd` even when later listeners short-circuit. Synthetic `EXPECT_FAIL` entries are emitted for xUnit fidelity.
-
-### 7.5 Verifier preconditions (refuse-to-run)
+### 6.4 Verifier preconditions (refuse-to-run)
 
 The verifier refuses `--enforce-support-claims` if any of:
 
-- More than one plugin is loaded (multi-engine v1 unsupported).
-- The loaded plugin's engine name doesn't match `[meta] engine` in the TOML.
-- `GTEST_TOTAL_SHARDS > 1` or `GTEST_SHARD_INDEX` is set (see §10).
-- `--gtest_break_on_failure` is set (it aborts before the verifier runs).
-- `--gtest_repeat` is set with N > 1 (record dedup policy is "one record per test"; repeats would conflict).
-- The build is debug (`PrintToStringParamName` is non-deterministic vs release in some cases; auto-gen and verifier must use the same param strings).
+- More than one plugin is loaded (multi-engine deferred — §9, §13).
+- Loaded plugin's engine name doesn't match `[meta] engine`.
+- `GTEST_TOTAL_SHARDS > 1` or `GTEST_SHARD_INDEX` is set (§9).
+- `--gtest_break_on_failure` is set (aborts before the verifier runs).
+- `--gtest_repeat` is set with N > 1 (record dedup conflict).
+- The build is debug (`PrintToStringParamName` is non-deterministic in some cases; auto-gen and verifier must agree on param strings).
 
-Each refusal prints a clear message naming the offending env var or flag.
+A `TestEventListener` for the verifier registers **before** any other listener so it owns `OnTestProgramEnd` when later listeners short-circuit. Synthetic `EXPECT_FAIL` entries are emitted for xUnit fidelity.
 
-### 7.6 Why unclaimed gain is a warning, not a failure
+## 7. Condensation Heuristic
 
-A previous draft proposed failing on "unclaimed gain" — any test the engine supports that no matcher covers. That forces TOML updates on every new test family or op the engine happens to support, which discourages adding tests and bloats every unrelated PR. The TOML is a contract, not a capability inventory.
+The auto-gen tool sees up to 10K+ observed records per asic and must produce a small safe matcher set.
 
-Rule E logs a warning instead (§3.2 row 1). The engineer sees `claimed support != actual support` with concrete fix steps in CI output but the build doesn't fail. When the engineer is ready to claim the new capability they regenerate via `--write-support-claims` or hand-edit the matcher. The warning gives discoverability without forcing reactive PRs. Pure default-silent — saying nothing on unclaimed gain — is rejected because it lets the TOML drift from reality without anyone noticing (§13.5).
+Let `S` = observed `(op_chain, io_dtype, layout)` tuples with non-empty support; `U` = tuples with empty support. The emitted matcher set must satisfy:
 
-## 8. Condensation Heuristic
-
-The auto-gen tool sees up to 10K+ observed test records per asic. The algorithm condenses them to a small set of safe `[[supported.matchers]]` entries.
-
-### 8.1 Invariants
-
-Let:
-- `S` = set of observed `(op_chain, io_dtype, layout)` tuples with non-empty supportingEngineIds for the current `(arch, platform)`.
-- `U` = set of observed `(op_chain, io_dtype, layout)` tuples with empty supportingEngineIds.
-
-Emitted matcher set `M` must satisfy:
-
-1. **Coverage**: every tuple in `S` lies in the cross-product of some `m ∈ M`.
-2. **Safety**: no tuple in `U` lies in the cross-product of any `m ∈ M`.
+1. **Coverage**: every tuple in `S` lies in the cross-product of some emitted matcher.
+2. **Safety**: no tuple in `U` lies in any emitted matcher's cross-product. (A matcher over-claiming a `U` tuple would fail Rule A on the very next run.)
 3. **Minimality (soft)**: fewer matchers preferred.
 
-Safety is hard: a matcher that includes an `(op_chain, io_dtype, layout)` tuple where the engine returned empty would fail CI on the very next run. The tool rejects such matchers.
+Algorithm: group `S` by `(io_dtypes, layouts)` rectangle; for each group, emit one matcher with that rectangle and the set of `op_chains` present. If a candidate matcher's cross-product would include a tuple in `U`, split the matcher — drop one of `op_chains[i]`, `io_dtypes[j]`, or `layouts[k]` until safe. Prefer dropping `op_chains` (most fine-grained). Pure set-grouping over `std::set` / `std::map`; no trie, no token-splitting, no globbing.
 
-### 8.2 Algorithm
+**Worked example — gfx10 with a CBA carve-out.** Engine doesn't have CK fusion kernels: every `ConvFprop + Pointwise:*` tuple is in `U`. Plain `ConvFprop` / `ConvDgrad` / `ConvWgrad` are in `S` with full dtype/layout coverage and zero overlap with `U` → one safe matcher with all three op_chains and the full rectangle. The `ConvFprop + Pointwise:*` op_chains are entirely in `U`, so no matcher covers them; CBA tests run, return empty support, harness `GTEST_SKIP`s — no claim fires.
 
-The algorithm is set-grouping, not pattern-coalescing:
+Mixed-fixture case (some tuples for an op_chain in `S`, some in `U`): tool emits no matcher for that op_chain and lists the conflict on stderr ("supported: NCHW fp16/fp32/bf16; unsupported: NHWC fp16/fp32 — investigate"). Engineer hand-edits the main TOML if a `[[test_skips]]` is warranted.
 
-1. Group `S` by `(io_dtypes, layouts)` rectangle. Two tuples `(op_a, d, l)` and `(op_b, d, l)` go in the same group when their `(d, l)` values are equal *and* extending the group's `op_chains` doesn't create a `(*, d', l')` in `U` for any `d'`/`l'` already in the group.
-2. For each group, emit one `[[supported.matchers]]` with that group's `op_chains`, `io_dtypes`, and `layouts`.
-3. If a candidate matcher's cross-product would include a tuple in `U`, split it — drop one of `op_chains[i]`, `io_dtypes[j]`, or `layouts[k]` until safe. Prefer dropping op_chains (most fine-grained).
+## 8. Auto-Generation Tool
 
-The implementation is straightforward C++ over `std::set` / `std::map` — no trie, no glob coalescing, no token splitting. No external dependencies beyond `tomlplusplus` (already used).
-
-### 8.3 Worked example
-
-Observed-supported on gfx942 (subset, for illustration):
-
-| op_chain | io_dtype | layout |
-|----------|----------|--------|
-| ConvFprop | fp16 | NCHW |
-| ConvFprop | fp16 | NHWC |
-| ConvFprop | fp32 | NCHW |
-| ConvFprop | fp32 | NHWC |
-| ConvFprop | bf16 | NCHW |
-| ConvFprop | bf16 | NHWC |
-| ConvDgrad | fp16 | NCHW |
-| ConvDgrad | fp32 | NCHW |
-| ConvWgrad | fp32 | NCHW |
-| ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD | fp16 | NCHW |
-| (… etc) | | |
-
-Observed-unsupported on gfx942: none in this example.
-
-Grouping:
-- All Conv* with io={fp16,fp32,bf16} layouts={NCHW,NHWC} present → one matcher with `op_chains=["ConvFprop","ConvDgrad","ConvWgrad"]`, full dtype/layout cross-product.
-- Wait — ConvDgrad lacks (fp16,NHWC), (fp32,NHWC), (bf16,*). ConvWgrad lacks even more. Safety check: emitting one matcher with all three op_chains × full rectangle would include unobserved tuples (might be `U`!). Algorithm splits: ConvFprop matcher gets full rectangle; ConvDgrad and ConvWgrad get narrower matchers reflecting only their observed tuples.
-
-The output is what the schema in §6.2 shows.
-
-### 8.4 Worked example with carve-out
-
-On gfx10 the engine doesn't have CK fusion kernels. Observed-unsupported includes every `ConvFprop + Pointwise:*` tuple. The algorithm:
-
-- Group plain `ConvFprop`/`ConvDgrad`/`ConvWgrad` with full dtype/layout rectangle → safe (no overlap with `U`) → emit.
-- Group `ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD` → entire op_chain is in `U` → no matcher emitted. The CBA tests will run, return empty support, harness `GTEST_SKIP`s, and no matcher claims them.
-
-No special handling needed — the safety check naturally produces "no matcher" output for un-supportable op_chains.
-
-### 8.5 Edge cases
-
-| Case | Handling |
-|------|----------|
-| Test errored before record (Rule B in §7.1). | Tuple is absent from both `S` and `U`. Algorithm proceeds; verifier raises Rule B at run time. |
-| Two tests with same `(op_chain, io_dtype, layout)`, one supported, one unsupported. | Algorithm treats as conflict — adds to `U` and emits an stderr note ("inconsistent support for tuple X across observed tests; suspect flake or arch-conditional behavior"). |
-| Tuple observed in `S` whose op_chain string is identical to an existing claim's entry but with a different layout. | Algorithm augments the existing matcher's `layouts` list if safe; else creates a new matcher. |
-| `op_chain` string contains characters that would be problematic for TOML escaping (`"`, `\`, newlines). | Forbidden in the source: `describeGraph()` produces ASCII strings without escapes. Load-time check rejects pathological strings to be safe. |
-
-## 9. Auto-Generation Tool
-
-### 9.1 CLI
+### 8.1 CLI
 
 ```bash
 ./hipdnn_integration_tests \
@@ -521,256 +284,96 @@ No special handling needed — the safety check naturally produces "no matcher" 
     --write-support-claims
 ```
 
-Runs the full suite, observes per-test support, condenses to safe matchers (§8), and wholesale-replaces the `[[supported]]` block(s) for the current `(arch, platform)` in `MIOPEN_ENGINE.supported.toml`. Other asics' blocks are untouched. The hand-edited main file is **never** modified.
+Runs the full suite, observes per-test support, condenses to safe matchers (§7), and wholesale-rewrites the `[[supported]]` block(s) for the current `(arch, platform)` in `<EngineName>.supported.toml`. Other asics' blocks and the main TOML are untouched.
 
-### 9.2 Sidecar file layout
+### 8.2 Atomic write
 
-The sidecar lives alongside the main TOML, named `<EngineName>.supported.toml` (e.g. `MIOPEN_ENGINE.supported.toml`). Both files must be committed together; a CI lint rejects PRs that stage only one.
+The tool generates the new sidecar via `tomlplusplus` in memory, writes to `<sidecar>.tmp.<pid>` with `O_WRONLY | O_CREAT | O_EXCL`, `fsync`s, and `rename`s atomically (using `MoveFileExA` on Windows). On failure the tmp is unlinked; the original sidecar is never partially overwritten.
 
-The loader reads both files at startup (`TestSettings::initialize` follows the sidecar discovery rule: "if `<main>.supported.toml` exists alongside the main TOML, parse it and union its `[[supported]]` blocks"). Discovery is mechanical, no opt-in flag.
+### 8.3 Preconditions
 
-Inside the sidecar:
-- `[meta] engine` must match the main file's engine; mismatch → load fails loud.
-- `[[supported]]` blocks are the only content. Anything else → load fails loud.
-- Wholesale replacement is the only write mode; merge-preserve is future work.
+Refuses to run if any of:
 
-### 9.3 Atomic single-stage write
+- `--gtest_filter` set (partial baseline).
+- `GTEST_TOTAL_SHARDS > 1` or shard env vars set (§9).
+- More than one plugin loaded.
+- Debug build (`PrintToStringParamName` determinism).
+- Sidecar's mount is read-only.
+- Another process holds `flock(LOCK_EX)` on the sidecar.
+- Existing sidecar has a `[[supported]]` block for this `(arch, platform)` whose matchers have zero observed coverage (would silently drop a previously valid claim — investigate before regenerating).
 
-The tool uses tomlplusplus to read the existing sidecar (if any), drops `[[supported]]` blocks matching the current `(arch, platform)`, adds the freshly-generated block, and writes:
+### 8.4 Build integration
 
-1. Generate full sidecar TOML text into memory via tomlplusplus's serializer.
-2. Write to `MIOPEN_ENGINE.supported.toml.tmp.<pid>` with `O_WRONLY | O_CREAT | O_EXCL`.
-3. `fsync` the temp file.
-4. `rename(tmp, final)` — atomic on POSIX, atomic on Windows when `MoveFileExA` with `MOVEFILE_REPLACE_EXISTING` is used (the tool calls the right API per platform).
-5. `fsync` the containing directory (POSIX) to persist the rename.
+`--write-support-claims` is a CLI flag on the integration test binary; a CMake/ctest target per provider (`ninja miopen-provider-write-support-claims`) wraps it with the right `--test-config` baked in. CI never runs the tool — engineer-driven only; auto-applying it would silently rewrite the contract.
 
-If any step fails, the tmp file is unlinked and the tool exits nonzero with a clear message. The original sidecar is never partially overwritten.
+## 9. Sharding
 
-### 9.4 Preconditions (refuse to run)
+This RFC does not solve sharding in v1. GoogleTest sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX`) and external runners split a single binary's test population across processes; each process sees only its slice. Running the in-process verifier per shard would silently misbehave — a matcher whose cross-product happens to fall in a shard that didn't draw it would fire the "matched no observed tests" path despite the regression being real elsewhere.
 
-The tool refuses if any of:
+v1 refuses `--enforce-support-claims` when any sharding env var is detected, with a clear stderr message. CI configurations that want enforcement run an unsharded job.
 
-- `--gtest_filter` is set (partial run → bogus baseline).
-- `GTEST_TOTAL_SHARDS > 1` or `GTEST_SHARD_INDEX` set (sharded run → partial baseline; §10).
-- Multiple plugins are loaded (cannot attribute support per engine; v1 single-engine only).
-- The build is debug (`PrintToStringParamName` may produce different param strings vs release; mandate release builds for baseline generation).
-- The sidecar's filesystem mount is read-only (e.g. some Docker bind-mount configurations).
-- Another process holds a `flock(LOCK_EX)` on the sidecar (concurrent writes refused).
-- The sidecar already contains a `[[supported]]` block for the current `(arch, platform)` AND that block has matchers whose cross-products match zero observed tests. Such matchers would already fail the verifier under Rule C (§7.1) — the tool refuses to wholesale-replace them silently; the engineer investigates whether the catalog actually shrank or whether the run was under-built.
+Intended v2 path: each shard writes its `SupportMatrixCollector` records to `support_records_shard_<N>.json`; a single `hipdnn_integration_tests --verify-claims-from <dir>` reads all shards, unions them, and runs the verifier once. The reduce phase can promote Rule C's zero-coverage warning to a hard error because in the union of all shards every matcher should have coverage. The full Full-tier integration suite eventually needs sharding for CI wall-clock; documenting the deferred path is the honest v1 stance.
 
-### 9.5 Mixed-fixture stderr output
+## 10. Workflow and CI
 
-When an `op_chain` appears in both `S` and `U` for the same `(arch, platform)`, the algorithm can't safely include it. Tool emits to stderr:
+**Day-to-day**: CI runs `--enforce-support-claims` on pre-submit (Smoke) and post-submit (Standard/Comprehensive/Full) on each target asic, unsharded. A claim-broken failure surfaces in the standard test report; the engineer either fixes the code, narrows the matcher, regenerates via `--write-support-claims`, or adds a `[[test_skips]]` entry with a reason.
 
-```
-Conflicting support for op_chain "ConvFprop + Pointwise:ADD + Pointwise:GELU_FWD" on gfx942:
-  supported: 3 tests (NCHW fp16/fp32/bf16)
-  unsupported: 2 tests (NHWC fp16/fp32)
+**Bootstrap (new engine or new asic)**: engineer runs `ninja <provider>-write-support-claims` on the target hardware (Full tier, no filter, no sharding, release build), reviews the resulting sidecar diff, stages both files, and commits.
 
-  Resolution options (apply by hand-editing the main file's [[test_skips]],
-  or by re-running --write-support-claims after fixing the engine):
-    - Add a [[test_skips]] entry for the unsupported subset, if it's an
-      engine-supports-but-broken case
-    - Investigate why NHWC is unsupported (engine bug? layout-specific path?)
-    - If the unsupported subset is intentional, no action — those tests
-      remain default-silent (§3.2)
-```
+**Staged rollout for existing engines**: ship the loader and verifier with enforcement OFF by default → per-provider PRs add `[meta] engine` and a sidecar asynchronously → flip enforcement ON by default in a coordinated PR. `.gitattributes` pins `*.supported.toml` to LF. A CI lint rejects PRs that stage `<E>.toml` or `<E>.supported.toml` without the other when both are needed.
 
-The tool emits no matcher for the conflicting op_chain. Tests in the unsupported subset are silent under §3.2; tests in the supported subset are silent too (no claim). The engineer decides whether to encode the resolution in the main file.
+## 11. Alternatives Considered
 
-### 9.6 Build integration
+### 11.1 Flat per-instance test-name list
 
-Two surfaces:
+`tests = ["Suite/Fixture.Case/Param", ...]` enumerating every supported instance. Doesn't scale (10K+ instances per asic); swamps PR diffs; unreviewable. **Rejected** in favour of patterns/matchers.
 
-- **CLI flag** on the integration test binary (`--write-support-claims`).
-- **CMake/ctest target** per provider (e.g. `ninja miopen-provider-write-support-claims`) that invokes the binary with the right `--test-config` baked in.
+### 11.2 Separate `[[unsupported]]` section with mandatory reason
 
-## 10. Sharding
+Doubles the maintenance load (every op family classified positively *or* negatively); forces TOML updates whenever engine capability grows. **Rejected** — absence from `[[supported]]` is the implicit unsupported state.
 
-This RFC does not solve sharding in v1. It explicitly refuses enforcement when sharding is detected, but the design needs to accommodate sharding in the future, so the path is documented here.
+### 11.3 Default-deny on unclaimed gain (or pure silence)
 
-### 10.1 The problem
+Three options for the engine-supports-something-no-matcher-covers case: fail, silent, or warn. Fail forces TOML updates on every new test family (PR churn, discourages adding tests). Silent lets the TOML drift from reality without anyone noticing. **Warning adopted** as the middle ground — Rule E in §6.1.
 
-GoogleTest's sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX` env vars), `ctest -jN`, and external runners like `gtest-parallel` all split a single test binary's test population across multiple processes. Each process sees only its shard's tests. In the proposed in-process verifier:
+### 11.4 Glob patterns over test names
 
-- Each process loads the same TOML and runs the verifier against its own `SupportMatrixCollector` records.
-- A matcher whose cross-product is entirely outside a shard's slice fires the "matched no observed tests" info line but doesn't fail.
-- A regression in a shard that didn't draw the relevant tests passes green; the shard that did draw them fails. The CI aggregator may report the failure correctly or may not, depending on how shard results merge.
-- More dangerously: matcher safety becomes unverifiable per-shard, because each shard's `U` is a subset of the whole.
+Earlier drafts used `patterns = ["*ConvFwd*"]` matched against GTest test names via `globMatch`. Rejected after review found: `globMatch` is platform-divergent (`fnmatch` vs `PathMatchSpecA`); GTest parameter strings can contain `[` and `]`; matching depends on naming convention (PascalCase, `TEST_P` vs `TEST_F` vs `TYPED_TEST`); `DISABLED_` prefix matches but tests never run. Structured matchers eliminate all four. **Rejected** in favour of structured selectors.
 
-### 10.2 v1 behaviour: refuse
+### 11.5 Multi-asic `[[supported]]` blocks
 
-`--enforce-support-claims` refuses to run when any sharding env var is detected (`GTEST_TOTAL_SHARDS`, `GTEST_SHARD_INDEX`, plus the gtest-parallel detection markers). Clear stderr message names the env var and points at this section. CI configurations that want enforcement must run an unsharded job.
+`archs = ["gfx942", "gfx90a"]` to share patterns. Couples updates that should be independent — engineer fixing gfx942 has to know the gfx90a story. **Rejected** in favour of one block per asic; sharing is by duplication.
 
-This is a real cost — the integration suite's Full tier could benefit from sharding — but it's the only honest v1 stance. The alternative (in-process verifier with sharded input) silently misbehaves.
+### 11.6 Standalone verifier binary
 
-### 10.3 Future design: per-shard records + reduce phase
+Architect-suggested: pull the verifier out of the test binary into its own tool that consumes serialized records + TOML. Survives test-binary aborts; fits sharding reduce naturally. **Deferred** to v2 — v1 keeps the verifier in-process for one-command simplicity; the sharding reduce-phase mode (§9) can be reused as a standalone path when it lands.
 
-The intended v2 path:
+Other variants reviewed and rejected without dedicated subsections: per-`(suite, instantiation)` counts/digests (stale on partial runs); coverage floors / `min_count` (stale by construction); sidecar-`tomlkit`-Python helper (cross-language pipeline avoided); single global hash digest (zero diagnostic value); reusing the `--generate-support-matrix` markdown as baseline (aggregation hides regressions); inverting the schema to enumerate every unsupported test in `[[test_skips]]` (forces the complement). Justifications captured in commit history.
 
-1. Each test process writes its `SupportMatrixCollector` records to `support_records_shard_<N>.json` (or `.bin` for size) in a configured output directory, instead of running the verifier in-process.
-2. After all shards complete, a single `hipdnn_integration_tests --verify-claims-from <dir>` invocation reads every shard's records, unions them, runs the verifier once, and emits the combined diff.
-3. CTest invokes the reduce job as a `FIXTURES_CLEANUP`-style dependent test that runs after all shards.
-
-The reduce-phase verifier can also promote the "matched no observed tests" info line to a hard error, because in the union of all shards every matcher's cross-product should have non-zero observed coverage (assuming a full unfiltered run).
-
-Per-shard JSON records also serve the auto-gen tool: a sharded `--write-support-records-shard` mode could collect observations across shards, then a separate `--write-support-claims-from <dir>` invocation does the condensation. Out of v1.
-
-### 10.4 Why not just disable sharding in CI
-
-The hipDNN integration suite at Full-tier maturity is hours of wall time; CI parallelism is non-optional medium-term. Documenting the refuse-to-enforce path and pointing at the reduce design is the honest v1 stance; banning sharding outright would push back on a legitimate CI need.
-
-## 11. Workflow
-
-### 11.1 Day-to-day flow (most PRs)
-
-1. PR author lands a code change.
-2. CI runs `hipdnn_integration_tests --enforce-support-claims ...` (single-engine, unsharded job).
-3. If a matcher is broken or a test errored, CI fails with the per-test report (§7.3).
-4. Author edits:
-   - Real regression → fix the code.
-   - Matcher too broad → regenerate via `--write-support-claims` for that asic, or narrow by hand.
-   - Test errored unrelatedly → fix the test (no TOML change).
-   - Engine-supported-but-broken → add a `[[test_skips]]` entry in the main file with a reason.
-5. Re-run CI; failure clears.
-
-### 11.2 Bootstrap (new engine or new asic)
-
-1. Engineer runs `ninja <provider>-write-support-claims` on the target hardware (Full tier, no filter, no sharding, release build).
-2. Tool generates `[[supported]]` block(s) for the current `(arch, platform)` in the sidecar. Mixed-fixture cases listed on stderr.
-3. Engineer reviews the `git diff` of `<EngineName>.supported.toml`. Stages both the main file (if changed) and the sidecar.
-4. Commits; first CI run on that asic goes green.
-
-### 11.3 Staged rollout for existing engines
-
-The first PR landing this RFC must not break existing engines that lack TOML claims. Order:
-
-1. **Ship the loader and verifier with enforcement OFF by default**. `--enforce-support-claims` is opt-in; engines without claims are unaffected.
-2. **Per-provider PRs add a `[meta] engine` line + sidecar** asynchronously, generated via `--write-support-claims` on each target asic.
-3. **Flip enforcement ON by default once all providers have sidecars**. Single coordinated PR.
-
-`.gitattributes` pins `*.supported.toml` to LF line endings to prevent Windows engineers from churning the file with CRLF.
-
-## 12. CI Integration
-
-- **Pre-submit (Smoke):** `--enforce-support-claims` on. Catches claim regressions on the fast tier.
-- **Post-submit (Standard/Comprehensive/Full):** `--enforce-support-claims` on. Wider observed set → more tuples evaluated.
-- **Unsharded enforcement job per asic.** Until the §10.3 reduce design lands, the enforcement job runs unsharded. Other CI shape (sharded test runs that don't enforce claims) is unaffected.
-- **CI never runs `--write-support-claims`.** Engineer-driven tool only; auto-applying in CI would silently rewrite the contract.
-- **Sidecar-pair lint.** CI rejects PRs that stage `<E>.toml` or `<E>.supported.toml` without the other when both would be needed.
-- **CODEOWNERS for the sidecar.** Recommend each provider's TOML pair has CODEOWNERS coverage so contract changes get reviewed.
-
-## 13. Alternatives Considered
-
-### 13.1 Flat per-instance test-name list
-
-Enumerate every supported test name. Doesn't scale (10K+ instances per asic); swamps PR diffs; unreviewable. **Rejected.**
-
-### 13.2 Per-`(suite, instantiation)` counts and/or digests
-
-Snapshot, not contract; counts decay silently as catalogs grow; breaks on partial local runs. **Rejected.**
-
-### 13.3 Coverage floors / `min_count`
-
-Stale by construction; brittle on partial runs. Catalog-shrink detection is intentionally out of scope (§3.2). **Rejected.**
-
-### 13.4 Separate `[[unsupported]]` section with mandatory `reason`
-
-Doubles the maintenance load (every op family classified positively *or* negatively). Forces TOML updates whenever engine capability grows. **Rejected** — absence from `[[supported]]` is the implicit unsupported state.
-
-### 13.5 Default-deny on unclaimed gain (fail) or pure silence (no surface)
-
-Two endpoints of the same question: when an engine supports a graph no matcher covers, do we **fail**, do we say **nothing**, or do we **warn**?
-
-- **Default-deny (fail).** Tests not matching any matcher that turn out to be supported → FAIL. Forces TOML updates on every new test family the engine happens to support. Bring-up friction; PR churn; discourages adding tests.
-- **Pure silence.** No diagnostic at all. The TOML drifts out of sync with reality and nobody notices until something else surfaces the gap.
-- **Warning (adopted, Rule E in §7.1).** Logs `claimed support != actual support` with concrete fix steps; doesn't fail CI. Engineer regenerates or hand-edits when ready.
-
-**Default-deny rejected** for the bring-up friction; **pure silence rejected** for losing discoverability; **warning adopted** as the middle ground.
-
-### 13.6 Multi-asic `[[supported]]` blocks
-
-`archs = ["gfx942", "gfx90a"]` to share patterns. Couples updates that should be independent — engineer fixing gfx942 has to know the gfx90a story. **Rejected** in favour of one block per asic.
-
-### 13.7 Glob patterns over test names
-
-Earlier drafts of this RFC used `patterns = ["*ConvFwd*"]` matched against GTest test names via `globMatch`. Rejected after review found:
-
-- `globMatch` is platform-divergent (`fnmatch` vs `PathMatchSpecA`) — same pattern can match on Linux and miss on Windows because `*` doesn't cross `/`.
-- GTest parameter strings can contain `[` and `]` (char-class metacharacters).
-- The match is sensitive to test-naming convention (PascalCase, TEST_P vs TEST_F vs TYPED_TEST format differences).
-- `DISABLED_` prefix matches but tests never run, silently passing claims.
-
-Structured matchers (op_chain + dtype + layout from `describeGraph`) eliminate all four. **Rejected** in favour of structured selectors.
-
-### 13.8 Wildcards in structured matchers
-
-A draft proposed `op_chains = ["ConvFprop + Pointwise:*"]` with `*` as a Pointwise-mode wildcard. Rejected because `*` would mean "all current AND future pointwise modes" — a claim about the unknown that the engineer can't honestly verify. **Rejected** — exact enumeration only.
-
-### 13.9 Sidecar baseline file per engine
-
-Already adopted (§6.2). Earlier drafts considered keeping the auto-gen output inside the main TOML using a sentinel comment for the machine-managed region; that was rejected because sentinels are fragile to autoformatters, CRLF normalisation, and BOM. Sidecar files have clear human/machine separation, atomic single-writer semantics, and trivial CI lint for stage-pair-ness.
-
-### 13.10 Python-based TOML round-trip
-
-`tomlkit` in a Python helper for comment-preserving rewrites. Rejected because the sidecar approach makes round-trip a non-issue — the sidecar is wholly machine-owned and tomlplusplus's canonical serialiser is fine for it. **Rejected.**
-
-### 13.11 Hash digest only
-
-One SHA over the sorted supported set per asic. Zero diagnostic value; no per-test action list. **Rejected.**
-
-### 13.12 GTest-only failure mode (no run-end verifier)
-
-`ADD_FAILURE()` inside the harness body. A test can only fail if it ran; the post-`RUN_ALL_TESTS` listener catches Rule B cases (errored before record) that GTest-only doesn't. **Partial adoption** — verifier runs at program end *and* installs a `TestEventListener` for xUnit fidelity.
-
-### 13.13 Verifier as standalone binary
-
-Architect-suggested: pull the verifier out into its own binary that consumes (RFC 0006 manifest + TOML). Survives test-binary aborts and fits sharding aggregation naturally. **Rejected for v1**, deferred. v1 keeps verifier in-binary; if/when sharding's reduce phase lands (§10.3) the verifier mode that consumes serialized records can be reused as a standalone path. The architectural rationale is sound but the v1 scope is in-process.
-
-### 13.14 Programmatic skip-list inversion
-
-Replace claims with: every unsupported test must have a matching `[[test_skips]]` entry. Forces engineers to enumerate the complement (larger set); `reason` strings become meaningless for "no kernel." **Rejected.**
-
-## 14. Risks
+## 12. Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Matcher claims a triple the engine doesn't support; CI fails on every run until fixed. | The auto-gen tool's safety check prevents this for generated matchers (§8.1). For hand-edited matchers, the failure is immediate and the report names the specific triple. |
-| A matcher whose cross-product matches no observed test silently passes review. | Informational stderr line at verifier time. The auto-gen tool refuses to wholesale-replace a block whose existing matchers have zero coverage (§9.4 last bullet). |
-| First run on a new asic fails because no `[[supported]]` block exists. | Verifier treats absence as **not enforced**. Bring-up is unblocked; engineer runs `--write-support-claims` once and commits. |
-| Sidecar gets out of sync with main TOML (e.g. `[meta] engine` mismatch). | Load-time check; loud error. CI lint requires both files staged together. |
-| Atomic write fails mid-operation (disk full, crash). | tmp+fsync+rename; if any step fails, original is untouched; tmp is cleaned up on exit. |
-| Engineer edits the sidecar by hand and the auto-gen wipes it. | Sidecar's header comment marks it machine-managed; the tool's wholesale-replace is documented. Engineer-written claims belong in the main TOML, not the sidecar (the main file supports `[[supported]]` blocks too; both are unioned). |
-| Test-naming convention drifts and the harness can't recover graph properties. | Structured matchers don't depend on test naming — they match on `describeGraph` output. Naming convention is irrelevant to the verifier. (Still recommended via a separate CI lint, but not load-bearing here.) |
-| `describeGraph` output format changes between releases, breaking existing matcher op_chain strings. | `describeGraph` becomes a stability contract once this RFC ships. Any change to its output format is a `[meta] version` bump and a coordinated sidecar regen. Documented in §6.5. |
-| `[[test_skips]]` over-broad filter silently shadows a `[[supported]]` matcher. | Load-time warning when any `[[supported.matchers]]` cross-product is fully covered by a same-arch `[[test_skips]]` filter. |
-| `--gtest_repeat` or `--gtest_break_on_failure` interaction. | Verifier refuses to run when either is set (§7.5). |
-| Secret leakage via `testName` strings landing in committed TOML. | The sidecar contains `op_chain`/`dtype`/`layout` strings only — never `testName`. Test names are used internally by the verifier for failure messages, never serialized. |
-| Concurrent `--write-support-claims` runs corrupt the sidecar. | `flock(LOCK_EX)` for the duration of read+compute+write. Second concurrent run refused (§9.4). |
+| A pattern accidentally over-matches and CI fails on every run. | The auto-gen tool's safety check (§7) prevents this for generated matchers. For hand-edited matchers, the failure is immediate and the report names the specific triple. |
+| `describeGraph` output format changes, breaking existing `op_chain` strings. | `describeGraph` becomes a stability contract once this RFC ships. Any format change is a `[meta] version` bump and a coordinated sidecar regen. |
+| `[[test_skips]]` over-broad filter silently shadows a `[[supported]]` matcher. | Load-time warning when any matcher's cross-product is fully covered by a same-arch `[[test_skips]]` filter. |
+| Test-naming-convention drift breaking the matcher. | Structured matchers don't depend on test naming — they match on `describeGraph` output. Naming convention is irrelevant to the verifier. |
+| Auto-gen wholesale-replace blows away hand-curated content. | Sidecar split (§5): hand-curated `[[supported]]` blocks belong in the main file. The tool only touches the sidecar. |
+| First run on a new asic fails because no block exists. | Verifier treats absence as **not enforced**. Engineer runs `--write-support-claims` once and commits. |
 
-## 15. Open Questions and Future Work
+## 13. Open Questions and Future Work
 
-- **RFC 0006 multi-engine attribution.** v1 refuses multi-engine builds. The eventual fix requires either (a) per-engine support bitmaps in `recordGraphSupport` (queries every loaded engine before picking one — Nx probe cost) or (b) sourcing the verifier from RFC 0006's pre-filter manifest. Both are non-trivial. Tracked separately.
-- **Sharding reduce phase.** §10.3 sketches the v2 design. Implementation requires per-shard JSON output mode, a `--verify-claims-from <dir>` mode, and a ctest fixture wiring it together.
-- **Detecting obsolete `[[test_skips]]`.** A `detect_obsolete = true` flag could trigger an offline check: for each skipped test, build the graph and query engine support without executing. Returned support means the skip is stale. Requires harness API changes for graph-build-without-execute.
-- **Wildcards in matchers.** §13.8 rejects `*` for v1. If a real engine (e.g. compiler-based, claims "any pointwise mode") needs the "commit to all" stance, add explicit wildcard semantics in v2 with documentation that it commits to current AND future enum values.
-- **Merge-preserve auto-gen.** v1 wholesale-replaces matching blocks. Merge-preserving behaviour (keep matchers still validly covering all-supported observations and no unsupported ones; only add new matchers for gaps) is a v2 enhancement if re-run friction becomes a felt cost.
-- **Build-constraint scoping.** Support is technically a function of (engine, arch, build flags, ROCm version). v1 factors out arch and platform. A future schema could add `rocm_min_version`, `compiler_flags`, etc. for engines where this matters.
-- **Standalone verifier binary.** §13.13 deferred. Natural rework when sharding's reduce phase lands.
-- **CODEOWNERS for sidecars.** Convention to recommend; not enforced by this RFC.
+- **Multi-engine attribution.** v1 refuses multi-engine builds. The eventual fix requires either per-engine support bitmaps in `recordGraphSupport` (queries every loaded engine before picking one — Nx probe cost) or sourcing the verifier from RFC 0006's pre-filter manifest. Tracked separately.
+- **Sharding reduce phase.** Per-shard JSON output mode + `--verify-claims-from <dir>` aggregator + ctest fixture (§9). Implementation deferred.
+- **Detecting obsolete `[[test_skips]]`.** A `detect_obsolete = true` flag could trigger an offline check that builds each skipped graph and queries engine support without executing. Requires harness API changes for graph-build-without-execute.
+- **Wildcards in matchers.** Rejected for v1. If a real engine (e.g. compiler-based) needs the "commit to all" stance, add explicit wildcard semantics in v2 with documentation that it commits to current AND future enum values.
 
-## 16. Glossary
+## 14. Glossary
 
-- **Engine.** A plugin-provided implementation that can execute a graph. Reported by `hipdnnGetEngineCount_ext` / `getEngineInfo`.
-- **Supported (for a test).** The engine returned at least one entry from `Graph::get_ranked_engine_ids()`.
-- **Pre-skipped.** A test removed by a matching `[[test_skips]]` entry during `SetUp()`. Excluded from claim evaluation.
-- **Observed.** A test that reached `SupportMatrixCollector::recordGraphSupport` during this run (not pre-skipped, not filtered out, in a built binary).
-- **Errored before record.** A test that started but failed/crashed before reaching `recordGraphSupport`. Conservatively counts as a verifier failure (Rule B in §7.1).
-- **Graph properties.** The structured tuple `(op_chain, io_dtype, layout)` extracted from `describeGraph()` output and `setTestCaseLayout`.
 - **Matcher.** A `[[supported.matchers]]` entry. Claims that the cross-product of its `op_chains × io_dtypes × layouts` is fully supported by the engine.
 - **Claimed.** A test whose `(op_chain, io_dtype, layout)` lies in some matcher's cross-product for the current `(arch, platform)`.
-- **Claim broken.** An observed claimed test with empty `engineIds`. Rule A in §7.1.
-- **Zero-coverage matcher.** A `[[supported.matchers]]` entry whose cross-product matches zero observed tests in a full unfiltered CI run. Indicates broken test detection (fixture rename, catalog removal, `op_chain` drift). Rule C in §7.1.
-- **Engine over-claim.** A test that fails while the engine returned non-empty `supportingEngineIds` and no matcher covers it. Diagnostic note on the existing test failure, not a new failure. Rule D in §7.1.
-- **Unclaimed gain.** A test that passes while the engine returned non-empty `supportingEngineIds` and no matcher covers it. Logged as a warning ("claimed support != actual support") with concrete fix steps; does not fail the build. Rule E in §7.1.
-- **Sidecar.** The machine-managed `<EngineName>.supported.toml` file containing `[[supported]]` blocks. Always paired with the hand-edited main `<EngineName>.toml`.
+- **Claim broken.** An observed claimed test with empty `engineIds`. Rule A.
+- **Zero-coverage matcher.** A matcher whose cross-product matches zero observed tests in a full unfiltered CI run. Rule C.
+- **Engine over-claim.** A test that fails while the engine returned support and no matcher covers it. Rule D (note, not a new failure).
+- **Unclaimed gain.** A test that passes while the engine returned support and no matcher covers it. Rule E (warning).
+- **Sidecar.** The machine-managed `<EngineName>.supported.toml` file containing `[[supported]]` blocks, paired with the hand-edited main `<EngineName>.toml`.
