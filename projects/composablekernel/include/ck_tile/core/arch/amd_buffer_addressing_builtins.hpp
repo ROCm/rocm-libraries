@@ -1381,7 +1381,7 @@ CK_TILE_DEVICE_EXTERN double llvm_amdgcn_raw_buffer_atomic_max_fp64(
     int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64.v4i32");
 
 // Direct loads from global to LDS.
-#if __clang_major__ >= 21 && __clang_major__ <= 23
+#if __clang_major__ >= 21 && __clang_major__ < 23
 CK_TILE_DEVICE_EXTERN void
 llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 as3_uint32_ptr lds_ptr,

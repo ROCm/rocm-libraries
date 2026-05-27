@@ -34,7 +34,7 @@
 #include "ck/utility/debug.hpp"
 
 #include "ck/utility/amd_arch.hpp"
-#if __clang_major__ >= 20 && __clang_major__ <= 23
+#if __clang_major__ >= 20 && __clang_major__ < 23
 #include "amd_buffer_addressing_builtins.hpp"
 #else
 #include "amd_buffer_addressing.hpp"
