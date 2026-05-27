@@ -189,9 +189,19 @@ __device__ __forceinline__ int swizzle_c8_inverse(int spatial, int c8)
 //   block_groups() = waves_per_wg
 //   channels_per_group() = mfma_k (32 or 16)
 //   block_c() = waves_per_wg * channels_per_group
-//   block_k_size() = mfma_n (16 or 32 K-channels)
-//   block_q() = mfma_m (16 or 32 spatial positions)
+//   block_k_size() = mfma_m (16 or 32 K-output channels; A/C rows)
+//   block_q() = mfma_n (16 or 32 spatial positions; B/C columns)
 //   c_local_count() = waves_per_wg (one cpg slice per wave)
+//
+// MFMA dimension convention (matches hardware lane mapping):
+//   weight operand = A: 16 (or 32) rows × K reduction
+//                    → row index = mfma_m → K-output channel (Fprop) or
+//                                            C-input channel (Dgrad)
+//   input  operand = B: K reduction × 16 (or 32) columns
+//                    → column index = mfma_n → spatial output position
+//   accumulator    = C: rows × columns
+//                    → lane % 16 selects N (column = spatial),
+//                      4 values per lane span M (rows = K-output).
 // ===================================================================
 template <DataType DT = DataType::fp16>
 struct Config
@@ -215,11 +225,13 @@ struct Config
 
     constexpr int num_waves() const { return waves_per_wg; }
     constexpr int block_c() const { return channels_per_group() * block_groups(); }
-    constexpr int block_q() const { return mfma_m(); }
+    // Spatial output positions per wave = MFMA N (columns of B/C).
+    constexpr int block_q() const { return mfma_n(); }
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
 
+    // K-output channels per wave = MFMA M (rows of A/C).
     // All waves share the same block_k_size K-channels.
-    constexpr int block_k_size() const { return mfma_n(); }
+    constexpr int block_k_size() const { return mfma_m(); }
 
     // C-sections per c_block = waves_per_wg (one per wave).
     constexpr int c_local_count() const { return block_groups(); }
@@ -404,7 +416,8 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     // Mfma distribution — needed by InputLoader's static type declarations.
     // Not used at runtime (ConvInputLoader passes init_mfma_offsets=false).
     // The distribution must be well-formed for type deduction to compile.
-    static constexpr int SPATIAL_LANES = cfg.mfma_m();   // 16 or 32
+    // Input is the MFMA B operand: spatial position = N (columns of B/C).
+    static constexpr int SPATIAL_LANES = cfg.mfma_n();   // 16 or 32
     static constexpr int K_GROUPS      = 64 / SPATIAL_LANES; // 4 or 2
     struct Mfma
     {
@@ -486,9 +499,11 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
 
-        constexpr int MFMA_M = cfg.mfma_m();
-        const int lane_q  = lane % MFMA_M;
-        const int lane_c8 = lane / MFMA_M;
+        // Input = MFMA B operand: lane % mfma_n → column (spatial position),
+        // lane / mfma_n → K-reduction group.
+        constexpr int MFMA_N = cfg.mfma_n();
+        const int lane_q  = lane % MFMA_N;
+        const int lane_c8 = lane / MFMA_N;
 
         // v3: each wave is its own C-group (wave_group = wave, not wave / 2).
         const int wave_group = wave;
@@ -753,17 +768,17 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
         {
             // Fprop: LDS layout is [block_k_size_K, KH_KW, cpg_C], C innermost.
             //
-            // MFMA A operand mapping:
-            //   k_out = lane % mfma_n → K-output channel
-            //   c_grp = lane / mfma_n → C-reduction group (each has 8 values)
+            // MFMA A operand mapping (weight is A; row index = M dimension):
+            //   k_out = lane % mfma_m → K-output channel (row of A)
+            //   c_grp = lane / mfma_m → C-reduction group (each has 8 values)
             //
             // Each thread reads 8 C values per filter position:
             //   vals[j] = weight[k_out, f, c_grp*8 + j]
             constexpr int C_SLICE = cfg.channels_per_group();
-            constexpr int MFMA_N = cfg.mfma_n();
+            constexpr int MFMA_M = cfg.mfma_m();
 
-            const int k_out = lane % MFMA_N;
-            const int c_grp = lane / MFMA_N;
+            const int k_out = lane % MFMA_M;
+            const int c_grp = lane / MFMA_M;
 
             static_for<KH_KW_L>(
                 [&]<int F>()
