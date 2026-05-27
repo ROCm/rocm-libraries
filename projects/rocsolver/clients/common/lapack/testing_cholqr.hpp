@@ -674,19 +674,19 @@ void testing_cholqr(Arguments& argus)
             rocsolver_bench_header("Arguments:");
             if(BATCHED)
             {
-                rocsolver_bench_output("m", "n", "lda", "ldw", "strideW", "cholshift", "batch_c");
-                rocsolver_bench_output(m, n, lda, ldw, stW, cholshift_char, bc);
+                rocsolver_bench_output("m", "n", "lda", "ldw", "strideW", "cholshift", "cholnum", "batch_c");
+                rocsolver_bench_output(m, n, lda, ldw, stW, cholshift_char, cholnum, bc);
             }
             else if(STRIDED)
             {
                 rocsolver_bench_output("m", "n", "lda", "strideA", "ldw", "strideW", "cholshift",
-                                       "batch_c");
-                rocsolver_bench_output(m, n, lda, stA, ldw, stW, cholshift_char, bc);
+                                       "cholnum", "batch_c");
+                rocsolver_bench_output(m, n, lda, stA, ldw, stW, cholshift_char, cholnum, bc);
             }
             else
             {
-                rocsolver_bench_output("m", "n", "lda", "ldw", "cholshift");
-                rocsolver_bench_output(m, n, lda, ldw, cholshift_char);
+                rocsolver_bench_output("m", "n", "lda", "ldw", "cholshift", "cholnum");
+                rocsolver_bench_output(m, n, lda, ldw, cholshift_char, cholnum);
             }
             rocsolver_bench_header("Results:");
             if(argus.norm_check)

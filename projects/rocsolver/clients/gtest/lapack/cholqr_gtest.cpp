@@ -37,7 +37,7 @@ template <typename I>
 using cholqr_tuple = tuple<vector<I>, int>;
 
 /** Test parameter tuple: {{m, n, lda, ldw}, singular}
-    the value of singular is used to manipulate the conditioning of the inpuit matrix
+    the value of singular is used to manipulate the conditioning of the input matrix
     to test the different algorithm configs (choleskyQR1, choleskyQR2, shifted_choleskyQR3)
 
     - If singular = 0, the input matrix is non singular (cond(A) small).
