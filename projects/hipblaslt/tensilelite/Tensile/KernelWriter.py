@@ -3668,6 +3668,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # initialize SubTileIdx
     self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
+    label_unrolledLoop_lc1 = Label("unrolledLoop_lc1", "", alignment=16)
+
+    # For loopCopies>=2 (EPS uses 2; HalfPLR uses 3), place the lc=1 SBranch target
+    #   EPS    : initC[lc=0] -> lc=1 -> lc=0 -> lc=1 -> ...
+    #   HalfPLR: initC[lc=0] -> lc=1 -> lc=2 -> lc=0 -> lc=1 -> lc=2 -> ...
+    if loopCopies >= 2 and lc == 1 and not initCIter:
+      module.add(label_unrolledLoop_lc1)
+
     # not generate openLoop for firstIter
     if not firstIter and not initCIter:
       module.addComment2("Unrolled Loop %u/%u - Begin" % (lc+1, loopCopies))
@@ -4410,9 +4418,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not skipClose and not kernel["UseCustomMainLoopSchedule"]:
         if not initCIter:
           module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel))
+        elif loopCopies >= 2:
+          # initC(lc=0) + multi-copy (EPS loopCopies=2 / HalfPLR loopCopies=3)
+          # initC(lc=0) -> (lc=1) -> (lc=0 in EPS / lc=2 in HalfPLR) -> ...
+          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=(loopCopies == 2)))
+          module.add(SBranch(label_unrolledLoop_lc1.getLabelName()))
         else:
-          # initC consumed one K iteration: dec counter and fall through to origin loop's begin label
-          module.add(self.decCounter(kernel))
+          # initC (no EPS, no HalfPLR): closeLoop(finalLoop=False) does dec + exit-check
+          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=False))
 
     return module
 

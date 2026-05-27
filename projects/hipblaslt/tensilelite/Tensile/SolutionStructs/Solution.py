@@ -4614,20 +4614,15 @@ class Solution(collections.abc.Mapping):
       state["LdsInitCVgprs"] = True
 
     # Resolve InitCIterWmma (-1=auto, 0=disable, 1=force enable).
-    # ExpandPointerSwap=True is incompatible: EPS duplicates the unrolled body into lc=0/lc=1
-    # variants that bake LDS buffer indices into the emitted code and must alternate at runtime;
-    # initC's fall-through into lc=0's begin label would run lc=0 twice in a row and break the
-    # LDS double-buffer ordering.
     autoInitCIterWmma = state["EnableMatrixInstruction"] and not state["LdsInitCVgprs"] \
                         and not state["ForceUnrollSubIter"] \
                         and not state["ProblemType"]["DataType"].isComplex() \
-                        and not state["ProblemType"]["Sparse"] \
-                        and not state["ExpandPointerSwap"]
+                        and not state["ProblemType"]["Sparse"]
     if state["InitCIterWmma"] == -1:
       state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
     elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
       reject(state, printRejectionReason,
-             "InitCIterWmma=1 requires EnableMatrixInstruction and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse/ExpandPointerSwap")
+             "InitCIterWmma=1 requires EnableMatrixInstruction and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
       return
 
     # force MIArchVgpr when using WMMA
