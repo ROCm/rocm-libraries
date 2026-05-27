@@ -1,0 +1,9 @@
+# GTest YAML that exercises the gtest-pattern validator: contains a pattern
+# with a forbidden character (space) which must fail validation.
+test_categories:
+  quick:
+    description: "Has an unsafe pattern"
+    test_patterns:
+      - "Bad Pattern With Spaces"
+    labels:
+      - "quick"

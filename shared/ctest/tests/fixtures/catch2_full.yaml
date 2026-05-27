@@ -1,0 +1,61 @@
+# Comprehensive Catch2 test_categories.yaml covering:
+#   - Multiple categories
+#   - include + exclude tag combinations
+#   - OS-specific exclude_tags_windows / exclude_tags_linux
+#   - The `[]` "all tests" sentinel (must be skipped when forming includes)
+#   - execution_settings.category_timeouts + timeout_multiplier
+#   - execution_settings.environment
+test_categories:
+  quick:
+    description: "Quick Catch2 tests"
+    test_tags:
+      - "[smoke]"
+      - "[unit]"
+    exclude_tags:
+      - "[slow]"
+    exclude_tags_windows:
+      - "[linux-only]"
+    exclude_tags_linux:
+      - "[windows-only]"
+    labels:
+      - "quick"
+      - "pre-commit"
+
+  standard:
+    description: "Standard Catch2 tests"
+    test_tags:
+      - "[smoke]"
+      - "[unit]"
+      - "[integration]"
+    exclude_tags:
+      - "[slow]"
+      - "[flaky]"
+    labels:
+      - "standard"
+      - "pr"
+
+  all_tests:
+    description: "Use [] sentinel to mean 'run everything'"
+    test_tags:
+      - "[]"
+    labels:
+      - "full"
+
+  excludes_only:
+    description: "No include tags -- only excludes are applied"
+    exclude_tags:
+      - "[slow]"
+      - "[flaky]"
+    labels:
+      - "comprehensive"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 2
+  category_timeouts:
+    quick: 60
+    standard: 600
+    comprehensive: 1800
+    all_tests: 3600
+  environment:
+    CATCH2_LOG_LEVEL: "info"

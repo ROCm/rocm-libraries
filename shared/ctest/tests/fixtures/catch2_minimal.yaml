@@ -1,0 +1,10 @@
+# Minimal valid Catch2 test_categories.yaml.
+test_categories:
+  quick:
+    description: "Fast Catch2 tests"
+    test_tags:
+      - "[smoke]"
+      - "[unit]"
+    labels:
+      - "quick"
+      - "pre-commit"

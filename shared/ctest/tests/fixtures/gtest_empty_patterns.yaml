@@ -1,0 +1,14 @@
+# GTest YAML where a category has NO test_patterns -- parser should emit a
+# warning and skip the category rather than failing.
+test_categories:
+  quick:
+    description: "Has patterns"
+    test_patterns:
+      - "Smoke.*"
+    labels:
+      - "quick"
+  empty:
+    description: "Missing test_patterns -- expected to be skipped with a warning"
+    test_patterns: []
+    labels:
+      - "standard"

@@ -1,0 +1,9 @@
+# Catch2 YAML with a malformed tag (no closing bracket) -- must fail
+# validation via validate_tag.
+test_categories:
+  quick:
+    description: "Has an invalid Catch2 tag"
+    test_tags:
+      - "[smoke"
+    labels:
+      - "quick"

@@ -1,0 +1,23 @@
+# GTest YAML with no exclude_gpu section -- exercises the path where
+# the parser is asked to emit only category suites (no per-GPU variants).
+test_categories:
+  quick:
+    description: "CPU-only quick tests"
+    test_patterns:
+      - "Cpu.*"
+    labels:
+      - "quick"
+  standard:
+    description: "CPU-only standard tests"
+    test_patterns:
+      - "Cpu.*"
+      - "Validation.*"
+    exclude:
+      - "*Slow*"
+    labels:
+      - "standard"
+
+execution_settings:
+  category_timeouts:
+    quick: 60
+    standard: 300
