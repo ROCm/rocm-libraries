@@ -96,6 +96,16 @@ struct FmhaBwdDQDKDVVariant
 
 // clang-format off
 static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
+    {"fmha_bwd_dqdkdv_fp16_d64_batch", makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                   .hdim_q = 64, .hdim_v = 64,
+                   .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_bf16_d64_batch", makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16,
+                   .hdim_q = 64, .hdim_v = 64,
+                   .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,

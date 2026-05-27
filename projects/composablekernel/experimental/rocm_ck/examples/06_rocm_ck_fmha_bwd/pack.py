@@ -77,6 +77,24 @@ VARIANTS = [
     },
     # --- DqDkDv variants ---
     {
+        "name": "fmha_bwd_dqdkdv_fp16_d64_batch",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 64,
+        "hdim_v": 64,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_bf16_d64_batch",
+        "family": "dqdkdv",
+        "dtype": "bf16",
+        "hdim_q": 64,
+        "hdim_v": 64,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch",
         "family": "dqdkdv",
         "dtype": "fp16",
