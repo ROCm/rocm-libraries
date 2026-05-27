@@ -297,10 +297,10 @@ option( WORKAROUND_ISSUE_1148 "" ${WORKAROUND_ISSUE_1148_DEFAULT})
 
 if(MIOPEN_TEST_INT8)
     set(SKIP_ALL_EXCEPT_TESTS
-              test_tensor_vec test_tensor_trans test_tensor_transform test_conv2d test_conv2d_find2)
+              test_tensor_vec test_tensor_trans test_tensor_transform)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(SKIP_ALL_EXCEPT_TESTS
-              test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
+              test_tensor_vec
               test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
@@ -325,13 +325,6 @@ endif()
 if (MIOPEN_TEST_GFX115X)
     list(APPEND SKIP_TESTS test_ctc)
 endif()
-
-# Skip conv2d tests to capture flaky behavior                                                                             
-list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
-
-# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
-list(APPEND SKIP_TESTS test_immed_conv2d)
-
 
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
@@ -404,10 +397,6 @@ function(add_test_executable TEST_NAME)
         set(TEST_COMMAND ${TEST_COMMAND} --xnack 1)
     endif()
 
-    if(WORKAROUND_ISSUE_936 AND (${TEST_NAME} MATCHES "test_conv2d" OR ${TEST_NAME} MATCHES "test_immed_conv2d") )
-        set(TEST_COMMAND ${TEST_COMMAND} --tolerance 130) #increased by 1.625 times
-    endif()
-
     add_test_command(${TEST_NAME} ${TEST_COMMAND})
     rate_added_test(${TEST_NAME})
     add_dependencies(tests ${TEST_NAME})
@@ -461,16 +450,10 @@ endfunction()
 file(GLOB TEST_SOURCES *.cpp)
 
 set(LONG_TESTS
-    test_conv2d
-    test_conv2d_find2
-    test_conv3d
-    test_conv3d_find2
     test_conv_group
     test_soft_max
     test_conv_for_implicit_gemm
-    test_immed_conv3d
     test_conv3d_extra
-    test_conv_3d
     test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
@@ -823,12 +806,6 @@ set(ARGS_NCHWC_CHWNC_FWD_FP16x8
     --tensor_vect 1
     --vector_length 8)
 
-add_custom_test(test_regression_issue_2624 SKIP_UNLESS_ALL GFX900_DISABLED GFX906_DISABLED
-    # Regression test for SWDEV-433714 (issue 2624)
-    ENVIRONMENT ${IMPLICITGEMM_TESTING_ENV} MIOPEN_LOG_LEVEL=5
-    COMMAND $<TARGET_FILE:test_conv2d> ${MIOPEN_TEST_FLOAT_ARG} --verbose --input 2 1 22 22 --weights 1 1 4 4 --pads_strides_dilations 1 2 4 4 3 2 --disable-backward-data --disable-backward-weights
-)
-
 # MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW is explicitly enabled due to the kernel is disabled by default via #2306
 set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
     MIOPEN_FIND_MODE=normal
@@ -840,45 +817,6 @@ set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
 # * Use TEST_TUNING. This flag leads to test failure in case of any "Error"
 #   message output to the log, which happens if something is broken in the tuning machinery.
 # * Use MIOPEN_DEBUG_TUNING_ITERATIONS_MAX to save testing time.
-
-add_custom_test(smoke_solver_ConvMlirIgemm_F GFX900_DISABLED GFX908_DISABLED GFX90A_DISABLED GFX103X_ENABLED HALF_ENABLED SKIP_UNLESS_MLIR TEST_TUNING
-    ENVIRONMENT MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5 ${IMPLICITGEMM_MLIR_ENV_F}
-    COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_F} --input 64 128 14 14 --weights 128 128 1 1 --pads_strides_dilations 0 0 2 2 1 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(smoke_solver_ConvMlirIgemm_B GFX900_DISABLED GFX908_DISABLED GFX90A_DISABLED GFX103X_ENABLED HALF_ENABLED SKIP_UNLESS_MLIR TEST_TUNING
-    ENVIRONMENT MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5 ${IMPLICITGEMM_MLIR_ENV_B}
-    COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_B} --input 64 256 28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --group-count 4 ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(smoke_solver_ConvMlirIgemm_W GFX900_DISABLED GFX908_DISABLED GFX90A_DISABLED GFX103X_ENABLED HALF_ENABLED SKIP_UNLESS_MLIR TEST_TUNING
-    ENVIRONMENT MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5 ${IMPLICITGEMM_MLIR_ENV_W}
-    COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(conv_transposed_fwd
-    COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_F} --input 1 16 24 24 --weights 16 16 7 7 --pads_strides_dilations 3 3 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(conv_transposed_bwd
-    COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_B} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(conv_transposed_wrw
-    COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(conv_transposed_fwd_find_2
-    COMMAND $<TARGET_FILE:test_conv2d_find2> ${TEST_CONV_VERBOSE_F} --input 1 16 24 24 --weights 16 16 7 7 --pads_strides_dilations 3 3 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(conv_transposed_bwd_find_2
-    COMMAND $<TARGET_FILE:test_conv2d_find2> ${TEST_CONV_VERBOSE_B} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
-)
-
-add_custom_test(conv_transposed_wrw_find_2
-    COMMAND $<TARGET_FILE:test_conv2d_find2> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
-)
 
 #Dont install the tests if we are building each test separately
 #When the tests are built as a single unit, then we want to be
