@@ -91,6 +91,15 @@ void EnginePlugin::resolveSymbols()
     const auto funcNameExecuteOpGraph = "hipdnnEnginePluginExecuteOpGraph";
     _funcExecuteOpGraph = _lib.getSymbol<decltype(_funcExecuteOpGraph)>(funcNameExecuteOpGraph);
 
+    // Optional symbol per RFC 0008 §4.5; absence simply means the plugin
+    // opts out of override execute.
+    if(!tryAssignSymbol(_funcExecuteOpGraphWithOverrides,
+                        "hipdnnEnginePluginExecuteOpGraphWithOverrides"))
+    {
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not support override-aware execute "
+                                "(hipdnnEnginePluginExecuteOpGraphWithOverrides not exported)");
+    }
+
 #ifndef NDEBUG
     _initialized = true;
 #endif
@@ -346,6 +355,43 @@ void EnginePlugin::executeOpGraph(hipdnnEnginePluginHandle_t handle,
                          workspace,
                          deviceBuffers,
                          numDeviceBuffers);
+}
+
+bool EnginePlugin::hasOverrideExecute() const
+{
+    assert(_initialized);
+    return _funcExecuteOpGraphWithOverrides != nullptr;
+}
+
+void EnginePlugin::executeOpGraphWithOverrides(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    void* workspace,
+    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+    uint32_t numDeviceBuffers,
+    uint32_t numOverrides,
+    const int64_t* overrideUniqueIds,
+    const uint32_t* overrideLengths,
+    const int64_t* const* overrideShapes,
+    const int64_t* const* overrideStrides) const
+{
+    assert(_initialized);
+    THROW_IF_NULL(_funcExecuteOpGraphWithOverrides,
+                  HIPDNN_STATUS_NOT_SUPPORTED,
+                  "Plugin does not export hipdnnEnginePluginExecuteOpGraphWithOverrides; "
+                  "callers must guard with EnginePlugin::hasOverrideExecute() (RFC 0008 §4.6).");
+    invokePluginFunction("execute op graph with overrides",
+                         _funcExecuteOpGraphWithOverrides,
+                         handle,
+                         executionContext,
+                         workspace,
+                         deviceBuffers,
+                         numDeviceBuffers,
+                         numOverrides,
+                         overrideUniqueIds,
+                         overrideLengths,
+                         overrideShapes,
+                         overrideStrides);
 }
 
 } // namespace plugin

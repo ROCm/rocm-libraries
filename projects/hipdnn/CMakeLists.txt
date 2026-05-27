@@ -8,6 +8,8 @@ set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
+set(HIPDNN_TSL_ROBIN_MAP_VERSION "1.4.1" CACHE STRING "Version of tsl-robin-map to use")
 
 option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
@@ -101,6 +103,23 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     "${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
     CACHE STRING "Relative install directory for official hipDNN engine plugins"
 )
+set(HIPDNN_PLUGIN_HEURISTIC_SUBDIR "hipdnn_plugins/heuristics"
+    CACHE STRING "Subdirectory for official hipDNN heuristic plugins"
+)
+set(HIPDNN_BUILD_PLUGIN_HEURISTIC_DIR
+    "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE PATH "Build directory for official hipDNN heuristic plugins"
+)
+set(HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR
+    "${HIPDNN_PLUGIN_FULL_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE
+        STRING
+        "Full install directory for official hipDNN heuristic plugins. Uses the CMAKE_INSTALL_PREFIX set at configure time (defaults to /opt/rocm/)."
+)
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR
+    "${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE STRING "Relative install directory for official hipDNN heuristic plugins"
+)
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Build directory for test plugins"
 )
@@ -140,6 +159,8 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
+option(HIPDNN_BUILD_PYTHON_BINDINGS "Build Python bindings (requires Python and nanobind)" OFF)
+
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
@@ -169,6 +190,7 @@ include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
 
 # Add global compile options
@@ -231,6 +253,10 @@ add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
 add_subdirectory(tools)
+
+if(HIPDNN_BUILD_PYTHON_BINDINGS)
+    add_subdirectory(python)
+endif()
 
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests

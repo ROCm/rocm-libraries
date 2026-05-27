@@ -262,7 +262,7 @@ static void scheduleRegionWithMovableSideEffects(
             std::vector<DsInfo*> group;
             auto flushGroup = [&]() {
                 if (group.empty()) return;
-                bool asc = groupAsc.count(prevAff) ? groupAsc[prevAff] : true;
+                bool asc = groupAsc.contains(prevAff) ? groupAsc[prevAff] : true;
                 if (!asc) {
                     // Reverse operand type order but keep DAG id order within
                     // each type. Sort by (srcReg descending, idx ascending).

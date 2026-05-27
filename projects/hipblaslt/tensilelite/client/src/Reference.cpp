@@ -2627,6 +2627,18 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4)
+#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
+            case TypedGemm_F6F4_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F4_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
             case TypedGemm_B6F4_S_S::TypeId():
             {
@@ -2639,6 +2651,18 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
+#if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
+            case TypedGemm_B6F4_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F4_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #endif // !_WIN32
 #if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
             // DestDataType: S
