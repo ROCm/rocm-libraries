@@ -2096,7 +2096,6 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
             brick_length.erase(brick_length.begin() + idx);
             brick_stride.erase(brick_stride.begin() + idx - 1);
             field_stride.erase(field_stride.begin() + idx - 1);
-            --idx;
         }
     }
 }
