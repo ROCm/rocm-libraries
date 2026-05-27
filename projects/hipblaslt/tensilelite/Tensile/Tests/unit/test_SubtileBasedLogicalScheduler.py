@@ -247,6 +247,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
         writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
     writer.loopCounterName = lambda kernel, loopIdx: "LoopCounterL"
+    writer.tailLoopBoundaryDtlLoadAB = lambda *a, **kw: MagicMock()
     _label_counters = {}
     def _getNameInc(base):
         n = _label_counters.get(base, 0)
@@ -2136,6 +2137,8 @@ class TestIntegration:
                 writer, kernel,
                 tileInfoA=tiA, tileInfoB=tiB,
                 dtileInfo=dTileInfo,
+                tensorParametersA=MagicMock(),
+                tensorParametersB=MagicMock(),
             )
             asm = str(sched.emitTailLoop(writer, kernel)).lower()
 
@@ -2770,8 +2773,7 @@ class TestBuildTailloopPGR0:
             lrB=ReadGranularity(mn=1, k=1),
             grA=ReadGranularity(mn=1, k=2),
             grB=ReadGranularity(mn=1, k=2),
-            numPartitionsM=1,
-            numPartitionsN=5,
+            partitionSizeN=2,
             pgr=2,
         )
         sched = LogicalScheduler(cfg)
