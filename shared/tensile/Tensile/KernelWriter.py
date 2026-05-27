@@ -2168,7 +2168,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not kernel["NoLdsWriteCode"]:
                 waitLWCode.addCode(self.wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
               if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
-                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before _s_barrier
+                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before thread sync
                 # Except for PGR=2 and Load C (StoreCInUnroll) case. In that case, Load C is executed after necessary Load A and B.
                 # Wait for Load C is already done here in PGR=2 case.
                 needLoadC = kernel["StoreCInUnroll"] and (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]
@@ -2749,7 +2749,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not(kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and not kernel["PrefetchGlobalRead"]==2:
                 kl.append(self.wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "12wait for global read"))
               else:
-                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before _s_barrier
+                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before thread sync
                 # Except for PGR=2 and Load C case. In that case, Load C is executed after necessary Load A and B.
                 # Wait for Load C is already done here in PGR=2 case.
                 needLoadC = kernel["StoreCInUnroll"] and (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]

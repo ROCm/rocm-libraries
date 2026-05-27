@@ -235,6 +235,27 @@ class KernelWriterAssembly(KernelWriter):
     """ (1) registers per global 32-bit offset (some intructions only support 32-bit offset) """
     return 1
 
+  def isGfx12(self):
+    return self.version[0] == 12
+
+  def hasWorkGroup2(self):
+    return hasattr(self, "sgprs") and "WorkGroup2" in self.sgprs
+
+  def gfx12AtomicCmpswapMemoryModifier(self, memoryBit):
+    """Add the gfx12 atomic return modifier while preserving trailing modifiers."""
+    modifiers = memoryBit.split()
+    returnModifier = "th:TH_ATOMIC_RT_RETURN"
+
+    if not modifiers:
+      return returnModifier
+
+    if modifiers[0] in ("glc", "sc0"):
+      modifiers[0] = returnModifier
+    elif not modifiers[0].startswith("th:"):
+      modifiers.insert(0, returnModifier)
+
+    return " ".join(modifiers)
+
   def getCompileArgs(self, sourceFileName, objectFileName, *moreArgs, isa=None, wavefrontSize=None):
     if isa is None:
       isa = self.version
@@ -2551,7 +2572,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineBarrierMacros(self):
     kStr = ".macro _s_barrier" + self.endLine
-    if self.version[0] >= 12:
+    if self.isGfx12():
       kStr += "    s_barrier_signal -1" + self.endLine
       kStr += "    s_barrier_wait -1" + self.endLine
     else:
@@ -3418,7 +3439,8 @@ class KernelWriterAssembly(KernelWriter):
                    "WorkGroup0 = ttmp9")
       kStr += inst("s_and_b32", sgpr("WorkGroup1"), "ttmp7", "0xFFFF",
                    "WorkGroup1 = ttmp7[15:0]")
-      if kernel["ProblemType"]["NumIndicesC"] > 2:
+      # WorkGroup2 is only allocated for unpacked batch dimensions.
+      if self.hasWorkGroup2():
         kStr += inst("s_lshr_b32", sgpr("WorkGroup2"), "ttmp7", "16",
                      "WorkGroup2 = ttmp7[31:16]")
 
@@ -12082,7 +12104,7 @@ class KernelWriterAssembly(KernelWriter):
       tmpSgprRef = self.getTmpSgpr(1)
       tmpSgpr = tmpSgprRef.idx()
     if kernel["ProblemType"]["UseBeta"]:
-      cmpEqZero = "s_cmp_eq_u32" if self.version[0] >= 12 else "s_cmpk_eq_u32"
+      cmpEqZero = "s_cmp_eq_u32" if self.isGfx12() else "s_cmpk_eq_u32"
       if self.bpeCinternal <= self.bpr: # 1 register to check for Beta==0
         kStr += inst(cmpEqZero, sgpr("Beta"), hex(0), "Beta == 0")
       else: # multiple registers to check for Beta==0
@@ -12135,7 +12157,7 @@ class KernelWriterAssembly(KernelWriter):
     kStr += inst("s_cselect_b32", sgpr(tmpS0), sgpr(tmpS0), 0, "set rMT0")
     # s01 now = myMT0 = wg0 < nwg0-1 ? MT0 : rMT0
 
-    cmpGtZero = "s_cmp_gt_u32" if self.version[0] >= 12 else "s_cmpk_gt_u32"
+    cmpGtZero = "s_cmp_gt_u32" if self.isGfx12() else "s_cmpk_gt_u32"
 
     # if rMT0 > 0 goto label_B?_E1
     if self.do["EdgeWrite"]:
@@ -13813,7 +13835,7 @@ class KernelWriterAssembly(KernelWriter):
           rv.addCode(inst("s_mov_b32", soffset, offset, "large offset"))
         else:
           assert 0, "offset too large and soffset set"
-      elif self.version[0] >= 12 and (soffset == 0 or soffset == "0"):
+      elif self.isGfx12() and (soffset == 0 or soffset == "0"):
         soffset = sgpr(self.getTmpSgpr(1).idx())
         rv.addCode(inst("s_mov_b32", soffset, 0, "gfx12 buffer soffset must be SGPR"))
       if extraFields != "":
@@ -13914,7 +13936,7 @@ class KernelWriterAssembly(KernelWriter):
         assert offset < 4096, "sgpr offset provided with large const offset"
         tmpSgpr = soffset
 
-      if self.version[0] >= 12 and (tmpSgpr == 0 or tmpSgpr == "0"):
+      if self.isGfx12() and (tmpSgpr == 0 or tmpSgpr == "0"):
         tmpSgpr = sgpr(self.getTmpSgpr(1).idx())
         kStr += inst("s_mov_b32", tmpSgpr, 0, "gfx12 buffer soffset must be SGPR")
 
@@ -14113,11 +14135,11 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["BufferStore"]:
         atomicMemoryBit = memoryBit
         atomicOffset = "0 offen offset:%u" % (addrCalc.globalOffset + offset)
-        if self.version[0] >= 12:
+        if self.isGfx12():
           tmpSgpr = sgpr(self.getTmpSgpr(1).idx())
           kStr += inst("s_mov_b32", tmpSgpr, 0, "gfx12 buffer atomic soffset must be SGPR")
           atomicOffset = "%s offen offset:%u" % (tmpSgpr, addrCalc.globalOffset + offset)
-          atomicMemoryBit = "th:TH_ATOMIC_RT_RETURN"
+          atomicMemoryBit = self.gfx12AtomicCmpswapMemoryModifier(memoryBit)
         kStr += "_buffer_atomic_cmpswap_b%u %s, %s, %s %s %s   // %s%s" % \
             (bits, \
             vgpr(addDst,atomicOpW*2), \

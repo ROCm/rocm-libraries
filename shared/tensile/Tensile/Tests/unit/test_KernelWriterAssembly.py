@@ -23,6 +23,35 @@
 ################################################################################
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
+import collections
+from types import SimpleNamespace
+
+def test_gfx12_compatibility_checks_do_not_apply_to_future_isa():
+    kw = KernelWriterAssembly("","")
+    kw.version = (13, 0, 0)
+    kw.bpeCinternal = 4
+    kw.bpr = 4
+
+    assert "s_barrier_signal" not in kw.defineBarrierMacros()
+    assert "s_cmpk_eq_u32" in kw.checkIsBetaZero({"ProblemType": {"UseBeta": True}}, "Label", 0)
+    assert "gfx12 buffer soffset must be SGPR" not in str(
+        kw.chooseGlobalRead(True, 4, 0, "v0", "s[0:3]", 0, 0, "", False))
+    assert "gfx12 buffer atomic soffset must be SGPR" not in kw.chooseAtomicCmpswap(
+        {"BufferStore": True}, SimpleNamespace(globalOffset=0, addrDVgpr=0), 0, 0, 1, "glc")
+
+def test_gfx12_atomic_cmpswap_modifier_preserves_extra_modifiers():
+    kw = KernelWriterAssembly("","")
+
+    assert kw.gfx12AtomicCmpswapMemoryModifier("glc") == "th:TH_ATOMIC_RT_RETURN"
+    assert kw.gfx12AtomicCmpswapMemoryModifier("glc slc") == "th:TH_ATOMIC_RT_RETURN slc"
+
+def test_workgroup2_hydration_uses_actual_sgpr_definition():
+    kw = KernelWriterAssembly("","")
+    kw.sgprs = collections.OrderedDict()
+
+    assert not kw.hasWorkGroup2()
+    kw.sgprs["WorkGroup2"] = 4
+    assert kw.hasWorkGroup2()
 
 def test_occupancy():
     kw = KernelWriterAssembly("","")
