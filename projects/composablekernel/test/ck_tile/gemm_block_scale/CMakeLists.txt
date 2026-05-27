@@ -14,20 +14,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # AQuant tests - split into 10 files
 
     # AQuant Memory Pipeline tests
-    add_gtest_executable(test_tile_gemm_quant_aquant_mem_prefill_interwave
-        test_gemm_quant_aquant_mem_prefill_interwave.cpp
-    )
-    target_compile_options(test_tile_gemm_quant_aquant_mem_prefill_interwave PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
-
     add_gtest_executable(test_tile_gemm_quant_aquant_mem_decode_intrawave
         test_gemm_quant_aquant_mem_decode_intrawave.cpp
     )
     target_compile_options(test_tile_gemm_quant_aquant_mem_decode_intrawave PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
-
-    add_gtest_executable(test_tile_gemm_quant_aquant_mem_decode_interwave
-        test_gemm_quant_aquant_mem_decode_interwave.cpp
-    )
-    target_compile_options(test_tile_gemm_quant_aquant_mem_decode_interwave PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     add_gtest_executable(test_tile_gemm_quant_aquant_base_rcr 
         test_gemm_quant_aquant_base_rcr.cpp
@@ -272,9 +262,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # Collect all test targets for umbrella label
     set(CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS
         # AQuant tests
-        test_tile_gemm_quant_aquant_mem_prefill_interwave
         test_tile_gemm_quant_aquant_mem_decode_intrawave
-        test_tile_gemm_quant_aquant_mem_decode_interwave
         test_tile_gemm_quant_aquant_base_rcr
         test_tile_gemm_quant_aquant_base_rrr_crr
         test_tile_gemm_quant_aquant_base_ccr
@@ -330,9 +318,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # Target to build only AQuant memory pipeline tests
     add_custom_target(test_tile_gemm_aquant_mem_all)
     add_dependencies(test_tile_gemm_aquant_mem_all
-        test_tile_gemm_quant_aquant_mem_prefill_interwave
         test_tile_gemm_quant_aquant_mem_decode_intrawave
-        test_tile_gemm_quant_aquant_mem_decode_interwave
     )
 
     # Umbrella target to build all gemm quant tests

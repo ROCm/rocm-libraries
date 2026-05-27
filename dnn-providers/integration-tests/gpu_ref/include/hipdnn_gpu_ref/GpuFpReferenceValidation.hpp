@@ -27,6 +27,7 @@ public:
 
     ~GpuFpReferenceValidation() override = default;
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function) - explicit instantiation in .cpp
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override;
 

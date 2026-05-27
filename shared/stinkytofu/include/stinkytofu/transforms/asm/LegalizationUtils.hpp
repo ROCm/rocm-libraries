@@ -116,6 +116,18 @@ STINKYTOFU_EXPORT Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBu
 STINKYTOFU_EXPORT Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
                                                 GfxArchID archId, bool hasVgprMsb);
 
+// Legalize implicit special registers (SCC, VCC, EXEC) on an instruction.
+//
+// HW flags (Flags.def: IF_ImplicitRead/WriteSCC, IF_ImplicitReadVCC,
+// IF_ImplicitRead/WriteEXEC) declare implicit reads/writes that are not
+// encoded as explicit operands. This function inspects those flags and adds
+// the corresponding singleton register (sized by `wavefrontSize` for
+// VCC/EXEC) to the instruction's src/dest list — but only if the register
+// is not already present. The check matches by RegType and idx, which is
+// sufficient for SCC/VCC/EXEC since they are singletons.
+STINKYTOFU_EXPORT void legalizeImplicitSpecialRegisters(StinkyInstruction* inst,
+                                                        uint32_t wavefrontSize);
+
 }  // namespace stinkytofu
 
 #endif  // STINKYTOFU_LEGALIZATION_UTILS_HPP
