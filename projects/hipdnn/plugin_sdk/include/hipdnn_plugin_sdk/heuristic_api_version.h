@@ -5,7 +5,7 @@
 
 /**
  * @file heuristic_api_version.h
- * @brief Version constants for the heuristic plugin C ABI (RFC 0007)
+ * @brief Version constants for the heuristic plugin C ABI
  *
  * The heuristic plugin API has its own versioning scheme, independent of the
  * backend library version. This allows the heuristic plugin interface to evolve

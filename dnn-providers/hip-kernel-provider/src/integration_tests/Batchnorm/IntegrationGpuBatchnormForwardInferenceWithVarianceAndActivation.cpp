@@ -98,7 +98,7 @@ protected:
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         epsilonTensorAttr->set_name("epsilon").set_value(1e-5);
 
-        graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
+        const graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
 
         auto yTensorAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
                                                                      meanTensorAttr,
