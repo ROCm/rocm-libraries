@@ -609,7 +609,7 @@ PredictionResult ProcessPredictions(const std::vector<float>& predictions,
 
     // Sort solvers in order of their probabilities
     std::vector<std::pair<int, float>> sort_res(predictions.size());
-    for(size_t idx = 0ULL; idx < predictions.size(); idx++)
+    for(size_t idx = 0U; idx < predictions.size(); idx++)
         sort_res[idx] = {idx, predictions[idx]};
 
     const auto cmp = [](const std::pair<int, float>& a, const std::pair<int, float>& b) -> bool {
@@ -1214,7 +1214,7 @@ bool ModelSetParams(const std::string& arch,
                                                                        // score of the k-th token
         // order tokens according to their scores
         std::priority_queue<std::pair<float, int>> pq;
-        for(size_t j = 0ULL; j < token_scores.size(); j++)
+        for(size_t j = 0U; j < token_scores.size(); j++)
         {
             pq.push(std::make_pair(token_scores[j], j)); // sort by value at index
         }

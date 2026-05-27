@@ -69,7 +69,7 @@ struct Conv3DTestCase
     std::vector<size_t> GetInput() { return {N, C, img.z, img.y, img.x}; }
     std::vector<size_t> GetWeights()
     {
-        EXPECT_EQUAL(C % G, 0ULL);
+        EXPECT_EQUAL(C % G, 0U);
         return {K, C / G, filter.z, filter.y, filter.x};
     }
 

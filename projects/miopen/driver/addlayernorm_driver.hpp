@@ -312,12 +312,12 @@ int AddLayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     meanhost = std::vector<Tref>(mean_sz, Tref0val);
     rstdhost = std::vector<Tref>(rstd_sz, Tref0val);
 
-    for(size_t i = 0ULL; i < in_sz; i++)
+    for(size_t i = 0U; i < in_sz; i++)
     {
         in[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
     }
 
-    for(size_t i = 0ULL; i < in2_sz; i++)
+    for(size_t i = 0U; i < in2_sz; i++)
     {
         in2[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
     }
@@ -327,7 +327,7 @@ int AddLayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(in2_dev->ToGPU(GetStream(), in2.data()) != 0)
         std::cerr << "Error copying (in2) to GPU, size: " << in2_dev->GetSize() << std::endl;
 
-    for(size_t i = 0ULL; i < weight_sz; i++)
+    for(size_t i = 0U; i < weight_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE)
             weight[i] = Tgpu1val;
@@ -338,7 +338,7 @@ int AddLayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(weight_dev->ToGPU(GetStream(), weight.data()) != 0)
         std::cerr << "Error copying (weight) to GPU, size: " << weight_dev->GetSize() << std::endl;
 
-    for(size_t i = 0ULL; i < bias_sz; i++)
+    for(size_t i = 0U; i < bias_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE)
             bias[i] = Tgpu0val;
