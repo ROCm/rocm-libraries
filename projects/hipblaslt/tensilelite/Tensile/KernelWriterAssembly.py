@@ -4454,8 +4454,6 @@ class KernelWriterAssembly(KernelWriter):
       return module
     if tc not in ("A", "B"):
       return module
-    if not kernel["ProblemType"]["DataType"].isBFloat16():
-      return module
     if self.states.groOffsetInMacroTile != 1:
       return module
 

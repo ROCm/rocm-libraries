@@ -1268,7 +1268,9 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
     module.add(writer.calculateLoopNumIter(
         kernel, tensorParametersA, tensorParametersB, -1))
     # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
-    # (no-op outside UseSubtileImpl bf16 A/B).
+    # (no-op outside UseSubtileImpl A/B). Needed for bf16 (boundary DTL
+    # load) and fp4 (regular tail-loop dwordx4 must see the actual K_rem
+    # to avoid pulling stale OOB-zeroed dwords into LDS).
     module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA))
     module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB))
     module.add(scheduler.emitTailLoop(writer, kernel))
