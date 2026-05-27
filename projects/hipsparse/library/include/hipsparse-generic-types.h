@@ -199,7 +199,7 @@ typedef enum
     HIPSPARSE_FORMAT_SLICED_ELL  = 6 /**< Sliced ELL */
 #ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
-    HIPSPARSE_FORMAT_BSR         = 7 /**< Block sparse row */
+    HIPSPARSE_FORMAT_BSR = 7 /**< Block sparse row */
 #endif
 } hipsparseFormat_t;
 #else
@@ -311,7 +311,7 @@ typedef enum
     HIPSPARSE_SPMV_SELL_ALG1   = 5
 #ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
-    HIPSPARSE_SPMV_BSR_ALG1    = 6
+    HIPSPARSE_SPMV_BSR_ALG1 = 6
 #endif
 } hipsparseSpMVAlg_t;
 #else
@@ -326,7 +326,7 @@ typedef enum
     HIPSPARSE_SPMV_SELL_ALG1   = 5
 #ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
-    HIPSPARSE_SPMV_BSR_ALG1    = 6
+    HIPSPARSE_SPMV_BSR_ALG1 = 6
 #endif
 } hipsparseSpMVAlg_t;
 #elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
