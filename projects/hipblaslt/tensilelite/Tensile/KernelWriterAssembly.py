@@ -4544,7 +4544,7 @@ class KernelWriterAssembly(KernelWriter):
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
     waveSize        = kernel["WavefrontSize"]
     depthU          = kernel["DepthU"]
-    laneMaskCount   = self.states.laneSGPRCount  # 2 for wave64, 1 for wave32
+    laneMaskCount   = self.states.laneSGPRCount
 
     # K-side geometry is identical for A and B in the bf16 subtile path.
     bpe          = int(tPA["bpeGR"])
@@ -4743,31 +4743,23 @@ class KernelWriterAssembly(KernelWriter):
                                       src=sgpr(sChunkSel),
                                       comment="sM0Step = chunkSel * subtileOffsetBytes"))
 
-          # v_cmp + ff1 -> sLaneId
-          if waveSize == 64:
-            module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
-                                 src1=vgpr(vaddrVgpr),
-                                 comment="find lane whose vaddr == sTarget"))
-            module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
-                              comment="sAnyMatch = vcc_lo | vcc_hi"))
-            # Use stmp+2 as scratch for ff1(hi)+32 (numLine_ws is dead).
-            module.add(SFf1B32(dst=sgpr(stmp+2), src=sgpr(sCmpHi), comment="ff1(vcc_hi)"))
-            module.add(SAddU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=32,
-                               comment="+ 32 (hi-half lane offset)"))
-            module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
-                               comment="ff1(vcc_lo)"))
-            module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
-                                 comment="SCC=1 if lo had no match"))
-            module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+2), src1=sgpr(sLaneId),
-                                   comment="sLaneId = lo==-1 ? hi+32 : lo"))
-          else:
-            module.add(VCmpEQU32(dst=sgpr(sCmpLo, 1), src0=sgpr(stmp+0),
-                                 src1=vgpr(vaddrVgpr),
-                                 comment="find lane whose vaddr == sTarget"))
-            module.add(SMovB32(dst=sgpr(sAnyMatch), src=sgpr(sCmpLo),
-                               comment="sAnyMatch = vcc"))
-            module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
-                               comment="sLaneId = ff1(vcc)"))
+          # v_cmp + ff1 -> sLaneId (wave64 only for now).
+          assert waveSize == 64
+          module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
+                               src1=vgpr(vaddrVgpr),
+                               comment="find lane whose vaddr == sTarget"))
+          module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
+                            comment="sAnyMatch = vcc_lo | vcc_hi"))
+          # Use stmp+2 as scratch for ff1(hi)+32 (numLine_ws is dead).
+          module.add(SFf1B32(dst=sgpr(stmp+2), src=sgpr(sCmpHi), comment="ff1(vcc_hi)"))
+          module.add(SAddU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=32,
+                             comment="+ 32 (hi-half lane offset)"))
+          module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                             comment="ff1(vcc_lo)"))
+          module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
+                               comment="SCC=1 if lo had no match"))
+          module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+2), src1=sgpr(sLaneId),
+                                 comment="sLaneId = lo==-1 ? hi+32 : lo"))
 
           # m0 = LocalWriteBaseAddr + sLaneId*16 + sM0Base (+ sM0Step)
           #
