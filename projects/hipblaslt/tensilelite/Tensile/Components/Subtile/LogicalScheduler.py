@@ -453,20 +453,16 @@ class SkipOp(BaseOp):
 
 
 @dataclass
-class TailBoundaryLoadOp(BaseOp):
-    """Wave-0 lane-0 16-bit DTL boundary load for the trailing odd K element.
-
-    Emitted in the tail-loop preamble between WaitGROp and SyncOp so the
-    boundary `ushort` overwrites the zero that the OOB dwordx4 wrote into
-    the same LDS slot.
-    """
-    tensor: str = ""
+class TailBoundaryLoadABOp(BaseOp):
+    """Combined A+B boundary load: shared parity gate + K math, then per-tensor
+    M math and DTL load under a single skip label."""
+    tensor: str = "AB"
 
     def __post_init__(self):
-        self.kind = 'tail_boundary'
+        self.kind = 'tail_boundary_ab'
 
     def __str__(self):
-        return f"tail_boundary({self.tensor})"
+        return "tail_boundary_ab"
 
 
 @dataclass
@@ -2089,8 +2085,7 @@ class LogicalScheduler:
         # sync). For non-bf16 / non-Subtile paths this is a no-op Module.
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
-        preamble.append(TailBoundaryLoadOp(tensor='A'))
-        preamble.append(TailBoundaryLoadOp(tensor='B'))
+        preamble.append(TailBoundaryLoadABOp())
         preamble.append(SyncOp())
 
         # Loop over partitions to re-use vgpr tile maps.

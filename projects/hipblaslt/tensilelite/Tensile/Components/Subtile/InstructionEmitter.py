@@ -97,7 +97,7 @@ class InstructionEmitter:
             'gr_inc':           lambda em, ui: self.emit_gr_inc(em.source),
             'skip':             lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
-            'tail_boundary':  lambda em, ui: self.emit_tail_boundary(em.source),
+            'tail_boundary_ab': lambda em, ui: self.emit_tail_boundary_ab(),
         }
 
         # Sentinel for the long-lived per-lane diff vgpr. Set by
@@ -218,19 +218,14 @@ class InstructionEmitter:
     def emit_sync(self):
         return [SBarrier(comment="Barrier")]
 
-    def emit_tail_boundary(self, source):
-        """Emit the wave-0/lane-0 16-bit DTL boundary load for one tensor.
-
-        Returns an empty list when the writer's tailLoopBoundaryDtlLoad
-        gates out (non-bf16, non-Subtile, etc.) or when no tP was provided.
-        """
-        tP = self.tensorParametersMap.get(source.tensor)
-        if tP is None:
+    def emit_tail_boundary_ab(self):
+        """Emit the combined A+B boundary load (shared parity gate + K math)."""
+        tPA = self.tensorParametersMap.get('A')
+        tPB = self.tensorParametersMap.get('B')
+        if tPA is None or tPB is None:
             return []
-        mod = self.writer.tailLoopBoundaryDtlLoad(self.kernel, tP)
-        items = list(mod.flatitems())
-        items.append(Label("seb1_%s" % source.tensor, ""))
-        return items
+        mod = self.writer.tailLoopBoundaryDtlLoadAB(self.kernel, tPA, tPB)
+        return list(mod.flatitems())
 
     def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor."""
