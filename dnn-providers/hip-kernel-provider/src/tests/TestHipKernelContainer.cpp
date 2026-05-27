@@ -22,7 +22,7 @@ constexpr uint32_t EXPECTED_ENGINES = 0
                                       + 1
 #endif
 
-#ifdef HIPDNN_ENGINE_HIP_KERNEL
+#ifdef HIPDNN_ENGINE_HIP_MLOPS
                                       + 1
 #endif
 
@@ -43,9 +43,9 @@ TEST(TestHipKernelContainer, CopyEngineIdsReturnsExpectedEngineCount)
     EXPECT_EQ(numEngines, EXPECTED_ENGINES);
 }
 
-TEST(TestHipKernelContainer, CopyEngineIdsWithBufferContainsHipKernelEngineId)
+TEST(TestHipKernelContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
 {
-#ifndef HIPDNN_ENGINE_HIP_KERNEL
+#ifndef HIPDNN_ENGINE_HIP_MLOPS
     GTEST_SKIP();
 #else
     std::array<int64_t, EXPECTED_ENGINES> engineIds = {};
@@ -56,12 +56,12 @@ TEST(TestHipKernelContainer, CopyEngineIdsWithBufferContainsHipKernelEngineId)
     EXPECT_EQ(totalEngines, EXPECTED_ENGINES);
     EXPECT_EQ(numEngines, EXPECTED_ENGINES);
 
-    bool containsHipKernelEngine = false;
+    bool containsHipMlopsEngine = false;
     for(const int64_t engine : engineIds)
     {
-        containsHipKernelEngine |= (engine == hipdnn_data_sdk::utilities::HIP_KERNEL_ENGINE_ID);
+        containsHipMlopsEngine |= (engine == hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID);
     }
-    EXPECT_EQ(containsHipKernelEngine, true);
+    EXPECT_EQ(containsHipMlopsEngine, true);
 #endif
 }
 

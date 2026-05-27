@@ -9,7 +9,7 @@
 # Usage:
 # within the engine that contains HIP kernel kernels,
 # call the function add_kernels_for_embedding with arguments being the paths
-# to the kernels within the directory (see hip_kernel_engine for an example)
+# to the kernels within the directory (see hip_mlops_engine for an example)
 #
 
 # Keep a list of kernel files to be inlined

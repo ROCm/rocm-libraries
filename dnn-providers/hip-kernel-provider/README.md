@@ -24,7 +24,7 @@ HipKernelEngine
 ### Key Components
 
 - **Engines** (`src/engines/`): High-level operation orchestration
-    - **HIP kernel engine** (`src/engines/hip_kernel_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_KERNEL_ENGINE` (on by default)
+    - **HIP MLops engine** (`src/engines/hip_mlops_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_MLOPS_ENGINE` (on by default)
     - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default)
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time

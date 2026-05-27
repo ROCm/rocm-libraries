@@ -42,8 +42,8 @@ if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
 endif()
 
-if(ENABLE_HIP_KERNEL_ENGINE)
-    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_KERNEL=1)
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
@@ -98,10 +98,10 @@ embed_kernel_sources(
     ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.hpp
 )
 
-set(HIP_KERNEL_ENGINE_GENERATED_SOURCES
+set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
     ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp)
 
-set_source_files_properties(${HIP_KERNEL_ENGINE_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 
-target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_ENGINE_GENERATED_SOURCES}")
+target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_SOURCES}")
