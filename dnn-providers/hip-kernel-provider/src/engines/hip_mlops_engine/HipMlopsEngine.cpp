@@ -44,10 +44,9 @@ bool HipMlopsEngine::isApplicable(
     return false;
 }
 
-void HipMlopsEngine::getDetails(
-    HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    hipdnnPluginConstData_t& detailsOut) const
+void HipMlopsEngine::getDetails(HipKernelHandle& handle,
+                                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                                hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
 
