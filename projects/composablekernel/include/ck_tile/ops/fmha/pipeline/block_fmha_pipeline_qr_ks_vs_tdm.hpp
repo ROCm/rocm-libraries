@@ -433,8 +433,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                         make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](
-                                    auto tile_idx) {
+                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
                                     const auto col = k_origin.at(I0) + tile_idx.at(I1);
 
                                     {
@@ -960,8 +959,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                         make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](
-                                    auto tile_idx) {
+                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
                                     const auto col = k_origin.at(I0) + tile_idx.at(I1);
 
                                     {
