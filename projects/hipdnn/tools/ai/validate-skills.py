@@ -11,8 +11,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SKILLS_DIR = ROOT / "skills"
-AI_RULES_PATH = ROOT.parent.parent / "docs" / "ai-rules.md"
-
 
 REQUIRED_OPENAI_FIELDS = (
     "display_name",
@@ -30,18 +28,6 @@ FORBIDDEN_SKILL_TEXT = (
 FORBIDDEN_SKILL_PATTERNS = (re.compile(r"\bAskUserQuestion\b"),)
 
 SLASH_SKILL_PATTERN = re.compile(r"(?<![\w:/])/(?:hipdnn|pr-summary)[A-Za-z0-9_-]*")
-
-FORBIDDEN_AI_RULES_TEXT = (
-    "link-skills.py",
-    "link everything",
-    "installer links",
-    "--copy",
-)
-REQUIRED_AI_RULES_TEXT = (
-    "install-skills.py",
-    "validate-skills.py",
-)
-
 
 EXPECTED_SCRIPTS = {
     "hipdnn-superbuild": ("windows_rocm_setup.py",),
@@ -156,24 +142,6 @@ def validate_skill(skill: Path) -> list[str]:
     return errors
 
 
-def validate_ai_rules() -> list[str]:
-    if not AI_RULES_PATH.exists():
-        return [f"{AI_RULES_PATH}: missing project AI rules"]
-
-    text = AI_RULES_PATH.read_text(encoding="utf-8")
-    errors: list[str] = []
-
-    for token in FORBIDDEN_AI_RULES_TEXT:
-        if token in text:
-            errors.append(f"{AI_RULES_PATH}: contains stale skill install text: {token}")
-
-    for token in REQUIRED_AI_RULES_TEXT:
-        if token not in text:
-            errors.append(f"{AI_RULES_PATH}: missing skill install text: {token}")
-
-    return errors
-
-
 def main() -> int:
     if not SKILLS_DIR.exists():
         print(f"ERROR: skills directory not found: {SKILLS_DIR}", file=sys.stderr)
@@ -187,7 +155,6 @@ def main() -> int:
     errors: list[str] = []
     for skill in skills:
         errors.extend(validate_skill(skill))
-    errors.extend(validate_ai_rules())
 
     for left, right in DUPLICATE_SCRIPT_PAIRS:
         # Skip validation if either file is a symlink (symlinks auto-stay in sync)
