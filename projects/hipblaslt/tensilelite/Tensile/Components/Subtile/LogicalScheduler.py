@@ -220,8 +220,6 @@ class SchedulerConfig:
             reads = self.numSubIterK // g.k
             self.numUnroll[t] = reads // (defaultReads[t] if defaultReads[t] != 0 else 1)
 
-        maxUnroll = max(self.numUnroll.values()) if self.numUnroll else 1
-
         self.plr = 0 if self.pgr == 0 else 1
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.pgr == 0:
@@ -1153,10 +1151,10 @@ class LogicalScheduler:
         offsetMT = 0 if pgr == 0 else 1
 
         maxUnroll = max(self.config.numUnroll.values())
+        gr_slot_bounds = self._build_gr_slot_bounds()
         for uid in range(maxUnroll):
             gr_list = self._build_gr_list(part_ranges, offsetMT,
                                           self.config.offsetPartition, unrollId=uid)
-            gr_slot_bounds = self._build_gr_slot_bounds()
             self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
 
         if maxUnroll > 1 and pgr == 1:

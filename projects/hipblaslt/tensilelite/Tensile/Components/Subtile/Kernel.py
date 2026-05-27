@@ -1267,7 +1267,7 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   # it once here, before the loop. emitMfmaInstruction will reference it via kernel dict.
   miK = kernel["MatrixInstK"]
   unitScaleVgpr = -1
-  if miK == 128 and scaleTiA is None:
+  if miK == 128 and not (scaleTiA or scaleTiB):
       unitScaleVgpr = writer.vgprPool.checkOut(1)
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
