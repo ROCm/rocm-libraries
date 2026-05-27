@@ -145,6 +145,28 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_conv_input_loader_chunked
+                         test_conv_input_loader_chunked.cpp)
+    if(TARGET test_direct_conv_conv_input_loader_chunked)
+        target_compile_options(test_direct_conv_conv_input_loader_chunked PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+            -Wno-float-equal
+        )
+    endif()
+
+    add_gtest_executable(test_direct_conv_conv_weight_loader_chunked
+                         test_conv_weight_loader_chunked.cpp)
+    if(TARGET test_direct_conv_conv_weight_loader_chunked)
+        target_compile_options(test_direct_conv_conv_weight_loader_chunked PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+            -Wno-float-equal
+        )
+    endif()
+
     # BF16 CK Tile direct convolution integration tests
     add_gtest_executable(test_direct_conv_grouped_4c_bf16_tile_conv test_grouped_4c_bf16_tile_conv.cpp)
     if(TARGET test_direct_conv_grouped_4c_bf16_tile_conv)

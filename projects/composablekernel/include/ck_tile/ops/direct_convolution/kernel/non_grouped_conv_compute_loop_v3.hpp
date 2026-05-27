@@ -137,29 +137,45 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     constexpr int stride = 1;
     constexpr int dilation = 1;
 
-    // --- Weight prologue: all waves load their own C-slice in parallel ---
+    // --- Weight prologue: all waves load their own C-slice(s) in parallel ---
     // Each wave loads into its private LDS region and reads back into registers,
     // with no inter-wave serialization. This eliminates the (NUM_WAVES - 1)
     // redundant DRAM reads of the old serial approach.
+    //
+    // For c_slices_per_wave > 1, the prologue loops N times: each iteration
+    // (re)uses the same per-wave LDS region for a different C-chunk and
+    // accumulates the chunk into a separate register slot in the WeightLoader.
+    // LDS footprint stays at one chunk regardless of N.
     WeightLoaderT wl;
     constexpr int CPG = cfg.channels_per_group();
     constexpr int WEIGHT_SLICE_UINT4 = TC::WEIGHT_LDS_SIZE_UINT4;
+    constexpr int N_CSPW = cfg.c_slices_per_wave;
 
     uint4* wave_weight_lds = lds_buf + wave_id * WEIGHT_SLICE_UINT4;
 
-    if constexpr(is_dgrad)
-        WeightLoaderT::load_kyxc_to_lds_dgrad_wave(
-            wave_weight_lds, wei, wave_id * CPG, weight_block_k, C);
-    else
-        WeightLoaderT::load_kyxc_to_lds_wave(
-            wave_weight_lds, wei, weight_block_k, wave_id, C);
+    static_for<N_CSPW>(
+        [&]<int CS>()
+        {
+            // Wave w loading chunk CS reads C-section (CS * waves_per_wg + w)
+            // from KYXC DRAM. For N=1 this collapses to the original c_slice
+            // == wave_id pattern.
+            constexpr int wave_stride = cfg.waves_per_wg;
+            const int wave_section = CS * wave_stride + wave_id;
 
-    wait_vmcnt<0>();
-    __syncthreads();
+            if constexpr(is_dgrad)
+                WeightLoaderT::load_kyxc_to_lds_dgrad_wave(
+                    wave_weight_lds, wei, wave_section * CPG, weight_block_k, C);
+            else
+                WeightLoaderT::load_kyxc_to_lds_wave(
+                    wave_weight_lds, wei, weight_block_k, wave_section, C);
 
-    wl.read_from_lds(wave_weight_lds);
+            wait_vmcnt<0>();
+            __syncthreads();
 
-    __syncthreads();
+            wl.template read_from_lds_chunk<CS>(wave_weight_lds);
+
+            __syncthreads();
+        });
 
     // --- Construct InputLoader and OutputWriter ---
     InputLoaderT il(bc, lds_buf, in, hi, wi, px, y_padding,
@@ -167,8 +183,8 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     uint4* output_staging_lds = lds_buf + INPUT_TOTAL;
     OutputWriterT ow(bc, output_staging_lds, out, ho, wo);
 
-    // --- Prefetch first input row ---
-    il.prefetch_tile_to_lds(0);
+    // --- Prefetch first input chunk of row 0 ---
+    il.template prefetch_tile_to_lds<0>(0);
 
     // --- Circular accumulator buffer ---
     constexpr AccType Zero{};
@@ -194,6 +210,13 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     };
 
     // --- Main loop: process input rows in batches of cfg.kh ---
+    //
+    // For c_slices_per_wave = N, each input row is processed as N chunks
+    // streamed sequentially through the same fixed-size LDS double-buffer.
+    // Per (y, CS) iteration: wait for current chunk's prefetch, issue next
+    // chunk's prefetch (same row + CS+1, or next row + CS=0), MFMA against
+    // chunk CS in toc, swap buffers. Accumulators persist across the CS
+    // loop; flush happens once per row.
     for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
     {
         static_for<cfg.kh>(
@@ -201,41 +224,55 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
             {
                 int y = y_base + Y_LOCAL;
 
-                wait_vmcnt<0>();
-                __syncthreads();
-
-                if((y + 1) < hi)
-                    il.fetch_tile_to_lds(tic);
-
-                // MFMA core: each wave uses its own C-section of the input.
-                static_for<cfg.kw>(
-                    [&]<int S>()
+                static_for<N_CSPW>(
+                    [&]<int CS>()
                     {
-                        typename InputLoaderT::input_type input_reg;
-                        il.read_from_lds(input_reg, S, toc);
+                        wait_vmcnt<0>();
+                        __syncthreads();
 
-                        static_for<cfg.kh>(
-                            [&]<int R>()
+                        // Prefetch the next chunk into tic: either chunk CS+1
+                        // of the same row, or chunk 0 of the next row.
+                        if constexpr(CS + 1 < N_CSPW)
+                        {
+                            il.template prefetch_tile_to_lds<CS + 1>(tic);
+                        }
+                        else
+                        {
+                            if((y + 1) < hi)
+                                il.template fetch_tile_to_lds<0>(tic);
+                        }
+
+                        // MFMA core: chunk CS lives in lds[toc].
+                        static_for<cfg.kw>(
+                            [&]<int S>()
                             {
-                                constexpr int p_idx =
-                                    (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                                if constexpr(is_dgrad)
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get_transposed<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                                else
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
+                                typename InputLoaderT::input_type input_reg;
+                                il.read_from_lds(input_reg, S, toc);
+
+                                static_for<cfg.kh>(
+                                    [&]<int R>()
+                                    {
+                                        constexpr int p_idx =
+                                            (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                                        if constexpr(is_dgrad)
+                                            acc[p_idx] = mfma_fn(
+                                                wl.template get_transposed<R, S, CS>(),
+                                                input_reg,
+                                                acc[p_idx]);
+                                        else
+                                            acc[p_idx] = mfma_fn(
+                                                wl.template get<R, S, CS>(),
+                                                input_reg,
+                                                acc[p_idx]);
+                                    });
                             });
+
+                        tic ^= 1;
+                        toc ^= 1;
                     });
 
-                tic ^= 1;
-                toc ^= 1;
-
-                // Flush completed output row via cross-wave LDS reduction.
+                // Flush completed output row via cross-wave LDS reduction
+                // — once per input row, after all N chunks contributed.
                 constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh;
                 int p_out = y + py - (cfg.kh - 1);
                 if(p_out >= 0 && p_out < ho)
@@ -255,38 +292,49 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
                     return;
                 int y = y_rem_base + Y_LOCAL;
 
-                wait_vmcnt<0>();
-                __syncthreads();
-
-                if((y + 1) < hi)
-                    il.fetch_tile_to_lds(tic);
-
-                static_for<cfg.kw>(
-                    [&]<int S>()
+                static_for<N_CSPW>(
+                    [&]<int CS>()
                     {
-                        typename InputLoaderT::input_type input_reg;
-                        il.read_from_lds(input_reg, S, toc);
+                        wait_vmcnt<0>();
+                        __syncthreads();
 
-                        static_for<cfg.kh>(
-                            [&]<int R>()
+                        if constexpr(CS + 1 < N_CSPW)
+                        {
+                            il.template prefetch_tile_to_lds<CS + 1>(tic);
+                        }
+                        else
+                        {
+                            if((y + 1) < hi)
+                                il.template fetch_tile_to_lds<0>(tic);
+                        }
+
+                        static_for<cfg.kw>(
+                            [&]<int S>()
                             {
-                                constexpr int p_idx =
-                                    (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                                if constexpr(is_dgrad)
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get_transposed<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                                else
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                            });
-                    });
+                                typename InputLoaderT::input_type input_reg;
+                                il.read_from_lds(input_reg, S, toc);
 
-                tic ^= 1;
-                toc ^= 1;
+                                static_for<cfg.kh>(
+                                    [&]<int R>()
+                                    {
+                                        constexpr int p_idx =
+                                            (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                                        if constexpr(is_dgrad)
+                                            acc[p_idx] = mfma_fn(
+                                                wl.template get_transposed<R, S, CS>(),
+                                                input_reg,
+                                                acc[p_idx]);
+                                        else
+                                            acc[p_idx] = mfma_fn(
+                                                wl.template get<R, S, CS>(),
+                                                input_reg,
+                                                acc[p_idx]);
+                                    });
+                            });
+
+                        tic ^= 1;
+                        toc ^= 1;
+                    });
 
                 constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
                 int p_out = y + py - (cfg.kh - 1);

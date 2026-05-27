@@ -1158,3 +1158,224 @@ TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3DgradTest, Dgrad_Config46
 {
     ASSERT_TRUE((RunDgrad<46>(1, 8, 8, 1, 128, 256, 3, 3, 1, 1)));
 }
+
+// =============================================================================
+// v3 c_slices_per_wave > 1 — 16x16x32 only.
+//
+// Each wave streams N C-chunks of 32 channels through the same fixed-size
+// LDS buffers. total_block_c = waves_per_wg * N * 32. LDS footprint matches
+// (waves_per_wg, N=1); the wave just does N× more MFMA per row.
+//
+//   Config 49: Fprop, waves=2, N=2 (total_block_c=128) — same C-coverage as
+//              Config 2 (waves=4, N=1) with half the reduction LDS.
+//   Config 50: Dgrad, waves=2, N=2 (total_block_c=128)
+//   Config 51: Fprop, waves=2, N=4 (total_block_c=256)
+//   Config 52: Dgrad, waves=2, N=4 (total_block_c=256)
+//   Config 53/54: Fprop/Dgrad N=2 with CyclicShift swizzle
+//   Config 55/56: Fprop/Dgrad N=2 with XOR swizzle
+// =============================================================================
+
+class DirectConvNonGrouped32cFp16V3CspwFpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// Config 49: Fprop, waves=2, N=2 — C=128, K=128, no swizzle
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config49_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config49_C128_K128_NoPad)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 8, 8, 1, 128, 128, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config49_C128_K64)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 8, 8, 1, 128, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config49_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<49>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config49_C128_K128_Ho100)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 100, 100, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// Config 51: Fprop, waves=2, N=4 — C=256, K=128
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config51_C256_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<51>(1, 8, 8, 1, 256, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config51_C256_K256)
+{
+    ASSERT_TRUE((RunFprop<51>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config51_C256_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<51>(2, 16, 16, 1, 256, 128, 3, 3, 1, 1)));
+}
+
+// Config 53: Fprop, waves=2, N=2, CyclicShift
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config53_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<53>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// Config 55: Fprop, waves=2, N=2, XOR
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config55_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<55>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+class DirectConvNonGrouped32cFp16V3CspwDgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// Config 50: Dgrad, waves=2, N=2 — C_out=128, K=C_in=128
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config50_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<50>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config50_C128_K128_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<50>(1, 8, 8, 1, 128, 128, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config50_C64_K128)
+{
+    ASSERT_TRUE((RunDgrad<50>(1, 8, 8, 1, 64, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config50_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<50>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// Config 52: Dgrad, waves=2, N=4 — K=256
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config52_C128_K256_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<52>(1, 8, 8, 1, 128, 256, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config52_C256_K256)
+{
+    ASSERT_TRUE((RunDgrad<52>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+// Config 54: Dgrad, waves=2, N=2, CyclicShift
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config54_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<54>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// Config 56: Dgrad, waves=2, N=2, XOR
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config56_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<56>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// =============================================================================
+// v3 c_slices_per_wave > 1, waves_per_wg = 4 — 16x16x32.
+//
+// Same chunked-streaming schedule as configs 49-56 but with 4 waves per WG.
+// total_block_c = 4 * N * 32.
+//
+//   Config 57: Fprop, waves=4, N=2 (total_block_c=256)
+//   Config 58: Dgrad, waves=4, N=2 (total_block_c=256)
+//   Config 59: Fprop, waves=4, N=4 (total_block_c=512)
+//   Config 60: Dgrad, waves=4, N=4 (total_block_c=512)
+//   Config 61/62: Fprop/Dgrad N=2, CyclicShift
+//   Config 63/64: Fprop/Dgrad N=2, XOR
+// =============================================================================
+
+// Config 57: Fprop, waves=4, N=2 — C=256
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config57_C256_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<57>(1, 8, 8, 1, 256, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config57_C256_K256_Pad1)
+{
+    ASSERT_TRUE((RunFprop<57>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config57_C256_K256_NoPad)
+{
+    ASSERT_TRUE((RunFprop<57>(1, 8, 8, 1, 256, 256, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config57_C256_K256_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<57>(2, 16, 16, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+// Config 59: Fprop, waves=4, N=4 — C=512
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config59_C512_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<59>(1, 8, 8, 1, 512, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config59_C512_K256)
+{
+    ASSERT_TRUE((RunFprop<59>(1, 8, 8, 1, 512, 256, 3, 3, 1, 1)));
+}
+
+// Config 61: Fprop, waves=4, N=2, CyclicShift
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config61_C256_K256_Pad1)
+{
+    ASSERT_TRUE((RunFprop<61>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+// Config 63: Fprop, waves=4, N=2, XOR
+TEST_F(DirectConvNonGrouped32cFp16V3CspwFpropTest, Fprop_Config63_C256_K256_Pad1)
+{
+    ASSERT_TRUE((RunFprop<63>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+// Config 58: Dgrad, waves=4, N=2 — K=256
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config58_C256_K256_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<58>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config58_C128_K256)
+{
+    ASSERT_TRUE((RunDgrad<58>(1, 8, 8, 1, 128, 256, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config58_C256_K256_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<58>(2, 16, 16, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+// Config 60: Dgrad, waves=4, N=4 — K=512
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config60_C256_K512_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<60>(1, 8, 8, 1, 256, 512, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config60_C128_K512)
+{
+    ASSERT_TRUE((RunDgrad<60>(1, 8, 8, 1, 128, 512, 3, 3, 1, 1)));
+}
+
+// Config 62: Dgrad, waves=4, N=2, CyclicShift
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config62_C256_K256_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<62>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
+
+// Config 64: Dgrad, waves=4, N=2, XOR
+TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config64_C256_K256_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<64>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
+}
