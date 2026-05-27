@@ -33,6 +33,7 @@
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/ops/direct_convolution/utils/logging.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
 #include "ck_tile/core/tensor/load_tile.hpp"
@@ -214,9 +215,9 @@ struct Config
     int n_fold = 8;
 
     // Derived from MFMA shape:
-    constexpr int mfma_m() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : 32; }
-    constexpr int mfma_n() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : 32; }
-    constexpr int mfma_k() const { return (mfma_shape == MfmaShape::M16N16K32) ? 32 : 16; }
+    constexpr int mfma_m() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : -1; }
+    constexpr int mfma_n() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : -1; }
+    constexpr int mfma_k() const { return (mfma_shape == MfmaShape::M16N16K32) ? 32 : -1; }
 
     constexpr int channels_per_group() const { return mfma_k(); }
     constexpr int group_size() const { return channels_per_group(); }
@@ -328,19 +329,44 @@ template <DataType DT = DataType::fp16>
 inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
 {
     if(par.direction != cfg.direction)
+    {
+        LogInfo("Direction mismatch: conv direction != config direction, ", 
+            " conv direction = ", std::move(to_string(par.direction)), 
+            ", config direction = ", std::move(to_string(cfg.direction)));
         return false;
+    }
+
     if(par.kh != cfg.kh || par.kw != cfg.kw)
+    {
+        LogInfo("Kernel size mismatch: conv kh/kw != config kh/kw");
         return false;
+    }
+
     // C_in must equal block_c (= waves_per_wg * channels_per_group).
     const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
     if(C_in != cfg.block_c())
+    {
+        LogInfo("Input channel mismatch: conv C_in != config block_c: ", 
+            " C_in = ", std::move(std::to_string(C_in)), 
+            ", config.block_c() = ", std::move(std::to_string(cfg.block_c())));
         return false;
+    }
+
     // K_out must be divisible by block_k_size.
     const int K_out = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
     if(K_out % cfg.block_k_size() != 0)
+    {
+        LogInfo("Output channel mismatch: conv K_out not divisible by config block_k_size, ", 
+            " K_out = ", std::to_string(K_out), ", config.block_k_size() = ", std::to_string(cfg.block_k_size()));
         return false;
+    }
+
     if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
+    {
+        LogInfo("Invalid XOR swizzle config: spatial dimension too small for effective swizzle");
         return false;
+    }
+
     return true;
 }
 
@@ -1156,15 +1182,53 @@ constexpr KernelVariant make_variant()
         {
             if(!is_applicable_base(par))
                 return false;
+
             if(par.in_type != DT || par.wei_type != DT || par.out_type != DT)
+            {
+                LogInfo("Data type mismatch.");
                 return false;
+            }
+                
             if(!par.is_non_grouped())
+            {
+                LogInfo("Grouped convolution not supported");
                 return false;
-            // C and K must be multiples of 16 (block_k_size).
-            // The stricter requirement (C_in must be block_c = waves*32) is
+            }
+
+            // Fprop: C_in=c_tot must be %32 (MFMA reduction), K_out=k_tot must be %16 (MFMA output).
+            // Dgrad: roles swap — C_in=k_tot must be %32, K_out=c_tot must be %16.
+            // The stricter requirement (C_in == block_c = waves*32 exactly) is
             // checked per-config in is_valid_config.
-            if(par.c_tot % 16 != 0 || par.k_tot % 16 != 0)
+            if (par.direction == Direction::Fprop)
+            {
+                if(par.c_tot % 32 != 0 || par.k_tot % 16 != 0)
+                {
+                    LogInfo("For Fprop, C-in must be multiple of 32 and K-out must be multiple of 16. "
+                            "But got C-in = " + std::to_string(par.c_tot) +
+                            " and K-out = " + std::to_string(par.k_tot));
+                    return false;
+                }
+            }
+            else if (par.direction == Direction::Dgrad)
+            {
+                // For Dgrad the tensor roles are swapped relative to Fprop:
+                //   C_in = par.k_tot  (output-gradient channels, MFMA reduction dim, needs %32)
+                //   K_out = par.c_tot (input-gradient channels,  MFMA output dim,    needs %16)
+                // This mirrors the is_valid_config() mapping: C_in = par.k_tot, K_out = par.c_tot.
+                if(par.k_tot % 32 != 0 || par.c_tot % 16 != 0)
+                {
+                    LogInfo("For Dgrad, C_in (=k_tot) must be multiple of 32 and K_out (=c_tot) must be multiple of 16. "
+                            "But got k_tot = " + std::to_string(par.k_tot) +
+                            " and c_tot = " + std::to_string(par.c_tot));
+                    return false;
+                }
+            }
+            else
+            {
+                LogInfo("Unsupported convolution direction (bwd weight).");
                 return false;
+            }
+            
             return true;
         },
         .config_is_compatible = [](const Conv2dParams& par, int idx)
