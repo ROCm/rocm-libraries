@@ -1381,27 +1381,50 @@ class LogicalScheduler:
         flat_len = numP * numK
 
         consumer_flat = consumer_pi * numK + consumer_slot
-
         wraps_needed = abs(dep_ref.mt_offset)
 
+        # Locate dep_flat: the flat position of the dependency GR in the schedule.
+        dep_flat = None
+        for p_idx, pslots in enumerate(self._partitions):
+            for k_idx, slot in enumerate(pslots):
+                if any(gr is dep_ref.ref for gr in slot.grs):
+                    dep_flat = p_idx * numK + k_idx
+                    break
+            if dep_flat is not None:
+                break
+
+        if dep_flat is None:
+            return WaitGRCounts()
+
+        # Exact number of backward steps from consumer to dep's slot.
+        # Forward distance from dep (exclusive) to consumer (inclusive) =
+        #   wraps_needed full iterations + (consumer_flat - dep_flat) slots.
+        # Walking backward covers the same count of slots.
+        # Always >= 1 for wraps_needed >= 1 (since consumer_flat - dep_flat >= -(flat_len-1)).
+        total_steps = wraps_needed * flat_len + consumer_flat - dep_flat
+        assert total_steps >= 1, (
+            f"_compute_inflight_loads: total_steps={total_steps} < 1 "
+            f"(wraps_needed={wraps_needed}, consumer_flat={consumer_flat}, dep_flat={dep_flat}); "
+            "dep GR is at or after the consumer in the same iteration — invalid forward dependency"
+        )
+
         counts = WaitGRCounts()
-        wraps_completed = 0
         pos = consumer_flat
-
-        max_steps = (wraps_needed + 1) * flat_len
-        for _ in range(max_steps):
+        for step in range(total_steps):
             pos = (pos - 1) % flat_len
-            if pos == flat_len - 1 and _ > 0:
-                wraps_completed += 1
-
             pi = pos // numK
             slot_k = pos % numK
             slot = self._partitions[pi][slot_k]
 
+            # On the final step we are at dep's slot: stop when we reach the dep GR.
+            # GRs emitted after the dep (encountered first in reverse order) are in-flight
+            # and are counted before we hit the dep.
+            is_final = (step == total_steps - 1)
+
             # Walk GRs in reverse emission order (most recently issued first)
             sorted_grs = sorted(slot.grs, key=self._gr_sort_key, reverse=True)
             for gr in sorted_grs:
-                if gr.tensor == tensor and gr is dep_ref.ref and wraps_completed >= wraps_needed:
+                if is_final and gr.tensor == tensor and gr is dep_ref.ref:
                     return counts
                 atoms = self._count_gr_atoms(gr)
                 cur = getattr(counts, gr.tensor)

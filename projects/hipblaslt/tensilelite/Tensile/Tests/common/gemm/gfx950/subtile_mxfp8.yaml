@@ -50,7 +50,22 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          # 2x2 wave group — symmetric
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          # 2x2 wave group — asymmetric
+          - [16, 16, 128, 1,  1, 2, 4,  2, 2]  # MT 64x128
+          - [16, 16, 128, 1,  1, 4, 2,  2, 2]  # MT 128x64
+          # 4x1 wave group
+          - [16, 16, 128, 1,  1, 2, 2,  4, 1]  # MT 128x32
+          - [16, 16, 128, 1,  1, 2, 4,  4, 1]  # MT 128x64
+          - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96
+          - [16, 16, 128, 1,  1, 4, 2,  4, 1]  # MT 256x32
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 2, 2,  1, 4]  # MT 32x128
+          - [16, 16, 128, 1,  1, 4, 2,  1, 4]  # MT 64x128
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]  # MT 96x128
+          - [16, 16, 128, 1,  1, 2, 4,  1, 4]  # MT 32x256
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [256]                 # 2*MI_K = 256
@@ -62,9 +77,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 256]   # K = 1*DU
-          - Exact: [256, 256, 1, 512]   # K = 2*DU
-          - Exact: [128, 128, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 256]   # K = 1*DU; LCM(MT_M)=LCM(MT_N)=768
+          - Exact: [768, 768, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
 
   ########################################
   # FP8 TN — PGR=2 (scheduler path), DU = 2*MI_K = 256, MT 128x128
@@ -89,7 +104,22 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          # 2x2 wave group — symmetric
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          # 2x2 wave group — asymmetric
+          - [16, 16, 128, 1,  1, 2, 4,  2, 2]  # MT 64x128
+          - [16, 16, 128, 1,  1, 4, 2,  2, 2]  # MT 128x64
+          # 4x1 wave group
+          - [16, 16, 128, 1,  1, 2, 2,  4, 1]  # MT 128x32
+          - [16, 16, 128, 1,  1, 2, 4,  4, 1]  # MT 128x64
+          - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96
+          - [16, 16, 128, 1,  1, 4, 2,  4, 1]  # MT 256x32
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 2, 2,  1, 4]  # MT 32x128
+          - [16, 16, 128, 1,  1, 4, 2,  1, 4]  # MT 64x128
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]  # MT 96x128
+          - [16, 16, 128, 1,  1, 2, 4,  1, 4]  # MT 32x256
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]                 # 2*MI_K = 256
@@ -101,6 +131,6 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 256]   # K = 1*DU
-          - Exact: [256, 256, 1, 512]   # K = 2*DU
-          - Exact: [128, 128, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 256]   # K = 1*DU; LCM(MT_M)=LCM(MT_N)=768
+          - Exact: [768, 768, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
