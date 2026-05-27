@@ -50,8 +50,6 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          - [32, 16, 128, 1, 1, 2, 2, 2, 2]
-          - [32, 16, 128, 1, 1, 4, 4, 2, 2]
         - DepthU: [256, 512]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
