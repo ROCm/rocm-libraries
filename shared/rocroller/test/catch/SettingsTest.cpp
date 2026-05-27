@@ -10,6 +10,8 @@
 #include "common/SourceMatcher.hpp"
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
+#include <unistd.h> // usleep
+
 using namespace rocRoller;
 using namespace Catch::Matchers;
 
