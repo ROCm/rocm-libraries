@@ -603,19 +603,13 @@ def real_kernel_capture_pair_approach_a(isa_infrastructure):
     )
 
     # --- Build #2: non-CMS reference via Approach A's helper.
-    # rocm-libraries-2bww: CANONICAL_TF32_4X4_TN_CONFIG now carries
-    # UsePLRPack=True (required by the CMS schedule's required_flags for
-    # matching).  The non-CMS reference historically built WITHOUT
-    # UsePLRPack because the CMS schedule mutated it after matching; the
-    # non-CMS reference used the unmutated config.  Under strict-2bww the
-    # mutation is gone — flags live in the config — so we must strip
-    # UsePLRPack from the non-CMS reference config to preserve the
-    # intended "unmutated reference" semantics the fixture comment describes.
-    # This keeps the 3 GR-OrderInverted residuals (surfaced by Approach A's
-    # unmutated dict) as the known comparison baseline per rocm-libraries-3ija.
-    ref_config = dict(CANONICAL_TF32_4X4_TN_CONFIG)
-    ref_config['UsePLRPack'] = False
-    default_cap = build_non_cms_reference(ref_config, asm, isaInfoMap)
+    # rocm-libraries-y391: cms_solution carries
+    # `_pre_cms_derived_state` — the snapshot Solution.assignDerivedParameters
+    # took before its CMS-injection block. `build_non_cms_reference` uses
+    # that snapshot directly as the re-derivation base, so the non-CMS
+    # build sees the un-mutated config without any per-flag fix-up here.
+    default_cap = build_non_cms_reference(
+        dict(cms_solution), asm, isaInfoMap)
     return default_cap, cms_cap
 
 

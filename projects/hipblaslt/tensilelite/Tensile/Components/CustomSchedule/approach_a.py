@@ -102,41 +102,35 @@ _DERIVATION_GATE_KEYS = (
 def _prepare_non_cms_config(kernel_config):
     """Return a deep-copied config suitable for non-CMS re-derivation.
 
-    Strategy (rocm-libraries-y391):
+    Requires ``kernel_config["_pre_cms_derived_state"]`` — the snapshot
+    that ``Solution.assignDerivedParameters`` takes immediately before
+    its CMS-injection block (rocm-libraries-y391, Solution.py:1999).
+    Raises if absent. The snapshot is set unconditionally by Solution.py
+    for every solution, so any caller going through ``Solution(...)``
+    always has it; callers that hand-construct configs must either go
+    through ``Solution`` or set the snapshot themselves.
 
-      * If ``kernel_config`` carries ``_pre_cms_derived_state`` — the
-        snapshot ``Solution.assignDerivedParameters`` takes immediately
-        before its CMS-injection block — use that as the base. This is
-        the canonical production path: the snapshot is guaranteed
-        free of CMS-only mutations (``MfmaInitCVgprs=True`` from
-        Solution.py:2013, etc.) regardless of which CMS schedule
-        matched.
-
-      * Otherwise (e.g. unit tests that hand-construct configs and pass
-        them straight in), fall back to deep-copying the input itself.
-        This is safe for synthetic inputs because they carry no
-        CMS-injected mutations to undo — but it would be wrong for any
-        future caller passing a post-CMS-derivation Solution dict
-        without the snapshot. The snapshot key is set unconditionally
-        by Solution.py for every solution, so callers going through
-        ``Solution(...)`` always have it.
-
-    In both branches we:
-      * Force ``UseCustomMainLoopSchedule=0`` so the non-CMS branch of
-        ``assignDerivedParameters`` fires.
-      * Strip ``Assigned*DerivedParameters`` gate markers so the second
-        derivation pass actually runs end-to-end (Solution.py:457-459,
+    The returned config:
+      * Comes from the snapshot — no CMS-only mutations carried over.
+      * Has ``UseCustomMainLoopSchedule=0`` forced so the non-CMS
+        branch of ``assignDerivedParameters`` fires.
+      * Has ``Assigned*DerivedParameters`` gate markers stripped so the
+        second derivation pass runs end-to-end (Solution.py:457-459,
         1223-1225 short-circuit on these).
-      * Drop ``_pre_cms_derived_state`` itself so the snapshot doesn't
-        propagate recursively through nested re-derivation.
+      * Has ``_pre_cms_derived_state`` itself dropped so the snapshot
+        doesn't propagate recursively through nested re-derivation.
     """
     snapshot = kernel_config.get("_pre_cms_derived_state")
-    if snapshot is not None:
-        base = snapshot
-    else:
-        base = kernel_config
+    if snapshot is None:
+        raise RuntimeError(
+            "build_non_cms_reference: kernel_config is missing "
+            "'_pre_cms_derived_state'. Solution.assignDerivedParameters "
+            "sets this unconditionally (Solution.py:1999); callers that "
+            "hand-construct configs without going through Solution must "
+            "set it themselves. See rocm-libraries-y391."
+        )
 
-    config = deepcopy(dict(base))
+    config = deepcopy(dict(snapshot))
     config["UseCustomMainLoopSchedule"] = 0
     for k in _DERIVATION_GATE_KEYS:
         config.pop(k, None)
@@ -148,16 +142,14 @@ def build_non_cms_reference(kernel_config, asm, isaInfoMap):
     """Build a non-CMS reference kernel and return its ``FourPartCapture``.
 
     Args:
-        kernel_config: dict-shaped solution config (the same shape
-            consumed by ``cms_test_utils._make_solution``). The caller's
-            ``UseCustomMainLoopSchedule`` value is overridden to 0 so
-            this is always a non-CMS build, regardless of the input.
-            When the input carries ``_pre_cms_derived_state`` (set by
-            ``Solution.assignDerivedParameters`` immediately before its
-            CMS-injection block — rocm-libraries-y391), that snapshot
-            is used as the re-derivation base. Otherwise the input
-            itself is used (acceptable for synthetic test configs that
-            never went through CMS injection).
+        kernel_config: dict-shaped solution config. MUST carry
+            ``_pre_cms_derived_state`` — the snapshot
+            ``Solution.assignDerivedParameters`` takes immediately before
+            its CMS-injection block (Solution.py:1999, rocm-libraries-
+            y391). That snapshot is the re-derivation base; the rest of
+            the input is ignored. ``UseCustomMainLoopSchedule=0`` is
+            forced on the snapshot so the non-CMS branch of
+            ``assignDerivedParameters`` fires on the second pass.
         asm: The ``Assembler`` instance from ``isa_infrastructure``.
         isaInfoMap: The ISA info map from ``isa_infrastructure``.
 
