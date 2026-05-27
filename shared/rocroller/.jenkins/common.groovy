@@ -573,6 +573,9 @@ def runCodeQLTestCommand (platform, project)
                 set -ex
                 cd ${project.paths.project_build_prefix}
 
+                CODEQL_INSTALL_DIR=\$PWD/codeql/install
+                export PATH="\${CODEQL_INSTALL_DIR}/codeql:\$PATH"
+
                 # Run CodeQL unit tests
                 ./codeql/run_tests
 
