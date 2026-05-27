@@ -3,10 +3,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Run install codeql script if zip not found
 CODEQL_INSTALL_DIR=/opt/codeql
+if [[ -n "$1" ]]; then
+  CODEQL_INSTALL_DIR="$1"
+fi
+
+# Run install codeql script if zip not found
 if [[ ! -f /opt/codeql/codeql-cli.zip ]]; then
-  CODEQL_INSTALL_DIR=$PWD/codeql/install
   ./codeql/install_codeql "${CODEQL_INSTALL_DIR}"
 fi
 

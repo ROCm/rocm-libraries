@@ -554,7 +554,10 @@ def runCodeQLCompileCommand (platform, project, jobName)
                     pip install --upgrade pip setuptools wheel
                     pip install -r requirements.txt
 
-                    ./codeql/setup_codeql
+                    CODEQL_INSTALL_DIR\$PWD/codeql/install
+                    export PATH="\${CODEQL_INSTALL_DIR}/bin:\$PATH"
+
+                    ./codeql/setup_codeql \${CODEQL_INSTALL_DIR}
                     ./codeql/create_database
                     """
 
