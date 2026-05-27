@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -15,7 +15,7 @@
 // Forward declaration
 struct ExampleProviderHandle;
 
-/// Execution context for the example plugin.
+/// Execution context for the plugin.
 ///
 /// Inherits from:
 /// - HipdnnEnginePluginExecutionContext: opaque pointer compatibility

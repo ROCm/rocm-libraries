@@ -2,10 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelEngine.hpp"
-#include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
+#include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 namespace hip_kernel_provider
@@ -21,14 +21,16 @@ int64_t HipKernelEngine::id() const
     return _id;
 }
 
-void initializeHipKernelSettings(
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+static void initializeHipKernelSettings(
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     [[maybe_unused]] HipKernelSettings& executionSettings)
 {
 }
 
 bool HipKernelEngine::isApplicable(
-    HipKernelHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    HipKernelHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -42,13 +44,14 @@ bool HipKernelEngine::isApplicable(
     return false;
 }
 
-void HipKernelEngine::getDetails(HipKernelHandle& handle,
-                                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                 hipdnnPluginConstData_t& detailsOut) const
+void HipKernelEngine::getDetails(
+    HipKernelHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
 
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
@@ -62,7 +65,7 @@ void HipKernelEngine::getDetails(HipKernelHandle& handle,
 
         for(const auto& knobT : customKnobs)
         {
-            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
             knobsVector.push_back(knobOffset);
         }
 
@@ -73,7 +76,8 @@ void HipKernelEngine::getDetails(HipKernelHandle& handle,
 
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+    auto engineDetails
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -84,8 +88,8 @@ void HipKernelEngine::getDetails(HipKernelHandle& handle,
 
 size_t HipKernelEngine::getMaxWorkspaceSize(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     HipKernelSettings baseExecutionSettings;
     initializeHipKernelSettings(engineConfig, baseExecutionSettings);
@@ -107,8 +111,8 @@ size_t HipKernelEngine::getMaxWorkspaceSize(
 
 void HipKernelEngine::initializeExecutionContext(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipKernelContext& executionContext) const
 {
     HipKernelSettings executionSettings;

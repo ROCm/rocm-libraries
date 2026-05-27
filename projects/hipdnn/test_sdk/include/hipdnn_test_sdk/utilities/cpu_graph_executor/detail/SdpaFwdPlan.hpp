@@ -5,9 +5,9 @@
 
 #include <optional>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -20,13 +20,13 @@ namespace hipdnn_test_sdk::detail
 
 struct SdpaFwdParams
 {
-    SdpaFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& qAttributes,
-                  const hipdnn_data_sdk::data_objects::TensorAttributes& kAttributes,
-                  const hipdnn_data_sdk::data_objects::TensorAttributes& vAttributes,
-                  const hipdnn_data_sdk::data_objects::TensorAttributes& oAttributes,
+    SdpaFwdParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
                   std::optional<float> attnScaleValue,
                   bool causalMask,
-                  const hipdnn_data_sdk::data_objects::TensorAttributes* attnMaskAttributes
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
@@ -40,13 +40,13 @@ struct SdpaFwdParams
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT qTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT kTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT vTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT oTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT qTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT kTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT vTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT oTensor;
     std::optional<float> attnScaleValue;
     bool causalMask;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
 };
 
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
@@ -95,10 +95,10 @@ private:
     SdpaFwdParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType QDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType KDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType VDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ODataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
 class SdpaFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -108,8 +108,9 @@ public:
     using ODataType = utilities::DataTypeToNative<ODataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         const auto* nodeAttributes = node.attributes_as_SdpaAttributes();
@@ -192,8 +193,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_SdpaAttributes();
         if(nodeAttributes == nullptr)
@@ -213,16 +214,14 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
-        SdpaFwdParams params(*tensorMap.at(nodeAttributes->q_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->k_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->v_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->o_tensor_uid()),
-                             attnScaleValue,
-                             nodeAttributes->causal_mask(),
-                             attnMaskPtr);
-
         return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType>>(
-            std::move(params));
+            SdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
+                          *tensorMap.at(nodeAttributes->k_tensor_uid()),
+                          *tensorMap.at(nodeAttributes->v_tensor_uid()),
+                          *tensorMap.at(nodeAttributes->o_tensor_uid()),
+                          attnScaleValue,
+                          nodeAttributes->causal_mask(),
+                          attnMaskPtr));
     }
 };
 

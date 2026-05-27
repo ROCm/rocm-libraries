@@ -139,8 +139,9 @@ namespace rocRoller
             constexpr bool isSpecial() const;
             constexpr bool isTTMP() const;
             constexpr bool isSCC() const;
+            constexpr bool isEXECZ() const;
             bool           isVCC() const;
-            constexpr bool isExec() const;
+            bool           isEXEC() const;
 
             /**
              * Asserts that `this` is in a valid state to be used as an operand to an instruction.

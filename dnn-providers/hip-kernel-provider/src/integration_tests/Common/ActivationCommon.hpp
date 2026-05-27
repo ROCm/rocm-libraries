@@ -3,15 +3,15 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 
-namespace test_activation_common
+namespace hip_kernel_provider::test_activation_common
 {
 
 struct ActivTestCase
 {
-    hipdnn_data_sdk::data_objects::PointwiseMode mode;
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode;
     std::optional<float> reluLowerClip;
     std::optional<float> reluUpperClip;
     std::optional<float> reluLowerClipSlope;
@@ -19,7 +19,7 @@ struct ActivTestCase
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
 
-    ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode modeLocal,
+    ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode modeLocal,
                   std::optional<float> reluLowerClipLocal = std::nullopt,
                   std::optional<float> reluUpperClipLocal = std::nullopt,
                   std::optional<float> reluLowerClipSlopeLocal = std::nullopt,
@@ -34,7 +34,7 @@ struct ActivTestCase
         , eluAlpha(eluAlphaLocal)
         , softplusBeta(softplusBetaLocal)
     {
-        using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
+        using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
         switch(mode)
         {
@@ -93,7 +93,7 @@ struct ActivTestCase
 
 inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
@@ -112,7 +112,7 @@ inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
 
 inline std::vector<ActivTestCase> createFwdActivationFullCases()
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
@@ -170,4 +170,4 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     return cases;
 }
 
-} // namespace test_activation_common
+} // namespace hip_kernel_provider::test_activation_common

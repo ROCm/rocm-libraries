@@ -259,13 +259,42 @@ template <typename T>
 }
 
 /// Unpacks a graph-level data type attribute from a backend descriptor.
-/// Queries the attribute, validates the count, and converts the hipdnnDataType_t
-/// to a frontend DataType.
+/// Queries the attribute count first; a count of zero (or
+/// ``HIPDNN_STATUS_NOT_SUPPORTED``) means the field was never set on the
+/// backend side and the caller should treat it as ``DataType::NOT_SET``.
+/// Otherwise fetches the value and converts the ``hipdnnDataType_t`` to a
+/// frontend ``DataType``.
+///
+/// @note This helper does not enforce presence -- absence is a valid result
+///       (returned as ``DataType::NOT_SET`` with no error). Callers that
+///       require the attribute to be present must check for
+///       ``DataType::NOT_SET`` themselves and surface their own error.
 [[nodiscard]] inline std::pair<DataType, Error>
     unpackGraphDataType(hipdnnBackendDescriptor_t desc,
                         hipdnnBackendAttributeName_t attrName,
                         const std::string& errorContext)
 {
+    int64_t count = 0;
+    auto countStatus = hipdnnBackend()->backendGetAttribute(
+        desc, attrName, HIPDNN_TYPE_DATA_TYPE, 0, &count, nullptr);
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+    {
+        return {DataType::NOT_SET, {}};
+    }
+    if(countStatus != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {DataType::NOT_SET,
+                Error{ErrorCode::HIPDNN_BACKEND_ERROR,
+                      "Failed to get count for " + errorContext
+                          + " Backend error: " + backendErrMsg.data()}};
+    }
+    if(count == 0)
+    {
+        return {DataType::NOT_SET, {}};
+    }
+
     hipdnnDataType_t dt{};
     auto err = getDescriptorAttrScalar(desc, attrName, HIPDNN_TYPE_DATA_TYPE, dt, errorContext);
     if(err.is_bad())
@@ -400,8 +429,17 @@ template <typename T>
         case DataType::INT8:
         case DataType::FP8_E4M3:
         case DataType::FP8_E5M2:
+        case DataType::FP8_E4M3_FNUZ:
+        case DataType::FP8_E5M2_FNUZ:
         {
             const uint8_t val = valueBytes[0];
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::BOOLEAN:
+        {
+            bool val = false;
+            std::memcpy(&val, valueBytes.data(), sizeof(bool));
             tensor->set_value(val);
             break;
         }

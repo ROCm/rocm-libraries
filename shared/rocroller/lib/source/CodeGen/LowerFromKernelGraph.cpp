@@ -9,6 +9,7 @@
 #include <rocRoller/CodeGen/Annotate.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/CodeGen/ConditionalGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/CodeGen/ExchangeGenerator.hpp>
@@ -55,6 +56,7 @@ namespace rocRoller
                 , m_loadStoreTileGenerator(
                       m_graph, kernel->context(), kernel->max_flat_workgroup_size())
                 , m_exchangeGenerator(m_graph, kernel->context())
+                , m_conditionalGenerator(kernel->context())
                 , m_argumentTracer(std::move(argTracer))
             {
             }
@@ -343,59 +345,25 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ConditionalOp const& op)
             {
-                auto falseLabel = m_context->labelAllocator()->label(
-                    fmt::format("ConditionalFalse_{}_{}", op.conditionName, tag));
-                auto botLabel = m_context->labelAllocator()->label(
-                    fmt::format("ConditionalBottom_{}_{}", op.conditionName, tag));
+                AssertFatal(op.mode < ConditionalMode::Count,
+                            "Unsupported mode for ConditionalOp: ",
+                            ShowValue(op.mode));
+                Log::debug("ConditionalOp tag {}: mode {}, condition {}",
+                           tag,
+                           toString(op.mode),
+                           op.conditionName);
 
-                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional");
-
-                auto expr            = m_fastArith(op.condition);
-                auto conditionResult = m_context->brancher()->resultRegister(expr);
-
-                co_yield Expression::generate(conditionResult, expr, m_context);
-                // -------------------------------------------------------------------------------
-                // TODO: remove this once we better handle data-flow across branches
-                {
-                    co_yield Instruction::Wait(
-                        WaitCount::Zero(m_context->targetArchitecture(),
-                                        "REMOVEME: Wait before branching into conditional label!"));
-                }
-                // -------------------------------------------------------------------------------
-                co_yield m_context->brancher()->branchIfZero(
-                    falseLabel,
-                    conditionResult,
-                    concatenate("Condition: False, jump to ", falseLabel->toString()));
-                auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                co_yield generate(trueBody);
-                co_yield m_context->brancher()->branch(
-                    botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
-
-                // -------------------------------------------------------------------------------
-                // TODO: remove this once we better handle data-flow across branches
-                {
-                    co_yield Instruction::Wait(
-                        WaitCount::Zero(m_context->targetArchitecture(),
-                                        "REMOVEME: Wait before conditional label!"));
-                }
-                // -------------------------------------------------------------------------------
-                co_yield Instruction::Label(falseLabel);
-                auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                auto trueBody   = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                auto elseBody   = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
+                std::function<Generator<Instruction>()> elseBodyFn;
                 if(!elseBody.empty())
-                {
-                    co_yield generate(elseBody);
-                }
+                    elseBodyFn = [this, elseBody]() { return generate(elseBody); };
+                auto condition = m_fastArith(op.condition);
+                auto labelBase = fmt::format("{}_{}", op.conditionName, tag);
 
-                // -------------------------------------------------------------------------------
-                // TODO: remove this once we better handle data-flow across branches
-                {
-                    co_yield Instruction::Wait(
-                        WaitCount::Zero(m_context->targetArchitecture(),
-                                        "REMOVEME: Wait before conditional label!"));
-                }
-                // -------------------------------------------------------------------------------
-                co_yield Instruction::Label(botLabel);
-                co_yield Instruction::Unlock("Unlock Conditional");
+                co_yield m_conditionalGenerator.genConditional(
+                    condition, labelBase, trueBodyFn, elseBodyFn, op.mode);
             }
 
             Generator<Instruction> operator()(int tag, AssertOp const& op)
@@ -1178,6 +1146,7 @@ namespace rocRoller
             FastArithmetic         m_fastArith;
             LoadStoreTileGenerator m_loadStoreTileGenerator;
             ExchangeGenerator      m_exchangeGenerator;
+            ConditionalGenerator   m_conditionalGenerator;
 
             std::optional<ControlFlowArgumentTracer> m_argumentTracer;
         };

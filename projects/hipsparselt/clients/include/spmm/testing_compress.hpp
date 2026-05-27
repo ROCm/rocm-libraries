@@ -108,6 +108,10 @@ void self_validate(T*             A,
                                           || std::is_same<hipsparselt_fp8_e4m3, T>::value
                                           || std::is_same<hipsparselt_fp8_e5m2, T>::value
 #endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+                                          || std::is_same<hipsparselt_fp8_e4m3_fnuz, T>::value
+                                          || std::is_same<hipsparselt_fp8_e5m2_fnuz, T>::value
+#endif
                                       ,
                                       float,
                                       T>;
@@ -185,6 +189,10 @@ void compress(const Ti*      in,
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
                                           || std::is_same<hipsparselt_fp8_e4m3, Ti>::value
                                           || std::is_same<hipsparselt_fp8_e5m2, Ti>::value
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+                                          || std::is_same<hipsparselt_fp8_e4m3_fnuz, Ti>::value
+                                          || std::is_same<hipsparselt_fp8_e5m2_fnuz, Ti>::value
 #endif
                                       ,
                                       float,

@@ -398,6 +398,44 @@ void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
   FILE.close();
 }
 
+template <>
+void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
+                                int lda, std::complex<float> *A, std::string ADataFile)
+{
+    const int A_row = transA == HIPBLAS_OP_N ? row : col;
+    const int A_col = transA == HIPBLAS_OP_N ? col : row;
+
+  std::ofstream FILE(ADataFile);
+  
+  FILE << std::scientific << std::setprecision(6);
+  for (int i = 0; i < A_row; i++) {
+    for (int j = 0; j < A_col; j++)
+      FILE  << std::setw(15) << std::right << static_cast<double>(std::real(A[j * lda + i])) << " " << static_cast<double>(std::imag(A[j * lda + i])) << "i";
+    FILE << std::endl;
+  }
+
+  FILE.close();
+}
+
+template <>
+void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
+                                int lda, std::complex<double> *A, std::string ADataFile)
+{
+    const int A_row = transA == HIPBLAS_OP_N ? row : col;
+    const int A_col = transA == HIPBLAS_OP_N ? col : row;
+
+  std::ofstream FILE(ADataFile);
+  
+  FILE << std::scientific << std::setprecision(6);
+  for (int i = 0; i < A_row; i++) {
+    for (int j = 0; j < A_col; j++)
+      FILE  << std::setw(15) << std::right << static_cast<double>(std::real(A[j * lda + i])) << " " << static_cast<double>(std::imag(A[j * lda + i])) << "i";
+    FILE << std::endl;
+  }
+
+  FILE.close();
+}
+
 /* ==================================================================== */
 /*! \brief call hipblasltStoreValuesToFile with appropriate datatype. */
 void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
@@ -428,6 +466,12 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
   else if (T == HIP_R_8F_E5M2)
     hipblasltStoreValuesToFile(transA, row, col, lda,
                                static_cast<hipblaslt_bf8 *>(hA), ADataFile);
+  else if(T == HIP_C_32F)
+    hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<std::complex<float> *>(hA),
+                               ADataFile);
+  else if (T == HIP_C_64F)
+    hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<std::complex<double> *>(hA),
+                               ADataFile);
   else
     hipblaslt_cout << "This datatype " << T
                    << " is Unsupported and could be added to the if-else "

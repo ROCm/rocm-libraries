@@ -6,6 +6,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/AddInstruction.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentLoader.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Buffer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ConditionalGenerator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CrashKernelGenerator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExchangeGenerator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Instruction.cpp"

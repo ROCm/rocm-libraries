@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
@@ -18,9 +18,9 @@ class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
-    static bool isApplicable(const hipdnn_data_sdk::data_objects::Node& node)
+    static bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
     {
-        using namespace hipdnn_data_sdk::data_objects;
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
 
         bool validNode = (node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes
                           || node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes);

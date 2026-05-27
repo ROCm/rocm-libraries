@@ -144,8 +144,7 @@ namespace ExecuteMaskGeneratorTest
             // Exec mode uses EXEC masking, not scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // Exec mode uses EXEC masking, not VCC-based branches.
-            CHECK_THAT(StripClusterBranchLines(output, ctx),
-                        !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
@@ -179,8 +178,7 @@ namespace ExecuteMaskGeneratorTest
             // Exec mode uses EXEC masking, not scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // Exec mode uses EXEC masking, not VCC-based branches.
-            CHECK_THAT(StripClusterBranchLines(output, ctx),
-                        !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
@@ -220,8 +218,7 @@ namespace ExecuteMaskGeneratorTest
             // BranchAndExec does not use scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // BranchAndExec does not use VCC-based branches.
-            CHECK_THAT(StripClusterBranchLines(output, ctx),
-                        !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
@@ -263,8 +260,7 @@ namespace ExecuteMaskGeneratorTest
             // BranchAndExec does not use scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // BranchAndExec does not use VCC-based branches.
-            CHECK_THAT(StripClusterBranchLines(output, ctx),
-                        !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
