@@ -372,4 +372,4 @@ Every extension PR should land with:
 - a doc entry under `dsl_docs/` (this tree) if the new primitive is part of the public surface;
 - a manifest schema update in `helpers/manifest.py` if the new kernel needs a new `kind`;
 - an `expected.json` gate if you want CI to keep the kernel honest;
-- a `RUNBOOK_COMPLIANCE.md` row if the extension is a new performance lever.
+- a `runbook_compliance.md` row if the extension is a new performance lever.

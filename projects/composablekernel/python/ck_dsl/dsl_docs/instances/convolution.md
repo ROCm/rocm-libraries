@@ -352,7 +352,7 @@ Algorithm:
    b. Reset that circular accumulator slot unconditionally.
 ```
 
-Key levers (per `RUNBOOK_COMPLIANCE.md`):
+Key levers (per `optimization/runbook_compliance.md`):
 
 - K=32 MFMA fold: ~92 -> ~108 TFLOPS;
 - wide direct epilogue (1 `buffer_store_dwordx2` per lane = 4 halves): ~108 -> ~210 TFLOPS;

@@ -2,7 +2,7 @@
 
 This page records the measurements that landed during the documentation validation pass on this checkout. All numbers are MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.git245bf6ed / Python 3.12.3. Reproduction commands are below each table; run them from the Composable Kernel repository root with the Python interpreter for your ROCm environment.
 
-These numbers are smoke-grade — they confirm the kernels build, verify, and reach a sane TFLOPS / latency band. They are **not** the hero numbers; for that, run the full `examples/attention/parity_unified_attention.py --attempts 10 --warmup 5` harness or the `RUNBOOK_COMPLIANCE.md` empirical sweeps with median + spread reporting.
+These numbers are smoke-grade — they confirm the kernels build, verify, and reach a sane TFLOPS / latency band. They are **not** the hero numbers; for that, run the full `examples/attention/parity_unified_attention.py --attempts 10 --warmup 5` harness or the `runbook_compliance.md` empirical sweeps with median + spread reporting.
 
 ## Static Unit Tests
 

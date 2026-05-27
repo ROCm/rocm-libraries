@@ -1,11 +1,4 @@
-# MLSE Kernel Optimization Notes And Tools
-
-This directory vendors CK DSL-relevant optimization runbooks and helper scripts
-from:
-
-```text
-/workspace/mlse-tools-internal/performance/kernel_optimization
-```
+# Kernel Optimization Notes And Tools
 
 The files are copied here so CK DSL optimization guidance remains available with
 the `ck_dsl` docs. They are reference material, not part of the runtime package.
@@ -23,13 +16,20 @@ the `ck_dsl` docs. They are reference material, not part of the runtime package.
 - `kernel-launch-guide.md`
 - `bisect-perf-regression.md`
 
-FlyDSL-only and environment-management skills were intentionally not copied.
-
 ## Helper Scripts
 
 `tools/` contains the helper scripts most useful for CK DSL benchmarking and
 post-processing:
 
+- `dsl_probes/` (CK-DSL-native, no GPU launch required for most probes)
+  - `probe_occupancy.py`           — `llvm-readelf --notes` → VGPR/AGPR/SGPR/LDS occupancy estimate
+  - `probe_isa_inspect.py`         — `llvm-objdump` → opcode-class histogram (MFMA, ds_read, waitcnt, …)
+  - `probe_intrinsic_counts.py`    — lowered LLVM IR → AMDGCN intrinsic histogram
+  - `probe_lowering_compare.py`    — LLVM-direct vs HIP-debug backend HSACO compare
+  - `probe_config_sweep.py`        — generic `dataclasses.replace` sweep over a spec dataclass
+  - `probe_targeted_bench.py`      — direct-CUDA-event bench across a list of shapes
+  - `probe_rocprof_single.py`      — single-process rocprof-friendly harness
+  - `README.md`                    — when-to-use index
 - `stage1_benchmark/`
   - `_ua_shape_utils.py`
   - `benchmark_ckdsl_unified_attention.py`
@@ -49,6 +49,13 @@ post-processing:
   - `extract_ck_dsl_isa.py`
   - `profile_register_usage.py`
   - `rocm_tools.py`
+
+The `dsl_probes/` folder is the "step 3: inspect the artifact before
+chasing performance" tier from the optimization runbook. It is purely
+DSL-side (compile + lower + readelf + objdump) so it works without a
+GPU attached and runs in well under one second per variant. The
+`stage{1,3,4,5}` tiers complement it with rocprof- and trace-based
+analysis once a real launch is in flight.
 
 Some scripts assume the original MLSE repository layout. When running them from
 this vendored location, set `PYTHONPATH` explicitly to the relevant tool

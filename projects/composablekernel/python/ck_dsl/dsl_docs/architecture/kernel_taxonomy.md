@@ -144,4 +144,4 @@ MFMA?", the rule is:
      `helpers/persistent.py` if the work is irregular.
 
 Anything else is a custom kernel; consult `dsl_docs/optimization/
-optimization_playbook.md` for the pattern catalog.
+optimization_runbook.md` (the lever catalog is §12.1).
