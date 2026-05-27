@@ -261,6 +261,51 @@ def test_BF16_path_unchanged(writer):
     assert "cbsz" not in asm and "blgp" not in asm
 
 
+# ---- BF16 branch coverage ---------------------------------------------------
+def test_BF16_path_with_SourceSwap(writer):
+    """BF16 + SourceSwap=True: operand positions must be swapped."""
+    kernel = _mkKernel("B", "B", miK=32, sourceSwap=True)
+    tA = _mkTile(0, 4, writer.vgprPool)
+    tB = _mkTile(8, 4, writer.vgprPool)
+    tC = _mkTile(16, 4, writer.vgprPool)
+    tD = _mkTile(32, 4, writer.vgprPool)
+    asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
+    assert "v_mfma_f32_16x16x32_bf16" in asm
+    assert "v[8:11]" in asm and "v[0:3]" in asm
+    # With SourceSwap, A-position gets B's regs and vice versa.
+    # The instruction string has: acc, A-pos-operand, B-pos-operand, acc2
+    # A-pos = vgpr(vgprBStart) = v[8:11], B-pos = vgpr(vgprAStart) = v[0:3]
+
+
+def test_BF16_uses_accvgpr_alias_when_D_in_agpr_pool(writer):
+    """BF16 + MIArchVgpr=False with D/C in agprPool: must use accvgpr alias."""
+    kernel = _mkKernel("B", "B", miK=32, sourceSwap=False, miArchVgpr=False)
+    tA = _mkTile(0, 4, writer.vgprPool)
+    tB = _mkTile(8, 4, writer.vgprPool)
+    tC = _mkTile(16, 4, writer.agprPool)
+    tD = _mkTile(32, 4, writer.agprPool)
+    asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
+    assert "v_mfma_f32_16x16x32_bf16" in asm
+    assert "acc[32:35]" in asm and "acc[16:19]" in asm, \
+        f"expected agpr alias on D and C:\n{asm}"
+
+
+def test_BF16_mixed_pools_C_agpr_D_vgpr(writer):
+    """BF16 + MIArchVgpr=False: C in agprPool, D in vgprPool.
+    dAccAlias and cAccAlias must be computed independently."""
+    kernel = _mkKernel("B", "B", miK=32, sourceSwap=False, miArchVgpr=False)
+    tA = _mkTile(0, 4, writer.vgprPool)
+    tB = _mkTile(8, 4, writer.vgprPool)
+    tC = _mkTile(16, 4, writer.agprPool)
+    tD = _mkTile(32, 4, writer.vgprPool)
+    asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
+    assert "v_mfma_f32_16x16x32_bf16" in asm
+    # D is in vgprPool -> dAccAlias = vgpr -> v[32:35]
+    assert "v[32:35]" in asm, f"D should use vgpr alias:\n{asm}"
+    # C is in agprPool and MIArchVgpr=False -> cAccAlias = accvgpr -> acc[16:19]
+    assert "acc[16:19]" in asm, f"C should use accvgpr alias:\n{asm}"
+
+
 # ---- Pool-aliasing dispatch unchanged for F8 ------------------------------
 def test_F8_uses_accvgpr_alias_when_D_in_agpr_pool(writer):
     """When MIArchVgpr=False AND D's pool is the agprPool, the F8 path must
