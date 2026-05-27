@@ -378,31 +378,37 @@ static uint32_t numwg_from_slots(const std::vector<Slot>& slots) {
 // Pieces of main(), broken out for readability.
 // ----------------------------------------------------------------------------
 
-/// Set of allocated device buffers, indexed by their config-declared `role`
-/// name (typically "A", "B", "C", "D", plus feature-gated ones like "bias").
+/**
+ * Set of allocated device buffers, indexed by their config-declared `role`
+ * name (typically "A", "B", "C", "D", plus feature-gated ones like "bias").
+ */
 struct BufferSet {
-    std::unordered_map<std::string, void*>    ptrs;   ///< role -> device pointer
-    std::unordered_map<std::string, uint64_t> sizes;  ///< role -> bytes
+    std::unordered_map<std::string, void*>    ptrs;   /**< role -> device pointer */
+    std::unordered_map<std::string, uint64_t> sizes;  /**< role -> bytes */
 };
 
-/// Result of `time_kernel`: matches hipblaslt-bench's reported timing model
-/// (steady-state mean over a tight loop following untimed warmup).
+/**
+ * Result of `time_kernel`: matches hipblaslt-bench's reported timing model
+ * (steady-state mean over a tight loop following untimed warmup).
+ */
 struct TimingResult {
-    int    cold_iters;   ///< Number of untimed warmup launches.
-    int    hot_iters;    ///< Number of timed launches in the hot loop.
-    double total_us;     ///< Wall-clock microseconds for the hot window.
-    double us_per_iter;  ///< total_us / hot_iters.
+    int    cold_iters;   /**< Number of untimed warmup launches. */
+    int    hot_iters;    /**< Number of timed launches in the hot loop. */
+    double total_us;     /**< Wall-clock microseconds for the hot window. */
+    double us_per_iter;  /**< total_us / hot_iters. */
 };
 
-/// Allocate one device buffer per declaration in `c.buffers` and initialize
-/// it per its `init` mode: "poison" fills with 0xee (so we can later detect
-/// regions the kernel didn't write), anything else zero-fills.
-///
-/// Returns a BufferSet mapping each buffer's role -> device pointer and
-/// role -> allocation size, used downstream by `build_kernarg` (to plug
-/// pointers into pointer slots) and `verify_d_buffer` (to read D back).
-///
-/// Aborts via HIP_CHECK if any `hipMalloc` / `hipMemset` fails.
+/**
+ * Allocate one device buffer per declaration in `c.buffers` and initialize
+ * it per its `init` mode: "poison" fills with 0xee (so we can later detect
+ * regions the kernel didn't write), anything else zero-fills.
+ *
+ * Returns a BufferSet mapping each buffer's role -> device pointer and
+ * role -> allocation size, used downstream by `build_kernarg` (to plug
+ * pointers into pointer slots) and `verify_d_buffer` (to read D back).
+ *
+ * Aborts via HIP_CHECK if any `hipMalloc` / `hipMemset` fails.
+ */
 static BufferSet allocate_buffers(const Config& c) {
     BufferSet bs;
     for (const auto& b : c.buffers) {
@@ -415,17 +421,19 @@ static BufferSet allocate_buffers(const Config& c) {
     return bs;
 }
 
-/// Build the flat kernarg byte buffer by walking the config's slot list in
-/// order. For each slot:
-///   - `kind=buffer` slots: look up the device pointer for the named buffer
-///     role and memcpy 8 bytes into the slot's offset.
-///   - `kind=value`  slots: memcpy the pre-encoded `value_bytes` (whose
-///     width was set by okl.py from the kernel's HSA `.args` metadata) into
-///     the slot's offset.
-///
-/// Bounds-checks every slot against `c.kernarg_size`; exits with a clean
-/// named-slot error message on overrun, on a buffer reference to a role we
-/// didn't allocate, or on a buffer slot whose size isn't 8 bytes.
+/**
+ * Build the flat kernarg byte buffer by walking the config's slot list in
+ * order. For each slot:
+ *   - `kind=buffer` slots: look up the device pointer for the named buffer
+ *     role and memcpy 8 bytes into the slot's offset.
+ *   - `kind=value`  slots: memcpy the pre-encoded `value_bytes` (whose
+ *     width was set by okl.py from the kernel's HSA `.args` metadata) into
+ *     the slot's offset.
+ *
+ * Bounds-checks every slot against `c.kernarg_size`; exits with a clean
+ * named-slot error message on overrun, on a buffer reference to a role we
+ * didn't allocate, or on a buffer slot whose size isn't 8 bytes.
+ */
 static std::vector<uint8_t>
 build_kernarg(const Config& c, const BufferSet& bs) {
     std::vector<uint8_t> kernarg(c.kernarg_size, 0);
@@ -460,15 +468,17 @@ build_kernarg(const Config& c, const BufferSet& bs) {
     return kernarg;
 }
 
-/// Launch `fn` COLD_ITERS times to warm caches (with a single sync after the
-/// warmup), then HOT_ITERS times in a tight loop with one sync at the end,
-/// timing the hot window with `std::chrono::steady_clock`. Matches
-/// hipblaslt-bench's default-mode timing methodology (CPU wall clock with one
-/// sync per timing window; see clients/common/include/argument_model.hpp:80-94
-/// and testing_matmul.hpp:5293-5396).
-///
-/// `kernarg` is passed in by reference but never mutated; we hand the bytes
-/// off to the HIP driver via HIP_LAUNCH_PARAM_BUFFER_POINTER.
+/**
+ * Launch `fn` COLD_ITERS times to warm caches (with a single sync after the
+ * warmup), then HOT_ITERS times in a tight loop with one sync at the end,
+ * timing the hot window with `std::chrono::steady_clock`. Matches
+ * hipblaslt-bench's default-mode timing methodology (CPU wall clock with one
+ * sync per timing window; see clients/common/include/argument_model.hpp:80-94
+ * and testing_matmul.hpp:5293-5396).
+ *
+ * `kernarg` is passed in by reference but never mutated; we hand the bytes
+ * off to the HIP driver via HIP_LAUNCH_PARAM_BUFFER_POINTER.
+ */
 static TimingResult time_kernel(hipFunction_t fn,
                                 std::vector<uint8_t>& kernarg,
                                 uint32_t workgroup_size,
@@ -505,10 +515,12 @@ static TimingResult time_kernel(hipFunction_t fn,
     return r;
 }
 
-/// Emit the standard runner preamble + timing + performance lines to stdout.
-/// Lines: conf path, .co path, kernel symbol (truncated to 80 chars),
-/// resource estimate from hipFuncGetAttribute (regs/LDS), problem dims,
-/// kernarg layout summary, grid dims, iter counts, hot-window time, gflops.
+/**
+ * Emit the standard runner preamble + timing + performance lines to stdout.
+ * Lines: conf path, .co path, kernel symbol (truncated to 80 chars),
+ * resource estimate from hipFuncGetAttribute (regs/LDS), problem dims,
+ * kernarg layout summary, grid dims, iter counts, hot-window time, gflops.
+ */
 static void print_report(const std::filesystem::path& conf_path,
                          const std::filesystem::path& co_path,
                          const Config&        c,
@@ -538,16 +550,18 @@ static void print_report(const std::filesystem::path& conf_path,
     printf("perf:      %.1f gflops\n", gflops);
 }
 
-/// Read the D buffer back to host and check (a) the kernel actually wrote it
-/// (no 0xee poison bytes left from the init) and (b) the result is all zero
-/// (since A, B, C were all zero-initialized and beta=0, alpha*0+beta*0=0
-/// regardless of dtype). Prints "verify: OK" on full pass.
-///
-/// Exits 2 on detection of a never-written D (full poison preserved). Warns
-/// to stderr on partial non-zero results (kernel wrote, but result wasn't
-/// the algebraically expected zero - usually means alpha/beta wasn't honored
-/// or one of the inputs wasn't really zero on the device). Returns silently
-/// if D isn't in the buffer set (some kernels with feature-gated outputs).
+/**
+ * Read the D buffer back to host and check (a) the kernel actually wrote it
+ * (no 0xee poison bytes left from the init) and (b) the result is all zero
+ * (since A, B, C were all zero-initialized and beta=0, alpha*0+beta*0=0
+ * regardless of dtype). Prints "verify: OK" on full pass.
+ *
+ * Exits 2 on detection of a never-written D (full poison preserved). Warns
+ * to stderr on partial non-zero results (kernel wrote, but result wasn't
+ * the algebraically expected zero - usually means alpha/beta wasn't honored
+ * or one of the inputs wasn't really zero on the device). Returns silently
+ * if D isn't in the buffer set (some kernels with feature-gated outputs).
+ */
 static void verify_d_buffer(const BufferSet& bs) {
     auto dit = bs.ptrs.find("D");
     if (dit == bs.ptrs.end()) return;
@@ -578,7 +592,9 @@ static void verify_d_buffer(const BufferSet& bs) {
     }
 }
 
-/// Free every device buffer in `bs` and unload the HIP module.
+/**
+ * Free every device buffer in `bs` and unload the HIP module.
+ */
 static void cleanup(const BufferSet& bs, hipModule_t module) {
     for (const auto& kv : bs.ptrs) HIP_CHECK(hipFree(kv.second));
     HIP_CHECK(hipModuleUnload(module));
