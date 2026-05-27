@@ -1218,18 +1218,21 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
-def mainLoop(writer, kernel):
-  module = Module()
+def createSchedulerAndAllocABTiles(writer, kernel):
+  """Create the scheduler, run analysis, and allocate A/B data tile VGPRs.
+
+  Separated from mainLoop so A/B tiles can be allocated before the D-tile
+  (accumulator).  On HasVgprMSB architectures this places A/B in the lowest
+  VGPR bank.
+  """
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
-
 
   tiA = writer.states.a.tileInfo
   tiB = writer.states.b.tileInfo
   scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
   scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
 
-  # Values to be ajusted once we support more tile shapes.  For now, we assume:
   lrAGran = ReadGranularity(mn=1, k=1)
   lrBGran = ReadGranularity(mn=1, k=1)
   grAGran = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
@@ -1264,7 +1267,7 @@ def mainLoop(writer, kernel):
           partitionSizeN=partSizeN,
           pgr=schedulerPgr
       )
-      
+
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
@@ -1273,6 +1276,20 @@ def mainLoop(writer, kernel):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+  return scheduler
+
+
+def mainLoop(writer, kernel, scheduler=None):
+  module = Module()
+
+  if scheduler is None:
+    scheduler = createSchedulerAndAllocABTiles(writer, kernel)
+
+  tiA = writer.states.a.tileInfo
+  tiB = writer.states.b.tileInfo
+  scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
+  scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
+
   dtileInfo = writer.states.d.tileInfo
   scheduler.populate_instructions(
       writer, kernel,
