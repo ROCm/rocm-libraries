@@ -109,3 +109,18 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<39, dir
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<41, direct_conv::Version::v3>, SIGNATURE>);
 // XOR+LDS, 8-wave
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<43, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — c_slices_per_wave > 1 (16x16x32 only)
+// Each wave streams N C-chunks of cpg=32 channels through fixed-size LDS.
+// Fprop indices: 49,51 (waves=2 N=2/4), 53,55 (waves=2 N=2 Cyclic/XOR),
+//                57,59 (waves=4 N=2/4), 61,63 (waves=4 N=2 Cyclic/XOR)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<49, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<51, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<53, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<55, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<57, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<59, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<61, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<63, direct_conv::Version::v3>, SIGNATURE>);

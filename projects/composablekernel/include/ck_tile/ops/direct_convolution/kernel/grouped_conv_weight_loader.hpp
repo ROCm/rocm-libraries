@@ -28,27 +28,26 @@ namespace direct_conv {
 // WeightLoader structs, which populate the weights[] array from LDS
 // and inherit the get<R,S>() / get_transposed<R,S>() accessors.
 // -----------------------------------------------------------------------
-template <int KH, int KW, typename VecType = fp16x4_t>
+template <int KH, int KW, typename VecType = fp16x4_t, int NumSlices = 1>
 struct WeightAccessor
 {
     using value_type = VecType;
-    VecType weights[KH * KW];
+    // [KH * KW] slots for NumSlices=1 (legacy); [KH * KW * NumSlices] when
+    // the wave streams multiple C-slices through the same LDS region and
+    // caches them all in registers.
+    VecType weights[KH * KW * NumSlices];
 
-    static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
-        ck_tile::make_tuple(ck_tile::number<KH>{}, ck_tile::number<KW>{}));
-
-    template <int R, int S>
+    template <int R, int S, int CS = 0>
     __device__ __forceinline__ VecType get() const
     {
-        constexpr auto coord = ck_tile::make_tensor_coordinate(
-            desc_, ck_tile::make_tuple(ck_tile::number<R>{}, ck_tile::number<S>{}));
-        return weights[coord.get_offset()];
+        static_assert(CS >= 0 && CS < NumSlices, "CS out of range");
+        return weights[(R * KW + S) * NumSlices + CS];
     }
 
-    template <int R, int S>
+    template <int R, int S, int CS = 0>
     __device__ __forceinline__ VecType get_transposed() const
     {
-        return get<KH - 1 - R, KW - 1 - S>();
+        return get<KH - 1 - R, KW - 1 - S, CS>();
     }
 };
 
@@ -61,8 +60,8 @@ struct WeightAccessor
 // 8-element VecType provides the same functionality. This alias is kept
 // for readability at call sites that distinguish 4-element vs 8-element.
 // -----------------------------------------------------------------------
-template <int KH, int KW, typename VecType = fp16x8_t>
-using WeightAccessor8 = WeightAccessor<KH, KW, VecType>;
+template <int KH, int KW, typename VecType = fp16x8_t, int NumSlices = 1>
+using WeightAccessor8 = WeightAccessor<KH, KW, VecType, NumSlices>;
 
 // Shared weight load function for grouped convolution kernels.
 //

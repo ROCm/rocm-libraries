@@ -214,6 +214,15 @@ struct Config
     int kw = 3;
     int n_fold = 8;
 
+    // Number of channels_per_group C-chunks each wave streams through the
+    // same fixed-size LDS buffers. Default 1 reproduces the legacy schedule.
+    // For N > 1, block_c = waves_per_wg * N * cpg but LDS sizes stay at the
+    // N=1 footprint; chunks ping-pong through the input double-buffer and
+    // share the per-wave weight LDS region (loaded sequentially in prologue).
+    // Restricted to mfma_shape == M16N16K32 (see static_assert in
+    // TileConstants).
+    int c_slices_per_wave = 1;
+
     // Derived from MFMA shape:
     constexpr int mfma_m() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : -1; }
     constexpr int mfma_n() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : -1; }
@@ -225,7 +234,14 @@ struct Config
     constexpr int block_groups() const { return waves_per_wg; }
 
     constexpr int num_waves() const { return waves_per_wg; }
+    // Channels in a single in-flight LDS chunk = one input double-buffer
+    // entry = one prologue iteration's weight LDS region.
+    // INVARIANT: block_c() must not scale with c_slices_per_wave — it is
+    // consumed by TileConstantsBase (BLOCK_C8, INPUT_LDS_BUFFER_SIZE_*) and
+    // Weight::WEIGHT_LDS_READ_K, which must stay fixed-size when N grows.
     constexpr int block_c() const { return channels_per_group() * block_groups(); }
+    // Total C channels covered per workgroup across all chunks.
+    constexpr int total_block_c() const { return block_c() * c_slices_per_wave; }
     // Spatial output positions per wave = MFMA N (columns of B/C).
     constexpr int block_q() const { return mfma_n(); }
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
@@ -234,8 +250,10 @@ struct Config
     // All waves share the same block_k_size K-channels.
     constexpr int block_k_size() const { return mfma_m(); }
 
-    // C-sections per c_block = waves_per_wg (one per wave).
-    constexpr int c_local_count() const { return block_groups(); }
+    // Total C-sections per workgroup across all waves and chunks.
+    constexpr int c_local_count() const {
+        return block_groups() * c_slices_per_wave;
+    }
 
     Direction direction = Direction::Fprop;
 
@@ -268,7 +286,12 @@ struct Config
             epilogue_suffix = "_lds_staged_epilogue";
         }
 
-        return base + epilogue_suffix;
+        std::string buf_suffix = (input_buffering == InputBuffering::Single) ? "_single_buf" : "";
+
+        std::string cspw_suffix =
+            (c_slices_per_wave > 1) ? ("_cspw" + std::to_string(c_slices_per_wave)) : "";
+
+        return base + epilogue_suffix + buf_suffix + cspw_suffix;
     }
 };
 
@@ -358,6 +381,35 @@ static constexpr Config<DT> configs[] = {
     {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 42
     {.waves_per_wg = 8, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 43
 
+
+    // --- c_slices_per_wave > 1 (indices 49-56) ---
+    // 16x16x32 only — each wave streams N chunks of cpg=32 channels through
+    // the same fixed-size LDS buffers. total_block_c = waves_per_wg * N * 32.
+    // No swizzle.
+    {.waves_per_wg = 2, .c_slices_per_wave = 2},                                                                                                              // 49 Fprop, total_block_c=128
+    {.waves_per_wg = 2, .c_slices_per_wave = 2, .direction = Direction::Dgrad},                                                                              // 50 Dgrad, total_block_c=128
+    {.waves_per_wg = 2, .c_slices_per_wave = 4},                                                                                                              // 51 Fprop, total_block_c=256
+    {.waves_per_wg = 2, .c_slices_per_wave = 4, .direction = Direction::Dgrad},                                                                              // 52 Dgrad, total_block_c=256
+    // CyclicShift variants
+    {.waves_per_wg = 2, .c_slices_per_wave = 2, .swizzle_type = SwizzleType::CyclicShift},                                                                   // 53
+    {.waves_per_wg = 2, .c_slices_per_wave = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                    // 54
+    // XOR variants
+    {.waves_per_wg = 2, .c_slices_per_wave = 2, .swizzle_type = SwizzleType::XOR},                                                                            // 55
+    {.waves_per_wg = 2, .c_slices_per_wave = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},                                            // 56
+
+    // --- waves_per_wg = 4 with c_slices_per_wave > 1 (indices 57-64) ---
+    // 16x16x32 only. total_block_c = 4 * N * 32.
+    // No swizzle.
+    {.waves_per_wg = 4, .c_slices_per_wave = 2},                                                                                                              // 57 Fprop, total_block_c=256
+    {.waves_per_wg = 4, .c_slices_per_wave = 2, .direction = Direction::Dgrad},                                                                              // 58 Dgrad, total_block_c=256
+    {.waves_per_wg = 4, .c_slices_per_wave = 4},                                                                                                              // 59 Fprop, total_block_c=512
+    {.waves_per_wg = 4, .c_slices_per_wave = 4, .direction = Direction::Dgrad},                                                                              // 60 Dgrad, total_block_c=512
+    // CyclicShift variants
+    {.waves_per_wg = 4, .c_slices_per_wave = 2, .swizzle_type = SwizzleType::CyclicShift},                                                                   // 61
+    {.waves_per_wg = 4, .c_slices_per_wave = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                    // 62
+    // XOR variants
+    {.waves_per_wg = 4, .c_slices_per_wave = 2, .swizzle_type = SwizzleType::XOR},                                                                            // 63
+    {.waves_per_wg = 4, .c_slices_per_wave = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},                                            // 64
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -382,9 +434,9 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
         return false;
     }
 
-    // C_in must equal block_c (= waves_per_wg * channels_per_group).
+    // C_in must equal total_block_c (= waves_per_wg * c_slices_per_wave * cpg).
     const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
-    if(C_in != cfg.block_c())
+    if(C_in != cfg.total_block_c())
     {
         LogInfo("Input channel mismatch: conv C_in != config block_c: ", 
             " C_in = ", std::move(std::to_string(C_in)), 
@@ -426,6 +478,12 @@ template <auto cfg>
 struct TileConstants : direct_conv::TileConstantsBase<cfg>
 {
     using Base = direct_conv::TileConstantsBase<cfg>;
+
+    // c_slices_per_wave > 1 is only supported for the 16x16x32 MFMA path
+    // for now (the 32x32x16 path stays at N=1).
+    static_assert(cfg.c_slices_per_wave >= 1, "c_slices_per_wave must be >= 1");
+    static_assert(cfg.c_slices_per_wave == 1 || cfg.mfma_shape == MfmaShape::M16N16K32,
+                  "c_slices_per_wave > 1 is only supported for M16N16K32 configs");
 
     static constexpr int WAVES_PER_WG = cfg.waves_per_wg;
     static constexpr int KH_KW_       = cfg.kh * cfg.kw;
@@ -500,6 +558,14 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     static constexpr int OVERFLOW_COUNT =
         (TC::BLOCK_W - TC::TOTAL_SPATIAL) * TC::BLOCK_C8;
 
+    // Byte offset added to input_voffset / overflow_voffset to point at chunk
+    // CS of the current input row (constant across rows). For c_slices_per_wave
+    // == 1 this is always zero.
+    static constexpr ck_tile::index_t CHUNK_VOFFSET_STRIDE =
+        static_cast<ck_tile::index_t>(cfg.waves_per_wg) *
+        static_cast<ck_tile::index_t>(cfg.channels_per_group()) *
+        static_cast<ck_tile::index_t>(sizeof(ElementType));
+
     // State for overflow loads.
     ck_tile::index_t  overflow_voffset;
     CK_TILE_LDS_ADDR ElementType* overflow_lds_dest;
@@ -521,6 +587,27 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         : base(bc, input_lds, in, hi, wi, px, py, dx, dy, sx, sy,
                TC::GROUP_SIZE, /*init_mfma_offsets=*/false)
     {
+        // The base ctor sizes input_rsrc from the dram descriptor's
+        // element-space, which is built with BLOCK_C8 (per-chunk) on the
+        // C axis. That clamps the buffer's hardware bounds-check to a
+        // single chunk's worth of channels at the last (h, w), so any
+        // chunk CS > 0 load that targets the LAST real input column gets
+        // zeroed by the OOB clamp. Re-make the rsrc to span the full
+        // per-batch input tensor (N batches × hi × wi × C), which is the
+        // largest extent any chunk's voffset can reach.
+        //
+        // We also bypass this re-make when N == 1 (no chunks beyond CS=0,
+        // base ctor's sizing is already correct).
+        if constexpr(cfg.c_slices_per_wave > 1)
+        {
+            const ElementType* input_base =
+                in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
+            const size_t rsrc_bytes =
+                static_cast<size_t>(hi) * wi * bc.C * sizeof(ElementType);
+            base::input_rsrc = ck_tile::make_builtin_buffer_resource(
+                input_base, static_cast<uint32_t>(rsrc_bytes));
+        }
+
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
 
@@ -580,8 +667,17 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     }
 
     // Override prefetch: base load (16 spatial positions) + overflow load (2 extra).
+    //
+    // CS selects which C-chunk of the CURRENT input row is loaded. CS = 0
+    // matches the legacy path; CS > 0 adds CS * (waves * cpg) channels' worth
+    // of bytes to the per-thread DRAM offset, leaving the row position alone.
+    // Does NOT advance input_voffset / overflow_voffset.
+    template <int CS = 0>
     __device__ __forceinline__ void prefetch_tile_to_lds(int lds_buffer_index)
     {
+        static_assert(CS >= 0 && CS < cfg.c_slices_per_wave, "CS out of range");
+        constexpr ck_tile::index_t chunk_off = CS * CHUNK_VOFFSET_STRIDE;
+
         if(base::load_active)
         {
             CK_TILE_LDS_ADDR ElementType* lds_dest =
@@ -591,7 +687,7 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
                 ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
                 lds_dest,
                 base::input_rsrc,
-                base::input_voffset,
+                base::input_voffset + chunk_off,
                 0,
                 ck_tile::number<0>{},
                 base::is_valid);
@@ -606,21 +702,23 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
                 ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
                 lds_dest,
                 base::input_rsrc,
-                overflow_voffset,
+                overflow_voffset + chunk_off,
                 0,
                 ck_tile::number<0>{},
                 overflow_is_valid);
         }
     }
 
-    // Override fetch: advance both offsets, then prefetch.
+    // Override fetch: advance both offsets to the next row, then prefetch
+    // chunk CS of that row.
+    template <int CS = 0>
     __device__ __forceinline__ void fetch_tile_to_lds(int lds_buffer_index)
     {
         if(base::load_active)
             base::input_voffset += base::row_stride_bytes;
         if(overflow_active)
             overflow_voffset += base::row_stride_bytes;
-        prefetch_tile_to_lds(lds_buffer_index);
+        prefetch_tile_to_lds<CS>(lds_buffer_index);
     }
 };
 
@@ -635,7 +733,8 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
 // ===================================================================
 template <auto cfg>
 struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
-    std::conditional_t<cfg.data_type == DataType::bf16, bf16x8_t, fp16x8_t>>
+    std::conditional_t<cfg.data_type == DataType::bf16, bf16x8_t, fp16x8_t>,
+    cfg.c_slices_per_wave>
 {
     using TC = TileConstants<cfg>;
     using ElementType = ToType<cfg.data_type>;
@@ -745,7 +844,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
         }
     }
 
-    // Read weights from LDS into registers (this->weights[]).
+    // Read weights from LDS into the register cache slot for chunk CS.
     //
     // Uses manual addressing for both Fprop and Dgrad. The tile distribution
     // approach from v1 is not applicable because v3's weight LDS only holds
@@ -755,9 +854,16 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     //
     // All waves read the same weight data (same 16 K-channels). Each wave
     // pairs this with a different C-section of the input during MFMA.
-    __device__ void read_from_lds(uint4* weight_lds)
+    //
+    // For c_slices_per_wave > 1, the prologue calls this once per chunk CS
+    // with that chunk's weight data in LDS; the per-chunk register slot is
+    // weights[F * N + CS].
+    template <int CS = 0>
+    __device__ void read_from_lds_chunk(uint4* weight_lds)
     {
+        static_assert(CS >= 0 && CS < cfg.c_slices_per_wave, "CS out of range");
         constexpr int KH_KW_L = cfg.kh * cfg.kw;
+        constexpr int N_      = cfg.c_slices_per_wave;
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const auto* lds_ptr = reinterpret_cast<const ElementType*>(weight_lds);
         using VecType = typename std::remove_reference_t<decltype(*this)>::value_type;
@@ -786,7 +892,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
                             int k = k_group * 8 + J;
                             vals[J] = lds_ptr[k * KH_KW_L * BLOCK_C + F * BLOCK_C + c_lane];
                         });
-                    __builtin_memcpy(&this->weights[F], vals, sizeof(VecType));
+                    __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
                 });
         }
         else
@@ -814,9 +920,16 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
                         {
                             vals[J] = lds_ptr[k_out * KH_KW_L * C_SLICE + F * C_SLICE + c_grp * 8 + J];
                         });
-                    __builtin_memcpy(&this->weights[F], vals, sizeof(VecType));
+                    __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
                 });
         }
+    }
+
+    // Legacy single-chunk entry: equivalent to read_from_lds_chunk<0>().
+    // Used by the v3 single-buffer compute loop and by the N=1 path.
+    __device__ void read_from_lds(uint4* weight_lds)
+    {
+        read_from_lds_chunk<0>(weight_lds);
     }
 };
 
