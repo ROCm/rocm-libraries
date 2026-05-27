@@ -291,6 +291,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["ProblemType"]["ActivationNoGuard"] = True
     kernel["ProblemType"]["ActivationComputeDataType"] = compute_dtype
     kernel["ProblemType"]["HighPrecisionAccumulate"] = use_bf16
+    kernel["ProblemType"]["StochasticRounding"] = False
     kernel["ProblemType"]["UseInitialStridesCD"] = False
     kernel["ProblemType"]["UseInitialStridesAB"] = False
     kernel["ProblemType"]["Fp16AltImpl"] = False
