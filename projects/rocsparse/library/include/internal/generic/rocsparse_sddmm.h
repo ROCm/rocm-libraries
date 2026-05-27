@@ -229,9 +229,27 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  \note
 *  Batched computation is supported for the \ref rocsparse_format_coo format when
 *  \p alg == \ref rocsparse_sddmm_alg_default. The batch count is taken from the
-*  sparse matrix \f$C\f$ and must match the batch counts of the dense matrices
-*  \f$A\f$ and \f$B\f$. The per-batch strides are configured via
-*  \ref rocsparse_dnmat_set_strided_batch and \ref rocsparse_coo_set_strided_batch.
+*  sparse matrix \f$C\f$. Each of the dense matrices \f$A\f$ and \f$B\f$ must either
+*  use the same batch count as \f$C\f$, or be configured with batch count 1 and
+*  batch stride 0 in order to broadcast that operand across all batches of \f$C\f$.
+*  Concretely, the following four configurations are accepted:
+*  \f[
+*    \begin{aligned}
+*      &C_i = (A   \cdot B  ) \circ C_i, &&\text{(both A and B broadcast)} \\
+*      &C_i = (A   \cdot B_i) \circ C_i, &&\text{(A broadcast)} \\
+*      &C_i = (A_i \cdot B  ) \circ C_i, &&\text{(B broadcast)} \\
+*      &C_i = (A_i \cdot B_i) \circ C_i, &&\text{(fully batched)}
+*    \end{aligned}
+*  \f]
+*  Per-batch strides for the dense operands and the sparse output are configured
+*  via \ref rocsparse_dnmat_set_strided_batch and \ref rocsparse_coo_set_strided_batch
+*  respectively. For COO, \ref rocsparse_coo_set_strided_batch sets a single
+*  per-batch stride that applies to all three COO buffers (row indices, column
+*  indices and values); i.e. the row-index, column-index and value buffers of
+*  batch \f$i\f$ are obtained from the base pointers by adding
+*  \p i * \p batch_stride, and must therefore be laid out with the same stride.
+*  The stride must be at least the per-batch nnz of \f$C\f$, and may be larger
+*  to allow padding.
 *  All other formats and algorithms currently return \ref rocsparse_status_not_implemented
 *  when the batch count is greater than one.
 *

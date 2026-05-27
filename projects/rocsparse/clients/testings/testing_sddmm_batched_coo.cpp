@@ -225,10 +225,11 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     int64_t tiny_size       = 100;
     int64_t nnz_A_per_batch = static_cast<int64_t>(A_m) * A_n + tiny_size;
     int64_t nnz_B_per_batch = static_cast<int64_t>(B_m) * B_n + tiny_size;
+    int64_t nnz_C_per_batch = nnz_C + tiny_size;
 
     int64_t batch_stride_A = (batch_count_A > 1) ? nnz_A_per_batch : 0;
     int64_t batch_stride_B = (batch_count_B > 1) ? nnz_B_per_batch : 0;
-    int64_t batch_stride_C = (batch_count_C > 1) ? nnz_C : 0;
+    int64_t batch_stride_C = (batch_count_C > 1) ? nnz_C_per_batch : 0;
 
     // Allocate/initialize dense A and B matrices (per batch unique).
     host_vector<A> hA(batch_count_A * nnz_A_per_batch);
@@ -244,30 +245,25 @@ void testing_sddmm_batched_coo(const Arguments& arg)
                                arg.rand_gen_min,
                                arg.rand_gen_max);
 
-    // Output sparse matrix C. The COO row/column indices are replicated per
-    // batch (so the sparsity pattern is the same for each batch, but the values
-    // are independent per batch).
-    //
-    // hcoo_val_gold initially holds the random initial values of C; it is
-    // re-used as the on-host backup needed to restore the device values
-    // between the host-pointer-mode and device-pointer-mode SDDMM runs, and is
-    // only overwritten with the gold result after both runs.
-    host_vector<I> hcoo_row_ind(batch_count_C * nnz_C);
-    host_vector<I> hcoo_col_ind(batch_count_C * nnz_C);
-    host_vector<C> hcoo_val(batch_count_C * nnz_C);
-    host_vector<C> hcoo_val_gold(batch_count_C * nnz_C);
+    host_vector<I> hcoo_row_ind(batch_count_C * nnz_C_per_batch);
+    host_vector<I> hcoo_col_ind(batch_count_C * nnz_C_per_batch);
+    host_vector<C> hcoo_val(batch_count_C * nnz_C_per_batch);
+    host_vector<C> hcoo_val_gold(batch_count_C * nnz_C_per_batch);
 
     for(I i = 0; i < batch_count_C; ++i)
     {
         for(I j = 0; j < nnz_C; ++j)
         {
-            hcoo_row_ind[nnz_C * i + j] = hcoo_row_ind_temp[j];
-            hcoo_col_ind[nnz_C * i + j] = hcoo_col_ind_temp[j];
+            hcoo_row_ind[nnz_C_per_batch * i + j] = hcoo_row_ind_temp[j];
+            hcoo_col_ind[nnz_C_per_batch * i + j] = hcoo_col_ind_temp[j];
         }
     }
 
-    rocsparse_init_1d_array<C>(
-        hcoo_val, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<C>(hcoo_val,
+                               batch_count_C * nnz_C_per_batch,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
     hcoo_val_gold = hcoo_val;
 
     // Allocate device memory
@@ -323,13 +319,17 @@ void testing_sddmm_batched_coo(const Arguments& arg)
             rocsparse_reproducibility::save("P pointer mode host", dcoo_val);
         }
 
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcoo_val, dcoo_val, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hcoo_val,
+                                  dcoo_val,
+                                  sizeof(C) * batch_count_C * nnz_C_per_batch,
+                                  hipMemcpyDeviceToHost));
 
         // Restore the initial sparse output values on the device for the next
         // run. hcoo_val_gold still carries the initial values at this point.
-        CHECK_HIP_ERROR(hipMemcpy(
-            dcoo_val, hcoo_val_gold, sizeof(C) * batch_count_C * nnz_C, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dcoo_val,
+                                  hcoo_val_gold,
+                                  sizeof(C) * batch_count_C * nnz_C_per_batch,
+                                  hipMemcpyHostToDevice));
 
         // Pointer mode device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
@@ -370,8 +370,10 @@ void testing_sddmm_batched_coo(const Arguments& arg)
 
         // Pull the device-pointer-mode result back, overwriting hcoo_val, and
         // check it.
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcoo_val, dcoo_val, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hcoo_val,
+                                  dcoo_val,
+                                  sizeof(C) * batch_count_C * nnz_C_per_batch,
+                                  hipMemcpyDeviceToHost));
         hcoo_val_gold.near_check(hcoo_val);
     }
 

@@ -145,6 +145,12 @@ namespace rocsparse
             return;
         }
 
+        // COO has a single per-batch stride (configured by the user via
+        // rocsparse_coo_set_strided_batch) which applies to all three COO
+        // buffers (row indices, column indices and values). The caller is
+        // therefore required to lay out the three buffers with that same
+        // stride, and to broadcast A or B across batches the caller passes
+        // batch_stride_A == 0 or batch_stride_B == 0.
         rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
             transA,
             transB,
