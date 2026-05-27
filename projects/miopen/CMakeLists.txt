@@ -79,7 +79,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(CTest)
+# When MIOpen is consumed via add_subdirectory in a parent superbuild, the parent
+# typically owns the CTest lifecycle. include(CTest) at the top of the project
+# would also unconditionally set BUILD_TESTING=ON, which may not be what the
+# parent wants.
+if(PROJECT_IS_TOP_LEVEL)
+    include(CTest)
+else()
+    if(NOT DEFINED BUILD_TESTING)
+        option(BUILD_TESTING "Build testing" ON)
+    endif()
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -106,7 +116,10 @@ set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 # By default build shared libraries
 option(BUILD_SHARED_LIBS "Create shared libraries" ON)
 
-list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+# PREPEND (rather than APPEND) so MIOpen's local cmake helpers (ClangTidy,
+# ClangCheck, etc.) take precedence over any same-named modules a parent
+# superbuild may have placed on CMAKE_MODULE_PATH before our subdirectory ran.
+list(PREPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 if(MIOPEN_STANDALONE_BUILD)
     include(cmake/ThirdParty.cmake)
@@ -155,12 +168,7 @@ endif()
 # OPTION - MIOpen Backend
 # - OpenCL
 # - HIP
-check_cxx_compiler_flag("--cuda-host-only -x hip" HAS_HIP)
-if(HAS_HIP)
-    set(MIOPEN_DEFAULT_BACKEND "HIP")
-else()
-    set(MIOPEN_DEFAULT_BACKEND "OpenCL")
-endif()
+set(MIOPEN_DEFAULT_BACKEND "HIP")
 
 if(NOT WIN32)
     include(CheckCXXLinkerFlag)
@@ -349,7 +357,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             include(cmake/Dependencies.cmake)
 
             execute_process (
-                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
+                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${PROJECT_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
             if(_match)
@@ -503,8 +511,7 @@ else()
     message(STATUS "clang-offload-bundler not found")
 endif()
 
-set_var_to_condition(MIOPEN_USE_MLIR_DEFAULT NOT (NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR}))
-option(MIOPEN_USE_MLIR "Use MLIR compilation backend" ${MIOPEN_USE_MLIR_DEFAULT})
+option(MIOPEN_USE_MLIR "Use MLIR compilation backend" OFF)
 
 if(MIOPEN_USE_MLIR)
     if(NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR})
@@ -678,7 +685,12 @@ set(KERNELS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/src/kernels)
 find_program(UNZIPPER bzip2 REQUIRED)
 file(MAKE_DIRECTORY ${KERNELS_BINARY_DIR})
 
-add_custom_target(generate_kernels ALL)
+# Project-prefixed aggregator avoids collisions when included via add_subdirectory
+# in a superbuild. Unprefixed alias preserved for standalone back-compat.
+add_custom_target(miopen-generate-kernels ALL)
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(generate_kernels DEPENDS miopen-generate-kernels)
+endif()
 
 set(MIOPEN_USE_SQLITE_PERFDB Off CACHE BOOL "Use sqlite perfdb instead of text-based.")
 if(MIOPEN_USE_SQLITE_PERFDB)
@@ -704,10 +716,10 @@ function(unpack_db db_bzip2_file)
                            COMMAND $<TARGET_FILE:sqlite2txt> ${KERNELS_BINARY_DIR}/${__fname} ${KERNELS_BINARY_DIR}/${__fname}.txt
         )
         add_custom_target(generate_${__tname}_txt ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname}.txt)
-        add_dependencies(generate_kernels generate_${__tname}_txt)
+        add_dependencies(miopen-generate-kernels generate_${__tname}_txt)
         set(__fname ${__fname}.txt)
     else()
-        add_dependencies(generate_kernels generate_${__tname})
+        add_dependencies(miopen-generate-kernels generate_${__tname})
     endif()
     set(__fname ${__fname} PARENT_SCOPE)
 endfunction()
@@ -782,13 +794,15 @@ if(NOT MIOPEN_TEST_DISCRETE)
 list(APPEND CPACK_COMPONENTS_ALL clients)
 endif()
 
-rocm_create_package(
-    NAME MIOpen-${MIOPEN_BACKEND}
-    DESCRIPTION "AMD DNN Library"
-    MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
-    LDCONFIG
-    # DEPENDS rocm-opencl hip-rocclr tinygemm
-)
+if(NOT ROCM_LIBS_SUPERBUILD)
+    rocm_create_package(
+        NAME MIOpen-${MIOPEN_BACKEND}
+        DESCRIPTION "AMD DNN Library"
+        MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
+        LDCONFIG
+        # DEPENDS rocm-opencl hip-rocclr tinygemm
+    )
+endif()
 
 include(EnableCompilerWarnings)
 set(MIOPEN_TIDY_ERRORS ERRORS * -readability-inconsistent-declaration-parameter-name)

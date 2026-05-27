@@ -123,10 +123,16 @@ macro(enable_cppcheck)
         endif()
 ")
 
-    add_custom_target(cppcheck
+    # Project-prefixed target avoids collisions in superbuild contexts;
+    # unprefixed alias is created standalone-only for back-compat.
+    add_custom_target(miopen-cppcheck
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/cppcheck.cmake
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "cppcheck: Running cppcheck..."
     )
-    mark_as_analyzer(cppcheck)
+    mark_as_analyzer(miopen-cppcheck)
+
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        add_custom_target(cppcheck DEPENDS miopen-cppcheck)
+    endif()
 endmacro()

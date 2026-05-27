@@ -97,6 +97,23 @@ list(
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
+# miopen.h:6221 declares `miopenTensorArgumentIsScalar = 1U << 31` in an enum with no
+# explicit underlying type. Clang widens via the MS extension, which is exactly what
+# -Wmicrosoft-enum-value reports. We can't change the bit pattern (it's a flag value),
+# and modifying MIOpen's public enum carries ABI/consumer risk. Lowest-risk fix:
+# silence this specific warning here.
+list(APPEND MIOPENPROVIDER_WARNING_COMPILE_OPTIONS -Wno-microsoft-enum-value)
+
+if(WIN32)
+    # AMD clang reports `__declspec(dllimport)` as "not supported" on the
+    # x86_64-pc-windows-msvc target, even though the attribute is honored
+    # (verified via llvm-readobj --coff-exports on MIOpen.dll). This produces
+    # ~150k spurious warnings from the CMake-generated MIOPEN_EXPORT and
+    # MIOPEN_INTERNALS_EXPORT macros. Suppress until the compiler issue is
+    # resolved upstream.
+    list(PREPEND MIOPENPROVIDER_WARNING_COMPILE_OPTIONS -Wno-ignored-attributes)
+endif()
+
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
 # remove when fixed. Added to prevent issues with not finding hip cmake.
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
@@ -146,7 +163,14 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
-find_package(miopen CONFIG REQUIRED)
+# When this provider is built standalone or against an installed MIOpen, locate
+# the package on disk. When built as part of a superbuild that also includes
+# projects/miopen as a sibling component, the MIOpen target is already in the
+# build graph and find_package would either fail or pull in a stale installed
+# copy.
+if(NOT TARGET MIOpen)
+    find_package(miopen CONFIG REQUIRED)
+endif()
 
 add_library(
     miopen_plugin_impl OBJECT

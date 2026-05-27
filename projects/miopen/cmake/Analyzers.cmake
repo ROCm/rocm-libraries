@@ -24,10 +24,17 @@
 #
 ################################################################################
 
-if(NOT TARGET analyze)
-    add_custom_target(analyze)
+# Prefer a project-prefixed analyzer aggregator so the target does not collide
+# with sibling projects when MIOpen is included via add_subdirectory in a
+# superbuild. The unprefixed `analyze` target is preserved as a back-compat
+# alias when MIOpen is built standalone.
+if(NOT TARGET miopen-analyze)
+    add_custom_target(miopen-analyze)
+endif()
+if(NOT ROCM_LIBS_SUPERBUILD AND NOT TARGET analyze)
+    add_custom_target(analyze DEPENDS miopen-analyze)
 endif()
 
 function(mark_as_analyzer)
-    add_dependencies(analyze ${ARGN})
+    add_dependencies(miopen-analyze ${ARGN})
 endfunction()

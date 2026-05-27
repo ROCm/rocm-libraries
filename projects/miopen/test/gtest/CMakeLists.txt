@@ -58,8 +58,8 @@ function(add_gtest TEST_NAME TEST_CPP)
     target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
   endif()
 
-  add_dependencies(tests ${TEST_NAME})
-  add_dependencies(check ${TEST_NAME})
+  add_dependencies(miopen-tests ${TEST_NAME})
+  add_dependencies(miopen-check ${TEST_NAME})
 
   target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
   target_include_directories(${TEST_NAME} PRIVATE ../ ../../src/kernels)

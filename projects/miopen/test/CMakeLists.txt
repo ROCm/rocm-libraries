@@ -216,16 +216,26 @@ else()
 endif()
 
 # Exclude *_suite tests added as part of test filter standardization(#3513) from check target to avoid running them during build.
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite")
-add_custom_target(tests)
+# Project-prefixed targets avoid collisions when included via add_subdirectory in a superbuild.
+# Unprefixed `check` / `tests` / `gpu_detection_check` aliases are created standalone-only.
+add_custom_target(miopen-check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite")
+add_custom_target(miopen-tests)
+
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(check DEPENDS miopen-check)
+    add_custom_target(tests DEPENDS miopen-tests)
+endif()
 
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
-    add_custom_target(gpu_detection_check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1)
-    add_dependencies(check gpu_detection_check)
+    add_custom_target(miopen-gpu-detection-check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1)
+    add_dependencies(miopen-check miopen-gpu-detection-check)
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        add_custom_target(gpu_detection_check DEPENDS miopen-gpu-detection-check)
+    endif()
 endif()
 
 if(MIOPEN_TEST_WITH_MIOPENDRIVER)
-    add_dependencies(check MIOpenDriver)
+    add_dependencies(miopen-check MIOpenDriver)
 endif()
 
 
@@ -405,8 +415,8 @@ function(add_test_executable TEST_NAME)
 
     add_test_command(${TEST_NAME} ${TEST_COMMAND})
     rate_added_test(${TEST_NAME})
-    add_dependencies(tests ${TEST_NAME})
-    add_dependencies(check ${TEST_NAME})
+    add_dependencies(miopen-tests ${TEST_NAME})
+    add_dependencies(miopen-check ${TEST_NAME})
     set_tests_properties(${TEST_NAME} PROPERTIES FAIL_REGULAR_EXPRESSION "FAILED")
     if(WORKAROUND_ISSUE_1148
         AND (${TEST_NAME} MATCHES "test_soft_max") )
