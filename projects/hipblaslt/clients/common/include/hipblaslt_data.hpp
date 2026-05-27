@@ -107,7 +107,12 @@ public:
         filename() = std::move(name);
         if(remove_atexit)
         {
-            auto cleanup = [] { fs::remove(filename().c_str()); };
+            auto cleanup = [] {
+                // Best-effort removal of generated temp file. Use non-throwing
+                // overload because failure during process exit must not abort.
+                std::error_code ec;
+                fs::remove(filename(), ec);
+            };
             atexit(cleanup);
             at_quick_exit(cleanup);
         }

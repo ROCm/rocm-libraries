@@ -38,6 +38,10 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     /**
@@ -192,3 +196,5 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

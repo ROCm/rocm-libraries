@@ -26,8 +26,14 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     template <typename MyProblem, typename MySolution>
     struct SolutionLibrary;
 }
+
+TENSILE_HIDDEN_END

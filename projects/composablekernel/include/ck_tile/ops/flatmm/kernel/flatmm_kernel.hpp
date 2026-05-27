@@ -11,6 +11,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -304,7 +305,7 @@ struct FlatmmKernel
             hipDeviceProp_t prop;
             int deviceId = 0; // default device
 
-            constexpr int block_size = FlatmmKernel::BlockSize().x;
+            const int block_size     = FlatmmKernel::BlockSize().x;
             int dync_smem_size       = 0;
             int maxActiveBlocksPerCU = 0;
 
@@ -333,7 +334,17 @@ struct FlatmmKernel
         }
     }
 
-    CK_TILE_HOST static constexpr auto BlockSize() { return dim3(kBlockSize); }
+    CK_TILE_HOST static auto BlockSize()
+    {
+        if(ck_tile::is_wave32())
+        {
+            return dim3(kBlockSize / 2);
+        }
+        else
+        {
+            return dim3(kBlockSize);
+        }
+    }
 
     template <class ScaleM, class ScaleN>
     CK_TILE_HOST static constexpr FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>
@@ -355,13 +366,9 @@ struct FlatmmKernel
                 hostArgs.scale_n};
     }
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPingSize()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return max(FlatmmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
-    }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPongSize()
-    {
-        return FlatmmPipeline::GetSmemSize();
     }
 
     struct SplitKBatchOffset
@@ -849,8 +856,7 @@ struct FlatmmKernel
               const BDataType* b_flat_ptr,
               const std::array<const void*, NumDTensor>& ds_ptr,
               EDataType* e_ptr,
-              void* smem_ptr_ping,
-              void* smem_ptr_pong,
+              void* smem_ptr,
               const FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>& kargs,
               const SplitKBatchOffset& splitk_batch_offset,
               const index_t block_idx_m,
@@ -866,7 +872,7 @@ struct FlatmmKernel
 
         // Run GEMM cooperatively by whole workgroup.
         const auto& c_block_tile = FlatmmPipeline{}.template operator()(
-            a_block_window, b_flat_block_window, num_loop, smem_ptr_ping, smem_ptr_pong);
+            a_block_window, b_flat_block_window, num_loop, smem_ptr);
 
         // Run Epilogue Pipeline with k_batch dispatching
         if constexpr(ScaleM::GranularityMN != -1 || ScaleN::GranularityMN != -1)
@@ -883,10 +889,11 @@ struct FlatmmKernel
                                          decltype(ds_block_window)>(e_block_window,
                                                                     c_block_tile,
                                                                     ds_block_window,
-                                                                    smem_ptr_ping,
+                                                                    smem_ptr,
                                                                     scale_m_window,
                                                                     scale_n_window);
             }
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
             else
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::atomic_add>(
@@ -897,10 +904,11 @@ struct FlatmmKernel
                                          decltype(ds_block_window)>(e_block_window,
                                                                     c_block_tile,
                                                                     ds_block_window,
-                                                                    smem_ptr_ping,
+                                                                    smem_ptr,
                                                                     scale_m_window,
                                                                     scale_n_window);
             }
+#endif
         }
         else if(UseDefaultScheduler || (get_warp_id() == 0))
         {
@@ -912,8 +920,9 @@ struct FlatmmKernel
                     .template operator()<decltype(e_block_window),
                                          decltype(c_block_tile),
                                          decltype(ds_block_window)>(
-                        e_block_window, c_block_tile, ds_block_window, smem_ptr_ping);
+                        e_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
             else
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::atomic_add>(
@@ -922,8 +931,9 @@ struct FlatmmKernel
                     .template operator()<decltype(e_block_window),
                                          decltype(c_block_tile),
                                          decltype(ds_block_window)>(
-                        e_block_window, c_block_tile, ds_block_window, smem_ptr_ping);
+                        e_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
+#endif
         }
     }
 
@@ -949,8 +959,7 @@ struct FlatmmKernel
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
 
             // allocate LDS
-            __shared__ char smem_ptr_ping[GetSmemPingSize()];
-            __shared__ char smem_ptr_pong[GetSmemPongSize()];
+            __shared__ char smem_ptr[GetSmemSize()];
 
             if constexpr(!(EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
                            is_any_of<EDataType, fp16_t, bf16_t>::value))
@@ -960,8 +969,7 @@ struct FlatmmKernel
                                                           b_flat_ptr,
                                                           kargs.ds_ptr,
                                                           e_ptr,
-                                                          smem_ptr_ping,
-                                                          smem_ptr_pong,
+                                                          smem_ptr,
                                                           kargs,
                                                           splitk_batch_offset,
                                                           i_m,

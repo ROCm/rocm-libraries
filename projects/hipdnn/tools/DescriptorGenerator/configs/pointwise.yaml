@@ -57,25 +57,21 @@ operation:
       fbs_field: "in_0_tensor_uid"
       attr_suffix: "IN_0_EXT"
       required: true
-      frontend_getter: "get_in_0()"
 
     - name: "out_0"
       fbs_field: "out_0_tensor_uid"
       attr_suffix: "OUT_0_EXT"
       required: true
-      frontend_getter: "get_out_0()"
 
     - name: "in_1"
       fbs_field: "in_1_tensor_uid"
       attr_suffix: "IN_1_EXT"
       required: false
-      frontend_getter: "get_in_1()"
 
     - name: "in_2"
       fbs_field: "in_2_tensor_uid"
       attr_suffix: "IN_2_EXT"
       required: false
-      frontend_getter: "get_in_2()"
 
   data_fields:
     - name: "operation"
@@ -102,7 +98,7 @@ operation:
         backend_header: "HipdnnPointwiseMode.h"
         backend_prefix: "HIPDNN_POINTWISE_"
         values:
-          - { name: "NOT_SET", value: 0, sentinel: true }
+          - { name: "NOT_SET", value: 0, sentinel: true, sdk_name: "UNSET" }
           - { name: "ABS", value: 1, description: "Absolute value: |x|" }
           - { name: "ADD", value: 2, description: "Addition: x + y" }
           - { name: "ADD_SQUARE", value: 3, description: "Add x to y squared: x + y^2" }

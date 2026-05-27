@@ -79,6 +79,12 @@ def worker_lock_path(tmp_path_factory, worker_id):
     if not worker_id:
         return None
 
+    # Under FFM each worker gets its own emulator instance, so there is
+    # no GPU contention — give each worker a private lock so client
+    # invocations can run in parallel across workers.
+    if os.environ.get("HSA_MODEL_MEMFILE"):
+      return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+
     return tmp_path_factory.getbasetemp().parent / "client_execution.lock"
 
 @pytest.fixture(scope="session", autouse=True)
@@ -99,6 +105,12 @@ def assign_gpu_to_worker(worker_id):
     import re
     from Tensile.ParallelExecution import detectAvailableGpus
 
+    base_memfile = os.environ.get("HSA_MODEL_MEMFILE", "")
+    if base_memfile:
+        os.environ["HSA_MODEL_MEMFILE"] = f"{base_memfile}_{worker_id}"
+        print(f"Worker {worker_id}: HSA_MODEL_MEMFILE={os.environ['HSA_MODEL_MEMFILE']}")
+        return
+
     num_gpus = detectAvailableGpus()
     # Extract numeric ID from worker_id (e.g., 'gw0' -> 0, 'gw1' -> 1)
     match = re.search(r'\d+', worker_id)
@@ -109,6 +121,25 @@ def assign_gpu_to_worker(worker_id):
         print(f"Worker {worker_id} assigned to GPU {gpu_id} (total GPUs: {num_gpus})")
     else:
         print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
+
+@pytest.fixture(autouse=True)
+def clear_ffm_memfile_per_test():
+   """
+   Unlinks the worker's HSA_MODEL_MEMFILE after each test so the next
+   tensilelite-client subprocess starts with a fresh FFM emulator backing.
+   Helps isolate flakiness caused by residual state in the shared memfile
+   between consecutive tests on the same worker.
+   """
+   yield
+   memfile = os.environ.get("HSA_MODEL_MEMFILE")
+   if not memfile:
+     return
+   try:
+     os.unlink(memfile)
+   except FileNotFoundError:
+     pass
+   except OSError as e:
+     print(f"warn: could not unlink {memfile}: {e}", file=sys.stderr)
 
 @pytest.fixture
 def tensile_script_path():

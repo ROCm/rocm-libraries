@@ -21,7 +21,7 @@ int64_t HipKernelEngine::id() const
     return _id;
 }
 
-void initializeHipKernelSettings(
+static void initializeHipKernelSettings(
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
     [[maybe_unused]] HipKernelSettings& executionSettings)

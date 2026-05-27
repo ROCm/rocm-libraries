@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "BatchnormFwdTrainingPlanBuilder.hpp"
@@ -310,7 +310,6 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
         validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
-        BatchnormValidator::checkFwdActivationModeSupported(activAttr);
 
         HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");
