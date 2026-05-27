@@ -68,7 +68,17 @@ def fill_mma_tile_buffer(tileInfo, mt, du, stride):
     mma_k = tileInfo.mmaTileShape[1]
     nK = int(tileInfo.globalMMATileGrid[1])
 
-    buf = np.zeros(mt * stride, dtype=np.float16)
+    # Calculate the maximum row that can be accessed by any wave's GR load.
+    # For MIWaveGroup=[wg0, wg1], waves are assigned rows based on wave_id.
+    # Each wave covers 8 rows (wavesize=64 / blockSize=8).
+    # The soffset (s12) adds 32 rows (0x40 = 64, times stride bytes, divided by stride*bpe).
+    num_waves = tileInfo.numWaves
+    rows_per_wave = 8
+    s12_rows = 32  # 0x40 = 64, times stride bytes, divided by stride*bpe = 32 rows
+    max_row = (num_waves - 1) * rows_per_wave + (rows_per_wave - 1) + s12_rows
+    required_rows = max(mt, max_row + 1)
+
+    buf = np.zeros(required_rows * stride, dtype=np.float16)
     for m in range(mt):
         for k in range(du):
             mma_r = m // mma_m
