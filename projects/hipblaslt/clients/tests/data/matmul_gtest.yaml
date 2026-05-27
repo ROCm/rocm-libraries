@@ -80,14 +80,6 @@ Definitions:
     - {}
     - { stride_b: 0 }
 
-  - &bias_stride_test
-    - { a_type : f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, M: 128, N: 128, K: 128, bias_stride: 128}
-    - { a_type : f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, M: 129, N: 129, K: 129, bias_stride: 129}
-    - { a_type : f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, M: 128, N: 128, K: 128, bias_stride: 128}
-    - { a_type : f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, M: 129, N: 129, K: 129, bias_stride: 129}
-    - { a_type : bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, M: 128, N: 128, K: 128, bias_stride: 128}
-    - { a_type : bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, M: 129, N: 129, K: 129, bias_stride: 129}
-
 Tests:
 - name: matmul_bad_arg
   category: pre_checkin
@@ -1928,7 +1920,10 @@ Tests:
 - name: matmul_bias_stride
   category: pre_checkin
   function:
-    matmul: *bias_stride_test
+    matmul: *real_precision
+  matrix_size:
+    - {M: 128, N: 128, K: 128, bias_stride: 128}
+    - {M: 129, N: 129, K: 129, bias_stride: 129}
   transA_transB: *transA_transB_range
   alpha: 1
   beta: [ 0.0, 2.0 ]
