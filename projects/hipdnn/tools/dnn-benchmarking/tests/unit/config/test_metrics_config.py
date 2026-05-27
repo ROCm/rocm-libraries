@@ -62,3 +62,45 @@ class TestProfilingFields:
         cfg = MetricsConfig(profiling_output_dir="/tmp/out")
         assert isinstance(cfg.profiling_output_dir, Path)
         assert cfg.profiling_output_dir == Path("/tmp/out")
+
+    def test_pmc_all_without_multipass_flag_raises(self):
+        with pytest.raises(
+            ValueError, match="--pmc all requires --pmc-allow-multipass"
+        ):
+            MetricsConfig(pmc_set="all")
+
+    def test_pmc_all_with_multipass_flag_accepted(self):
+        cfg = MetricsConfig(pmc_set="all", pmc_allow_multipass=True)
+        assert cfg.pmc_set == "all"
+        assert cfg.opt_in_pass_requested is True
+
+    def test_pmc_basic_does_not_require_multipass(self):
+        cfg = MetricsConfig(pmc_set="basic")
+        assert cfg.pmc_set == "basic"
+
+
+class TestEmptyStringNormalization:
+    """The CLI uses argparse `choices=` so falsy strings never reach
+    these fields from the command line. Programmatic and TOML callers
+    don't have that gate — ``pmc_set=""`` or ``emit_trace=""`` would
+    pass the `is not None` checks downstream, ride into the
+    orchestrator as ``--pmc ""``, and crash rocprofv3 with a confusing
+    error. Normalise to None at construction time so falsy strings
+    are equivalent to "field unset"."""
+
+    def test_empty_pmc_set_normalised_to_none(self):
+        cfg = MetricsConfig(pmc_set="")
+        assert cfg.pmc_set is None
+        assert cfg.opt_in_pass_requested is False
+
+    def test_whitespace_only_pmc_set_normalised_to_none(self):
+        cfg = MetricsConfig(pmc_set="   ")
+        assert cfg.pmc_set is None
+
+    def test_empty_emit_trace_normalised_to_none(self):
+        cfg = MetricsConfig(emit_trace="")
+        assert cfg.emit_trace is None
+
+    def test_whitespace_only_emit_trace_normalised_to_none(self):
+        cfg = MetricsConfig(emit_trace="\t\n ")
+        assert cfg.emit_trace is None

@@ -28,6 +28,7 @@ private:
     std::vector<int64_t> _tensorUids;
     int64_t _workspaceSize = INVALID_WORKSPACE_SIZE;
     int64_t _engineId = INVALID_ENGINE_ID;
+    bool _isOverrideShapeEnabled = false;
 
     void getWorkspaceSize(hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
@@ -72,6 +73,7 @@ public:
     virtual std::shared_ptr<const EngineConfigDescriptor> getEngineConfig() const;
     virtual int64_t getEngineId() const;
     virtual const std::vector<int64_t>& getTensorUids() const;
+    virtual bool isOverrideShapeEnabled() const;
     virtual hipdnnEnginePluginExecutionContext_t getExecutionContext() const;
     virtual void serializeBackendPlan(size_t requestedByteSize,
                                       size_t* planByteSize,

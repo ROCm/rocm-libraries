@@ -476,6 +476,11 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SMovB32(sgpr(f"{group1}+6"), 0))
         return mod
 
+    def setMulticastMask(self, group1: int | str, mask: str, writer: "KernelWriterAssembly") -> Module:
+        mod = Module()
+        mod.add(SOrB32(sgpr(f"{group1}"), sgpr(f"{group1}"), sgpr(f"{mask}")))
+        return mod
+
     def setIterationIncrements(self, group2: int | str, ldsInc: int, sgprGlobalInc: int | str) -> Module:
         mod = Module()
         mod.add(SMovB32(sgpr(f"{group2}+1"), hex(ldsInc), f"set lds increment to {ldsInc}"))

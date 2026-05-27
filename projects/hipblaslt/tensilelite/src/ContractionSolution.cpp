@@ -1475,22 +1475,18 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
-        auto removePrefix = [](const std::string& s) {
-            size_t pos = s.find("gfx");
-            if(pos != std::string::npos)
-            {
-                return s.substr(pos + 3);
-            }
-            return s;
-        };
-        auto gpu_arch_no_prefix = removePrefix(hardware.archName());
-        if(internalArgsSupport.version >= 1)
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster)
         {
-            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(internalArgsSupport.version >= 1)
+            {
+                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
         }
+
+        rv.clusterDim = sizeMapping.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
@@ -3493,11 +3489,13 @@ namespace TensileLite
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             origami::problem_t origami_problem = {
-                .size     = {x, y, z},
-                .batch    = batch,
-                .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
-                .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                .size        = {x, y, z},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),

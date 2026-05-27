@@ -149,6 +149,7 @@ namespace TensileLite
                 iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
                 iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
                 iot::mapOptional(io, "ExpertSchedulingMode", s.expertSchedulingMode);
+                iot::mapOptional(io, "clusterDim", s.clusterDim);
             }
 
             const static bool flow = false;
