@@ -1295,10 +1295,10 @@ def test_320x320_bf16_preloop_1x5_offset_all():
 
 
 # ══════════════════════════════════════════════════════════════
-# ScaleDepthURatio R=2 reference snapshot — MT256x256x128 FP8
+# DepthUMX R=2 reference snapshot — MT256x256x128 FP8
 # ══════════════════════════════════════════════════════════════
 # Mirrors the subtile_mxfp8_mt256.yaml regression geometry (data DU=128
-# paired with scaleDU=256 via ScaleDepthURatio{A,B}=2): data-side
+# paired with scaleDU=256 via DepthUMX=256, R=DepthUMX/DepthU=2): data-side
 # numSubIterK=1, R=2 forces unroll_factor to a multiple of 2 so two body
 # copies appear per outer iter.  This snapshot pins the deduplicated
 # dependency-order output and serves as a reference test for the R=2
@@ -1357,7 +1357,7 @@ MAINLOOP (dependency paths):
 
 
 def test_256x256_fp8_R2_reference():
-    """Reference snapshot for MT256x256x128 FP8 with ScaleDepthURatio=2.
+    """Reference snapshot for MT256x256x128 FP8 with DepthUMX=256 (R=2).
 
     Pins the dep-order schedule for the central R=2 regression geometry
     so any future change to scheduler placement, scale-op anchoring, or

@@ -605,11 +605,12 @@ class MXScaleGRGeometry(MXScaleInputGeometry):
       return self
     instM    = self.scaleLayout.instM
     mt_mma   = kernel[f"MacroTile{tc}"] // instM
-    # Drive the scale GR per-fetch K span from _DepthUMXS{tc}.  When
-    # ScaleDepthURatio{tc}=R, _DepthUMXS{tc} = R * data_DU / mxBlock, so
-    # scale_K = _DepthUMXS{tc} * mxBlock = R * data_DU (in data elements) and
-    # one scale GR fetch covers R data-DU body iters.  For R=1 this reduces
-    # to the original formula (du_scale = data_DU // instK).
+    # Drive the scale GR per-fetch K span from _DepthUMXS{tc}.  With R =
+    # DepthUMX / DepthU (and R=1 when DepthUMX==0), _DepthUMXS{tc} =
+    # R * data_DU / mxBlock, so scale_K = _DepthUMXS{tc} * mxBlock =
+    # R * data_DU (in data elements) and one scale GR fetch covers R data-DU
+    # body iters.  For R=1 this reduces to the original formula
+    # (du_scale = data_DU // instK).
     mxBlock  = self.scaleLayout.mxBlock
     scale_K  = kernel[f"_DepthUMXS{tc}"] * mxBlock
     du_scale = scale_K // self.instK

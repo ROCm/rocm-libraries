@@ -218,7 +218,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  # inc scales linearly with ScaleDepthURatio{tc} via lrGlobalSubtileGrid[1].
+  # inc scales linearly with R (= DepthUMX/DepthU) via lrGlobalSubtileGrid[1].
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
@@ -302,8 +302,8 @@ def _graTileAssignmentScaleSwizzledCommon(tc, writer, kernel):
     "check lrSubtileSize=%d * lrGlobalSubtileGrid[1]=%s / loadWidth=%d)" % \
     (tc, numThreadsPerGroup, int(scaleGroupSize), str(ti_.lrGlobalSubtileGrid[1]), int(loadWidth))
   assert numThreadsPerGroup <= kernel["WavefrontSize"], \
-    "scale%s: numThreadsPerGroup=%d exceeds WavefrontSize=%d — ScaleDepthURatio*lrGlobalSubtileGrid[1] " \
-    "produced a per-scale-fetch K span that does not fit in one wave's lane budget" % \
+    "scale%s: numThreadsPerGroup=%d exceeds WavefrontSize=%d — R*lrGlobalSubtileGrid[1] " \
+    "(R = DepthUMX/DepthU) produced a per-scale-fetch K span that does not fit in one wave's lane budget" % \
     (tc, numThreadsPerGroup, kernel["WavefrontSize"])
 
   vtmp = writer.vgprPool.checkOut(1)

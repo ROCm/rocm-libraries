@@ -1,13 +1,13 @@
 ########################################
-# MXFP8 correctness regression — DU=128 + SDURA/B=2 path (subtile MX-scale)
+# MXFP8 correctness regression — DU=128 + DepthUMX=256 path (subtile MX-scale, R=2)
 #
 # Reproducer for the bug found by validate_mxfp8_correctness.py on
 # branch users/bnemanich/subtile-mxfp8-libraries.  The snapshot of the
 # in-flight validation CSV (run_9339, 548/1100 rows) shows:
 #
-#     DepthU=128 + SDURA=2 SDURB=2 (the swizzled-scale subtile path)
+#     DepthU=128 + DepthUMX=256 (R=2; swizzled-scale subtile path)
 #                                      → 310/327 fail  (94.8% fail rate)
-#     DepthU=256 + SDURA=1 SDURB=1     →  85/221 fail  (38.5% fail rate)
+#     DepthU=256 + DepthUMX=0   (R=1)  →  85/221 fail  (38.5% fail rate)
 #
 # Within the failing path, the workhorse MT256x256x128 / MIWT=[8,8] /
 # WG=[2,2] tile failed 71/74 cases with geomean(norm_error)=0.033 and
@@ -17,9 +17,9 @@
 #
 # This test pins ForkParameters to that single tile + scheduler combo so
 # TensileLite builds *only* the failing kernel and the verify step actually
-# exercises it on every ProblemSize.  ScaleDepthURatioA/B=2 selects the
-# 256-element swizzled MX scale period over a DepthU=128 unroll, matching
-# the failing kernel's SDURA2_SDURB2 token.
+# exercises it on every ProblemSize.  DepthUMX=256 (R=DepthUMX/DepthU=2)
+# selects the 256-element swizzled MX scale period over a DepthU=128
+# unroll, matching the failing kernel's DUMX256 token.
 #
 # Expected behaviour:
 #   - Before the bug is fixed: the verify step FAILS on the failing sizes
@@ -38,8 +38,7 @@
 #   PrefetchGlobalRead:   [2]    → PGR2
 #   PrefetchLocalRead:    [0]    → PLR0
 #   DepthU:               [128]
-#   ScaleDepthURatioA:    [2]    → SDURA2 (matches failing kernel)
-#   ScaleDepthURatioB:    [2]    → SDURB2 (matches failing kernel)
+#   DepthUMX:             [256]  → DUMX256 (matches failing kernel)
 #   ScheduleIterAlg:      [3]    → SIA3
 #   DirectToLds:          [1]    → DTL=1
 #   StreamK:              [3]    → SK3
@@ -108,8 +107,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead:  [0]
         - DepthU: [128]
-        - ScaleDepthURatioA: [2]
-        - ScaleDepthURatioB: [2]
+        - DepthUMX: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [3]

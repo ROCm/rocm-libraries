@@ -4210,7 +4210,11 @@ class KernelWriterAssembly(KernelWriter):
             # MX-scale, so it stays at DepthU.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
             if isMxSwizzledScaleLayout:
-              scaleR     = kernel.get("ScaleDepthURatio%s" % tcab, 1)
+              # R = DepthUMX / DepthU (1 when DepthUMX == 0).  Under R>1 the
+              # MX scale swizzled layout's per-fetch K span is R*DepthU in
+              # data elements; otherwise it collapses to DepthU.
+              _duMX      = int(kernel.get("DepthUMX", 0))
+              scaleR     = (_duMX // kernel["DepthU"]) if _duMX > 0 else 1
               scaleSpanK = scaleR * kernel["DepthU"]
             else:
               scaleSpanK = kernel["DepthU"]

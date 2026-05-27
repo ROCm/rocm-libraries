@@ -2179,11 +2179,11 @@ class TestBuildLoopVariants_PGR0:
 
 
 # ══════════════════════════════════════════════════════════════
-# ScaleDepthURatio R=2 (MX subtile decoupled scale DU)
+# DepthUMX (R=DepthUMX/DepthU=2) — MX subtile decoupled scale DU
 # ══════════════════════════════════════════════════════════════
 
 def test_scheduler_R2_FP8_MT256():
-    """MT256x256x128 FP8 with ScaleDepthURatio{A,B}=2.
+    """MT256x256x128 FP8 with DepthU=128 + DepthUMX=256 (R=2).
 
     Models the configuration emitted by Solution.py for the
     subtile_mxfp8_mt256.yaml regression: data DU=128 (data_numSubIterK=1)
@@ -2391,7 +2391,7 @@ def test_scheduler_R2_FP8_MT256_partN2_R1_baseline_unchanged():
 
 
 def test_data_gr_inc_lr_inc_emit_split_R2():
-    """Data gr_inc / lr_inc emit contract for ScaleDepthURatio=2.
+    """Data gr_inc / lr_inc emit contract for DepthUMX=256 (R=2).
 
     Verifies the InstructionEmitter contract that fixes the R=2 PGR=2
     correctness bug observed in MT256x256x128 MXFP8 (subtile_mxfp8_mt256

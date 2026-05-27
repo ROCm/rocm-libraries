@@ -1,5 +1,5 @@
 ########################################
-# MXFP8 TN — MT 256x256, DU=128, ScaleDepthURatio{A,B}=2, PGR=2 perf benchmark
+# MXFP8 TN — MT 256x256, DU=128, DepthUMX=256 (R=2), PGR=2 perf benchmark
 #
 # Companion perf yaml for subtile_mxfp8_mt256.yaml. NOT a correctness test:
 #   * NumElementsToValidate: 0  (skip CPU compare)
@@ -58,7 +58,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # FP8 TN — PGR=2 (scheduler path), MT 256x256, DU=128, ScaleDepthURatio{A,B}=2
+  # FP8 TN — PGR=2 (scheduler path), MT 256x256, DU=128, DepthUMX=256 (R=2)
   ########################################
   -
     - # ProblemType
@@ -84,8 +84,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [128]                 # data DU = MI_K (half native)
-        - ScaleDepthURatioA: [2]        # scale DU = 2 * data DU = 256
-        - ScaleDepthURatioB: [2]
+        - DepthUMX: [256]               # effective scale DU = 256 (R=2)
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [3]

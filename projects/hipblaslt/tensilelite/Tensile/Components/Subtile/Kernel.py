@@ -400,7 +400,12 @@ class TileInfo:
         # K span covered by ONE scale fetch (== R body iters' worth of data K).
         # When R == 1 self.scaleDepthU == self.depthU so all downstream grids
         # are bit-identical to the prior implementation.
-        self.scaleSchedulingPeriod = int(kernel.get(f"ScaleDepthURatio{_tc}", 1))
+        #
+        # R is derived from the user-visible DepthUMX knob:
+        #   DepthUMX == 0 → R = 1; DepthUMX > 0 → R = DepthUMX / DepthU.
+        _duRaw = int(kernel["_DepthU%s" % _tc])
+        _duMX = int(kernel.get("DepthUMX", 0))
+        self.scaleSchedulingPeriod = (_duMX // _duRaw) if _duMX > 0 else 1
         _mxBlock = geometry.scaleLayout.mxBlock
         self.depthU = kernel["_DepthU%s" % _tc]
         self.scaleDepthU = kernel["_DepthUMXS%s" % _tc] * _mxBlock
@@ -1153,7 +1158,7 @@ def mainLoop(writer, kernel):
   grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   numSubIterK = tiA.localMMATileGrid[1]
   # R-period: data body iters per scale fetch.  R == 1 for non-MX and for
-  # ScaleDepthURatio == 1 (no scheduler change for those cases).
+  # DepthUMX == 0 (no scheduler change for those cases).
   scaleSchedulingPeriod = 1
   if scaleTiA is not None:
     scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiA, 'scaleSchedulingPeriod', 1))
@@ -1169,8 +1174,8 @@ def mainLoop(writer, kernel):
   # right ui.  R==1 makes the division a no-op.
   def _div_r(v):
     assert v % R == 0, (
-      f"scale granularity {v} not divisible by ScaleDepthURatio={R}; check "
-      f"scaleDepthU/MXScale geometry sizing")
+      f"scale granularity {v} not divisible by R={R} (R=DepthUMX/DepthU); "
+      f"check scaleDepthU/MXScale geometry sizing")
     return v // R
   lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0],
                              k=_div_r(scaleTiA.lrSubtileShape[1])) if scaleTiA else None

@@ -139,8 +139,8 @@ class ReadGranularity:
 class SchedulerConfig:
     """Configuration for the MFMATile-based scheduler.
 
-    scaleSchedulingPeriod (R) = ScaleDepthURatio: data body iters per scale
-    fetch.  R==1 is the historical behavior; R>1 is used by the MXFP8
+    scaleSchedulingPeriod (R) = DepthUMX // DepthU: data body iters per
+    scale fetch.  R==1 is the historical behavior; R>1 is used by the MXFP8
     MT256x256/DU=128 path.  R>1 keeps numSubIterK at the data-side value;
     the R-period cadence is realised at the EMIT layer:
       - assign_vgpr_tiles forces unroll_factor = lcm(natural, R) (R distinct
@@ -2134,7 +2134,7 @@ class LogicalScheduler:
           to C1 (R-1) for PGR=0 would leave the first iter's C0 LR
           reading uninitialised LDS.  The GR/LR race fix only applies
           where PRELOOP supplies the first R-period's scale data, i.e.
-          PGR>=2 with mxfp8 ScaleDepthURatio>1.
+          PGR>=2 with mxfp8 DepthUMX>0 (R>1).
 
         R==1 is a no-op: every op stays ``ui_slot=None`` and the populate
         path is bit-identical to the pre-refactor "scale_op_gated_out=False"
@@ -2326,7 +2326,7 @@ class LogicalScheduler:
         Each unique (tensor, tile-range, k-range) appears exactly once.
 
         MX-scale R>1 widening: when ``hasScale and R > 1`` (the mxfp8
-        ScaleDepthURatio>1 path), PRELOOP MT=1 must cover ALL partitions
+        DepthUMX>0 path; R=DepthUMX/DepthU), PRELOOP MT=1 must cover ALL partitions
         — not just partition 0 — because the GR/LR cadence for scale
         prefetches one full R-period of scale + paired data into LDS, and
         mainloop iter 0's partition>0 reads have no other in-flight source

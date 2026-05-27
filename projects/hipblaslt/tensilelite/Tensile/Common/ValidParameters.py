@@ -416,13 +416,18 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
-    # For UseSubtileImpl=1 MX subtile path: multiplies scale GR/LR DepthU by
-    # this factor so the scale fetch cadence runs at 1/R of the data cadence.
-    # Default 1 (no decoupling).
-    # R>2 requires a wider op_sel byte scheme; see
-    # LogicalScheduler.SchedulerConfig.__post_init__ (asserts R*numSubIterK_data<=2).
-    "ScaleDepthURatioA": [1, 2],
-    "ScaleDepthURatioB": [1, 2],
+    # DepthUMX: absolute effective DepthU (in data elements) for MX scale fetches.
+    # The user-visible knob for the scale/data DepthU split. 0 means "use
+    # DepthU" (R=1, default, no decoupling). When > 0 it must be a positive
+    # multiple of DepthU and the scheduler runs at the implied period
+    # R = DepthUMX / DepthU.
+    #
+    # Allowed list is intentionally restricted to {0, 256} per nakajee's review
+    # on PR 7781 ("better to restrict the use case of DepthUMX to 256 or 0;
+    # allowing 512 needs special care for odd-exit K-not-multiple-of-512
+    # cases") and the local team decision to defer the wider-K work. Only the
+    # mxfp8 MT256x256 + DU=128 + R=2 path is exercised today.
+    "DepthUMX": [0, 256],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
