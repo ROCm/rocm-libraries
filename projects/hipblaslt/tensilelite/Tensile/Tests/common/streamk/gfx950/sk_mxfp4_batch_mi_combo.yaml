@@ -14,7 +14,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   PrintLevel: 2
-  PrintSolutionRejectionReason: True
+  # PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
   MaxWorkspaceSize: 134217728
   MXScaleFormat: 1
@@ -49,8 +49,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 1, 1, 2, 2]
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
@@ -59,34 +57,13 @@ BenchmarkProblems:
           - [32, 16, 128, 1, 1, 2, 2, 2, 2]
           - [32, 16, 128, 1, 1, 4, 4, 2, 2]
         - DepthU: [256]
-        - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
-        - LDSTrInst: [True]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
         - SourceSwap: [0]
-        - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [0]
-        - GlobalReadVectorWidthA: [32]
-        - GlobalReadVectorWidthB: [32]
-        - ExpandPointerSwap: [0]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
-        - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [0]
-        - DirectToVgprSparseMetadata: [0]
-        - StoreVectorWidth: [-1]
         - DirectToLds: [1]
-        - StreamK:
         - StreamK: [3]
         - StaggerU: [0]
-        - DirectToVgprA: [False]
-        - DirectToVgprB: [False]
         - WavefrontSize: [64]
         - WorkGroupMapping: [1]
         - UseSubtileImpl: [1]
