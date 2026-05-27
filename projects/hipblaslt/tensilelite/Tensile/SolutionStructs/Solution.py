@@ -735,26 +735,13 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
           return
 
-      depthUMX = state.get("DepthUMX", 0)
-      scaleDepthUData = depthUMX if depthUMX > 0 else state["DepthU"]
-      if depthUMX > 0:
-        if depthUMX < state["DepthU"]:
-          reject(state, printRejectionReason, f"DepthUMX={depthUMX} must be >= DepthU={state['DepthU']}")
-        if depthUMX % state["DepthU"] != 0:
-          reject(state, printRejectionReason, f"DepthUMX={depthUMX} must be a multiple of DepthU={state['DepthU']}")
-        if depthUMX > state["DepthU"] and state["PrefetchGlobalRead"] > 1:
-          reject(state, printRejectionReason,
-                 f"DepthUMX={depthUMX} with DepthU={state['DepthU']} already prefetches "
-                 f"{depthUMX // state['DepthU']}x DepthU ahead; PrefetchGlobalRead={state['PrefetchGlobalRead']} "
-                 f"would overwrite LDS buffers that haven't been consumed yet")
-
       bytesLoaded = state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
-        numBytesMXSA = (scaleDepthUData // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
+        numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
         if bytesLoaded < numBytesMXSA:
           reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
       if state["ProblemType"]["MXBlockB"]:
-        numBytesMXSB = (scaleDepthUData // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
+        numBytesMXSB = (state["DepthU"] // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
         if bytesLoaded < numBytesMXSB:
           reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
@@ -2423,19 +2410,30 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
-      depthUMX = state.get("DepthUMX", 0)
-      effectiveDepthU = depthUMX if depthUMX > 0 else depthU
+      if state["MXScaleFormat"] == "HostPreSwizzle":
+        swizzleSize1 = 256
+        mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+        if mxBlock:
+          dataDU = depthU * state["MatrixInstK"] // swizzleSize1
+          if dataDU < depthU:
+            depthUA = dataDU
+            depthUB = dataDU
+            if state["PrefetchGlobalRead"] > 1:
+              reject(state, printRejectionReason,
+                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) already "
+                     f"prefetches {depthU // dataDU}x data DU ahead; "
+                     f"PrefetchGlobalRead={state['PrefetchGlobalRead']} would overwrite "
+                     f"LDS buffers that haven't been consumed yet")
 
-      state["_RawDepthU"] = depthU
-      state["_DepthU"] = effectiveDepthU
-      state["DepthU"] = effectiveDepthU
+      state["_DepthU"] = depthU
+      state["DepthU"] = depthU
 
       state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = effectiveDepthU // state["ProblemType"]["MXBlockA"]
+        state["_DepthUMXSA"] = depthU // state["ProblemType"]["MXBlockA"]
       state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = effectiveDepthU // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # Auto-derived VW must keep LdsBlockSizePerPad <= 1024 bytes
@@ -3470,7 +3468,7 @@ class Solution(collections.abc.Mapping):
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
-          state["DepthU"] = state.get("_DepthU", depthU)
+          state["DepthU"] = depthU
           break
 
         # this depthU not valid

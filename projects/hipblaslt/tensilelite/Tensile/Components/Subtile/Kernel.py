@@ -389,11 +389,8 @@ class TileInfo:
     # --- Extract kernel config ---
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
       self.macroTile = kernel["MacroTileA"] if isA else kernel["MacroTileB"]
-      # MXScaleTilePair uses effective DepthU (= DepthUMX when set, else DepthU)
-      # so its MMA tile grid spans the full scale K range.
-      # ABTilePair uses the per-TC DepthU key directly (_DepthUA stays at raw DepthU).
       if isinstance(geometry, MXScaleTilePair):
-        self.depthU = kernel["DepthU"]  # effective DU (needed by globalMMATileGrid)
+        self.depthU = kernel["DepthU"]
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]
