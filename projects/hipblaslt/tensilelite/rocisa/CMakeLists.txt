@@ -104,6 +104,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         list(APPEND _rocisa_nb_flags STABLE_ABI)
     endif()
 
+    set(_TL_EMIT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../cpp")
     nanobind_add_module(_rocisa ${_rocisa_nb_flags}
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base.cpp"
@@ -117,9 +118,12 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/register.cpp"
                             ${ROCISAINST_SOURCE}
                             ${ROCISAPASS_SOURCE}
-                            ${ROCISAFUNC_SOURCE})
+                            ${ROCISAFUNC_SOURCE}
+                            "${_TL_EMIT_DIR}/src/emit_mfma.cpp"
+                            "${_TL_EMIT_DIR}/src/tl_emit_bindings.cpp")
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
+        "${_TL_EMIT_DIR}/include"
     )
 
     # Locate stinkytofu: prefer installed package, fall back to monorepo sibling.

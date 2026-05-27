@@ -1011,63 +1011,42 @@ def _selectF8F6F4InstType(kernel):
 # emit corresponding mfma instruction
 #
 def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTileD, scaleAVgpr=-1, scaleBVgpr=-1, scaleAsel=-1, scaleBsel=-1, comment = ""):
-  module = Module()
-
-  vgprAStart = vgprTileA.regList.indices[0]
-  vgprBStart = vgprTileB.regList.indices[0]
-  vgprCStart = vgprTileC.regList.indices[0]
-  vgprDStart = vgprTileD.regList.indices[0]
-
-  opASize = len(vgprTileA.regList.indices)
-  opBSize = len(vgprTileB.regList.indices)
-  opCSize = len(vgprTileC.regList.indices)
-  opDSize = len(vgprTileD.regList.indices)
-
-  # For subtile kernels with agpr overflow, D/C tiles that spilled to the vgpr
-  # pool must use vgpr() in the MFMA operands, not accvgpr().
-  dIsVgpr = (vgprTileD.regList.pool == writer.vgprPool)
-  cIsVgpr = (vgprTileC.regList.pool == writer.vgprPool)
-  dAccAlias = vgpr if (dIsVgpr or kernel["MIArchVgpr"]) else accvgpr
-  cAccAlias = vgpr if (cIsVgpr or kernel["MIArchVgpr"]) else accvgpr
-
-  aOperand = vgpr(vgprBStart,opBSize) if kernel["SourceSwap"] else vgpr(vgprAStart,opASize)
-  bOperand = vgpr(vgprAStart,opASize) if kernel["SourceSwap"] else vgpr(vgprBStart,opBSize)
+  from rocisa._rocisa.tl_emit import emitMfmaInstruction as _cpp_emitMfma
 
   miK = kernel["MatrixInstK"]
+  mxInstType = _selectF8F6F4InstType(kernel) if miK == 128 else InstType.INST_BF16
 
-  if miK == 128:
-    # MX FP4: 16x16x128
-    mxInstType = _selectF8F6F4InstType(kernel)
-    if scaleAVgpr >= 0 and scaleBVgpr >= 0:
-      # Use actual loaded scale VGPRs
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
-                                   comment=comment))
-    else:
-      # Fallback: hardcoded scale 0x7f (scale=1.0 for all elements)
-      tmpVgprScale = writer.vgprPool.checkOut(1)
-      module.add(VMovB32(dst=vgpr(tmpVgprScale), src=hex(0x7f7f7f7f), comment="hardcoded scale 0x7f (E8M0)"))
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(tmpVgprScale), mxsb=vgpr(tmpVgprScale), \
-                                   comment=comment))
-      writer.vgprPool.checkIn(tmpVgprScale)
-  else:
-    # BF16: 16x16x32
-    module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
-                               acc=dAccAlias(vgprDStart,opDSize), \
-                               a=aOperand, \
-                               b=bOperand, \
-                               acc2=cAccAlias(vgprCStart,opCSize), \
-                               comment=comment))
+  dIsVgpr = (vgprTileD.regList.pool == writer.vgprPool)
+  cIsVgpr = (vgprTileC.regList.pool == writer.vgprPool)
+
+  tmpScaleVgpr = -1
+  if miK == 128 and scaleAVgpr < 0:
+    tmpScaleVgpr = writer.vgprPool.checkOut(1)
+
+  module = _cpp_emitMfma(
+      mxInstTypeInt=mxInstType.value,
+      miK=miK,
+      sourceSwap=kernel["SourceSwap"],
+      miArchVgpr=kernel["MIArchVgpr"],
+      vgprAStart=vgprTileA.regList.indices[0],
+      opASize=len(vgprTileA.regList.indices),
+      vgprBStart=vgprTileB.regList.indices[0],
+      opBSize=len(vgprTileB.regList.indices),
+      vgprCStart=vgprTileC.regList.indices[0],
+      opCSize=len(vgprTileC.regList.indices),
+      cIsAccvgpr=not cIsVgpr and not kernel["MIArchVgpr"],
+      vgprDStart=vgprTileD.regList.indices[0],
+      opDSize=len(vgprTileD.regList.indices),
+      dIsAccvgpr=not dIsVgpr and not kernel["MIArchVgpr"],
+      scaleAVgpr=scaleAVgpr,
+      scaleBVgpr=scaleBVgpr,
+      scaleAsel=scaleAsel,
+      scaleBsel=scaleBsel,
+      tmpScaleVgpr=tmpScaleVgpr,
+      comment=comment)
+
+  if tmpScaleVgpr >= 0:
+    writer.vgprPool.checkIn(tmpScaleVgpr)
 
   return module
 

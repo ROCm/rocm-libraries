@@ -9,7 +9,7 @@
 
 namespace tl_emit
 {
-    std::shared_ptr<rocisa::Module> emitMfmaInstruction(rocisa::InstType mxInstType,
+    std::shared_ptr<rocisa::Module> emitMfmaInstruction(int              mxInstTypeInt,
                                                         int              miK,
                                                         bool             sourceSwap,
                                                         bool             miArchVgpr,

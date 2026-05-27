@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 add_subdirectory(rocisa)
-add_subdirectory(cpp)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

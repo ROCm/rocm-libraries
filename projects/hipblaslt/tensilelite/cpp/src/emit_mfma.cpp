@@ -9,7 +9,7 @@
 
 namespace tl_emit
 {
-    std::shared_ptr<rocisa::Module> emitMfmaInstruction(rocisa::InstType mxInstType,
+    std::shared_ptr<rocisa::Module> emitMfmaInstruction(int              mxInstTypeInt,
                                                         int              miK,
                                                         bool             sourceSwap,
                                                         bool             miArchVgpr,
@@ -32,7 +32,8 @@ namespace tl_emit
     {
         using namespace rocisa;
 
-        auto module = std::make_shared<Module>();
+        auto mxInstType = static_cast<InstType>(mxInstTypeInt);
+        auto module     = std::make_shared<Module>();
 
         auto dAcc = (miArchVgpr || !dIsAccvgpr) ? vgpr(vgprDStart, opDSize)
                                                  : accvgpr(vgprDStart, opDSize);
@@ -68,7 +69,7 @@ namespace tl_emit
             else
             {
                 module->addT<VMovB32>(vgpr(tmpScaleVgpr),
-                                      static_cast<int>(0x7f7f7f7f),
+                                      std::string("0x7f7f7f7f"),
                                       std::nullopt,
                                       "hardcoded scale 0x7f (E8M0)");
                 module->addT<MXMFMAInstruction>(mxInstType,

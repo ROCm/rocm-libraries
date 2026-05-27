@@ -38,6 +38,7 @@ void init_macro(nb::module_ m);
 void init_func(nb::module_ m);
 void init_register(nb::module_ m);
 void init_stinkytofu(nb::module_ m);
+void init_tl_emit(nb::module_ m);
 
 NB_MODULE(_rocisa, m)
 {
@@ -55,4 +56,5 @@ NB_MODULE(_rocisa, m)
     init_func(m);
     init_register(m);
     init_stinkytofu(m);
+    init_tl_emit(m);
 }
