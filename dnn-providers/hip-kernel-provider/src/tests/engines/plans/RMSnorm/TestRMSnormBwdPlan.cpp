@@ -227,7 +227,7 @@ TEST(TestRMSnormBwdPlan, CompileCallsCompilerWithCorrectKernelName)
     setupMockCompileChain();
 }
 
-TEST(TestRMSnormBwdPlan, CompileFp32SetsCorrectDefines)
+TEST(TestRMSnormBwdPlanFp32, CompileSetsCorrectDefines)
 {
     auto [mockCompiler, capturedOptions] = setupMockCompileChain();
 
@@ -248,7 +248,7 @@ TEST(TestRMSnormBwdPlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
-TEST(TestRMSnormBwdPlan, CompileFp16SetsCorrectDefines)
+TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefines)
 {
     auto [mockCompiler, capturedOptions]
         = setupMockCompileChain({150528, 50176, 224, 1},
@@ -272,7 +272,7 @@ TEST(TestRMSnormBwdPlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
-TEST(TestRMSnormBwdPlan, CompileBFp16SetsCorrectDefines)
+TEST(TestRMSnormBwdPlanBFp16, CompileSetsCorrectDefines)
 {
     auto [mockCompiler, capturedOptions]
         = setupMockCompileChain({150528, 50176, 224, 1},
