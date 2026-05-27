@@ -261,6 +261,16 @@ class StreamK(Component):
         there is one scale element per MXBlock data elements.
         For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
         is 32 * 256 so an additional *32 multiplier is needed.
+
+        Under UseSubtileImpl with ScaleDepthURatio{A,B} = R > 1, the kernel-
+        level `_DepthU{MXSA,MXSB}` already encodes one *scale fetch* worth
+        of K (= R * data_DU // MXBlock) rather than one *body iter*'s worth.
+        StreamK pre-advance, however, is keyed on body iters (`StreamKLocalStart`
+        counts data-DU iters), so the per-iter byte stride here must be the
+        *per-body* scale span, i.e. data_DU // MXBlock * 32, regardless of R.
+        Without this division the SK partial-tile setup over-advances SrdMXS{A,B}
+        by R, producing wrong scales on every SK partial tile (was the cause of
+        one mt256 K=4096 PGR=2 SK partial failure).
         """
         key = "_DepthU%s" % tc
         if key in kernel:
@@ -269,7 +279,11 @@ class StreamK(Component):
                 # UseSubtileImpl MX swizzled(pre shuffle) case: swizzled block size is 32 * 256,
                 # so the effective K stride for the scale tensor is DepthU * 32.
                 # Non-subtile MX kernels use the raw _DepthU (scale elements per tile in K).
-                _DepthU = (_DepthU * 32)
+                # _DepthU{MXSA,MXSB} encodes R*data_DU/MXBlock; divide by R so the stride
+                # represents *one body iter* (StreamK pre-advance is body-iter keyed).
+                tcab = "A" if tc == "MXSA" else "B"
+                R = int(kernel.get("ScaleDepthURatio%s" % tcab, 1))
+                _DepthU = (_DepthU * 32) // R
             return _DepthU
         return kernel["DepthU"]
 
