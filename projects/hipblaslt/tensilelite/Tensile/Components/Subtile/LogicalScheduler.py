@@ -2098,8 +2098,8 @@ class LogicalScheduler:
                     em.tensorParametersMap['A'],
                     em.tensorParametersMap['B']),
                 label="tail_boundary_ab"))
-            preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
-            preamble.append(SyncOp())
+        preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
+        preamble.append(SyncOp())
         
 
         # Loop over partitions to re-use vgpr tile maps.
