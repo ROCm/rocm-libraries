@@ -53,8 +53,11 @@ int main(int argc, char* argv[])
     try
     {
 #if CK_TILE_USE_WMMA
+        std::cout << "WMMA\n";
         return !run_grouped_conv_fwd_example<ConvConfigComputeV3_WMMA>(argc, argv);
+        // return !run_grouped_conv_fwd_example<ConvConfigComputeTDMV1>(argc, argv);
 #else
+        std::cout << "XDL\n";
         return !run_grouped_conv_fwd_example<ConvConfigComputeV3>(argc, argv);
 #endif
     }

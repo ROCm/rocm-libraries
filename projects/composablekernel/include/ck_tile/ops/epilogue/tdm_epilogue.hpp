@@ -52,6 +52,17 @@ struct TdmEpilogue
 
     static constexpr index_t NumDTensor = Problem::NumDTensor;
 
+    CDElementwise elfunc_;
+
+    CK_TILE_DEVICE TdmEpilogue(CDElementwise elfunc = CDElementwise{}) : elfunc_(elfunc) {};
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
+    {
+        // clang-format off
+        return concat('_', "TDMEpilogue");
+        // clang-format on
+    }
+
     // no use of vector store in TDM epilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeC() { return 1; }
     template <index_t I>

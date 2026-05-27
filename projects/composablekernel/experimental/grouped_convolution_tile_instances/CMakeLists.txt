@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-if(GPU_TARGETS MATCHES "gfx9")
+if(GPU_TARGETS MATCHES "gfx9|gfx1250")
   # Generate instances using python script if instance directories don't exist
   set(INSTANCES_DIR ${CMAKE_CURRENT_BINARY_DIR})
   if(NOT EXISTS ${INSTANCES_DIR}/forward OR

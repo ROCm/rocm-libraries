@@ -287,7 +287,7 @@ struct ConvConfigComputeTDMV1 : public ConvConfigBase
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile = 32;
 
-    static constexpr bool DoubleSmemBuffer          = false;
+    static constexpr bool DoubleSmemBuffer          = true;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_TDM_V1;
 };
 
@@ -401,3 +401,28 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V6>
     template <typename PipelineProblem>
     using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV6<PipelineProblem>;
 };
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline =
+        ck_tile::GemmPipelineAgBgCrCompTDMV1<PipelineProblem,
+                                             ck_tile::GemmPipelineAgBgCrCompTDMDefaultPolicy<
+                                                 false,
+                                                 PipelineProblem::Traits::DataCachePrefetchA,
+                                                 PipelineProblem::Traits::DataCachePrefetchB>>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline =
+        ck_tile::GemmPipelineAgBgCrCompTDMV2<PipelineProblem,
+                                             ck_tile::GemmPipelineAgBgCrCompTDMDefaultPolicy<
+                                                 true,
+                                                 PipelineProblem::Traits::DataCachePrefetchA,
+                                                 PipelineProblem::Traits::DataCachePrefetchB>>;
+};
+
