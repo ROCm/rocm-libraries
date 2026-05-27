@@ -88,14 +88,15 @@ rocblas_reduction_kernel_part1(rocblas_int    n,
                                rocblas_int    batch_count,
                                To*            workspace)
 {
-    int64_t tid = blockIdx.x * NB + threadIdx.x;
-    To      sum = 0;
 
     uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
 #endif
+        int64_t tid = blockIdx.x * NB + threadIdx.x;
+        To      sum = 0;
+
         const auto* x = load_ptr_batch(xvec, batch, shiftx, stridex);
 
         // sum WIN elements per thread
