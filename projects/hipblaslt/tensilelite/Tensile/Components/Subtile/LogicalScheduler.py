@@ -2088,18 +2088,18 @@ class LogicalScheduler:
         # granularity on OOB). We patch it with a 16-bit DTL load. Wider
         # dtypes (e.g. fp4 read at K=32 granularity) don't have this issue,
         # so we skip emission entirely for them.
-        preamble.append(SyncOp())
-        preamble.append(InlineModuleOp(
-            build=lambda em: (
-                em.writer.tailLoopBoundaryDtlLoadAB(
+        if self._kernel["ProblemType"]["DataType"].isBFloat16():
+            # We need to wait for other SIMD before placing the DTL load
+            # (as we'll write twice to this address : OOB Zero then fixup load)
+            preamble.append(SyncOp())
+            preamble.append(InlineModuleOp(
+                build=lambda em: em.writer.tailLoopBoundaryDtlLoadAB(
                     em.kernel,
                     em.tensorParametersMap['A'],
-                    em.tensorParametersMap['B'])
-                if em.kernel["ProblemType"]["DataType"].isBFloat16()
-                else None),
-            label="tail_boundary_ab"))
-        preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
-        preamble.append(SyncOp())
+                    em.tensorParametersMap['B']),
+                label="tail_boundary_ab"))
+            preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
+            preamble.append(SyncOp())
         
 
         # Loop over partitions to re-use vgpr tile maps.
@@ -2602,6 +2602,8 @@ class LogicalScheduler:
         if self._preloop_emitted is None or self._ngll_emitted is None \
                 or self._nll_emitted is None:
             self.build()
+
+        self._kernel = kernel
 
         from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
