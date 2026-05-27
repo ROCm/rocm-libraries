@@ -1,0 +1,51 @@
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:166: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:181: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:193: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:205: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:217: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:228: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:239: Skipped
+
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:119: Skipped
+Skipping fusion plan test on unsupported arch
+
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bad_fusion_plan.cpp:253: Skipped
+
+
+[==========] 8 tests from 1 test suite ran. (640 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 8 tests.

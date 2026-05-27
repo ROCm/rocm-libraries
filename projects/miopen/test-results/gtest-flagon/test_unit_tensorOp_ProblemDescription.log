@@ -1,0 +1,26 @@
+[==========] Running 9 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 9 tests from Full/CPU_TensorOpProblemDescription_NONE
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/0
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/0 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/1
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/1 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/2
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/2 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/3
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/3 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/4
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/4 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/5
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/5 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/6
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/6 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/7
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/7 (0 ms)
+[ RUN      ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/8
+[       OK ] Full/CPU_TensorOpProblemDescription_NONE.TensorOpProblemDescription/8 (0 ms)
+[----------] 9 tests from Full/CPU_TensorOpProblemDescription_NONE (823 ms total)
+
+[----------] Global test environment tear-down
+[==========] 9 tests from 1 test suite ran. (823 ms total)
+[  PASSED  ] 9 tests.

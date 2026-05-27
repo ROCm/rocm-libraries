@@ -1,0 +1,65 @@
+[==========] Running 7 tests from 7 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP16.ConvOclDirectFwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP16.ConvOclDirectFwd/0 (1011 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP16 (1011 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP16.ConvOclDirectFwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP16.ConvOclDirectFwd/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_BFP16.ConvOclDirectFwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_BFP16.ConvOclDirectFwd/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_BFP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_BFP16.ConvOclDirectFwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_BFP16.ConvOclDirectFwd/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_BFP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP32.ConvOclDirectFwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP32.ConvOclDirectFwd/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP32.ConvOclDirectFwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP32.ConvOclDirectFwd/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverOclDirectFwdDevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverOclDirectFwdDevApplicabilityFwd_NONE.ConvOclDirectFwd/0
+[       OK ] Smoke/CPU_UnitTestConvSolverOclDirectFwdDevApplicabilityFwd_NONE.ConvOclDirectFwd/0 (41 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverOclDirectFwdDevApplicabilityFwd_NONE (41 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 7 test suites ran. (1053 ms total)
+[  PASSED  ] 1 test.
+[  SKIPPED ] 6 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP16.ConvOclDirectFwd/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP16.ConvOclDirectFwd/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_BFP16.ConvOclDirectFwd/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_BFP16.ConvOclDirectFwd/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdFwd_FP32.ConvOclDirectFwd/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclDirectFwdBwd_FP32.ConvOclDirectFwd/0

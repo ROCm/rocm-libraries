@@ -1,0 +1,203 @@
+[==========] Running 96 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 84 tests from Smoke/CPU_tensor_nxd_NONE
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/0
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/0 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/1
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/1 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/2
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/2 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/3
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/3 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/4
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/4 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/5
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/5 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/6
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/6 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/7
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/7 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/8
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/8 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/9
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/9 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/10
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/10 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/11
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/11 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/12
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/12 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/13
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/13 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/14
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/14 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/15
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/15 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/16
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/16 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/17
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/17 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/18
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/18 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/19
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/19 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/20
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensor/20 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/0
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/0 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/1
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/1 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/2
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/2 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/3
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/3 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/4
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/4 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/5
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/5 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/6
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/6 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/7
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/7 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/8
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/8 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/9
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/9 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/10
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/10 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/11
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/11 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/12
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/12 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/13
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/13 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/14
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/14 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/15
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/15 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/16
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/16 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/17
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/17 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/18
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/18 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/19
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/19 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/20
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorLengths/20 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/0
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/0 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/1
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/1 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/2
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/2 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/3
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/3 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/4
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/4 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/5
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/5 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/6
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/6 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/7
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/7 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/8
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/8 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/9
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/9 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/10
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/10 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/11
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/11 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/12
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/12 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/13
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/13 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/14
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/14 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/15
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/15 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/16
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/16 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/17
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/17 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/18
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/18 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/19
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/19 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/20
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorStrides/20 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/0
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/0 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/1
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/1 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/2
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/2 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/3
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/3 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/4
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/4 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/5
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/5 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/6
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/6 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/7
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/7 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/8
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/8 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/9
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/9 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/10
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/10 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/11
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/11 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/12
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/12 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/13
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/13 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/14
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/14 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/15
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/15 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/16
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/16 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/17
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/17 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/18
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/18 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/19
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/19 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/20
+[       OK ] Smoke/CPU_tensor_nxd_NONE.TestGetTensorBytes/20 (0 ms)
+[----------] 84 tests from Smoke/CPU_tensor_nxd_NONE (753 ms total)
+
+[----------] 12 tests from Smoke/CPU_tensor_n4d_NONE
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/0
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/0 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/1
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/1 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/2
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/2 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/3
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/3 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/4
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/4 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/5
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGet4DTensor/5 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/0
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/0 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/1
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/1 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/2
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/2 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/3
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/3 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/4
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/4 (0 ms)
+[ RUN      ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/5
+[       OK ] Smoke/CPU_tensor_n4d_NONE.TestGetTensorIndex/5 (0 ms)
+[----------] 12 tests from Smoke/CPU_tensor_n4d_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 96 tests from 2 test suites ran. (767 ms total)
+[  PASSED  ] 96 tests.

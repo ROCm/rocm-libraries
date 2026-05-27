@@ -1,0 +1,52 @@
+[==========] Running 6 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16.ConvHipImplicitGemmForwardV4R4Xdlops/0 (758 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16 (758 ms total)
+
+[----------] 1 test from Full/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16
+[ RUN      ] Full/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16.ConvHipImplicitGemmForwardV4R4Xdlops/0 (0 ms)
+[----------] 1 test from Full/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_BFP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_BFP16.ConvHipImplicitGemmForwardV4R4Xdlops/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_BFP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP32.ConvHipImplicitGemmForwardV4R4Xdlops/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP32.ConvHipImplicitGemmForwardV4R4Xdlops/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_BFP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_BFP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+[       OK ] Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_BFP16.ConvHipImplicitGemmForwardV4R4Xdlops/0 (81 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_BFP16 (82 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_FP32
+[ RUN      ] Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_FP32.ConvHipImplicitGemmForwardV4R4Xdlops/0
+[       OK ] Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_FP32.ConvHipImplicitGemmForwardV4R4Xdlops/0 (67 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_FP32 (67 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 6 test suites ran. (908 ms total)
+[  PASSED  ] 2 tests.
+[  SKIPPED ] 4 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+[  SKIPPED ] Full/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_BFP16.ConvHipImplicitGemmForwardV4R4Xdlops/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP32.ConvHipImplicitGemmForwardV4R4Xdlops/0

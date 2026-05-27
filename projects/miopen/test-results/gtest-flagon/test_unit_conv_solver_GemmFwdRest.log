@@ -1,0 +1,51 @@
+[==========] Running 9 tests from 9 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16.GemmFwdRest/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16.GemmFwdRest/0 (2215 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16 (2215 ms total)
+
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16
+[ RUN      ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16.GemmFwdRest/0
+[       OK ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16.GemmFwdRest/0 (4 ms)
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16 (4 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16.GemmFwdRest/0
+[       OK ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16.GemmFwdRest/0 (325 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16 (325 ms total)
+
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16
+[ RUN      ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16.GemmFwdRest/0
+[       OK ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16.GemmFwdRest/0 (233 ms)
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16 (233 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32.GemmFwdRest/0
+[       OK ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32.GemmFwdRest/0 (381 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32 (381 ms total)
+
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32
+[ RUN      ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32.GemmFwdRest/0
+[       OK ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32.GemmFwdRest/0 (229 ms)
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32 (229 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_I8
+[ RUN      ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_I8.GemmFwdRest/0
+[       OK ] Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_I8.GemmFwdRest/0 (250 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_I8 (250 ms total)
+
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_I8
+[ RUN      ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_I8.GemmFwdRest/0
+[       OK ] Full/GPU_UnitTestConvSolverGemmFwdRestFwd_I8.GemmFwdRest/0 (231 ms)
+[----------] 1 test from Full/GPU_UnitTestConvSolverGemmFwdRestFwd_I8 (231 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverGemmFwdRestDevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverGemmFwdRestDevApplicabilityFwd_NONE.GemmFwdRest/0
+[       OK ] Smoke/CPU_UnitTestConvSolverGemmFwdRestDevApplicabilityFwd_NONE.GemmFwdRest/0 (40 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverGemmFwdRestDevApplicabilityFwd_NONE (40 ms total)
+
+[----------] Global test environment tear-down
+[==========] 9 tests from 9 test suites ran. (3913 ms total)
+[  PASSED  ] 9 tests.

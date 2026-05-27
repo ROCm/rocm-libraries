@@ -1,0 +1,103 @@
+[==========] Running 43 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 42 tests from Full/GPU_BN_Spatial_FP32
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c3h224w224
+PRNG seed: 12345678
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c3h224w224 (3602 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c4h1024w2048
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c4h1024w2048 (21679 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c64h14w14
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c64h14w14 (1380 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c64h28w28
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c64h28w28 (1983 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c64h56w56
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c64h56w56 (1820 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c96h28w28
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c96h28w28 (1502 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c128h4w4
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c128h4w4 (1174 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c128h14w14
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c128h14w14 (1235 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c160h7w7
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c160h7w7 (1141 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h7w7
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h7w7 (1215 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h14w14
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h14w14 (1218 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h56w56
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h56w56 (2595 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h256w512
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h256w512 (40703 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c224h14w14
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c224h14w14 (1364 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c256h7w7
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c256h7w7 (1362 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c256h28w28
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c256h28w28 (1758 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c352h7w7
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c352h7w7 (1320 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c480h128w256
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c480h128w256 (25152 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c528h64w128
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c528h64w128 (7127 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c1024h1w1
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n8c1024h1w1 (1342 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n25c32h8w8
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n25c32h8w8 (1277 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n32c256h12w12
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n32c256h12w12 (1435 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c32h160w160
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c32h160w160 (7354 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c64h80w80
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c64h80w80 (4143 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c64h160w160
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c64h160w160 (11987 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c128h80w80
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c128h80w80 (6373 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c256h20w20
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c256h20w20 (1680 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c512h20w20
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n38c512h20w20 (2277 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c3h227w227
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c3h227w227 (4075 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c64h56w56
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c64h56w56 (2899 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c64h112w112
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c64h112w112 (9813 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c128h28w28
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c128h28w28 (2115 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c256h14w14
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c256h14w14 (1297 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c256h20w20
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c256h20w20 (2111 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c256h56w56
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c256h56w56 (9977 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c512h7w7
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c512h7w7 (778 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c512h20w20
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c512h20w20 (3436 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c512h28w28
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c512h28w28 (5996 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c2048h7w7
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n64c2048h7w7 (1270 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n128c16h32w32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/bn_spatial_test.cpp:1142: Skipped
+Invalid batch size for batch normalization
+
+[  SKIPPED ] Full/GPU_BN_Spatial_FP32.TestFloat32/n128c16h32w32 (5 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n192c1h8w8
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n192c1h8w8 (644 ms)
+[ RUN      ] Full/GPU_BN_Spatial_FP32.TestFloat32/n192c1024h1w1
+[       OK ] Full/GPU_BN_Spatial_FP32.TestFloat32/n192c1024h1w1 (1217 ms)
+[----------] 42 tests from Full/GPU_BN_Spatial_FP32 (202861 ms total)
+
+[----------] 1 test from Smoke/GPU_BN_Spatial_FP32
+[ RUN      ] Smoke/GPU_BN_Spatial_FP32.TestFloat32/n4c64h28w28
+[       OK ] Smoke/GPU_BN_Spatial_FP32.TestFloat32/n4c64h28w28 (1318 ms)
+[----------] 1 test from Smoke/GPU_BN_Spatial_FP32 (1318 ms total)
+
+[----------] Global test environment tear-down
+[==========] 43 tests from 2 test suites ran. (204180 ms total)
+[  PASSED  ] 42 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] Full/GPU_BN_Spatial_FP32.TestFloat32/n128c16h32w32

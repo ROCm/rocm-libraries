@@ -1,0 +1,94 @@
+[==========] Running 37 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from GPU_CkImplLoader_FP16
+[ RUN      ] GPU_CkImplLoader_FP16.LoaderLoadsForCurrentDevice
+[       OK ] GPU_CkImplLoader_FP16.LoaderLoadsForCurrentDevice (4385 ms)
+[ RUN      ] GPU_CkImplLoader_FP16.LoaderFillsValidKernels
+[       OK ] GPU_CkImplLoader_FP16.LoaderFillsValidKernels (2 ms)
+[ RUN      ] GPU_CkImplLoader_FP16.LoaderFillsValidKernelsWithTf32Fallback
+[       OK ] GPU_CkImplLoader_FP16.LoaderFillsValidKernelsWithTf32Fallback (1 ms)
+[ RUN      ] GPU_CkImplLoader_FP16.LoaderCachesPerDevice
+[       OK ] GPU_CkImplLoader_FP16.LoaderCachesPerDevice (0 ms)
+[ RUN      ] GPU_CkImplLoader_FP16.LoaderStripsDeviceSuffix
+[       OK ] GPU_CkImplLoader_FP16.LoaderStripsDeviceSuffix (0 ms)
+[----------] 5 tests from GPU_CkImplLoader_FP16 (4388 ms total)
+
+[----------] 5 tests from CPU_CkImplLoader_NONE
+[ RUN      ] CPU_CkImplLoader_NONE.LoaderFailsGracefullyForUnknownDevice
+MIOpen(HIP): Warning [OpenRuntimeLibraryForDevice] CK grouped conv library not found for device gfx_nonexistent: libMIOpenCKGroupedConv_gfx_nonexistent.so: cannot open shared object file: No such file or directory
+[       OK ] CPU_CkImplLoader_NONE.LoaderFailsGracefullyForUnknownDevice (0 ms)
+[ RUN      ] CPU_CkImplLoader_NONE.LoaderStripsDeviceSuffixWithoutGpu
+MIOpen(HIP): Warning [OpenRuntimeLibraryForDevice] CK grouped conv library not found for device gfx_ck_loader_suffix_unit_test: libMIOpenCKGroupedConv_gfx_ck_loader_suffix_unit_test.so: cannot open shared object file: No such file or directory
+[       OK ] CPU_CkImplLoader_NONE.LoaderStripsDeviceSuffixWithoutGpu (0 ms)
+[ RUN      ] CPU_CkImplLoader_NONE.LoaderFailsGracefullyWithInvalidEnvPath
+MIOpen(HIP): Warning [OpenRuntimeLibraryForDevice] CK grouped conv library not found for device gfx_ck_loader_invalid_env: libMIOpenCKGroupedConv_gfx_ck_loader_invalid_env.so: cannot open shared object file: No such file or directory
+[       OK ] CPU_CkImplLoader_NONE.LoaderFailsGracefullyWithInvalidEnvPath (0 ms)
+[ RUN      ] CPU_CkImplLoader_NONE.LoaderReturnsEmptyOnFailure
+MIOpen(HIP): Warning [OpenRuntimeLibraryForDevice] CK grouped conv library not found for device gfx_bogus: libMIOpenCKGroupedConv_gfx_bogus.so: cannot open shared object file: No such file or directory
+[       OK ] CPU_CkImplLoader_NONE.LoaderReturnsEmptyOnFailure (0 ms)
+[ RUN      ] CPU_CkImplLoader_NONE.IsDeterministicSplitKValid
+MIOpen(HIP): Error [IsDeterministicSplitKValid] Failed to parse split_k from kernel_id: Kernel+abc
+MIOpen(HIP): Error [IsDeterministicSplitKValid] Failed to parse split_k from kernel_id: Kernel+
+[       OK ] CPU_CkImplLoader_NONE.IsDeterministicSplitKValid (0 ms)
+[----------] 5 tests from CPU_CkImplLoader_NONE (0 ms total)
+
+[----------] 27 tests from CPU_CkImplError_NONE
+[ RUN      ] CPU_CkImplError_NONE.LastErrorSetAndGet
+[       OK ] CPU_CkImplError_NONE.LastErrorSetAndGet (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.LastErrorThreadIsolation
+[       OK ] CPU_CkImplError_NONE.LastErrorThreadIsolation (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.TryCatchSuccess
+[       OK ] CPU_CkImplError_NONE.TryCatchSuccess (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.TryCatchCkImplException
+[       OK ] CPU_CkImplError_NONE.TryCatchCkImplException (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.TryCatchStdException
+[       OK ] CPU_CkImplError_NONE.TryCatchStdException (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.TryCatchUnknownException
+[       OK ] CPU_CkImplError_NONE.TryCatchUnknownException (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.StatusToString
+[       OK ] CPU_CkImplError_NONE.StatusToString (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ExceptionStoresStatusAndMessage
+[       OK ] CPU_CkImplError_NONE.ExceptionStoresStatusAndMessage (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ExceptionIsStdException
+[       OK ] CPU_CkImplError_NONE.ExceptionIsStdException (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ExceptionCopyPreservesFields
+[       OK ] CPU_CkImplError_NONE.ExceptionCopyPreservesFields (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfNullThrowsOnNull
+[       OK ] CPU_CkImplError_NONE.ThrowIfNullThrowsOnNull (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfNullPassesOnNonNull
+[       OK ] CPU_CkImplError_NONE.ThrowIfNullPassesOnNonNull (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfFalseThrowsOnFalse
+[       OK ] CPU_CkImplError_NONE.ThrowIfFalseThrowsOnFalse (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfFalsePassesOnTrue
+[       OK ] CPU_CkImplError_NONE.ThrowIfFalsePassesOnTrue (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfTrueThrowsOnTrue
+[       OK ] CPU_CkImplError_NONE.ThrowIfTrueThrowsOnTrue (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfTruePassesOnFalse
+[       OK ] CPU_CkImplError_NONE.ThrowIfTruePassesOnFalse (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfNeThrowsOnNotEqual
+[       OK ] CPU_CkImplError_NONE.ThrowIfNeThrowsOnNotEqual (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfNePassesOnEqual
+[       OK ] CPU_CkImplError_NONE.ThrowIfNePassesOnEqual (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfEqThrowsOnEqual
+[       OK ] CPU_CkImplError_NONE.ThrowIfEqThrowsOnEqual (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfEqPassesOnNotEqual
+[       OK ] CPU_CkImplError_NONE.ThrowIfEqPassesOnNotEqual (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.LastErrorSetReturnsStatus
+[       OK ] CPU_CkImplError_NONE.LastErrorSetReturnsStatus (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.LastErrorStdStringOverload
+[       OK ] CPU_CkImplError_NONE.LastErrorStdStringOverload (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.LastErrorTruncatesLongMessage
+[       OK ] CPU_CkImplError_NONE.LastErrorTruncatesLongMessage (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.TryCatchPreservesAllStatusCodes
+[       OK ] CPU_CkImplError_NONE.TryCatchPreservesAllStatusCodes (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfNullPropagatesThroughTryCatch
+[       OK ] CPU_CkImplError_NONE.ThrowIfNullPropagatesThroughTryCatch (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.ThrowIfFalsePropagatesThroughTryCatch
+[       OK ] CPU_CkImplError_NONE.ThrowIfFalsePropagatesThroughTryCatch (0 ms)
+[ RUN      ] CPU_CkImplError_NONE.NoThrowOnValidInputsThroughTryCatch
+[       OK ] CPU_CkImplError_NONE.NoThrowOnValidInputsThroughTryCatch (0 ms)
+[----------] 27 tests from CPU_CkImplError_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 37 tests from 3 test suites ran. (4390 ms total)
+[  PASSED  ] 37 tests.

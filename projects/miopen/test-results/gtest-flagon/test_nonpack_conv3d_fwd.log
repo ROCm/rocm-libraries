@@ -1,0 +1,27 @@
+[==========] Running 6 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from FullConvFwdDefault/GPU_ConvNonpackFwdSolverTest3D_FP16
+[ RUN      ] FullConvFwdDefault/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0
+PRNG seed: 12345678
+[       OK ] FullConvFwdDefault/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0 (5609 ms)
+[ RUN      ] FullConvFwdDefault/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1
+[       OK ] FullConvFwdDefault/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1 (48 ms)
+[----------] 2 tests from FullConvFwdDefault/GPU_ConvNonpackFwdSolverTest3D_FP16 (5657 ms total)
+
+[----------] 2 tests from FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16
+[ RUN      ] FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0
+[       OK ] FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0 (21 ms)
+[ RUN      ] FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1
+[       OK ] FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1 (48 ms)
+[----------] 2 tests from FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16 (70 ms total)
+
+[----------] 2 tests from FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16
+[ RUN      ] FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0
+[       OK ] FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0 (20 ms)
+[ RUN      ] FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1
+[       OK ] FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1 (48 ms)
+[----------] 2 tests from FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16 (69 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 3 test suites ran. (5797 ms total)
+[  PASSED  ] 6 tests.

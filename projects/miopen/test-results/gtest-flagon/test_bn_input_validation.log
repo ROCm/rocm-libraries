@@ -1,0 +1,60 @@
+[==========] Running 16 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 8 tests from Smoke/GPU_BNInputValidation2D_FP32
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/0
+PRNG seed: 12345678
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/0 (771 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/1
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/1 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/2
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/2 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/3
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/3 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/4
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/4 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/5
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/5 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/6
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/6 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/7
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation2D_FP32.RejectsInvalidInput/7 (0 ms)
+[----------] 8 tests from Smoke/GPU_BNInputValidation2D_FP32 (774 ms total)
+
+[----------] 8 tests from Smoke/GPU_BNInputValidation3D_FP32
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/0
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/0 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/1
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/1 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/2
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/2 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/3
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/3 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/4
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/4 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/5
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/5 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/6
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:87: BatchNorm Spatial training requires N*spatial_size > 1. Got N=1, spatial=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/6 (0 ms)
+[ RUN      ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/7
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/ocl/batchnormocl.cpp:98: BatchNorm PerActivation training requires N > 1. Got N=1. This restriction matches PyTorch behavior.
+[       OK ] Smoke/GPU_BNInputValidation3D_FP32.RejectsInvalidInput/7 (0 ms)
+[----------] 8 tests from Smoke/GPU_BNInputValidation3D_FP32 (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 16 tests from 2 test suites ran. (777 ms total)
+[  PASSED  ] 16 tests.

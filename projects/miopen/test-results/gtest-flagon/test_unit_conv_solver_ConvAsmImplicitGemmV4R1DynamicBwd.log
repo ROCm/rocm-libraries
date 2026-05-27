@@ -1,0 +1,77 @@
+[==========] Running 11 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/0 (911 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32 (911 ms total)
+
+[----------] 9 tests from Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/0 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/1 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/2 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/3 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/4 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/5 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/6 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/7 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/8 (0 ms)
+[----------] 9 tests from Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicDevApplicabilityBwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicDevApplicabilityBwd_NONE.ConvAsmImplicitGemmV4R1DynamicBwd/0
+[       OK ] Smoke/CPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicDevApplicabilityBwd_NONE.ConvAsmImplicitGemmV4R1DynamicBwd/0 (64 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicDevApplicabilityBwd_NONE (64 ms total)
+
+[----------] Global test environment tear-down
+[==========] 11 tests from 3 test suites ran. (976 ms total)
+[  PASSED  ] 1 test.
+[  SKIPPED ] 10 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/0
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/0
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/1
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/2
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/3
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/4
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/5
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/6
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/7
+[  SKIPPED ] Full/GPU_UnitTestConvSolverAsmImplicitGemmV4R1DynamicBwd_FP32.ConvAsmImplicitGemmV4R1DynamicBwd/8

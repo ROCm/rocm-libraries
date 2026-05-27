@@ -1,0 +1,122 @@
+[==========] Running 15 tests from 14 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16.ConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16.ConvBinWinogradRxS/0 (886 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16 (886 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16.ConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16.ConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32.ConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32.ConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32.ConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32.ConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSWrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSWrw_FP32.ConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSWrw_FP32.ConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSWrw_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP16.ConvBinWinogradRxS/0
+[       OK ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP16.ConvBinWinogradRxS/0 (42 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP16 (42 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP32
+[ RUN      ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP32.ConvBinWinogradRxS/0
+[       OK ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP32.ConvBinWinogradRxS/0 (39 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSDevApplicabilityFwd_FP32 (39 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP16.TransposedConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP16.TransposedConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP16.TransposedConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP16.TransposedConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP32.TransposedConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP32.TransposedConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP32.TransposedConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP32.TransposedConvBinWinogradRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP32 (0 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32.TransposedConvBinWinogradRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32.TransposedConvBinWinogradRxS/0 (0 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32.TransposedConvBinWinogradRxS/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32.TransposedConvBinWinogradRxS/1 (0 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP16.TransposedConvBinWinogradRxS/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP16.TransposedConvBinWinogradRxS/0 (41 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP16 (41 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP32
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP32.TransposedConvBinWinogradRxS/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP32.TransposedConvBinWinogradRxS/0 (41 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSDevApplicabilityFwd_FP32 (41 ms total)
+
+[----------] Global test environment tear-down
+[==========] 15 tests from 14 test suites ran. (1051 ms total)
+[  PASSED  ] 4 tests.
+[  SKIPPED ] 11 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16.ConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16.ConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32.ConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32.ConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSWrw_FP32.ConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP16.TransposedConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP16.TransposedConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP32.TransposedConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSBwd_FP32.TransposedConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32.TransposedConvBinWinogradRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32.TransposedConvBinWinogradRxS/1

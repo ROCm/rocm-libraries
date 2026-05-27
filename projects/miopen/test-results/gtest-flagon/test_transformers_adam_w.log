@@ -1,0 +1,1071 @@
+[==========] Running 528 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 176 tests from Full/GPU_TransformersAdamWTest_FP32
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_0
+PRNG seed: 12345678
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_0 (890 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_1
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_1 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_2
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_2 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_3
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_3 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_4
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_4 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_5
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_5 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_6
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_6 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_7
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_7 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_8
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_8 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_9
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_9 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_10
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_10 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_11
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_11 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_12
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_12 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_13
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_13 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_14
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_14 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_15
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_15 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_16
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_16 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_17
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_17 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_18
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_18 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_19
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_19 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_20
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_20 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_21
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_21 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_22
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_22 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_23
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_23 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_24
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_24 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_25
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_25 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_26
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_26 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_27
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_27 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_28
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_28 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_29
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_29 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_30
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_30 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_31
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_31 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_32
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_32 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_33
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_33 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_34
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_34 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_35
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_35 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_36
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_36 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_37
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_37 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_38
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_38 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_39
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_39 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_40
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_40 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_41
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_41 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_42
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_42 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_43
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_43 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_44
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_44 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_45
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_45 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_46
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_46 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_47
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_47 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_48
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_48 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_49
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_49 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_50
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_50 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_51
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_51 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_52
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_52 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_53
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_53 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_54
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_54 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_55
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_55 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_56
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_56 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_57
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_57 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_58
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_58 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_59
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_59 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_60
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_60 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_61
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_61 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_62
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_62 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_63
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_63 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_64
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_64 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_65
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_65 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_66
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_66 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_67
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_67 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_68
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_68 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_69
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_69 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_70
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_70 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_71
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_71 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_72
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_72 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_73
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_73 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_74
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_74 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_75
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_75 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_76
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_76 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_77
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_77 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_78
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_78 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_79
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_79 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_80
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_80 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_81
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_81 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_82
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_82 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_83
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_83 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_84
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_84 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_85
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_85 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_86
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_86 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_87
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_87 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_88
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_88 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_89
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_89 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_90
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_90 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_91
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_91 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_92
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_92 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_93
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_93 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_94
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_94 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_95
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_95 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_96
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_96 (43 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_97
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_97 (30 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_98
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_98 (33 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_99
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_99 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_100
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_100 (31 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_101
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_101 (36 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_102
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_102 (31 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_103
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_103 (28 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_104
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_104 (67 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_105
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_105 (69 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_106
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_106 (66 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_107
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_107 (70 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_108
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_108 (64 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_109
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_109 (97 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_110
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_110 (94 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_111
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_111 (93 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_112
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_112 (37 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_113
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_113 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_114
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_114 (31 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_115
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_115 (31 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_116
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_116 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_117
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_117 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_118
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_118 (31 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_119
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_119 (30 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_120
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_120 (78 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_121
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_121 (80 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_122
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_122 (83 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_123
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_123 (84 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_124
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_124 (79 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_125
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_125 (142 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_126
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_126 (115 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_127
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_127 (119 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_128
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_128 (44 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_129
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_129 (44 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_130
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_130 (43 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_131
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_131 (45 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_132
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_132 (43 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_133
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_133 (44 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_134
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_134 (44 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_135
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_135 (43 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_136
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_136 (163 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_137
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_137 (186 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_138
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_138 (164 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_139
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_139 (168 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_140
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_140 (164 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_141
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_141 (120 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_142
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_142 (109 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_143
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_143 (164 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_144
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_144 (110 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_145
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_145 (101 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_146
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_146 (77 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_147
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_147 (105 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_148
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_148 (93 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_149
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_149 (97 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_150
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_150 (97 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_151
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_151 (93 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_152
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_152 (490 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_153
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_153 (465 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_154
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_154 (455 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_155
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_155 (487 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_156
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_156 (457 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_157
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_157 (467 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_158
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_158 (482 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_159
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_159 (464 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_160
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_160 (96 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_161
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_161 (122 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_162
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_162 (119 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_163
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_163 (122 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_164
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_164 (117 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_165
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_165 (126 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_166
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_166 (115 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_167
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_167 (85 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_168
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_168 (504 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_169
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_169 (438 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_170
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_170 (599 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_171
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_171 (616 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_172
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_172 (585 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_173
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_173 (381 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_174
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_174 (390 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_175
+[       OK ] Full/GPU_TransformersAdamWTest_FP32.TransformersAdamWFloatTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_175 (381 ms)
+[----------] 176 tests from Full/GPU_TransformersAdamWTest_FP32 (13816 ms total)
+
+[----------] 176 tests from Full/GPU_TransformersAdamWTest_FP16
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_0
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_0 (20 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_1
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_1 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_2
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_2 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_3
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_3 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_4
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_4 (4 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_5
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_5 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_6
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_6 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_7
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_7 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_8
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_8 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_9
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_9 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_10
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_10 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_11
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_11 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_12
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_12 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_13
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_13 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_14
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_14 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_15
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_15 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_16
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_16 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_17
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_17 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_18
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_18 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_19
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_19 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_20
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_20 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_21
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_21 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_22
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_22 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_23
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_23 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_24
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_24 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_25
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_25 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_26
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_26 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_27
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_27 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_28
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_28 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_29
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_29 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_30
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_30 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_31
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_31 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_32
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_32 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_33
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_33 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_34
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_34 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_35
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_35 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_36
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_36 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_37
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_37 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_38
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_38 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_39
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_39 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_40
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_40 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_41
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_41 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_42
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_42 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_43
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_43 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_44
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_44 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_45
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_45 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_46
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_46 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_47
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_47 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_48
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_48 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_49
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_49 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_50
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_50 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_51
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_51 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_52
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_52 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_53
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_53 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_54
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_54 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_55
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_55 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_56
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_56 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_57
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_57 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_58
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_58 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_59
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_59 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_60
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_60 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_61
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_61 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_62
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_62 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_63
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_63 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_64
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_64 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_65
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_65 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_66
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_66 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_67
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_67 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_68
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_68 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_69
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_69 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_70
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_70 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_71
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_71 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_72
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_72 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_73
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_73 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_74
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_74 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_75
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_75 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_76
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_76 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_77
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_77 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_78
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_78 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_79
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_79 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_80
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_80 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_81
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_81 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_82
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_82 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_83
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_83 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_84
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_84 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_85
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_85 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_86
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_86 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_87
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_87 (0 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_88
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_88 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_89
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_89 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_90
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_90 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_91
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_91 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_92
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_92 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_93
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_93 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_94
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_94 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_95
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_95 (1 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_96
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_96 (34 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_97
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_97 (41 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_98
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_98 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_99
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_99 (41 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_100
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_100 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_101
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_101 (41 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_102
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_102 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_103
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_103 (41 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_104
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_104 (87 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_105
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_105 (95 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_106
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_106 (87 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_107
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_107 (95 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_108
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_108 (87 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_109
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_109 (95 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_110
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_110 (87 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_111
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_111 (95 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_112
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_112 (44 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_113
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_113 (42 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_114
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_114 (27 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_115
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_115 (35 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_116
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_116 (26 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_117
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_117 (32 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_118
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_118 (26 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_119
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_119 (33 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_120
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_120 (70 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_121
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_121 (77 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_122
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_122 (72 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_123
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_123 (99 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_124
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_124 (73 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_125
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_125 (78 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_126
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_126 (69 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_127
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_127 (76 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_128
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_128 (38 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_129
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_129 (49 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_130
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_130 (38 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_131
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_131 (49 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_132
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_132 (38 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_133
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_133 (49 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_134
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_134 (38 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_135
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_135 (48 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_136
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_136 (103 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_137
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_137 (115 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_138
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_138 (107 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_139
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_139 (112 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_140
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_140 (104 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_141
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_141 (112 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_142
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_142 (105 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_143
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_143 (112 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_144
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_144 (130 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_145
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_145 (263 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_146
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_146 (218 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_147
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_147 (271 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_148
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_148 (220 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_149
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_149 (268 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_150
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_150 (217 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_151
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_151 (266 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_152
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_152 (566 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_153
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_153 (543 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_154
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_154 (331 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_155
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_155 (373 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_156
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_156 (329 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_157
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_157 (359 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_158
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_158 (333 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_159
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_159 (362 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_160
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_160 (179 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_161
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_161 (216 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_162
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_162 (177 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_163
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_163 (223 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_164
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_164 (178 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_165
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_165 (346 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_166
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_166 (280 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_167
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_167 (356 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_168
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_168 (679 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_169
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_169 (469 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_170
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_170 (712 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_171
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_171 (774 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_172
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_172 (434 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_173
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_173 (466 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_174
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_174 (430 ms)
+[ RUN      ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_175
+[       OK ] Full/GPU_TransformersAdamWTest_FP16.TransformersAdamWFloat16Test/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_175 (460 ms)
+[----------] 176 tests from Full/GPU_TransformersAdamWTest_FP16 (14663 ms total)
+
+[----------] 176 tests from Full/GPU_TransformersAmpAdamWTest_FP32
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_0
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_0 (16 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_1
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_1 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_2
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_2 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_3
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_3 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_4
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_4 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_5
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_5 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_6
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_6 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_7
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_7 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_8
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_8 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_9
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_9 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_10
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_10 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_11
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_11 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_12
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_12 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_13
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_13 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_14
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_14 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_15
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_1_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_15 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_16
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_16 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_17
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_17 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_18
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_18 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_19
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_19 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_20
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_20 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_21
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_21 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_22
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_22 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_23
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_23 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_24
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_24 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_25
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_25 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_26
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_26 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_27
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_27 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_28
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_28 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_29
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_29 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_30
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_30 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_31
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_31 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_32
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_32 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_33
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_33 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_34
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_34 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_35
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_35 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_36
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_36 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_37
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_37 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_38
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_38 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_39
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_39 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_40
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_40 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_41
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_41 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_42
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_42 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_43
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_43 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_44
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_44 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_45
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_45 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_46
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_46 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_47
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_288_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_47 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_48
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_48 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_49
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_49 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_50
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_50 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_51
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_51 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_52
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_52 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_53
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_53 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_54
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_54 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_55
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_55 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_56
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_56 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_57
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_57 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_58
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_58 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_59
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_59 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_60
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_60 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_61
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_61 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_62
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_62 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_63
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_63 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_64
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_64 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_65
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_65 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_66
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_66 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_67
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_67 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_68
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_68 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_69
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_69 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_70
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_70 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_71
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_71 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_72
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_72 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_73
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_73 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_74
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_74 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_75
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_75 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_76
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_76 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_77
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_77 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_78
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_78 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_79
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_79 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_80
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_80 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_81
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_81 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_82
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_82 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_83
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_83 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_84
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_84 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_85
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_85 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_86
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_86 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_87
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_87 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_88
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_88 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_89
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_89 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_90
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_90 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_91
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_91 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_92
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_92 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_93
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_93 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_94
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_94 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_95
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_95 (0 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_96
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_96 (9 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_97
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_97 (7 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_98
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_98 (7 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_99
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_99 (8 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_100
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_100 (8 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_101
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_101 (8 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_102
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_102 (7 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_103
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_103 (8 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_104
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_104 (47 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_105
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_105 (45 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_106
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_106 (42 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_107
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_107 (44 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_108
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_108 (44 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_109
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_109 (46 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_110
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_110 (42 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_111
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_96x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_111 (43 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_112
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_112 (10 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_113
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_113 (10 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_114
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_114 (9 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_115
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_115 (9 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_116
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_116 (9 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_117
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_117 (10 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_118
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_118 (9 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_119
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_119 (10 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_120
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_120 (57 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_121
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_121 (56 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_122
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_122 (56 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_123
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_123 (56 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_124
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_124 (58 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_125
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_125 (58 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_126
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_126 (57 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_127
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_512x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_127 (59 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_128
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_128 (17 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_129
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_129 (15 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_130
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_130 (14 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_131
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_131 (14 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_132
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_132 (14 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_133
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_133 (15 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_134
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_134 (14 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_135
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_135 (15 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_136
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_136 (84 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_137
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_137 (85 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_138
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_138 (86 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_139
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_139 (86 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_140
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_140 (85 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_141
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_141 (87 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_142
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_142 (84 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_143
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x768_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_143 (88 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_144
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_144 (63 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_145
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_145 (95 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_146
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_146 (71 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_147
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_147 (71 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_148
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_148 (72 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_149
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_149 (72 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_150
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_150 (69 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_151
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_151 (70 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_152
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_152 (279 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_153
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_153 (283 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_154
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_154 (279 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_155
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_155 (283 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_156
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_156 (275 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_157
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_157 (284 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_158
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_158 (286 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_159
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x2304_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_159 (293 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_160
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_160 (89 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_161
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_0_test_id_161 (87 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_162
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_162 (132 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_163
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_0_use_step_size_1_test_id_163 (135 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_164
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_164 (125 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_165
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_0_test_id_165 (136 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_166
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_166 (132 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_167
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_0_use_step_tensor_1_use_step_size_1_test_id_167 (134 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_168
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_168 (612 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_169
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_0_test_id_169 (617 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_170
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_170 (617 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_171
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_0_use_step_size_1_test_id_171 (474 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_172
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_172 (369 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_173
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_0_test_id_173 (368 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_174
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_174 (368 ms)
+[ RUN      ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_175
+[       OK ] Full/GPU_TransformersAmpAdamWTest_FP32.TransformersAmpAdamWTest/input_768x3072_weight_decay_0p0005_correct_bias_1_use_step_tensor_1_use_step_size_1_test_id_175 (366 ms)
+[----------] 176 tests from Full/GPU_TransformersAmpAdamWTest_FP32 (9454 ms total)
+
+[----------] Global test environment tear-down
+[==========] 528 tests from 3 test suites ran. (37934 ms total)
+[  PASSED  ] 528 tests.

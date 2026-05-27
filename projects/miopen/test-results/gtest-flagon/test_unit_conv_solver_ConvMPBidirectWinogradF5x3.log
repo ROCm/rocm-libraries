@@ -1,0 +1,50 @@
+[==========] Running 5 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP16.TransposedConvMPBidirectWinogradF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP16.TransposedConvMPBidirectWinogradF5x3/0 (800 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP16 (800 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP16.TransposedConvMPBidirectWinogradF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP16.TransposedConvMPBidirectWinogradF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP32.TransposedConvMPBidirectWinogradF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP32.TransposedConvMPBidirectWinogradF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP32.TransposedConvMPBidirectWinogradF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP32.TransposedConvMPBidirectWinogradF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3DevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3DevApplicabilityFwd_NONE.TransposedConvMPBidirectWinogradF5x3/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3DevApplicabilityFwd_NONE.TransposedConvMPBidirectWinogradF5x3/0 (65 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3DevApplicabilityFwd_NONE (65 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 5 test suites ran. (866 ms total)
+[  PASSED  ] 1 test.
+[  SKIPPED ] 4 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP16.TransposedConvMPBidirectWinogradF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP16.TransposedConvMPBidirectWinogradF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Fwd_FP32.TransposedConvMPBidirectWinogradF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedMPBidirectWinogradF5x3Bwd_FP32.TransposedConvMPBidirectWinogradF5x3/0
+
+  YOU HAVE 5 DISABLED TESTS
+

@@ -1,0 +1,16 @@
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from Smoke/GPU_Allocator_FP32
+[ RUN      ] Smoke/GPU_Allocator_FP32.CustomAllocator/0
+[       OK ] Smoke/GPU_Allocator_FP32.CustomAllocator/0 (777 ms)
+[ RUN      ] Smoke/GPU_Allocator_FP32.NullAllocator/0
+[       OK ] Smoke/GPU_Allocator_FP32.NullAllocator/0 (2 ms)
+[ RUN      ] Smoke/GPU_Allocator_FP32.Deallocator/0
+[       OK ] Smoke/GPU_Allocator_FP32.Deallocator/0 (2 ms)
+[ RUN      ] Smoke/GPU_Allocator_FP32.Deallocator2/0
+[       OK ] Smoke/GPU_Allocator_FP32.Deallocator2/0 (2 ms)
+[----------] 4 tests from Smoke/GPU_Allocator_FP32 (784 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (784 ms total)
+[  PASSED  ] 4 tests.

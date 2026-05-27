@@ -1,0 +1,2232 @@
+[==========] Running 439 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 92 tests from Full/GPU_ConvBiasActivFind2Infer_FP32
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/0
+PRNG seed: 12345678
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/0 (4944 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/1 (64 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/2 (54 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/3 (35 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/4 (98 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/5 (158 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/6 (25 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/7 (36 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/8 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/9 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/10 (265 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/11 (261 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/12 (232 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/13 (247 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/14 (33 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/15 (190 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/16 (160 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/17 (196 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/18 (17 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/19 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/20 (255 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/21 (117 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/22 (105 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/0 (80 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/1 (70 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/2 (72 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/3 (42 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/4 (129 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/5 (183 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/6 (37 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/7 (50 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/8 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/9 (69 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/10 (396 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/11 (398 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/12 (333 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/13 (229 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/14 (35 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/15 (189 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/16 (163 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/17 (194 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/18 (18 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/19 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/20 (262 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/21 (112 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/22 (123 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/0 (81 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/1 (70 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/2 (71 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/3 (42 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/4 (130 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/5 (155 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/6 (35 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/7 (51 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/8 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/9 (99 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/10 (344 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/11 (275 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/12 (242 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/13 (240 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/14 (33 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/15 (193 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/16 (159 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/17 (194 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/18 (17 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/19 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/20 (262 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/21 (80 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/22 (74 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/0
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/0 (363 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/1
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/1 (103 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/2
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/2 (153 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/3
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/3 (126 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/4
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/4 (864 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/5
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/5 (293 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/6
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/6 (86 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/7
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/7 (434 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/8
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/8 (93 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/9
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/9 (121 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/10
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/10 (1115 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/11
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/11 (1116 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/12
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/12 (710 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/13
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/13 (1628 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/14
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/14 (90 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/15
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/15 (561 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/16
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/16 (283 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/17
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/17 (570 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/18
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/18 (156 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/19
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/19 (72 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/20
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/20 (1390 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/21
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/21 (372 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/22
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSf2x3g1Find2Fused/22 (454 ms)
+[----------] 92 tests from Full/GPU_ConvBiasActivFind2Infer_FP32 (24880 ms total)
+
+[----------] 345 tests from Full/GPU_ConvBiasActivFind2Infer_FP16
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/0 (52 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/1 (43 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/2 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/3 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/4 (32 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/5 (83 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/6 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/7 (16 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/8 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/9 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/10 (242 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/11 (249 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/12 (243 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/13 (124 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/14 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/15 (93 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/16 (85 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/17 (87 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/18 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/19 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/20 (137 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/21 (49 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/22 (46 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/23
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/23 (49 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/24
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/24 (42 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/25
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/25 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/26
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/26 (23 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/27
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/27 (32 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/28 (83 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/29
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/29 (25 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/30
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/30 (16 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/31
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/31 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/32 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/33
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/33 (175 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/34
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/34 (171 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/35
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/35 (163 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/36
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/36 (91 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/37
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/37 (19 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/38
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/38 (59 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/39
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/39 (53 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/40
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/40 (54 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/41
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/41 (7 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/42
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/42 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/43
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/43 (101 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/44
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/44 (32 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/45
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/45 (31 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/46
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/46 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/47
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/47 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/48
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/48 (26 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/49
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/49 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/50
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/50 (20 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/51
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/51 (47 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/52
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/52 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/53
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/53 (9 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/54
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/54 (7 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/55
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/55 (25 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/56
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/56 (161 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/57
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/57 (166 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/58
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/58 (254 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/59
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/59 (125 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/60
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/60 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/61
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/61 (92 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/62
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/62 (85 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/63
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/63 (88 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/64
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/64 (12 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/65
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/65 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/66
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/66 (138 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/67
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/67 (48 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/68
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/68 (46 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/69
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/69 (49 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/70
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/70 (43 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/71
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/71 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/72
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/72 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/73
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/73 (31 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/74
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/74 (83 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/75
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/75 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/76
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/76 (16 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/77
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/77 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/78
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/78 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/79
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/79 (297 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/80
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/80 (247 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/81
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/81 (243 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/82
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/82 (124 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/83
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/83 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/84
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/84 (92 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/85
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/85 (85 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/86
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/86 (89 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/87
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/87 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/88
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/88 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/89
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/89 (136 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/90
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/90 (48 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/91
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/91 (45 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/92
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/92 (49 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/93
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/93 (43 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/94
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/94 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/95
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/95 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/96
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/96 (31 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/97
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/97 (83 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/98
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/98 (24 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/99
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/99 (16 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/100
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/100 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/101
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/101 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/102
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/102 (181 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/103
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/103 (250 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/104
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/104 (244 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/105
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/105 (93 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/106
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/106 (20 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/107
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/107 (58 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/108
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/108 (50 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/109
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/109 (54 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/110
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/110 (9 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/111
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/111 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/112
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/112 (99 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/113
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/113 (54 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/114
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/114 (45 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/0 (50 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/1
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/1 (150 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/2
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/2 (152 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/3
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/3 (126 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/4
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/4 (577 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/5 (119 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/6
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/6 (82 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/7
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/7 (227 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/8
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/8 (83 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/9 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/10
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/10 (759 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/11 (280 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/12
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/12 (440 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/13 (129 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/14 (20 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/15 (71 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/16
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/16 (152 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/17
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/17 (291 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/18
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/18 (118 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/19
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/19 (68 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/20
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/20 (1036 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/21
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/21 (266 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/22
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/22 (250 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/23
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/23 (53 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/24
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/24 (111 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/25
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/25 (150 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/26
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/26 (126 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/27
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/27 (558 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/28 (113 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/29
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/29 (79 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/30
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/30 (213 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/31
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/31 (85 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/32 (46 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/33
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/33 (672 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/34
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/34 (192 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/35
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/35 (448 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/36
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/36 (129 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/37
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/37 (33 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/38
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/38 (125 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/39
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/39 (197 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/40
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/40 (234 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/41
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/41 (126 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/42
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/42 (72 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/43
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/43 (1095 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/44
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/44 (268 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/45
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/45 (278 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/46
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/46 (53 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/47
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/47 (111 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/48
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/48 (152 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/49
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/49 (126 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/50
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/50 (479 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/51
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/51 (106 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/52
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/52 (60 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/53
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/53 (160 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/54
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/54 (65 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/55
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/55 (31 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/56
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/56 (582 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/57
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/57 (190 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/58
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/58 (408 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/59
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/59 (95 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/60
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/60 (18 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/61
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/61 (73 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/62
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/62 (149 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/63
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/63 (240 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/64
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/64 (122 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/65
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/65 (90 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/66
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/66 (1064 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/67
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/67 (270 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/68
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/68 (257 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/69
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/69 (53 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/70
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/70 (112 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/71
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/71 (154 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/72
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/72 (144 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/73
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/73 (591 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/74
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/74 (113 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/75
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/75 (78 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/76
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/76 (210 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/77
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/77 (82 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/78
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/78 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/79
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/79 (776 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/80
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/80 (290 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/81
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/81 (462 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/82
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/82 (96 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/83
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/83 (20 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/84
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/84 (75 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/85
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/85 (150 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/86
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/86 (234 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/87
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/87 (91 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/88
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/88 (52 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/89
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/89 (743 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/90
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/90 (189 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/91
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/91 (190 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/92
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/92 (34 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/93
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/93 (81 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/94
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/94 (114 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/95
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/95 (93 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/96
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/96 (543 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/97
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/97 (116 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/98
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/98 (94 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/99
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/99 (211 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/100
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/100 (83 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/101
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/101 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/102
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/102 (775 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/103
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/103 (271 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/104
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/104 (521 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/105
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/105 (131 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/106
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/106 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/107
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:78: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/107 (119 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/108
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/108 (222 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/109
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/109 (334 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/110
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/110 (96 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/111
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/111 (55 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/112
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/112 (761 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/113
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/113 (197 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/114
+[       OK ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/114 (180 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/0 (34 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/1 (28 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/2 (27 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/3 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/4 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/5 (66 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/6 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/7 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/8 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/9 (26 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/10 (189 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/11 (188 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/12 (165 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/13 (127 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/14 (32 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/15 (116 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/16 (111 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/17 (113 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/18 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/19 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/20 (130 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/21 (49 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/22 (45 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/23
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/23 (49 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/24
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/24 (42 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/25
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/25 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/26
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/26 (23 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/27
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/27 (63 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/28 (120 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/29
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/29 (25 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/30
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/30 (17 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/31
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/31 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/32 (44 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/33
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/33 (273 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/34
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/34 (322 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/35
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/35 (241 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/36
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/36 (124 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/37
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/37 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/38
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/38 (116 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/39
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/39 (96 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/40
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/40 (95 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/41
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/41 (7 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/42
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/42 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/43
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/43 (97 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/44
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/44 (33 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/45
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/45 (27 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/46
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/46 (29 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/47
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/47 (26 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/48
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/48 (27 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/49
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/49 (13 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/50
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/50 (45 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/51
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/51 (64 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/52
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/52 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/53
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/53 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/54
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/54 (7 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/55
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/55 (25 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/56
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/56 (175 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/57
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/57 (271 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/58
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/58 (242 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/59
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/59 (124 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/60
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/60 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/61
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/61 (117 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/62
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/62 (111 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/63
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/63 (114 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/64
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/64 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/65
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/65 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/66
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/66 (131 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/67
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/67 (33 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/68
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/68 (28 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/69
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/69 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/70
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/70 (26 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/71
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/71 (27 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/72
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/72 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/73
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/73 (45 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/74
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/74 (64 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/75
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/75 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/76
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/76 (11 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/77
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/77 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/78
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/78 (28 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/79
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/79 (176 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/80
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/80 (188 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/81
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/81 (160 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/82
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/82 (94 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/83
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/83 (20 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/84
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/84 (77 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/85
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/85 (72 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/86
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/86 (70 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/87
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/87 (7 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/88
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/88 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/89
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/89 (94 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/90
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/90 (33 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/91
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/91 (28 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/92
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/92 (57 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/93
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/93 (27 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/94
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/94 (28 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/95
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/95 (14 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/96
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/96 (46 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/97
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/97 (66 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/98
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/98 (15 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/99
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/99 (10 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/100
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/100 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/101
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/101 (26 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/102
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/102 (187 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/103
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/103 (276 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/104
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/104 (243 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/105
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/105 (122 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/106
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/106 (30 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/107
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/107 (117 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/108
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/108 (110 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/109
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/109 (72 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/110
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/110 (7 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/111
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/111 (8 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/112
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/112 (91 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/113
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/113 (32 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/114
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_find2_infer.cpp:103: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/114 (29 ms)
+[----------] 345 tests from Full/GPU_ConvBiasActivFind2Infer_FP16 (42122 ms total)
+
+[----------] 2 tests from Full/GPU_ConvBiasActivFind2InferFusionFind_FP32
+[ RUN      ] Full/GPU_ConvBiasActivFind2InferFusionFind_FP32.ConvBiasActivFind2Float_testFind/0
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvCKIgemmGrpFwdBiasActivFused, enforce: SEARCH_DB_UPDATE(4)
+[       OK ] Full/GPU_ConvBiasActivFind2InferFusionFind_FP32.ConvBiasActivFind2Float_testFind/0 (271 ms)
+[ RUN      ] Full/GPU_ConvBiasActivFind2InferFusionFind_FP32.ConvBiasActivFind2Float_testFind/1
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvCKIgemmGrpFwdBiasActivFused, enforce: SEARCH_DB_UPDATE(4)
+[       OK ] Full/GPU_ConvBiasActivFind2InferFusionFind_FP32.ConvBiasActivFind2Float_testFind/1 (103 ms)
+[----------] 2 tests from Full/GPU_ConvBiasActivFind2InferFusionFind_FP32 (374 ms total)
+
+[----------] Global test environment tear-down
+[==========] 439 tests from 3 test suites ran. (67377 ms total)
+[  PASSED  ] 105 tests.
+[  SKIPPED ] 334 tests, listed below:
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/0
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/1
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/2
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/3
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/4
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/5
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/6
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/7
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/8
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/9
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/10
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/11
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/12
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/13
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/14
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/15
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/16
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/17
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/18
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/19
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/20
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/21
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBiasActivAsm1x1UFind2Float/22
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/0
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/1
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/2
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/3
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/4
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/5
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/6
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/7
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/8
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/9
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/10
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/11
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/12
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/13
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/14
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/15
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/16
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/17
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/18
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/19
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/20
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/21
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvOclDirectFwdFind2Fused/22
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/0
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/1
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/2
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/3
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/4
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/5
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/6
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/7
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/8
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/9
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/10
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/11
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/12
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/13
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/14
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/15
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/16
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/17
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/18
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/19
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/20
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/21
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP32.ConvBinWinogradRxSFind2Fused/22
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/0
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/1
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/2
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/3
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/4
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/5
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/6
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/7
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/8
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/9
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/10
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/11
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/12
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/13
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/14
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/15
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/16
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/17
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/18
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/19
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/20
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/21
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/22
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/23
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/24
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/25
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/26
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/27
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/28
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/29
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/30
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/31
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/32
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/33
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/34
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/35
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/36
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/37
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/38
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/39
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/40
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/41
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/42
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/43
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/44
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/45
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/46
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/47
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/48
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/49
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/50
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/51
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/52
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/53
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/54
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/55
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/56
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/57
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/58
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/59
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/60
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/61
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/62
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/63
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/64
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/65
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/66
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/67
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/68
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/69
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/70
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/71
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/72
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/73
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/74
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/75
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/76
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/77
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/78
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/79
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/80
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/81
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/82
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/83
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/84
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/85
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/86
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/87
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/88
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/89
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/90
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/91
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/92
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/93
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/94
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/95
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/96
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/97
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/98
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/99
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/100
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/101
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/102
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/103
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/104
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/105
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/106
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/107
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/108
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/109
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/110
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/111
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/112
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/113
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoFuryRxSf2x3Find2Fused/114
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/0
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/5
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/9
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/11
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/13
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/14
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/15
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/23
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/28
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/32
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/34
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/36
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/37
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/38
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/46
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/51
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/55
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/57
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/59
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/60
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/61
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/69
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/74
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/78
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/80
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/82
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/83
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/84
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/92
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/97
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/101
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/103
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/105
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/106
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvWinoRageRxSf2x3Find2Fused/107
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/0
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/1
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/2
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/3
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/4
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/5
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/6
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/7
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/8
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/9
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/10
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/11
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/12
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/13
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/14
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/15
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/16
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/17
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/18
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/19
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/20
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/21
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/22
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/23
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/24
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/25
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/26
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/27
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/28
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/29
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/30
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/31
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/32
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/33
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/34
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/35
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/36
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/37
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/38
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/39
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/40
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/41
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/42
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/43
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/44
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/45
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/46
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/47
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/48
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/49
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/50
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/51
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/52
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/53
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/54
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/55
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/56
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/57
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/58
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/59
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/60
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/61
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/62
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/63
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/64
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/65
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/66
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/67
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/68
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/69
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/70
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/71
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/72
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/73
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/74
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/75
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/76
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/77
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/78
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/79
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/80
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/81
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/82
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/83
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/84
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/85
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/86
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/87
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/88
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/89
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/90
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/91
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/92
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/93
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/94
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/95
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/96
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/97
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/98
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/99
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/100
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/101
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/102
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/103
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/104
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/105
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/106
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/107
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/108
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/109
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/110
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/111
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/112
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/113
+[  SKIPPED ] Full/GPU_ConvBiasActivFind2Infer_FP16.ConvCKIgemmFwdBiasActivFind2Fused/114

@@ -1,0 +1,1317 @@
+[==========] Running 4 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/perfdb.cpp:1476: Skipped
+Not in child process mode (no --mp-test-child arg)
+
+[  SKIPPED ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (684 ms total)
+
+[----------] 3 tests from CPU_PerfDb_NONE
+[ RUN      ] CPU_PerfDb_NONE.RamDb_AllTests
+MIOpen(HIP): Test Default [Run] Testing ramdb for reading premade file by FindRecord...
+MIOpen(HIP): Test Default [Run] Testing ramdb for reading stored data...
+MIOpen(HIP): Test Default [Run] Testing ramdb for updating existing records...
+MIOpen(HIP): Test Default [Run] Testing ramdb for removing records...
+MIOpen(HIP): Test Default [Run] Testing ramdb for reading premade file by Load...
+MIOpen(HIP): Test Default [Run] Testing ramdb for storing unexistent records by update...
+MIOpen(HIP): Test Default [Run] Testing different ramdb operations...
+MIOpen(HIP): Warning [EraseValues] 1x2, not found: 0
+MIOpen(HIP): Test Default [Run] Testing ramdb for using two objects targeting one file existing in one scope...
+MIOpen(HIP): Test Default [Run] Testing ramdb for multithreaded read access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test threads...
+MIOpen(HIP): Test Default [Run] Waiting for test threads...
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [Run] Testing ramdb for multiprocess read access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test processes...
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 0 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 1 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 2 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 3 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 4 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 5 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 6 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 7 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 8 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 9 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 10 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 11 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 12 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 13 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 14 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 15 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-1bd3-dd56-181e-03fd/file --mp-test-child-db-class ramdb
+MIOpen(HIP): Test Default [Run] Waiting for test processes...
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2399 ms total)
+
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2399 ms total)
+
+[----------] Global test environment tear-down
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2399 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2399 ms total)
+[  PASSED  ] 1 test.
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2399 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[==========] 1 test from 1 test suite ran. (2399 ms total)
+[  PASSED  ] 1 test.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2399 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2399 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2382 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2382 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (3 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2381 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2381 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2381 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2381 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (3 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2379 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2381 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (3 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2379 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2382 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (2 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2379 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2380 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (2 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2379 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2381 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (3 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2380 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2381 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2384 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2384 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2386 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2386 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2457 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2457 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (3 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2436 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2438 ms total)
+[  PASSED  ] 1 test.
+MIOpen(HIP): Test Default [Run] Testing ramdb for multithreaded write access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test threads...
+MIOpen(HIP): Test Default [Run] Waiting for test threads...
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [Run] Validating results...
+MIOpen(HIP): Test Default [Run] Validation passed...
+MIOpen(HIP): Test Default [Run] Testing ramdb for multiprocess write access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test processes...
+MIOpen(HIP): Test Default [Run] Waiting for test processes...
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (153 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3229 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3229 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (110 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3938 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3939 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (156 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3923 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3924 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (152 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3927 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3927 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (116 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4005 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4007 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (158 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4069 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4069 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (117 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4446 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4447 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (114 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4447 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4448 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (155 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4570 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4570 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (137 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4574 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4575 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (140 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4625 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4625 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (131 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4623 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4623 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (113 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4694 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4695 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (157 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4758 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4759 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (147 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4958 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4958 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (138 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (5122 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (5123 ms total)
+[  PASSED  ] 1 test.
+MIOpen(HIP): Test Default [Run] Validating results...
+MIOpen(HIP): Test Default [Run] Validation passed...
+[       OK ] CPU_PerfDb_NONE.RamDb_AllTests (8128 ms)
+[ RUN      ] CPU_PerfDb_NONE.PlainTextDb_AllTests
+MIOpen(HIP): Test Default [Run] Testing db for reading premade file by FindRecord...
+MIOpen(HIP): Test Default [Run] Testing db for reading stored data...
+MIOpen(HIP): Test Default [Run] Testing db for updating existing records...
+MIOpen(HIP): Test Default [Run] Testing db for removing records...
+MIOpen(HIP): Test Default [Run] Testing db for reading premade file by Load...
+MIOpen(HIP): Test Default [Run] Testing db for storing unexistent records by update...
+MIOpen(HIP): Test Default [Run] Testing different db operations...
+MIOpen(HIP): Warning [EraseValues] 1x2, not found: 0
+MIOpen(HIP): Test Default [Run] Testing db for using two objects targeting one file existing in one scope...
+MIOpen(HIP): Test Default [Run] Testing db for multithreaded read access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test threads...
+MIOpen(HIP): Test Default [Run] Waiting for test threads...
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [Run] Testing db for multiprocess read access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test processes...
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 0 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 1 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 2 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 3 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 4 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 5 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 6 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 7 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 8 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 9 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 10 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 11 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 12 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 13 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 14 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] /data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/bin/test_perfdb --reset-sharding --gtest_filter=CPU_PerfDb_ChildWorker_NONE.ProcessWork --mp-test-child 15 --mp-test-child-path /tmp/miopen-miopen.tests.perfdb-392b-b4a1-d4af-617e/file --mp-test-child-db-class db
+MIOpen(HIP): Test Default [Run] Waiting for test processes...
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] Global test environment set-up.
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+[----------] Global test environment set-up.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2672 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2674 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2674 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2676 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2676 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2678 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2818 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2819 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3533 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3534 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3768 ms total)
+
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3754 ms total)
+
+[----------] Global test environment tear-down
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3770 ms total)
+[  PASSED  ] 1 test.
+[==========] 1 test from 1 test suite ran. (3754 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3943 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3945 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4116 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4118 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4350 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4350 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (1 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4435 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4435 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4554 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4554 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4593 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4594 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4637 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4637 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4640 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4640 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (0 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4699 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4699 ms total)
+[  PASSED  ] 1 test.
+MIOpen(HIP): Test Default [Run] Testing db for multithreaded write access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test threads...
+MIOpen(HIP): Test Default [Run] Waiting for test threads...
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [Run] Validating results...
+MIOpen(HIP): Test Default [Run] Validation passed...
+MIOpen(HIP): Test Default [Run] Testing db for multiprocess write access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test processes...
+MIOpen(HIP): Test Default [Run] Waiting for test processes...
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+Note: Google Test filter = CPU_PerfDb_ChildWorker_NONE.ProcessWork
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE
+[ RUN      ] CPU_PerfDb_ChildWorker_NONE.ProcessWork
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (82 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (2625 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2625 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (44 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3209 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3210 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (72 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3195 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3195 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (42 ms)
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (35 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3669 ms total)
+
+[----------] Global test environment tear-down
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3669 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3670 ms total)
+[  PASSED  ] 1 test.
+[==========] 1 test from 1 test suite ran. (3670 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (94 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3660 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3660 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (33 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3675 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3676 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (45 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3676 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3677 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (48 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (3759 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3760 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (87 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4171 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4171 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (60 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4214 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4214 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (72 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4547 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4547 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (94 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4666 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4666 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (83 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4706 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4706 ms total)
+[  PASSED  ] 1 test.
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (95 ms)
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4748 ms total)
+
+[----------] Global test environment tear-down
+[       OK ] CPU_PerfDb_ChildWorker_NONE.ProcessWork (94 ms)
+[==========] 1 test from 1 test suite ran. (4748 ms total)
+[  PASSED  ] 1 test.
+[----------] 1 test from CPU_PerfDb_ChildWorker_NONE (4746 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4746 ms total)
+[  PASSED  ] 1 test.
+MIOpen(HIP): Test Default [Run] Validating results...
+MIOpen(HIP): Test Default [Run] Validation passed...
+[       OK ] CPU_PerfDb_NONE.PlainTextDb_AllTests (10015 ms)
+[ RUN      ] CPU_PerfDb_NONE.MultiFileDb_AllTests
+MIOpen(HIP): Test Default [Run] Running multifile read test with merge...
+MIOpen(HIP): Test Default [Run] Running multifile read test...
+MIOpen(HIP): Test Default [Run] Running multifile write test...
+MIOpen(HIP): Test Default [PrepareDb] Running multifile operations test...
+MIOpen(HIP): Test Default [UpdateTest] Update test...
+MIOpen(HIP): Test Default [LoadTest] Load test...
+MIOpen(HIP): Test Default [RemoveTest] Remove test...
+MIOpen(HIP): Warning [EraseValues] 1x2, not found: 0
+MIOpen(HIP): Test Default [RemoveRecordTest] Remove record test...
+MIOpen(HIP): Test Default [Run] Testing db for multifile multithreaded read access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test threads...
+MIOpen(HIP): Test Default [Run] Waiting for test threads...
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [ReadCommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [Run] Testing db for multifile multithreaded write access...
+MIOpen(HIP): Test Default [Run] Initializing test data...
+MIOpen(HIP): Test Default [Run] Launching test threads...
+MIOpen(HIP): Test Default [Run] Waiting for test threads...
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [CommonPart] Common part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with common db instance.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [UniquePart] Unique part. Section with separate db instances.
+MIOpen(HIP): Test Default [Run] Validating results...
+MIOpen(HIP): Test Default [Run] Validation passed...
+[       OK ] CPU_PerfDb_NONE.MultiFileDb_AllTests (292 ms)
+[----------] 3 tests from CPU_PerfDb_NONE (18436 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 2 test suites ran. (19121 ms total)
+[  PASSED  ] 3 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] CPU_PerfDb_ChildWorker_NONE.ProcessWork

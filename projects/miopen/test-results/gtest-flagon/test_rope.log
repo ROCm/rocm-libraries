@@ -1,0 +1,252 @@
+[==========] Running 114 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 19 tests from Full/GPU_RoPEFwdTest_FP32
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/0 (2716 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/1
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/1 (89 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/2
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/2 (123 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/3
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/3 (226 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/4
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/4 (33 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/5
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/5 (28 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/6
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/6 (23 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/7
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/7 (55 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/8
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/8 (122 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/9
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/9 (255 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/10
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/10 (81 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/11
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/11 (155 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/12
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/12 (391 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/13
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/13 (793 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/14
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/14 (383 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/15
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/15 (167 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/16
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/16 (78 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/17
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/17 (354 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/18
+[       OK ] Full/GPU_RoPEFwdTest_FP32.RoPEFwdTest/18 (1375 ms)
+[----------] 19 tests from Full/GPU_RoPEFwdTest_FP32 (7458 ms total)
+
+[----------] 19 tests from Full/GPU_RoPEFwdTest_FP16
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/0
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/0 (458 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/1
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/1 (65 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/2
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/2 (76 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/3
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/3 (147 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/4
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/4 (33 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/5
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/5 (25 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/6
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/6 (23 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/7
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/7 (84 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/8
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/8 (86 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/9
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/9 (167 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/10
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/10 (73 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/11
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/11 (108 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/12
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/12 (229 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/13
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/13 (531 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/14
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/14 (223 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/15
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/15 (110 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/16
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/16 (61 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/17
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/17 (206 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/18
+[       OK ] Full/GPU_RoPEFwdTest_FP16.RoPEFwdTest/18 (965 ms)
+[----------] 19 tests from Full/GPU_RoPEFwdTest_FP16 (3682 ms total)
+
+[----------] 19 tests from Full/GPU_RoPEFwdTest_BFP16
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/0
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/0 (529 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/1
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/1 (62 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/2
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/2 (94 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/3
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/3 (186 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/4
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/4 (39 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/5
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/5 (27 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/6
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/6 (23 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/7
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/7 (63 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/8
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/8 (101 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/9
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/9 (232 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/10
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/10 (90 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/11
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/11 (139 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/12
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/12 (264 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/13
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/13 (600 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/14
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/14 (304 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/15
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/15 (135 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/16
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/16 (73 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/17
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/17 (258 ms)
+[ RUN      ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/18
+[       OK ] Full/GPU_RoPEFwdTest_BFP16.RoPEFwdTest/18 (1173 ms)
+[----------] 19 tests from Full/GPU_RoPEFwdTest_BFP16 (4419 ms total)
+
+[----------] 19 tests from Full/GPU_RoPEBwdTest_FP32
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/0
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/0 (42 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/1
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/1 (57 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/2
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/2 (109 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/3
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/3 (221 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/4
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/4 (39 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/5
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/5 (27 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/6
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/6 (24 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/7
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/7 (54 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/8
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/8 (122 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/9
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/9 (259 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/10
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/10 (77 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/11
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/11 (150 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/12
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/12 (406 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/13
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/13 (711 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/14
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/14 (377 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/15
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/15 (164 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/16
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/16 (79 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/17
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/17 (331 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/18
+[       OK ] Full/GPU_RoPEBwdTest_FP32.RoPEBwdTest/18 (1470 ms)
+[----------] 19 tests from Full/GPU_RoPEBwdTest_FP32 (4728 ms total)
+
+[----------] 19 tests from Full/GPU_RoPEBwdTest_FP16
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/0
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/0 (41 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/1
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/1 (50 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/2
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/2 (73 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/3
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/3 (143 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/4
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/4 (37 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/5
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/5 (25 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/6
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/6 (22 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/7
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/7 (53 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/8
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/8 (84 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/9
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/9 (169 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/10
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/10 (70 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/11
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/11 (108 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/12
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/12 (204 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/13
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/13 (492 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/14
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/14 (225 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/15
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/15 (108 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/16
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/16 (60 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/17
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/17 (205 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/18
+[       OK ] Full/GPU_RoPEBwdTest_FP16.RoPEBwdTest/18 (966 ms)
+[----------] 19 tests from Full/GPU_RoPEBwdTest_FP16 (3147 ms total)
+
+[----------] 19 tests from Full/GPU_RoPEBwdTest_BFP16
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/0
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/0 (44 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/1
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/1 (60 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/2
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/2 (95 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/3
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/3 (185 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/4
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/4 (41 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/5
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/5 (26 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/6
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/6 (24 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/7
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/7 (64 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/8
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/8 (105 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/9
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/9 (202 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/10
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/10 (91 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/11
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/11 (139 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/12
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/12 (261 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/13
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/13 (596 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/14
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/14 (274 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/15
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/15 (138 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/16
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/16 (75 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/17
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/17 (280 ms)
+[ RUN      ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/18
+[       OK ] Full/GPU_RoPEBwdTest_BFP16.RoPEBwdTest/18 (1155 ms)
+[----------] 19 tests from Full/GPU_RoPEBwdTest_BFP16 (3865 ms total)
+
+[----------] Global test environment tear-down
+[==========] 114 tests from 6 test suites ran. (27302 ms total)
+[  PASSED  ] 114 tests.

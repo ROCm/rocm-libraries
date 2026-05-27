@@ -1,0 +1,15 @@
+[==========] Running 2 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_MIOpenDriverGemmTest_FP32
+[ RUN      ] Full/GPU_MIOpenDriverGemmTest_FP32.MIOpenDriverGemm/0
+[       OK ] Full/GPU_MIOpenDriverGemmTest_FP32.MIOpenDriverGemm/0 (3754 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverGemmTest_FP32 (3755 ms total)
+
+[----------] 1 test from Smoke/GPU_MIOpenDriverGemmTest_FP16
+[ RUN      ] Smoke/GPU_MIOpenDriverGemmTest_FP16.MIOpenDriverGemm/0
+[       OK ] Smoke/GPU_MIOpenDriverGemmTest_FP16.MIOpenDriverGemm/0 (2779 ms)
+[----------] 1 test from Smoke/GPU_MIOpenDriverGemmTest_FP16 (2779 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (6534 ms total)
+[  PASSED  ] 2 tests.

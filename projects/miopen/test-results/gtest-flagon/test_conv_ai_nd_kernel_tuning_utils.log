@@ -1,0 +1,235 @@
+[==========] Running 82 tests from 17 test suites.
+[----------] Global test environment set-up.
+[----------] 8 tests from CPU_SolverHeuristicConfig_NONE
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_PowerOfTwo
+[       OK ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_PowerOfTwo (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_NonPowerOfTwo
+[       OK ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_NonPowerOfTwo (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_OutOfRange
+[       OK ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_OutOfRange (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_AutoDeduce
+[       OK ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_AutoDeduce (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_NoSplitKSolver
+[       OK ] CPU_SolverHeuristicConfig_NONE.IsValidSplitK_NoSplitKSolver (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.GetSolverNameForArch_gfx90a
+[       OK ] CPU_SolverHeuristicConfig_NONE.GetSolverNameForArch_gfx90a (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.GetSolverNameForArch_gfx942
+[       OK ] CPU_SolverHeuristicConfig_NONE.GetSolverNameForArch_gfx942 (0 ms)
+[ RUN      ] CPU_SolverHeuristicConfig_NONE.SolverConfigs_Consistency
+[       OK ] CPU_SolverHeuristicConfig_NONE.SolverConfigs_Consistency (0 ms)
+[----------] 8 tests from CPU_SolverHeuristicConfig_NONE (846 ms total)
+
+[----------] 6 tests from CPU_HeuristicInitState_NONE
+[ RUN      ] CPU_HeuristicInitState_NONE.Reset_WithSplitK
+[       OK ] CPU_HeuristicInitState_NONE.Reset_WithSplitK (0 ms)
+[ RUN      ] CPU_HeuristicInitState_NONE.Reset_WithoutSplitK
+[       OK ] CPU_HeuristicInitState_NONE.Reset_WithoutSplitK (0 ms)
+[ RUN      ] CPU_HeuristicInitState_NONE.SetResult_WithSplitK
+[       OK ] CPU_HeuristicInitState_NONE.SetResult_WithSplitK (0 ms)
+[ RUN      ] CPU_HeuristicInitState_NONE.SetResult_WithoutSplitK
+[       OK ] CPU_HeuristicInitState_NONE.SetResult_WithoutSplitK (0 ms)
+[ RUN      ] CPU_HeuristicInitState_NONE.SetResult_InvalidIndex
+[       OK ] CPU_HeuristicInitState_NONE.SetResult_InvalidIndex (0 ms)
+[ RUN      ] CPU_HeuristicInitState_NONE.KernelIdFormatting
+[       OK ] CPU_HeuristicInitState_NONE.KernelIdFormatting (0 ms)
+[----------] 6 tests from CPU_HeuristicInitState_NONE (0 ms total)
+
+[----------] 5 tests from GPU_ConvNDKernelTuningUtils_FP32
+[ RUN      ] GPU_ConvNDKernelTuningUtils_FP32.GetKernelAsTokens_Test
+[       OK ] GPU_ConvNDKernelTuningUtils_FP32.GetKernelAsTokens_Test (30 ms)
+[ RUN      ] GPU_ConvNDKernelTuningUtils_FP32.GenerateSplitK_Test
+[       OK ] GPU_ConvNDKernelTuningUtils_FP32.GenerateSplitK_Test (1 ms)
+[ RUN      ] GPU_ConvNDKernelTuningUtils_FP32.ProcessExplicitXdlParams_Test
+[       OK ] GPU_ConvNDKernelTuningUtils_FP32.ProcessExplicitXdlParams_Test (1 ms)
+[ RUN      ] GPU_ConvNDKernelTuningUtils_FP32.ProcessExplicitXdlParams_EmptyInput_Test
+[       OK ] GPU_ConvNDKernelTuningUtils_FP32.ProcessExplicitXdlParams_EmptyInput_Test (1 ms)
+[ RUN      ] GPU_ConvNDKernelTuningUtils_FP32.FillHeuristicKernels_WithExplicitXdl_Test
+[       OK ] GPU_ConvNDKernelTuningUtils_FP32.FillHeuristicKernels_WithExplicitXdl_Test (1 ms)
+[----------] 5 tests from GPU_ConvNDKernelTuningUtils_FP32 (36 ms total)
+
+[----------] 3 tests from GPU_Conv2DKernelTuningAI_FP32
+[ RUN      ] GPU_Conv2DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Wrw_Test
+[       OK ] GPU_Conv2DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Wrw_Test (3668 ms)
+[ RUN      ] GPU_Conv2DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Fwd_Test
+[       OK ] GPU_Conv2DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Fwd_Test (4 ms)
+[ RUN      ] GPU_Conv2DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Bwd_Test
+[       OK ] GPU_Conv2DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Bwd_Test (2 ms)
+[----------] 3 tests from GPU_Conv2DKernelTuningAI_FP32 (3676 ms total)
+
+[----------] 3 tests from GPU_Conv3DKernelTuningAI_FP32
+[ RUN      ] GPU_Conv3DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Wrw_Test
+[       OK ] GPU_Conv3DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Wrw_Test (2 ms)
+[ RUN      ] GPU_Conv3DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Fwd_Test
+[       OK ] GPU_Conv3DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Fwd_Test (4 ms)
+[ RUN      ] GPU_Conv3DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Bwd_Test
+[       OK ] GPU_Conv3DKernelTuningAI_FP32.MetadataEncodingValidation_AllCKInstances_Bwd_Test (3 ms)
+[----------] 3 tests from GPU_Conv3DKernelTuningAI_FP32 (10 ms total)
+
+[----------] 3 tests from GPU_Conv2DKernelTuningSolver_FP32
+[ RUN      ] GPU_Conv2DKernelTuningSolver_FP32.FullSolverPathway_Wrw_Test
+[       OK ] GPU_Conv2DKernelTuningSolver_FP32.FullSolverPathway_Wrw_Test (49 ms)
+[ RUN      ] GPU_Conv2DKernelTuningSolver_FP32.FullSolverPathway_Fwd_Test
+[       OK ] GPU_Conv2DKernelTuningSolver_FP32.FullSolverPathway_Fwd_Test (22 ms)
+[ RUN      ] GPU_Conv2DKernelTuningSolver_FP32.FullSolverPathway_Bwd_Test
+[       OK ] GPU_Conv2DKernelTuningSolver_FP32.FullSolverPathway_Bwd_Test (42 ms)
+[----------] 3 tests from GPU_Conv2DKernelTuningSolver_FP32 (113 ms total)
+
+[----------] 3 tests from GPU_Conv3DKernelTuningSolver_FP32
+[ RUN      ] GPU_Conv3DKernelTuningSolver_FP32.FullSolverPathway_Wrw_Test
+[       OK ] GPU_Conv3DKernelTuningSolver_FP32.FullSolverPathway_Wrw_Test (45 ms)
+[ RUN      ] GPU_Conv3DKernelTuningSolver_FP32.FullSolverPathway_Fwd_Test
+[       OK ] GPU_Conv3DKernelTuningSolver_FP32.FullSolverPathway_Fwd_Test (16 ms)
+[ RUN      ] GPU_Conv3DKernelTuningSolver_FP32.FullSolverPathway_Bwd_Test
+[       OK ] GPU_Conv3DKernelTuningSolver_FP32.FullSolverPathway_Bwd_Test (17 ms)
+[----------] 3 tests from GPU_Conv3DKernelTuningSolver_FP32 (79 ms total)
+
+[----------] 4 tests from CPU_ConvNDKernelTuningDiagnostic_NONE
+[ RUN      ] CPU_ConvNDKernelTuningDiagnostic_NONE.ArchitectureCompatibility_2D_Test
+=== 2D Architecture Compatibility Report ===
+Current device: gfx942
+gfx942: SUPPORTED
+gfx950: SUPPORTED
+gfx90a: NOT SUPPORTED
+gfx908: NOT SUPPORTED
+[       OK ] CPU_ConvNDKernelTuningDiagnostic_NONE.ArchitectureCompatibility_2D_Test (1 ms)
+[ RUN      ] CPU_ConvNDKernelTuningDiagnostic_NONE.ArchitectureCompatibility_3D_Test
+=== 3D Architecture Compatibility Report ===
+Current device: gfx942
+gfx942: SUPPORTED
+gfx950: SUPPORTED
+gfx90a: NOT SUPPORTED
+gfx908: NOT SUPPORTED
+[       OK ] CPU_ConvNDKernelTuningDiagnostic_NONE.ArchitectureCompatibility_3D_Test (1 ms)
+[ RUN      ] CPU_ConvNDKernelTuningDiagnostic_NONE.GetFeatures2D_CrossPlatform_Test
+[       OK ] CPU_ConvNDKernelTuningDiagnostic_NONE.GetFeatures2D_CrossPlatform_Test (1 ms)
+[ RUN      ] CPU_ConvNDKernelTuningDiagnostic_NONE.GetFeatures3D_CrossPlatform_Test
+[       OK ] CPU_ConvNDKernelTuningDiagnostic_NONE.GetFeatures3D_CrossPlatform_Test (1 ms)
+[----------] 4 tests from CPU_ConvNDKernelTuningDiagnostic_NONE (6 ms total)
+
+[----------] 1 test from CPU_FillValidKernelsGeneric_NONE
+[ RUN      ] CPU_FillValidKernelsGeneric_NONE.Documentation_Test
+[       OK ] CPU_FillValidKernelsGeneric_NONE.Documentation_Test (0 ms)
+[----------] 1 test from CPU_FillValidKernelsGeneric_NONE (0 ms total)
+
+[----------] 1 test from CPU_RunKTNGeneric_NONE
+[ RUN      ] CPU_RunKTNGeneric_NONE.Documentation_Test
+[       OK ] CPU_RunKTNGeneric_NONE.Documentation_Test (0 ms)
+[----------] 1 test from CPU_RunKTNGeneric_NONE (0 ms total)
+
+[----------] 3 tests from GPU_RunAIHeuristics_Integration_FP32
+[ RUN      ] GPU_RunAIHeuristics_Integration_FP32.CandidateSelection_BasicFlow
+[       OK ] GPU_RunAIHeuristics_Integration_FP32.CandidateSelection_BasicFlow (3 ms)
+[ RUN      ] GPU_RunAIHeuristics_Integration_FP32.Deterministic_EnforcesSplitK1
+[       OK ] GPU_RunAIHeuristics_Integration_FP32.Deterministic_EnforcesSplitK1 (2 ms)
+[ RUN      ] GPU_RunAIHeuristics_Integration_FP32.ForwardSolver_NoSplitK
+[       OK ] GPU_RunAIHeuristics_Integration_FP32.ForwardSolver_NoSplitK (10 ms)
+[----------] 3 tests from GPU_RunAIHeuristics_Integration_FP32 (16 ms total)
+
+[----------] 2 tests from GPU_CKValidatorIntegration_FP32
+[ RUN      ] GPU_CKValidatorIntegration_FP32.RestrictiveValidator_OnlyAcceptsSplitK1And2
+[       OK ] GPU_CKValidatorIntegration_FP32.RestrictiveValidator_OnlyAcceptsSplitK1And2 (2 ms)
+[ RUN      ] GPU_CKValidatorIntegration_FP32.RejectAllValidator_ReturnsFalse
+MIOpen(HIP): Warning [ModelSelectBestCandidate] No valid kernel+split_k combinations found after filtering
+[       OK ] GPU_CKValidatorIntegration_FP32.RejectAllValidator_ReturnsFalse (1 ms)
+[----------] 2 tests from GPU_CKValidatorIntegration_FP32 (4 ms total)
+
+[----------] 2 tests from CPU_DeterministicMode_NONE
+[ RUN      ] CPU_DeterministicMode_NONE.HeuristicInit_SetsSplitK1
+[       OK ] CPU_DeterministicMode_NONE.HeuristicInit_SetsSplitK1 (0 ms)
+[ RUN      ] CPU_DeterministicMode_NONE.AllBackwardSolvers_SupportDeterministic
+[       OK ] CPU_DeterministicMode_NONE.AllBackwardSolvers_SupportDeterministic (0 ms)
+[----------] 2 tests from CPU_DeterministicMode_NONE (0 ms total)
+
+[----------] 4 tests from Smoke/GPU_ConvNDKernelTuning_FP32
+[ RUN      ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Fwd
+[       OK ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Fwd (1 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Wrw
+[       OK ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Wrw (1 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Fwd
+[       OK ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Fwd (1 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Wrw
+[       OK ] Smoke/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Wrw (1 ms)
+[----------] 4 tests from Smoke/GPU_ConvNDKernelTuning_FP32 (6 ms total)
+
+[----------] 10 tests from Full/GPU_ConvNDKernelTuning_FP32
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Fwd
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Fwd (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Bwd
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Bwd (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Wrw
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Wrw (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Half
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_Half (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_BFloat16
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv2D_BFloat16 (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Fwd
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Fwd (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Bwd
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Bwd (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Wrw
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Wrw (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Half
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_Half (1 ms)
+[ RUN      ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_BFloat16
+[       OK ] Full/GPU_ConvNDKernelTuning_FP32.GetFeaturesND_Test/Conv3D_BFloat16 (1 ms)
+[----------] 10 tests from Full/GPU_ConvNDKernelTuning_FP32 (15 ms total)
+
+[----------] 6 tests from Smoke/GPU_ConvNDKernelTuningAI_FP32
+[ RUN      ] Smoke/GPU_ConvNDKernelTuningAI_FP32.CandidateSelectionModel_Test/Conv2D
+[       OK ] Smoke/GPU_ConvNDKernelTuningAI_FP32.CandidateSelectionModel_Test/Conv2D (1 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuningAI_FP32.CandidateSelectionModel_Test/Conv3D
+[       OK ] Smoke/GPU_ConvNDKernelTuningAI_FP32.CandidateSelectionModel_Test/Conv3D (1 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Test/Conv2D
+[       OK ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Test/Conv2D (4 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Test/Conv3D
+[       OK ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Test/Conv3D (11 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Fallback_Test/Conv2D
+MIOpen(HIP): Warning [ModelSelectBestCandidate] No valid kernel+split_k combinations found after filtering
+[       OK ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Fallback_Test/Conv2D (1 ms)
+[ RUN      ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Fallback_Test/Conv3D
+MIOpen(HIP): Warning [ModelSelectBestCandidate] No valid kernel+split_k combinations found after filtering
+[       OK ] Smoke/GPU_ConvNDKernelTuningAI_FP32.RunParameterPredictionModel_Fallback_Test/Conv3D (1 ms)
+[----------] 6 tests from Smoke/GPU_ConvNDKernelTuningAI_FP32 (23 ms total)
+
+[----------] 18 tests from Unit/CPU_SplitKValidation_Parameterized_NONE
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/0
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/0 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/1
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/1 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/2
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/2 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/3
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/3 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/4
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/4 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/5
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/5 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/6
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/6 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/7
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/7 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/8
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/8 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/9
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/9 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/10
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/10 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/11
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/11 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/12
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/12 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/13
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/13 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/14
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/14 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/15
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/15 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/16
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/16 (0 ms)
+[ RUN      ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/17
+[       OK ] Unit/CPU_SplitKValidation_Parameterized_NONE.ValidateSplitKRange/17 (0 ms)
+[----------] 18 tests from Unit/CPU_SplitKValidation_Parameterized_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 82 tests from 17 test suites ran. (4835 ms total)
+[  PASSED  ] 82 tests.

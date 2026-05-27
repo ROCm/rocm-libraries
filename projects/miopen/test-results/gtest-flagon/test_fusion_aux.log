@@ -1,0 +1,12 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_FusionAux_FP32
+[ RUN      ] Smoke/GPU_FusionAux_FP32.TestFloat32/inputs_100_32_8_8_conv_filter_64_32_5_5_conv_desc_0_0_1_1_1_1_test_id_0
+PRNG seed: 12345678
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/fusion.cpp:482: Operator index out of bounds
+[       OK ] Smoke/GPU_FusionAux_FP32.TestFloat32/inputs_100_32_8_8_conv_filter_64_32_5_5_conv_desc_0_0_1_1_1_1_test_id_0 (10 ms)
+[----------] 1 test from Smoke/GPU_FusionAux_FP32 (726 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (726 ms total)
+[  PASSED  ] 1 test.

@@ -1,0 +1,65 @@
+[==========] Running 12 tests from 12 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_InlineVectorSizeAndAccumulate_NONE
+[ RUN      ] CPU_InlineVectorSizeAndAccumulate_NONE.Test
+[       OK ] CPU_InlineVectorSizeAndAccumulate_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorSizeAndAccumulate_NONE (2666 ms total)
+
+[----------] 1 test from CPU_InlineVectorFindIfAndDistance_NONE
+[ RUN      ] CPU_InlineVectorFindIfAndDistance_NONE.Test
+[       OK ] CPU_InlineVectorFindIfAndDistance_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorFindIfAndDistance_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVecotrTie_NONE
+[ RUN      ] CPU_InlineVecotrTie_NONE.Test
+[       OK ] CPU_InlineVecotrTie_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVecotrTie_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorCapacityAndEmpty_NONE
+[ RUN      ] CPU_InlineVectorCapacityAndEmpty_NONE.Test
+[       OK ] CPU_InlineVectorCapacityAndEmpty_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorCapacityAndEmpty_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorIteratorsConstructor_NONE
+[ RUN      ] CPU_InlineVectorIteratorsConstructor_NONE.Test
+[       OK ] CPU_InlineVectorIteratorsConstructor_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorIteratorsConstructor_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorConstructorException_NONE
+[ RUN      ] CPU_InlineVectorConstructorException_NONE.Test
+[       OK ] CPU_InlineVectorConstructorException_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorConstructorException_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorAllOf_NONE
+[ RUN      ] CPU_InlineVectorAllOf_NONE.Test
+[       OK ] CPU_InlineVectorAllOf_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorAllOf_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorResize_NONE
+[ RUN      ] CPU_InlineVectorResize_NONE.Test
+[       OK ] CPU_InlineVectorResize_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorResize_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorPushBackPopBack_NONE
+[ RUN      ] CPU_InlineVectorPushBackPopBack_NONE.Test
+[       OK ] CPU_InlineVectorPushBackPopBack_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorPushBackPopBack_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorAt_NONE
+[ RUN      ] CPU_InlineVectorAt_NONE.Test
+[       OK ] CPU_InlineVectorAt_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorAt_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorFrontBack_NONE
+[ RUN      ] CPU_InlineVectorFrontBack_NONE.Test
+[       OK ] CPU_InlineVectorFrontBack_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorFrontBack_NONE (0 ms total)
+
+[----------] 1 test from CPU_InlineVectorClear_NONE
+[ RUN      ] CPU_InlineVectorClear_NONE.Test
+[       OK ] CPU_InlineVectorClear_NONE.Test (0 ms)
+[----------] 1 test from CPU_InlineVectorClear_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 12 test suites ran. (2667 ms total)
+[  PASSED  ] 12 tests.

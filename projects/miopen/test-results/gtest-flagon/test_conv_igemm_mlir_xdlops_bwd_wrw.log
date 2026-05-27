@@ -1,0 +1,15 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32
+[ RUN      ] Full/GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32.FloatTest_conv_igemm_mlir_xdlops_bwd_wrw/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_igemm_mlir_xdlops_bwd_wrw.cpp:87: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32.FloatTest_conv_igemm_mlir_xdlops_bwd_wrw/0 (0 ms)
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32 (886 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (886 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32.FloatTest_conv_igemm_mlir_xdlops_bwd_wrw/0

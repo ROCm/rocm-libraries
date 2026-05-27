@@ -1,0 +1,1738 @@
+[==========] Running 860 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 10 tests from Smoke/GPU_UnitTestActivationDescriptor_FP16
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/0 (1580 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/1
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/1 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/2
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/2 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/3
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/3 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/4
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/4 (9 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/5
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/5 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/6
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/6 (9 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/7
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/7 (474 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/8
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/8 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/9
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP16.Activation/9 (9 ms)
+[----------] 10 tests from Smoke/GPU_UnitTestActivationDescriptor_FP16 (2124 ms total)
+
+[----------] 420 tests from Full/GPU_UnitTestActivationDescriptor_FP16
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/0
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/0 (398 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/1
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/1 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/2
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/2 (349 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/3
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/3 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/4
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/4 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/5
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/5 (64 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/6
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/6 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/7
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/7 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/8
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/8 (1620 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/9
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/9 (3346 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/10
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/10 (5571 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/11
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/11 (861 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/12
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/12 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/13
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/13 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/14
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/14 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/15
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/15 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/16
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/16 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/17
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/17 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/18
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/18 (38 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/19
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/19 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/20
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/20 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/21
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/21 (20 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/22
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/22 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/23
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/23 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/24
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/24 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/25
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/25 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/26
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/26 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/27
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/27 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/28
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/28 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/29
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/29 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/30
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/30 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/31
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/31 (137 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/32
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/32 (438 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/33
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/33 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/34
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/34 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/35
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/35 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/36
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/36 (87 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/37
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/37 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/38
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/38 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/39
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/39 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/40
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/40 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/41
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/41 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/42
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/42 (4 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/43
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/43 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/44
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/44 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/45
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/45 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/46
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/46 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/47
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/47 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/48
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/48 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/49
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/49 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/50
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/50 (1459 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/51
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/51 (3307 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/52
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/52 (4519 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/53
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/53 (1004 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/54
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/54 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/55
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/55 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/56
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/56 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/57
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/57 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/58
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/58 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/59
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/59 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/60
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/60 (25 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/61
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/61 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/62
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/62 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/63
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/63 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/64
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/64 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/65
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/65 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/66
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/66 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/67
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/67 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/68
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/68 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/69
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/69 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/70
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/70 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/71
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/71 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/72
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/72 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/73
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/73 (104 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/74
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/74 (436 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/75
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/75 (28 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/76
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/76 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/77
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/77 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/78
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/78 (100 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/79
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/79 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/80
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/80 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/81
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/81 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/82
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/82 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/83
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/83 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/84
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/84 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/85
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/85 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/86
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/86 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/87
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/87 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/88
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/88 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/89
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/89 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/90
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/90 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/91
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/91 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/92
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/92 (1939 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/93
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/93 (3457 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/94
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/94 (4915 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/95
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/95 (1579 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/96
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/96 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/97
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/97 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/98
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/98 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/99
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/99 (5 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/100
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/100 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/101
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/101 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/102
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/102 (55 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/103
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/103 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/104
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/104 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/105
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/105 (31 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/106
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/106 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/107
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/107 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/108
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/108 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/109
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/109 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/110
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/110 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/111
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/111 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/112
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/112 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/113
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/113 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/114
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/114 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/115
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/115 (219 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/116
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/116 (702 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/117
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/117 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/118
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/118 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/119
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/119 (31 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/120
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/120 (252 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/121
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/121 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/122
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/122 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/123
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/123 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/124
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/124 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/125
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/125 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/126
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/126 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/127
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/127 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/128
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/128 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/129
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/129 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/130
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/130 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/131
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/131 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/132
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/132 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/133
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/133 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/134
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/134 (1633 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/135
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/135 (2618 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/136
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/136 (4657 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/137
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/137 (918 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/138
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/138 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/139
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/139 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/140
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/140 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/141
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/141 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/142
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/142 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/143
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/143 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/144
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/144 (30 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/145
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/145 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/146
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/146 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/147
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/147 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/148
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/148 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/149
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/149 (5 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/150
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/150 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/151
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/151 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/152
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/152 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/153
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/153 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/154
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/154 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/155
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/155 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/156
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/156 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/157
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/157 (108 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/158
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/158 (456 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/159
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/159 (30 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/160
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/160 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/161
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/161 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/162
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/162 (113 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/163
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/163 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/164
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/164 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/165
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/165 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/166
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/166 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/167
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/167 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/168
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/168 (406 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/169
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/169 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/170
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/170 (425 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/171
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/171 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/172
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/172 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/173
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/173 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/174
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/174 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/175
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/175 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/176
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/176 (2117 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/177
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/177 (3410 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/178
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/178 (5530 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/179
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/179 (1668 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/180
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/180 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/181
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/181 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/182
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/182 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/183
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/183 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/184
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/184 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/185
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/185 (20 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/186
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/186 (59 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/187
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/187 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/188
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/188 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/189
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/189 (32 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/190
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/190 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/191
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/191 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/192
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/192 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/193
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/193 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/194
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/194 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/195
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/195 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/196
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/196 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/197
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/197 (22 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/198
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/198 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/199
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/199 (185 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/200
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/200 (1097 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/201
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/201 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/202
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/202 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/203
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/203 (32 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/204
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/204 (271 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/205
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/205 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/206
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/206 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/207
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/207 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/208
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/208 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/209
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/209 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/210
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/210 (407 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/211
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/211 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/212
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/212 (409 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/213
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/213 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/214
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/214 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/215
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/215 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/216
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/216 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/217
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/217 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/218
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/218 (1352 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/219
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/219 (3080 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/220
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/220 (5396 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/221
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/221 (860 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/222
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/222 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/223
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/223 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/224
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/224 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/225
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/225 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/226
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/226 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/227
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/227 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/228
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/228 (20 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/229
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/229 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/230
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/230 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/231
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/231 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/232
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/232 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/233
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/233 (5 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/234
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/234 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/235
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/235 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/236
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/236 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/237
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/237 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/238
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/238 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/239
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/239 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/240
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/240 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/241
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/241 (74 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/242
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/242 (358 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/243
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/243 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/244
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/244 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/245
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/245 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/246
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/246 (74 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/247
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/247 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/248
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/248 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/249
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/249 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/250
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/250 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/251
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/251 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/252
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/252 (403 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/253
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/253 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/254
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/254 (421 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/255
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/255 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/256
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/256 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/257
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/257 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/258
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/258 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/259
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/259 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/260
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/260 (1580 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/261
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/261 (2867 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/262
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/262 (4866 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/263
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/263 (1357 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/264
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/264 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/265
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/265 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/266
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/266 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/267
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/267 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/268
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/268 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/269
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/269 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/270
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/270 (39 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/271
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/271 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/272
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/272 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/273
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/273 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/274
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/274 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/275
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/275 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/276
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/276 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/277
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/277 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/278
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/278 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/279
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/279 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/280
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/280 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/281
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/281 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/282
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/282 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/283
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/283 (130 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/284
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/284 (609 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/285
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/285 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/286
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/286 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/287
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/287 (24 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/288
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/288 (157 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/289
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/289 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/290
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/290 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/291
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/291 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/292
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/292 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/293
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/293 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/294
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/294 (402 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/295
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/295 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/296
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/296 (409 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/297
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/297 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/298
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/298 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/299
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/299 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/300
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/300 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/301
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/301 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/302
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/302 (1556 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/303
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/303 (3586 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/304
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/304 (5596 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/305
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/305 (836 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/306
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/306 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/307
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/307 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/308
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/308 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/309
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/309 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/310
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/310 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/311
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/311 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/312
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/312 (31 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/313
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/313 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/314
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/314 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/315
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/315 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/316
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/316 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/317
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/317 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/318
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/318 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/319
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/319 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/320
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/320 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/321
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/321 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/322
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/322 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/323
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/323 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/324
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/324 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/325
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/325 (121 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/326
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/326 (519 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/327
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/327 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/328
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/328 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/329
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/329 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/330
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/330 (99 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/331
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/331 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/332
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/332 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/333
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/333 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/334
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/334 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/335
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/335 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/336
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/336 (400 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/337
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/337 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/338
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/338 (253 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/339
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/339 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/340
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/340 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/341
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/341 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/342
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/342 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/343
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/343 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/344
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/344 (1636 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/345
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/345 (2944 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/346
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/346 (5367 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/347
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/347 (882 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/348
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/348 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/349
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/349 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/350
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/350 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/351
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/351 (5 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/352
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/352 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/353
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/353 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/354
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/354 (24 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/355
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/355 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/356
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/356 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/357
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/357 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/358
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/358 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/359
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/359 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/360
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/360 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/361
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/361 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/362
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/362 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/363
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/363 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/364
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/364 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/365
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/365 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/366
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/366 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/367
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/367 (76 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/368
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/368 (404 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/369
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/369 (35 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/370
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/370 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/371
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/371 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/372
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/372 (88 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/373
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/373 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/374
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/374 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/375
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/375 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/376
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/376 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/377
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/377 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/378
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/378 (261 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/379
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/379 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/380
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/380 (252 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/381
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/381 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/382
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/382 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/383
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/383 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/384
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/384 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/385
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/385 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/386
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/386 (1894 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/387
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/387 (3426 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/388
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/388 (4814 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/389
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/389 (1311 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/390
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/390 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/391
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/391 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/392
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/392 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/393
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/393 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/394
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/394 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/395
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/395 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/396
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/396 (36 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/397
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/397 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/398
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/398 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/399
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/399 (22 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/400
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/400 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/401
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/401 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/402
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/402 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/403
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/403 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/404
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/404 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/405
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/405 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/406
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/406 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/407
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/407 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/408
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/408 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/409
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/409 (195 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/410
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/410 (852 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/411
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/411 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/412
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/412 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/413
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/413 (26 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/414
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/414 (157 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/415
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/415 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/416
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/416 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/417
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/417 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/418
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/418 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/419
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP16.Activation/419 (16 ms)
+[----------] 420 tests from Full/GPU_UnitTestActivationDescriptor_FP16 (129435 ms total)
+
+[----------] 10 tests from Smoke/GPU_UnitTestActivationDescriptor_FP32
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/0
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/0 (7 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/1
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/1 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/2
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/2 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/3
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/3 (7 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/4
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/4 (7 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/5
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/5 (9 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/6
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/6 (7 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/7
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/7 (409 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/8
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/8 (8 ms)
+[ RUN      ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/9
+[       OK ] Smoke/GPU_UnitTestActivationDescriptor_FP32.Activation/9 (8 ms)
+[----------] 10 tests from Smoke/GPU_UnitTestActivationDescriptor_FP32 (482 ms total)
+
+[----------] 420 tests from Full/GPU_UnitTestActivationDescriptor_FP32
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/0
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/0 (395 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/1
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/1 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/2
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/2 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/3
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/3 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/4
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/4 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/5
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/5 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/6
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/6 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/7
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/7 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/8
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/8 (2061 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/9
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/9 (3970 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/10
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/10 (7532 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/11
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/11 (1414 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/12
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/12 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/13
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/13 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/14
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/14 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/15
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/15 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/16
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/16 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/17
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/17 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/18
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/18 (25 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/19
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/19 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/20
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/20 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/21
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/21 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/22
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/22 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/23
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/23 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/24
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/24 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/25
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/25 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/26
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/26 (5 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/27
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/27 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/28
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/28 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/29
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/29 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/30
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/30 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/31
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/31 (111 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/32
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/32 (516 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/33
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/33 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/34
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/34 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/35
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/35 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/36
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/36 (135 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/37
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/37 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/38
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/38 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/39
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/39 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/40
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/40 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/41
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/41 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/42
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/42 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/43
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/43 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/44
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/44 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/45
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/45 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/46
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/46 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/47
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/47 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/48
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/48 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/49
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/49 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/50
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/50 (2309 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/51
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/51 (4445 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/52
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/52 (7766 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/53
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/53 (1147 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/54
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/54 (20 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/55
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/55 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/56
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/56 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/57
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/57 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/58
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/58 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/59
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/59 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/60
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/60 (27 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/61
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/61 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/62
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/62 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/63
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/63 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/64
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/64 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/65
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/65 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/66
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/66 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/67
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/67 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/68
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/68 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/69
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/69 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/70
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/70 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/71
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/71 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/72
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/72 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/73
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/73 (138 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/74
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/74 (624 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/75
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/75 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/76
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/76 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/77
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/77 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/78
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/78 (150 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/79
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/79 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/80
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/80 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/81
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/81 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/82
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/82 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/83
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/83 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/84
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/84 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/85
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/85 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/86
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/86 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/87
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/87 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/88
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/88 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/89
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/89 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/90
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/90 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/91
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/91 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/92
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/92 (2400 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/93
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/93 (4993 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/94
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/94 (7824 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/95
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/95 (1739 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/96
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/96 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/97
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/97 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/98
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/98 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/99
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/99 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/100
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/100 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/101
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/101 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/102
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/102 (39 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/103
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/103 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/104
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/104 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/105
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/105 (26 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/106
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/106 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/107
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/107 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/108
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/108 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/109
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/109 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/110
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/110 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/111
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/111 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/112
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/112 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/113
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/113 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/114
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/114 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/115
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/115 (199 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/116
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/116 (787 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/117
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/117 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/118
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/118 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/119
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/119 (25 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/120
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/120 (271 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/121
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/121 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/122
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/122 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/123
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/123 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/124
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/124 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/125
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/125 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/126
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/126 (5 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/127
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/127 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/128
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/128 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/129
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/129 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/130
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/130 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/131
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/131 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/132
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/132 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/133
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/133 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/134
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/134 (1963 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/135
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/135 (4425 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/136
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/136 (6706 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/137
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/137 (1295 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/138
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/138 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/139
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/139 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/140
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/140 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/141
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/141 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/142
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/142 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/143
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/143 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/144
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/144 (27 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/145
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/145 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/146
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/146 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/147
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/147 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/148
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/148 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/149
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/149 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/150
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/150 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/151
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/151 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/152
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/152 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/153
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/153 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/154
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/154 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/155
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/155 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/156
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/156 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/157
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/157 (159 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/158
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/158 (626 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/159
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/159 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/160
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/160 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/161
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/161 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/162
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/162 (103 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/163
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/163 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/164
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/164 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/165
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/165 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/166
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/166 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/167
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/167 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/168
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/168 (261 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/169
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/169 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/170
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/170 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/171
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/171 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/172
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/172 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/173
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/173 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/174
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/174 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/175
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/175 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/176
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/176 (2325 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/177
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/177 (5080 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/178
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/178 (6946 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/179
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/179 (1595 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/180
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/180 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/181
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/181 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/182
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/182 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/183
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/183 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/184
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/184 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/185
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/185 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/186
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/186 (53 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/187
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/187 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/188
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/188 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/189
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/189 (27 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/190
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/190 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/191
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/191 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/192
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/192 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/193
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/193 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/194
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/194 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/195
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/195 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/196
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/196 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/197
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/197 (20 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/198
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/198 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/199
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/199 (212 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/200
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/200 (1028 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/201
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/201 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/202
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/202 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/203
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/203 (22 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/204
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/204 (264 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/205
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/205 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/206
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/206 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/207
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/207 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/208
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/208 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/209
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/209 (20 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/210
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/210 (252 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/211
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/211 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/212
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/212 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/213
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/213 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/214
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/214 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/215
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/215 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/216
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/216 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/217
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/217 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/218
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/218 (1952 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/219
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/219 (4969 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/220
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/220 (6969 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/221
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/221 (1276 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/222
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/222 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/223
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/223 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/224
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/224 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/225
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/225 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/226
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/226 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/227
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/227 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/228
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/228 (26 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/229
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/229 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/230
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/230 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/231
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/231 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/232
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/232 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/233
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/233 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/234
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/234 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/235
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/235 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/236
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/236 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/237
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/237 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/238
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/238 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/239
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/239 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/240
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/240 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/241
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/241 (127 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/242
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/242 (592 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/243
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/243 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/244
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/244 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/245
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/245 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/246
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/246 (123 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/247
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/247 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/248
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/248 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/249
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/249 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/250
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/250 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/251
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/251 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/252
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/252 (288 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/253
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/253 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/254
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/254 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/255
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/255 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/256
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/256 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/257
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/257 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/258
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/258 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/259
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/259 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/260
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/260 (2089 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/261
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/261 (4581 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/262
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/262 (8321 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/263
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/263 (1384 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/264
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/264 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/265
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/265 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/266
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/266 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/267
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/267 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/268
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/268 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/269
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/269 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/270
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/270 (30 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/271
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/271 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/272
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/272 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/273
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/273 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/274
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/274 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/275
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/275 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/276
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/276 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/277
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/277 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/278
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/278 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/279
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/279 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/280
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/280 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/281
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/281 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/282
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/282 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/283
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/283 (167 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/284
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/284 (651 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/285
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/285 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/286
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/286 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/287
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/287 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/288
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/288 (152 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/289
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/289 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/290
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/290 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/291
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/291 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/292
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/292 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/293
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/293 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/294
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/294 (261 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/295
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/295 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/296
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/296 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/297
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/297 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/298
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/298 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/299
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/299 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/300
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/300 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/301
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/301 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/302
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/302 (1884 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/303
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/303 (4182 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/304
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/304 (6886 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/305
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/305 (1304 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/306
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/306 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/307
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/307 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/308
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/308 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/309
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/309 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/310
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/310 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/311
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/311 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/312
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/312 (27 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/313
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/313 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/314
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/314 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/315
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/315 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/316
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/316 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/317
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/317 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/318
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/318 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/319
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/319 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/320
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/320 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/321
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/321 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/322
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/322 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/323
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/323 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/324
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/324 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/325
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/325 (128 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/326
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/326 (527 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/327
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/327 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/328
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/328 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/329
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/329 (21 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/330
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/330 (136 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/331
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/331 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/332
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/332 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/333
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/333 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/334
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/334 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/335
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/335 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/336
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/336 (404 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/337
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/337 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/338
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/338 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/339
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/339 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/340
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/340 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/341
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/341 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/342
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/342 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/343
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/343 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/344
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/344 (2043 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/345
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/345 (4818 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/346
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/346 (7597 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/347
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/347 (1227 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/348
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/348 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/349
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/349 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/350
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/350 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/351
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/351 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/352
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/352 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/353
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/353 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/354
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/354 (24 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/355
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/355 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/356
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/356 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/357
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/357 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/358
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/358 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/359
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/359 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/360
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/360 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/361
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/361 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/362
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/362 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/363
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/363 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/364
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/364 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/365
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/365 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/366
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/366 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/367
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/367 (114 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/368
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/368 (534 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/369
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/369 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/370
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/370 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/371
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/371 (18 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/372
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/372 (128 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/373
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/373 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/374
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/374 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/375
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/375 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/376
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/376 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/377
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/377 (17 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/378
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/378 (257 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/379
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/379 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/380
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/380 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/381
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/381 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/382
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/382 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/383
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/383 (13 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/384
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/384 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/385
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/385 (15 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/386
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/386 (2195 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/387
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/387 (4520 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/388
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/388 (7253 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/389
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/389 (1406 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/390
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/390 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/391
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/391 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/392
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/392 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/393
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/393 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/394
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/394 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/395
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/395 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/396
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/396 (29 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/397
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/397 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/398
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/398 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/399
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/399 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/400
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/400 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/401
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/401 (7 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/402
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/402 (8 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/403
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/403 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/404
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/404 (6 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/405
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/405 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/406
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/406 (14 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/407
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/407 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/408
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/408 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/409
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/409 (162 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/410
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/410 (573 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/411
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/411 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/412
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/412 (11 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/413
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/413 (19 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/414
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/414 (181 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/415
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/415 (16 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/416
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/416 (12 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/417
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/417 (9 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/418
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/418 (10 ms)
+[ RUN      ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/419
+[       OK ] Full/GPU_UnitTestActivationDescriptor_FP32.Activation/419 (15 ms)
+[----------] 420 tests from Full/GPU_UnitTestActivationDescriptor_FP32 (170775 ms total)
+
+[----------] Global test environment tear-down
+[==========] 860 tests from 4 test suites ran. (302818 ms total)
+[  PASSED  ] 860 tests.

@@ -1,0 +1,15 @@
+[==========] Running 2 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/CPU_Mha_FP32
+[ RUN      ] Smoke/CPU_Mha_FP32.CPUMHATestFloatFw/0
+[       OK ] Smoke/CPU_Mha_FP32.CPUMHATestFloatFw/0 (9 ms)
+[----------] 1 test from Smoke/CPU_Mha_FP32 (801 ms total)
+
+[----------] 1 test from Smoke/CPU_Mha_FP8
+[ RUN      ] Smoke/CPU_Mha_FP8.CPUMHATestFloat8Fw/0
+[       OK ] Smoke/CPU_Mha_FP8.CPUMHATestFloat8Fw/0 (15 ms)
+[----------] 1 test from Smoke/CPU_Mha_FP8 (15 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (817 ms total)
+[  PASSED  ] 2 tests.

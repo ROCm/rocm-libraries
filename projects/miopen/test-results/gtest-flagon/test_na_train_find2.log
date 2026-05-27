@@ -1,0 +1,975 @@
+[==========] Running 472 tests from 8 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_na_train_find2_peract_FP16
+[ RUN      ] Smoke/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+PRNG seed: 12345678
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942130.HIP.fusion.fdb.txt"
+[       OK ] Smoke/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1154 ms)
+[----------] 1 test from Smoke/GPU_na_train_find2_peract_FP16 (1154 ms total)
+
+[----------] 108 tests from Full/GPU_na_train_find2_peract_FP16
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (129 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (706 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (828 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (5961 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (6979 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (6304 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2744 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2767 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2516 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (37 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (549 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (547 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (117 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (933 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (916 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (392 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1240 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1325 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (74 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (725 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (534 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (29 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (516 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (514 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (29 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (509 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (502 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (34 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (537 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (524 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (59 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (547 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (536 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (33 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (720 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (826 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (44 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (683 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (525 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (45 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (564 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (532 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (262 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (778 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1141 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (64 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (880 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (936 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (53 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (665 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (530 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (53 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (554 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (567 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (113 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (606 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (605 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (67 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (855 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (843 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (9873 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (10033 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (9547 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2546 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2954 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2563 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (59 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (799 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (530 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (593 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1062 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1063 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (60 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (549 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (564 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (21 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (529 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (563 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (70 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (584 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (639 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (783 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1346 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1399 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (612 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (991 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1275 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2768 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2795 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2770 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (124 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (616 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (678 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2319 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2676 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2879 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (80 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (962 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (652 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1664 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1631 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1604 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (480 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1033 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1032 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (232 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (687 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (750 ms)
+[----------] 108 tests from Full/GPU_na_train_find2_peract_FP16 (134333 ms total)
+
+[----------] 1 test from Smoke/GPU_na_train_find2_peract_FP32
+[ RUN      ] Smoke/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Smoke/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (22 ms)
+[----------] 1 test from Smoke/GPU_na_train_find2_peract_FP32 (22 ms total)
+
+[----------] 108 tests from Full/GPU_na_train_find2_peract_FP32
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (113 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (639 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (618 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (8194 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (9127 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (8971 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (3432 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (4107 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_32_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3556 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (30 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (533 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (498 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (93 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (615 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (579 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (397 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1364 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1387 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (70 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (856 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (843 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (37 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (600 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (503 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (30 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (507 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (524 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (37 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (512 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (531 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (61 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (541 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (535 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (35 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (550 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (511 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (38 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (508 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (516 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (47 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (525 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (524 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (287 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1180 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1236 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (69 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (594 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (530 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (43 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (519 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (516 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (55 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (534 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (550 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (102 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (587 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (585 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (46 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (527 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (813 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (13489 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (13753 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (13632 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (3399 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (3771 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3732 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (41 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (543 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (541 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (979 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1533 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_16_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1483 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (40 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (586 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_3_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (519 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (22 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (562 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (563 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (77 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (584 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (642 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1105 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2042 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1625 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1003 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1408 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1563 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (4645 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (4432 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (4434 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (200 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (857 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (694 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (4627 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (5492 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (4772 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (141 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (573 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (622 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2230 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2597 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2810 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (944 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1428 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_1024_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1509 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (339 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (823 ms)
+[ RUN      ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_peract_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (906 ms)
+[----------] 108 tests from Full/GPU_na_train_find2_peract_FP32 (176851 ms total)
+
+[----------] 1 test from Smoke/GPU_na_train_find2_spatial_FP16
+[ RUN      ] Smoke/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Smoke/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (27 ms)
+[----------] 1 test from Smoke/GPU_na_train_find2_spatial_FP16 (27 ms total)
+
+[----------] 126 tests from Full/GPU_na_train_find2_spatial_FP16
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (214 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (780 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (739 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (8741 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (10384 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (9360 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (30 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (676 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (590 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (172 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (605 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (592 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (117 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1058 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (763 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (49 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (616 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (601 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (29 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (562 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (560 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (36 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (677 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (752 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (39 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (605 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (568 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (38 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (569 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (744 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (54 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (863 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (580 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (260 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1240 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (829 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (12645 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (11960 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (11766 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (54 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (663 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (673 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (41 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (652 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (679 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (95 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (734 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (695 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (46 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (679 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (633 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (6491 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (7341 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (8053 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2130 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2340 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2462 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (42 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (573 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (585 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (24 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (654 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (625 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (78 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (695 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (710 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2785 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (3051 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3091 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (810 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1413 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1415 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (3878 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (4490 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (4798 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1924 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2513 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3009 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (176 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (820 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (759 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (346 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (935 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (953 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1291 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1835 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1836 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (685 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1300 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1300 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (3703 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (3960 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3749 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (321 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1056 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (921 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (154 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (732 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (771 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (331 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (919 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (949 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2909 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (3477 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3475 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (91 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (711 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (718 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (584 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1301 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1230 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1260 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2106 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2076 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (270 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (761 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (794 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (188 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (778 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (764 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (20 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (612 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (621 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (45 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (613 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP16.TestFloat16/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (579 ms)
+[----------] 126 tests from Full/GPU_na_train_find2_spatial_FP16 (208956 ms total)
+
+[----------] 1 test from Smoke/GPU_na_train_find2_spatial_FP32
+[ RUN      ] Smoke/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Smoke/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_16_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (19 ms)
+[----------] 1 test from Smoke/GPU_na_train_find2_spatial_FP32 (19 ms total)
+
+[----------] 126 tests from Full/GPU_na_train_find2_spatial_FP32
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (261 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (746 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_3_224_224__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (719 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (10181 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (11577 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_4_1024_2048__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (13028 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (32 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (577 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (563 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (44 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (759 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (628 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (110 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (704 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (669 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (56 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (621 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_96_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (602 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (32 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (740 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_4_4__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (893 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (38 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (588 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_128_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (563 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (36 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (564 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_160_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (567 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (45 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (577 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (574 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (48 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (763 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (847 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (337 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (834 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (841 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (20732 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (18770 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_192_256_512__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (21130 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (61 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (614 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_224_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (626 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (45 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (597 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (642 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (102 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (687 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_256_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (680 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (46 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (607 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_352_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (619 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (12113 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (11801 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_480_128_256__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (11901 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (3553 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (3845 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_528_64_128__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3637 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (43 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (595 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_8_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (595 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (28 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (679 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_25_32_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (587 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (83 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (624 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_32_256_12_12__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (655 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (3746 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (4384 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_32_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (4275 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1554 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2222 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2105 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (6553 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (6714 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_64_160_160__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (7601 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2850 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (3425 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_128_80_80__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (3338 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (270 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (859 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1179 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (559 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1135 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_38_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1037 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1505 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2338 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_3_227_227__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2333 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1184 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1742 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1764 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (5109 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (5569 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_64_112_112__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (5810 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (423 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1094 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_128_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1049 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (211 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (782 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_14_14__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1053 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (527 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1059 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1245 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (5031 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (5429 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_256_56_56__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (5336 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (93 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (693 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (632 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (1230 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2235 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_20_20__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (1885 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (2232 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (2897 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_512_28_28__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (2782 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (416 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1002 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_64_2048_7_7__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (908 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (245 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (1015 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_128_16_32_32__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (809 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (50 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (579 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1_8_8__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (573 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONRELU (50 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONLOGISTIC (602 ms)
+[ RUN      ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS
+[       OK ] Full/GPU_na_train_find2_spatial_FP32.TestFloat32/nchw_192_1024_1_1__alpha_0_500000_beta_0_500000_gamma_0_500000_amode_MIOPENACTIVATIONABS (605 ms)
+[----------] 126 tests from Full/GPU_na_train_find2_spatial_FP32 (293475 ms total)
+
+[----------] Global test environment tear-down
+[==========] 472 tests from 8 test suites ran. (814840 ms total)
+[  PASSED  ] 472 tests.

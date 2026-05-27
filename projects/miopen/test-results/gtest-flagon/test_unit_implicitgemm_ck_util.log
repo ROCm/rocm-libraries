@@ -1,0 +1,73 @@
+[==========] Running 28 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from CPU_SplitKGenericDirectTest_NONE
+[ RUN      ] CPU_SplitKGenericDirectTest_NONE.EmptyKernelIdReturnsNotSupported
+[       OK ] CPU_SplitKGenericDirectTest_NONE.EmptyKernelIdReturnsNotSupported (0 ms)
+[ RUN      ] CPU_SplitKGenericDirectTest_NONE.ZeroSplitKValueHandledCorrectly
+[       OK ] CPU_SplitKGenericDirectTest_NONE.ZeroSplitKValueHandledCorrectly (0 ms)
+[ RUN      ] CPU_SplitKGenericDirectTest_NONE.NegativeSplitKValueHandledCorrectly
+[       OK ] CPU_SplitKGenericDirectTest_NONE.NegativeSplitKValueHandledCorrectly (0 ms)
+[ RUN      ] CPU_SplitKGenericDirectTest_NONE.MultipleKernelsWithDifferentSplitKSupport
+[       OK ] CPU_SplitKGenericDirectTest_NONE.MultipleKernelsWithDifferentSplitKSupport (0 ms)
+[----------] 4 tests from CPU_SplitKGenericDirectTest_NONE (655 ms total)
+
+[----------] 9 tests from Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/0
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/0 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/1
+MIOpen(HIP): Warning [IsCKArgsSupported] Unable to parse split_k from kernel_id for wrw: test1+ : stoi
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/1 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/2
+MIOpen(HIP): Warning [IsCKArgsSupported] Unable to parse split_k from kernel_id for wrw: test2
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/2 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/3
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/3 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/4
+MIOpen(HIP): Warning [IsCKArgsSupported] Unable to parse split_k from kernel_id for wrw: test4+9999999999999999999999999 : stoi
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/4 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/5
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/5 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/6
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/6 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/7
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/7 (0 ms)
+[ RUN      ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/8
+[       OK ] Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE.TestParsing/8 (0 ms)
+[----------] 9 tests from Smoke/CPU_UnitTestImplicitGemmCKUtil_NONE (0 ms total)
+
+[----------] 15 tests from Smoke/CPU_SplitKGenericTest_NONE
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/0
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/0 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/1
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/1 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/2
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/2 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/3
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/3 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/4
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/4 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/5
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/5 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/6
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/6 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/7
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/7 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/8
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/8 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/9
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/9 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/10
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/10 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/11
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/11 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/12
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/12 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/13
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/13 (0 ms)
+[ RUN      ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/14
+[       OK ] Smoke/CPU_SplitKGenericTest_NONE.ValidatesSplitKSupport/14 (0 ms)
+[----------] 15 tests from Smoke/CPU_SplitKGenericTest_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 28 tests from 3 test suites ran. (655 ms total)
+[  PASSED  ] 28 tests.

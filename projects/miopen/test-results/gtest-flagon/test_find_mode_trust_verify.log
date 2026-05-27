@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_FindModeTrustVerify_FP16
+[ RUN      ] Smoke/GPU_FindModeTrustVerify_FP16.TrustVerifyTest/0
+[       OK ] Smoke/GPU_FindModeTrustVerify_FP16.TrustVerifyTest/0 (7324 ms)
+[----------] 1 test from Smoke/GPU_FindModeTrustVerify_FP16 (7324 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (7324 ms total)
+[  PASSED  ] 1 test.

@@ -1,0 +1,602 @@
+[==========] Running 274 tests from 8 test suites.
+[----------] Global test environment set-up.
+[----------] 70 tests from Full/CPU_TensorTestPossibleLayout4D5D_NONE
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/13 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/14
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/14 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/15
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/15 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/16
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/16 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/17
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/17 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/18
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/18 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/19
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/19 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/20
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/20 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/21
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/21 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/22
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/22 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/23
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/23 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/24
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/24 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/25
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/25 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/26
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/26 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/27
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/27 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/28
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/28 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/29
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/29 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/30
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/30 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/31
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/31 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/32
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/32 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/33
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/33 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/34
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/34 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/35
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/35 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/36
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/36 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/37
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/37 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/38
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/38 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/39
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/39 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/40
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/40 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/41
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/41 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/42
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/42 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/43
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/43 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/44
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/44 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/45
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/45 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/46
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/46 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/47
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/47 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/48
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/48 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/49
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/49 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/50
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/50 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/51
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/51 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/52
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/52 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/53
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/53 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/54
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/54 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/55
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/55 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/56
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/56 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/57
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/57 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/58
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/58 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/59
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/59 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/60
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/60 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/61
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/61 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/62
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/62 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/63
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/63 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/64
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/64 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/65
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/65 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/66
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/66 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/67
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/67 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/68
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/68 (0 ms)
+[ RUN      ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/69
+[       OK ] Full/CPU_TensorTestPossibleLayout4D5D_NONE.TensorDescriptor/69 (0 ms)
+[----------] 70 tests from Full/CPU_TensorTestPossibleLayout4D5D_NONE (853 ms total)
+
+[----------] 21 tests from Full/CPU_TensorTestGetLayoutT_NONE
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/13 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/14
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/14 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/15
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/15 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/16
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/16 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/17
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/17 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/18
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/18 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/19
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/19 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/20
+[       OK ] Full/CPU_TensorTestGetLayoutT_NONE.TensorDescriptor/20 (0 ms)
+[----------] 21 tests from Full/CPU_TensorTestGetLayoutT_NONE (0 ms total)
+
+[----------] 46 tests from Full/CPU_TensorTestGetLayoutEnum_NONE
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/0
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/0 (14 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/1
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/2
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/5
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/6
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/7
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/13 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/14
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/14 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/15
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/15 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/16
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/16 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/17
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/17 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/18
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/18 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/19
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/19 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/20
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/20 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/21
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/21 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/22
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/22 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/23
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/23 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/24
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/24 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/25
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/25 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/26
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/26 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/27
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/27 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/28
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/28 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/29
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'CNHW' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/29 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/30
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'HWCN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/30 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/31
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'HWNC' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/31 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/32
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/32 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/33
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/33 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/34
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'CNDHW' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/34 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/35
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'CDHWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/35 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/36
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'DHWNC' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/36 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/37
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'DHWCN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/37 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/38
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/38 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/39
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/39 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/40
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/40 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/41
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/41 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/42
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/42 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/43
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/43 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/44
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/44 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/45
+[       OK ] Full/CPU_TensorTestGetLayoutEnum_NONE.TensorDescriptor/45 (0 ms)
+[----------] 46 tests from Full/CPU_TensorTestGetLayoutEnum_NONE (14 ms total)
+
+[----------] 46 tests from Full/CPU_TensorTestGetLayoutStr_NONE
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/13 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/14
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/14 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/15
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/15 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/16
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/16 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/17
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/17 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/18
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/18 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/19
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/19 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/20
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/20 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/21
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/21 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/22
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/22 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/23
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/23 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/24
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/24 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/25
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/25 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/26
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/26 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/27
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/27 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/28
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/28 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/29
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/29 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/30
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/30 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/31
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/31 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/32
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/32 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/33
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/33 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/34
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/34 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/35
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/35 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/36
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/36 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/37
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/37 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/38
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/38 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/39
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/39 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/40
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/40 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/41
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/41 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/42
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/42 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/43
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/43 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/44
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/44 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/45
+[       OK ] Full/CPU_TensorTestGetLayoutStr_NONE.TensorDescriptor/45 (0 ms)
+[----------] 46 tests from Full/CPU_TensorTestGetLayoutStr_NONE (0 ms total)
+
+[----------] 9 tests from Full/CPU_TensorTestLayoutEnumToStr_NONE
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestLayoutEnumToStr_NONE.TensorDescriptor/8 (0 ms)
+[----------] 9 tests from Full/CPU_TensorTestLayoutEnumToStr_NONE (0 ms total)
+
+[----------] 46 tests from Full/CPU_TensorTestGetLayout_NONE
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/13 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/14
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/14 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/15
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/15 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/16
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/16 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/17
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/17 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/18
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/18 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/19
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/19 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/20
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/20 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/21
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/21 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/22
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/22 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/23
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/23 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/24
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/24 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/25
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/25 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/26
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/26 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/27
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/27 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/28
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/28 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/29
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/29 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/30
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/30 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/31
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/31 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/32
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/32 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/33
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/33 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/34
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/34 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/35
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/35 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/36
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/36 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/37
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/37 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/38
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/38 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/39
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/39 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/40
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/40 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/41
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/41 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/42
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/42 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/43
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/43 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/44
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/44 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/45
+[       OK ] Full/CPU_TensorTestGetLayout_NONE.TensorDescriptor/45 (0 ms)
+[----------] 46 tests from Full/CPU_TensorTestGetLayout_NONE (0 ms total)
+
+[----------] 22 tests from Full/CPU_TensorTestGetVectorLength_NONE
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/13 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/14
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/14 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/15
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/15 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/16
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/16 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/17
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/17 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/18
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/18 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/19
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/19 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/20
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/20 (0 ms)
+[ RUN      ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/21
+[       OK ] Full/CPU_TensorTestGetVectorLength_NONE.TensorDescriptor/21 (0 ms)
+[----------] 22 tests from Full/CPU_TensorTestGetVectorLength_NONE (0 ms total)
+
+[----------] 14 tests from Full/CPU_TensorTestCheckDimsFitIntoInt_NONE
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/0
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/1
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/2
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/3
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/4
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/5
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/6
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/7
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/7 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/8
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/8 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/9
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/9 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/10
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/10 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/11
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/11 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/12
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/12 (0 ms)
+[ RUN      ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/13
+[       OK ] Full/CPU_TensorTestCheckDimsFitIntoInt_NONE.TensorDescriptor/13 (0 ms)
+[----------] 14 tests from Full/CPU_TensorTestCheckDimsFitIntoInt_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 274 tests from 8 test suites ran. (870 ms total)
+[  PASSED  ] 274 tests.

@@ -1,0 +1,24 @@
+[==========] Running 8 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 8 tests from CPU_HandleHipDevice_NONE
+[ RUN      ] CPU_HandleHipDevice_NONE.ValidDeviceSetSucceeds
+[       OK ] CPU_HandleHipDevice_NONE.ValidDeviceSetSucceeds (1707 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.NegativeDeviceIdThrowsWithCorrectMessage
+[       OK ] CPU_HandleHipDevice_NONE.NegativeDeviceIdThrowsWithCorrectMessage (21 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.OutOfRangeDeviceIdThrowsWithCorrectMessage
+[       OK ] CPU_HandleHipDevice_NONE.OutOfRangeDeviceIdThrowsWithCorrectMessage (0 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.ErrorMessageContainsDeviceIdAndStatus
+[       OK ] CPU_HandleHipDevice_NONE.ErrorMessageContainsDeviceIdAndStatus (0 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.MultipleValidDevicesSwitchCorrectly
+[       OK ] CPU_HandleHipDevice_NONE.MultipleValidDevicesSwitchCorrectly (0 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.BoundaryConditionLastValidDevice
+[       OK ] CPU_HandleHipDevice_NONE.BoundaryConditionLastValidDevice (0 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.BoundaryConditionFirstInvalidDevice
+[       OK ] CPU_HandleHipDevice_NONE.BoundaryConditionFirstInvalidDevice (0 ms)
+[ RUN      ] CPU_HandleHipDevice_NONE.GetDeviceIdReturnsValidValue
+[       OK ] CPU_HandleHipDevice_NONE.GetDeviceIdReturnsValidValue (0 ms)
+[----------] 8 tests from CPU_HandleHipDevice_NONE (1728 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (1728 ms total)
+[  PASSED  ] 8 tests.

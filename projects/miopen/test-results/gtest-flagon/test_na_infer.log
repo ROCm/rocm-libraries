@@ -1,0 +1,68 @@
+[==========] Running 28 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 28 tests from Full/GPU_BNActivInfer_FP32
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/0 (1738 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/1
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/1 (427 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/2
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/2 (136 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/3
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/3 (143 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/4
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/4 (360 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/5
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/5 (96 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/6
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/6 (100 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/7
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/7 (600 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/8
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/8 (310 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/9
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/9 (424 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/10
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/10 (1705 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/11
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/11 (1525 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/12
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/12 (1101 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/13
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/13 (611 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/14
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/14 (220 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/15
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/15 (181 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/16
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/16 (1092 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/17
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/17 (669 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/18
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/18 (708 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/19
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/19 (513 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/20
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/20 (53 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/21
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/21 (52 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/22
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/22 (1848 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/23
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/23 (1425 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/24
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/24 (1591 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/25
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/25 (776 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/26
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/26 (328 ms)
+[ RUN      ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/27
+[       OK ] Full/GPU_BNActivInfer_FP32.BnFwdInferActivationFused/27 (399 ms)
+[----------] 28 tests from Full/GPU_BNActivInfer_FP32 (19145 ms total)
+
+[----------] Global test environment tear-down
+[==========] 28 tests from 1 test suite ran. (19145 ms total)
+[  PASSED  ] 28 tests.
+
+  YOU HAVE 28 DISABLED TESTS
+

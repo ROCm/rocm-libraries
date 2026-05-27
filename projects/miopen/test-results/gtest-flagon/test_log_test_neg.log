@@ -1,0 +1,17 @@
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from CPU_LOG_TEST_NEG_NONE
+[ RUN      ] CPU_LOG_TEST_NEG_NONE.AssertLogCmdOutput_Neg
+[       OK ] CPU_LOG_TEST_NEG_NONE.AssertLogCmdOutput_Neg (976 ms)
+[ RUN      ] CPU_LOG_TEST_NEG_NONE.AssertLogFindCmdOutput_Neg
+[       OK ] CPU_LOG_TEST_NEG_NONE.AssertLogFindCmdOutput_Neg (0 ms)
+[ RUN      ] CPU_LOG_TEST_NEG_NONE.AssertTestLogCmdCBAFusionOutput_Neg
+[       OK ] CPU_LOG_TEST_NEG_NONE.AssertTestLogCmdCBAFusionOutput_Neg (0 ms)
+[ RUN      ] CPU_LOG_TEST_NEG_NONE.AssertTestLogCmdBNormFusionOutput_Neg
+PRNG seed: 12345678
+[       OK ] CPU_LOG_TEST_NEG_NONE.AssertTestLogCmdBNormFusionOutput_Neg (349 ms)
+[----------] 4 tests from CPU_LOG_TEST_NEG_NONE (1326 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (1326 ms total)
+[  PASSED  ] 4 tests.

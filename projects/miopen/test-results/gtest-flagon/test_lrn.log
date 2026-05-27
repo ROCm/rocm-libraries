@@ -1,0 +1,252 @@
+[==========] Running 516 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 6 tests from Smoke/GPU_Lrn_FP32
+[ RUN      ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_0 (1894 ms)
+[ RUN      ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_1
+[       OK ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_1 (283 ms)
+[ RUN      ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_2
+[       OK ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_2 (604 ms)
+[ RUN      ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_3
+[       OK ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_3 (304 ms)
+[ RUN      ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_4
+[       OK ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_4 (635 ms)
+[ RUN      ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_5
+[       OK ] Smoke/GPU_Lrn_FP32.TestFloat/input_dims_16x32x8x8_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_5 (304 ms)
+[----------] 6 tests from Smoke/GPU_Lrn_FP32 (4028 ms total)
+
+[----------] 252 tests from Full/GPU_Lrn_FP32
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_0
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_0 (509 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_1
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_1 (244 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_2
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_2 (515 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_3
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_3 (247 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_4
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_4 (836 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_5
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x1x1_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_5 (408 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_6
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_6 (576 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_7
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_7 (243 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_8
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_8 (577 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_9
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_9 (273 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_10
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_10 (601 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_11
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x8x8_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_11 (277 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_12
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_12 (577 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_13
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_13 (552 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_14
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_14 (657 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_15
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_15 (567 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_16
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_16 (629 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_17
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x14x14_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_17 (571 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_18
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_18 (674 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_19
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_19 (548 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_20
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_20 (731 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_21
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_21 (525 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_22
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_22 (735 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_23
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x1x27x27_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_23 (523 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_24
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_24 (656 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_25
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_25 (524 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_26
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_26 (705 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_27
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_27 (538 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_28
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_28 (751 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_29
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x32x32_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_29 (552 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_30
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_30 (631 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_31
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_31 (569 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_32
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_32 (813 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_33
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_33 (565 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_34
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_34 (856 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_35
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x224x224_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_35 (568 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_36
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_36 (634 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_37
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_37 (539 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_38
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_38 (793 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_39
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_39 (554 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_40
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_40 (1395 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_41
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x227x227_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_41 (888 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_42
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_42 (876 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_43
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_43 (533 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_44
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_44 (794 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_45
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_45 (562 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_46
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_46 (869 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_47
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x3x231x231_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_47 (570 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_48
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_48 (10329 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_49
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_49 (10207 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_50
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_50 (39887 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_51
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_51 (16269 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_52
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_52 (55423 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_53
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x2048x2048_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_53 (16852 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_54
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_54 (22437 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_55
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_55 (20327 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_56
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_56 (85254 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_57
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_57 (34099 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_58
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_58 (123221 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_59
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x3072x3072_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_59 (37115 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_60
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_60 (38368 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_61
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_61 (36855 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_62
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_62 (155862 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_63
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_63 (58503 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_64
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_64 (217574 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_65
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x16x4096x4096_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_65 (66914 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_66
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_66 (6930 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_67
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_67 (6474 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_68
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_68 (24991 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_69
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_69 (9632 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_70
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_70 (33284 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_71
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x19x1024x2048_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_71 (11178 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_72
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_72 (841 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_73
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_73 (413 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_74
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_74 (639 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_75
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_75 (275 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_76
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_76 (623 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_77
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x8x8_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_77 (289 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_78
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_78 (565 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_79
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_79 (528 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_80
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_80 (628 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_81
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_81 (559 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_82
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_82 (664 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_83
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x16x16_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_83 (586 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_84
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_84 (626 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_85
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_85 (528 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_86
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_86 (757 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_87
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_87 (568 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_88
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_88 (836 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_89
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x32x28x28_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_89 (775 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_90
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_90 (556 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_91
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_91 (331 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_92
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_92 (598 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_93
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_93 (284 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_94
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_94 (607 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_95
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x48x7x7_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_95 (277 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_96
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_96 (568 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_97
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_97 (525 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_98
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_98 (632 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_99
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_99 (570 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_100
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_100 (640 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_101
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x14x14_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_101 (639 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_102
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_102 (633 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_103
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_103 (607 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_104
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_104 (873 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_105
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_105 (610 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_106
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_106 (983 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_107
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x56x56_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_107 (622 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_108
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_108 (771 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_109
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_109 (669 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_110
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_110 (1223 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_111
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_4_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_111 (762 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_112
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_5_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_112 (1457 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_113
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x64x112x112_n_5_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_113 (807 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x96x27x27_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_114
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x96x27x27_n_1_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_114 (675 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x96x27x27_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_115
+[       OK ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x96x27x27_n_1_alpha_1_beta_1_k_1_mode_CrossChannel_test_id_115 (567 ms)
+[ RUN      ] Full/GPU_Lrn_FP32.TestFloat/input_dims_1x96x27x27_n_4_alpha_1_beta_1_k_1_mode_WithinChannel_test_id_116

@@ -1,0 +1,42 @@
+[==========] Running 12 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from Full/GPU_BNOCLBWDSerialRun3D_FP16
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_0
+PRNG seed: 12345678
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_0 (3779 ms)
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_1
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_1 (4172 ms)
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_2
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_2 (5418 ms)
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_3
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_FP16.BnV2SerialRunBWDOCL3D_fp16/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_3 (6410 ms)
+[----------] 4 tests from Full/GPU_BNOCLBWDSerialRun3D_FP16 (19780 ms total)
+
+[----------] 4 tests from Full/GPU_BNOCLBWDSerialRun3D_BFP16
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_0
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_0 (2382 ms)
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_1
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_1 (3644 ms)
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_2
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_2 (4161 ms)
+[ RUN      ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_3
+[       OK ] Full/GPU_BNOCLBWDSerialRun3D_BFP16.BnV2SerialRunBWDOCLbfp16_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_3 (6667 ms)
+[----------] 4 tests from Full/GPU_BNOCLBWDSerialRun3D_BFP16 (16856 ms total)
+
+[----------] 4 tests from Full/GPU_BNBWDSerialRun3D_FP32
+[ RUN      ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_0
+[       OK ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_0 (2697 ms)
+[ RUN      ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_1
+[       OK ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_1 (3756 ms)
+[ RUN      ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_2
+[       OK ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_2 (3452 ms)
+[ RUN      ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_3
+[       OK ] Full/GPU_BNBWDSerialRun3D_FP32.BnV2SerialRunBWDCKfp32_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_3 (7183 ms)
+[----------] 4 tests from Full/GPU_BNBWDSerialRun3D_FP32 (17090 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 3 test suites ran. (53726 ms total)
+[  PASSED  ] 12 tests.
+
+  YOU HAVE 4 DISABLED TESTS
+

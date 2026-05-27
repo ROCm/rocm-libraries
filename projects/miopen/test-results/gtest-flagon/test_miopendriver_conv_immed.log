@@ -1,0 +1,20 @@
+[==========] Running 3 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_MIOpenDriverConvImmedTest_FP32
+[ RUN      ] Full/GPU_MIOpenDriverConvImmedTest_FP32.MIOpenDriverConvImmed/0
+[       OK ] Full/GPU_MIOpenDriverConvImmedTest_FP32.MIOpenDriverConvImmed/0 (16547 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverConvImmedTest_FP32 (16547 ms total)
+
+[----------] 1 test from Full/GPU_MIOpenDriverConvImmedTest_FP16
+[ RUN      ] Full/GPU_MIOpenDriverConvImmedTest_FP16.MIOpenDriverConvImmed/0
+[       OK ] Full/GPU_MIOpenDriverConvImmedTest_FP16.MIOpenDriverConvImmed/0 (14478 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverConvImmedTest_FP16 (14478 ms total)
+
+[----------] 1 test from Full/GPU_MIOpenDriverConvImmedTest_BFP16
+[ RUN      ] Full/GPU_MIOpenDriverConvImmedTest_BFP16.MIOpenDriverConvImmed/0
+[       OK ] Full/GPU_MIOpenDriverConvImmedTest_BFP16.MIOpenDriverConvImmed/0 (15309 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverConvImmedTest_BFP16 (15309 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 3 test suites ran. (46335 ms total)
+[  PASSED  ] 3 tests.

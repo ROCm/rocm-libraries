@@ -1,0 +1,72 @@
+[==========] Running 27 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/0 (5490 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16 (5490 ms total)
+
+[----------] 24 tests from Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/0
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/0 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/1
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/1 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/2
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/2 (15 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/3
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/3 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/4
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/4 (2 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/5
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/5 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/6
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/6 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/7
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/7 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/8
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/8 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/9
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/9 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/10
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/10 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/11
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/11 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/12
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/12 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/13
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/13 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/14
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/14 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/15
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/15 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/16
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/16 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/17
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/17 (15 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/18
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/18 (9 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/19
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/19 (19 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/20
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/20 (1 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/21
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/21 (2 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/22
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/22 (5 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/23
+[       OK ] Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16.ConvDepthwiseFwd2D/23 (13 ms)
+[----------] 24 tests from Full/GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16 (109 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16.ConvDepthwiseFwd2D/0
+[       OK ] Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16.ConvDepthwiseFwd2D/0 (2 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16 (2 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE.ConvDepthwiseFwd2D/0
+[       OK ] Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE.ConvDepthwiseFwd2D/0 (41 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE (41 ms total)
+
+[----------] Global test environment tear-down
+[==========] 27 tests from 4 test suites ran. (5644 ms total)
+[  PASSED  ] 27 tests.

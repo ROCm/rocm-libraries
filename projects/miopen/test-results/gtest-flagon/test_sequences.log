@@ -1,0 +1,36 @@
+[==========] Running 11 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from CPU_sequence_NONE
+[ RUN      ] CPU_sequence_NONE.SimpleListTest
+[       OK ] CPU_sequence_NONE.SimpleListTest (0 ms)
+[ RUN      ] CPU_sequence_NONE.LinearListTest
+[       OK ] CPU_sequence_NONE.LinearListTest (0 ms)
+[ RUN      ] CPU_sequence_NONE.TwoPowersListTest
+[       OK ] CPU_sequence_NONE.TwoPowersListTest (0 ms)
+[ RUN      ] CPU_sequence_NONE.JoinTest
+[       OK ] CPU_sequence_NONE.JoinTest (0 ms)
+[ RUN      ] CPU_sequence_NONE.DividedTest
+[       OK ] CPU_sequence_NONE.DividedTest (0 ms)
+[----------] 5 tests from CPU_sequence_NONE (1280 ms total)
+
+[----------] 3 tests from CPU_sequenceRule_NONE
+[ RUN      ] CPU_sequenceRule_NONE.IsInTest
+[       OK ] CPU_sequenceRule_NONE.IsInTest (0 ms)
+[ RUN      ] CPU_sequenceRule_NONE.NextTest
+[       OK ] CPU_sequenceRule_NONE.NextTest (0 ms)
+[ RUN      ] CPU_sequenceRule_NONE.CompareTest
+[       OK ] CPU_sequenceRule_NONE.CompareTest (0 ms)
+[----------] 3 tests from CPU_sequenceRule_NONE (0 ms total)
+
+[----------] 3 tests from CPU_sequenceRuleSet_NONE
+[ RUN      ] CPU_sequenceRuleSet_NONE.IsInTest
+[       OK ] CPU_sequenceRuleSet_NONE.IsInTest (0 ms)
+[ RUN      ] CPU_sequenceRuleSet_NONE.NextTest
+[       OK ] CPU_sequenceRuleSet_NONE.NextTest (0 ms)
+[ RUN      ] CPU_sequenceRuleSet_NONE.CompareTest
+[       OK ] CPU_sequenceRuleSet_NONE.CompareTest (0 ms)
+[----------] 3 tests from CPU_sequenceRuleSet_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 11 tests from 3 test suites ran. (1280 ms total)
+[  PASSED  ] 11 tests.

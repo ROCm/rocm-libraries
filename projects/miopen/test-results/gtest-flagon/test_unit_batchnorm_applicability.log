@@ -1,0 +1,150 @@
+[==========] Running 65 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 13 tests from Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/0
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/0 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/1
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/1 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/2
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/2 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/3
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/3 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/4
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/4 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/5
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/5 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/6
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/6 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/7
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/7 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/8
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/8 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/9
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/9 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/10
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/10 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/11
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/11 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/12
+[       OK ] Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/12 (0 ms)
+[----------] 13 tests from Smoke/CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE (821 ms total)
+
+[----------] 13 tests from Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/0
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/0 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/1
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/1 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/2
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/2 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/3
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/3 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/4
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/4 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/5
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/5 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/6
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/6 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/7
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/7 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/8
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/8 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/9
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/9 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/10
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/10 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/11
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/11 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/12
+[       OK ] Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/12 (0 ms)
+[----------] 13 tests from Smoke/CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE (0 ms total)
+
+[----------] 13 tests from Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/0
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/0 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/1
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/1 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/2
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/2 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/3
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/3 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/4
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/4 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/5
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/5 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/6
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/6 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/7
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/7 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/8
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/8 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/9
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/9 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/10
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/10 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/11
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/11 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/12
+[       OK ] Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE.IsApplicable/12 (0 ms)
+[----------] 13 tests from Smoke/CPU_BatchNormFwdInferenceApplicabilityTest_NONE (0 ms total)
+
+[----------] 13 tests from Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/0
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/0 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/1
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/1 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/2
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/2 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/3
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/3 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/4
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/4 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/5
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/5 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/6
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/6 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/7
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/7 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/8
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/8 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/9
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/9 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/10
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/10 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/11
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/11 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/12
+[       OK ] Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE.IsApplicable/12 (0 ms)
+[----------] 13 tests from Smoke/CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE (0 ms total)
+
+[----------] 13 tests from Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/0
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/0 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/1
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/1 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/2
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/2 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/3
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/3 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/4
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/4 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/5
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/5 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/6
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/6 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/7
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/7 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/8
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/8 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/9
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/9 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/10
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/10 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/11
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/11 (0 ms)
+[ RUN      ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/12
+[       OK ] Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE.IsApplicable/12 (0 ms)
+[----------] 13 tests from Smoke/CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 65 tests from 5 test suites ran. (822 ms total)
+[  PASSED  ] 65 tests.

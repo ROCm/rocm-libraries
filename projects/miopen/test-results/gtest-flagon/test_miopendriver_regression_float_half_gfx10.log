@@ -1,0 +1,24 @@
+[==========] Running 2 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionGfx10Test_FP32
+[ RUN      ] Full/GPU_MIOpenDriverRegressionGfx10Test_FP32.MIOpenDriverRegressionFloatHalfGfx10/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/miopendriver_regression_float_half_gfx10.cpp:67: Skipped
+
+
+[  SKIPPED ] Full/GPU_MIOpenDriverRegressionGfx10Test_FP32.MIOpenDriverRegressionFloatHalfGfx10/0 (1310 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionGfx10Test_FP32 (1310 ms total)
+
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionGfx10Test_FP16
+[ RUN      ] Full/GPU_MIOpenDriverRegressionGfx10Test_FP16.MIOpenDriverRegressionFloatHalfGfx10/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/miopendriver_regression_float_half_gfx10.cpp:67: Skipped
+
+
+[  SKIPPED ] Full/GPU_MIOpenDriverRegressionGfx10Test_FP16.MIOpenDriverRegressionFloatHalfGfx10/0 (0 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionGfx10Test_FP16 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (1310 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 2 tests, listed below:
+[  SKIPPED ] Full/GPU_MIOpenDriverRegressionGfx10Test_FP32.MIOpenDriverRegressionFloatHalfGfx10/0
+[  SKIPPED ] Full/GPU_MIOpenDriverRegressionGfx10Test_FP16.MIOpenDriverRegressionFloatHalfGfx10/0

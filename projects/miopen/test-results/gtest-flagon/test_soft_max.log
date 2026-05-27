@@ -1,0 +1,537 @@
+[==========] Running 2112 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1008 tests from Full/GPU_Softmax_FP32
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/0 (2365 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/1
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/1 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/2
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/2 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/3
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/3 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/4
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/4 (830 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/5
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/5 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/6
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/6 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/7
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/7 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/8
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/8 (1725 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/9
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/9 (416 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/10
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/10 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/11
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/11 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/12
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/12 (858 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/13
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/13 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/14
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/14 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/15
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/15 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/16
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/16 (855 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/17
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/17 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/18
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/18 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/19
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/19 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/20
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/20 (896 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/21
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/21 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/22
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/22 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/23
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/23 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/24
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/24 (875 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/25
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/25 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/26
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/26 (832 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/27
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/27 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/28
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/28 (903 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/29
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/29 (3 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/30
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/30 (805 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/31
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/31 (3 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/32
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/32 (420 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/33
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/33 (455 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/34
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/34 (428 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/35
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/35 (425 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/36
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/36 (811 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/37
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/37 (3 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/38
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/38 (856 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/39
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/39 (3 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/40
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/40 (876 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/41
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/41 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/42
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/42 (857 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/43
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/43 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/44
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/44 (826 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/45
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/45 (3 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/46
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/46 (863 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/47
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/47 (3 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/48
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/48 (886 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/49
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/49 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/50
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/50 (863 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/51
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/51 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/52
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/52 (821 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/53
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/53 (6 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/54
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/54 (858 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/55
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/55 (5 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/56
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/56 (1726 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/57
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/57 (458 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/58
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/58 (442 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/59
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/59 (439 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/60
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/60 (825 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/61
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/61 (7 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/62
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/62 (860 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/63
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/63 (6 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/64
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/64 (917 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/65
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/65 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/66
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/66 (911 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/67
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/67 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/68
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/68 (1046 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/69
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/69 (5 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/70
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/70 (846 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/71
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/71 (6 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/72
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/72 (895 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/73
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/73 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/74
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/74 (869 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/75
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/75 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/76
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/76 (941 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/77
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/77 (20 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/78
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/78 (834 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/79
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/79 (19 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/80
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/80 (445 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/81
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/81 (442 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/82
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/82 (439 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/83
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/83 (440 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/84
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/84 (848 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/85
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/85 (19 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/86
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/86 (854 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/87
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/87 (17 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/88
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/88 (901 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/89
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/89 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/90
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/90 (904 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/91
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/91 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/92
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/92 (848 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/93
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/93 (18 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/94
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/94 (883 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/95
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/95 (20 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/96
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/96 (929 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/97
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/97 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/98
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/98 (431 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/99
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/99 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/100
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/100 (897 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/101
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/101 (24 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/102
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/102 (486 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/103
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/103 (32 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/104
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/104 (443 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/105
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/105 (445 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/106
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/106 (449 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/107
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/107 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/108
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/108 (916 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/109
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/109 (26 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/110
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/110 (471 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/111
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/111 (26 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/112
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/112 (924 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/113
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/113 (1 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/114
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/114 (453 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/115
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/115 (0 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/116
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/116 (933 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/117
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/117 (26 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/118
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/118 (478 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/119
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/119 (24 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/120
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/120 (936 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/121
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/121 (16 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/122
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/122 (469 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/123
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/123 (14 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/124
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/124 (982 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/125
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/125 (63 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/126
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/126 (576 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/127
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/127 (53 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/128
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/128 (482 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/129
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/129 (475 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/130
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/130 (497 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/131
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/131 (12 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/132
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/132 (964 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/133
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/133 (58 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/134
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/134 (500 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/135
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/135 (56 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/136
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/136 (981 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/137
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/137 (17 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/138
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/138 (504 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/139
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/139 (27 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/140
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/140 (969 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/141
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/141 (56 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/142
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/142 (511 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/143
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/143 (52 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/144
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/144 (913 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/145
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/145 (14 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/146
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/146 (457 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/147
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/147 (13 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/148
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/148 (926 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/149
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/149 (54 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/150
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/150 (527 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/151
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/151 (52 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/152
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/152 (481 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/153
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/153 (474 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/154
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/154 (491 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/155
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/155 (13 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/156
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/156 (937 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/157
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/157 (56 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/158
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/158 (504 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/159
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/159 (55 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/160
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/160 (971 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/161
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/161 (20 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/162
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/162 (499 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/163
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/163 (22 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/164
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/164 (964 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/165
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/165 (55 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/166
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/166 (507 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/167
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/167 (53 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/168
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/168 (910 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/169
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/169 (13 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/170
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/170 (462 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/171
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/171 (14 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/172
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/172 (926 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/173
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/173 (55 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/174
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/174 (501 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/175
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/175 (55 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/176
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/176 (481 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/177
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/177 (498 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/178
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/178 (518 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/179
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/179 (15 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/180
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/180 (949 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/181
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/181 (58 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/182
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/182 (505 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/183
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/183 (57 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/184
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/184 (1041 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/185
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/185 (20 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/186
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/186 (567 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/187
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/187 (22 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/188
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/188 (956 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/189
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/189 (54 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/190
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/190 (512 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/191
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/191 (55 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/192
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/192 (8628 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/193
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/193 (7811 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/194
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/194 (9869 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/195
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/195 (7775 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/196
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/196 (5435 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/197
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/197 (4846 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/198
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/198 (4198 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/199
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/199 (4721 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/200
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/200 (7577 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/201
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/201 (7488 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/202
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/202 (9167 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/203
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/203 (9083 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/204
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/204 (6177 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/205
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/205 (6273 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/206
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/206 (6795 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/207
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/207 (6079 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/208
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/208 (11445 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/209
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/209 (10584 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/210
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/210 (13590 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/211
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/211 (12780 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/212
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/212 (6714 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/213
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/213 (5727 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/214
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/214 (6491 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/215
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/215 (5896 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/216
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/216 (17537 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/217
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/217 (17266 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/218
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/218 (21828 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/219
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/219 (21045 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/220
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/220 (12656 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/221
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/221 (12820 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/222
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/222 (12681 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/223
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/223 (11915 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/224
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/224 (19904 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/225
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/225 (17761 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/226
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/226 (24371 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/227
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/227 (21276 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/228
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/228 (9328 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/229
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/229 (12554 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/230
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/230 (14355 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/231
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/231 (11582 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/232
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/232 (27273 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/233
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/233 (24792 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/234
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/234 (28171 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/235
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/235 (26835 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/236
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/236 (15029 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/237
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/237 (13737 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/238
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/238 (11831 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/239
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/239 (12515 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/240
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/240 (34360 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/241
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/241 (29999 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/242
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/242 (29698 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/243
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/243 (26322 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/244
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/244 (14183 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/245
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/245 (14897 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/246
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/246 (15477 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/247
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/247 (14576 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/248
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/248 (21322 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/249
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/249 (20084 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/250
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/250 (28612 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/251
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/251 (27780 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/252
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/252 (13203 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/253
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/253 (11903 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/254
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/254 (14172 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/255
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/255 (16312 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/256
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/256 (27055 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/257
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/257 (25136 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/258
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/258 (33528 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/259
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/259 (32362 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/260
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/260 (14385 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/261
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/261 (14118 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/262
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/262 (15446 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/263
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/263 (16602 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/264
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/264 (3690 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/265
+[       OK ] Full/GPU_Softmax_FP32.TestFloat/265 (2725 ms)
+[ RUN      ] Full/GPU_Softmax_FP32.TestFloat/266

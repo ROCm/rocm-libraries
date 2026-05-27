@@ -1,0 +1,18 @@
+[==========] Running 5 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 5 tests from CPU_FilesystemChecker_NONE
+[ RUN      ] CPU_FilesystemChecker_NONE.DefaultCheckerWorks
+[       OK ] CPU_FilesystemChecker_NONE.DefaultCheckerWorks (0 ms)
+[ RUN      ] CPU_FilesystemChecker_NONE.MockCheckerCanBeInjected
+[       OK ] CPU_FilesystemChecker_NONE.MockCheckerCanBeInjected (0 ms)
+[ RUN      ] CPU_FilesystemChecker_NONE.MockCheckerReturnsNonNetworked
+[       OK ] CPU_FilesystemChecker_NONE.MockCheckerReturnsNonNetworked (0 ms)
+[ RUN      ] CPU_FilesystemChecker_NONE.DefaultCheckerRestoredAfterTest
+[       OK ] CPU_FilesystemChecker_NONE.DefaultCheckerRestoredAfterTest (0 ms)
+[ RUN      ] CPU_FilesystemChecker_NONE.MultiplePathsCanBeChecked
+[       OK ] CPU_FilesystemChecker_NONE.MultiplePathsCanBeChecked (0 ms)
+[----------] 5 tests from CPU_FilesystemChecker_NONE (697 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 1 test suite ran. (697 ms total)
+[  PASSED  ] 5 tests.

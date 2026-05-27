@@ -1,0 +1,33 @@
+[==========] Running 3 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_WidePooling2d_NHWC_FP32
+[ RUN      ] Full/GPU_WidePooling2d_NHWC_FP32.FloatTest_pooling2d_wide_nhwc/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/pooling2d_wide_nhwc.cpp:41: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_WidePooling2d_NHWC_FP32.FloatTest_pooling2d_wide_nhwc/0 (0 ms)
+[----------] 1 test from Full/GPU_WidePooling2d_NHWC_FP32 (617 ms total)
+
+[----------] 1 test from Full/GPU_WidePooling2d_NHWC_FP16
+[ RUN      ] Full/GPU_WidePooling2d_NHWC_FP16.HalfTest_pooling2d_wide_nhwc/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/pooling2d_wide_nhwc.cpp:46: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_WidePooling2d_NHWC_FP16.HalfTest_pooling2d_wide_nhwc/0 (0 ms)
+[----------] 1 test from Full/GPU_WidePooling2d_NHWC_FP16 (0 ms total)
+
+[----------] 1 test from Full/GPU_WidePooling2d_NHWC_BFP16
+[ RUN      ] Full/GPU_WidePooling2d_NHWC_BFP16.BFloat16Test_pooling2d_wide_nhwc/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/pooling2d_wide_nhwc.cpp:51: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_WidePooling2d_NHWC_BFP16.BFloat16Test_pooling2d_wide_nhwc/0 (0 ms)
+[----------] 1 test from Full/GPU_WidePooling2d_NHWC_BFP16 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 3 test suites ran. (618 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 3 tests, listed below:
+[  SKIPPED ] Full/GPU_WidePooling2d_NHWC_FP32.FloatTest_pooling2d_wide_nhwc/0
+[  SKIPPED ] Full/GPU_WidePooling2d_NHWC_FP16.HalfTest_pooling2d_wide_nhwc/0
+[  SKIPPED ] Full/GPU_WidePooling2d_NHWC_BFP16.BFloat16Test_pooling2d_wide_nhwc/0

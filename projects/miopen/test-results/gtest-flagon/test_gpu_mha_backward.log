@@ -1,0 +1,88 @@
+[==========] Running 24 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 16 tests from Smoke/GPU_Bwd_Mha_FP32
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/0 (6687 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/1
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/1 (20 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/2
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/2 (18 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/3
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/3 (9 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/4
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/4 (49 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/5
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/5 (1646 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/6
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/6 (384 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/7
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/7 (655 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/8
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/8 (587 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/9
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/9 (571 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/10
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/10 (893 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/11
+[       OK ] Smoke/GPU_Bwd_Mha_FP32.Test_float/11 (3 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_backward.cpp:129: Skipped
+CPU Dropout for backward pass currently is not supprorted
+
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/12 (0 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_backward.cpp:129: Skipped
+CPU Dropout for backward pass currently is not supprorted
+
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/13 (0 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_backward.cpp:129: Skipped
+CPU Dropout for backward pass currently is not supprorted
+
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/14 (0 ms)
+[ RUN      ] Smoke/GPU_Bwd_Mha_FP32.Test_float/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_backward.cpp:129: Skipped
+CPU Dropout for backward pass currently is not supprorted
+
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/15 (0 ms)
+[----------] 16 tests from Smoke/GPU_Bwd_Mha_FP32 (11531 ms total)
+
+[----------] 8 tests from Full/GPU_Bwd_Mha_FP32
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/0
+[       OK ] Full/GPU_Bwd_Mha_FP32.Test_float/0 (14969 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/1
+[       OK ] Full/GPU_Bwd_Mha_FP32.Test_float/1 (1116 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/2
+[       OK ] Full/GPU_Bwd_Mha_FP32.Test_float/2 (2025 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/3
+[       OK ] Full/GPU_Bwd_Mha_FP32.Test_float/3 (14293 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/4
+[       OK ] Full/GPU_Bwd_Mha_FP32.Test_float/4 (2023 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/5
+[       OK ] Full/GPU_Bwd_Mha_FP32.Test_float/5 (934 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_backward.cpp:129: Skipped
+CPU Dropout for backward pass currently is not supprorted
+
+[  SKIPPED ] Full/GPU_Bwd_Mha_FP32.Test_float/6 (0 ms)
+[ RUN      ] Full/GPU_Bwd_Mha_FP32.Test_float/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_backward.cpp:129: Skipped
+CPU Dropout for backward pass currently is not supprorted
+
+[  SKIPPED ] Full/GPU_Bwd_Mha_FP32.Test_float/7 (0 ms)
+[----------] 8 tests from Full/GPU_Bwd_Mha_FP32 (35363 ms total)
+
+[----------] Global test environment tear-down
+[==========] 24 tests from 2 test suites ran. (46895 ms total)
+[  PASSED  ] 18 tests.
+[  SKIPPED ] 6 tests, listed below:
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/12
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/13
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/14
+[  SKIPPED ] Smoke/GPU_Bwd_Mha_FP32.Test_float/15
+[  SKIPPED ] Full/GPU_Bwd_Mha_FP32.Test_float/6
+[  SKIPPED ] Full/GPU_Bwd_Mha_FP32.Test_float/7
+
+  YOU HAVE 24 DISABLED TESTS
+

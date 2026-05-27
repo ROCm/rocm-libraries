@@ -1,0 +1,94 @@
+[==========] Running 12 tests from 8 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16.ConvWinoFuryRxSf2x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16.ConvWinoFuryRxSf2x3/0 (729 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16.ConvWinoFuryRxSf2x3/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16.ConvWinoFuryRxSf2x3/1 (0 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16 (729 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16.ConvWinoFuryRxSf2x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16.ConvWinoFuryRxSf2x3/0 (0 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16.ConvWinoFuryRxSf2x3/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16.ConvWinoFuryRxSf2x3/1 (0 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16 (0 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16.ConvWinoFuryRxSf2x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16.ConvWinoFuryRxSf2x3/0 (0 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16.ConvWinoFuryRxSf2x3/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16.ConvWinoFuryRxSf2x3/1 (0 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverWinoFury2x3DevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverWinoFury2x3DevApplicabilityFwd_NONE.ConvWinoFuryRxSf2x3/0
+[       OK ] Smoke/CPU_UnitTestConvSolverWinoFury2x3DevApplicabilityFwd_NONE.ConvWinoFuryRxSf2x3/0 (43 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverWinoFury2x3DevApplicabilityFwd_NONE (43 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSFwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSFwd_FP16.TransposedConvWinoFuryRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSFwd_FP16.TransposedConvWinoFuryRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSFwd_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSBwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSBwd_FP16.TransposedConvWinoFuryRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSBwd_FP16.TransposedConvWinoFuryRxS/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSBwd_FP16 (0 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16.TransposedConvWinoFuryRxS/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16.TransposedConvWinoFuryRxS/0 (0 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16.TransposedConvWinoFuryRxS/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16.TransposedConvWinoFuryRxS/1 (0 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedWinoFuryRxSDevApplicabilityFwd_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedWinoFuryRxSDevApplicabilityFwd_FP16.TransposedConvWinoFuryRxS/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedWinoFuryRxSDevApplicabilityFwd_FP16.TransposedConvWinoFuryRxS/0 (42 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedWinoFuryRxSDevApplicabilityFwd_FP16 (42 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 8 test suites ran. (815 ms total)
+[  PASSED  ] 2 tests.
+[  SKIPPED ] 10 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16.ConvWinoFuryRxSf2x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Fwd_FP16.ConvWinoFuryRxSf2x3/1
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16.ConvWinoFuryRxSf2x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Bwd_FP16.ConvWinoFuryRxSf2x3/1
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16.ConvWinoFuryRxSf2x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinoFury2x3Wrw_FP16.ConvWinoFuryRxSf2x3/1
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSFwd_FP16.TransposedConvWinoFuryRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSBwd_FP16.TransposedConvWinoFuryRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16.TransposedConvWinoFuryRxS/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinoFuryRxSWrw_FP16.TransposedConvWinoFuryRxS/1

@@ -1,0 +1,840 @@
+[==========] Running 396 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 66 tests from Full/GPU_T5LayerNormTest_FP32
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/0 (2566 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/1
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/1 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/2
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/2 (72 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/3
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/3 (52 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/4
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/4 (46 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/5
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/5 (219 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/6
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/6 (578 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/7
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/7 (454 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/8
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/8 (63 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/9
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/9 (545 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/10
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/10 (1518 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/11
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/11 (948 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/12
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/12 (122 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/13
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/13 (460 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/14
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/14 (669 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/15
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/15 (48 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/16
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/16 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/17
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/17 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/18
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/18 (1754 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/19
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/19 (163 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/20
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/20 (31 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/21
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/21 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/22
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/22 (184 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/23
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/23 (33 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/24
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/24 (64 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/25
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/25 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/26
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/26 (24 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/27
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/27 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/28
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/28 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/29
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/29 (24 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/30
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/30 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/31
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/31 (46 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/32
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/32 (33 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/33
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/33 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/34
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/34 (213 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/35
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/35 (718 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/36
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/36 (466 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/37
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/37 (54 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/38
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/38 (465 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/39
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/39 (1366 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/40
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/40 (913 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/41
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/41 (104 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/42
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/42 (465 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/43
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/43 (561 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/44
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/44 (41 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/45
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/45 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/46
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/46 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/47
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/47 (1212 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/48
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/48 (109 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/49
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/49 (27 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/50
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/50 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/51
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/51 (160 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/52
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/52 (46 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/53
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/53 (86 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/54
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/54 (23 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/55
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/55 (30 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/56
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/56 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/57
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/57 (23 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/58
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/58 (6 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/59
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/59 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/60
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/60 (6 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/61
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/61 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/62
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/62 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/63
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/63 (1 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/64
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/64 (0 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/65
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP32.T5LayerNormFwdTest/65 (1 ms)
+[----------] 66 tests from Full/GPU_T5LayerNormTest_FP32 (18069 ms total)
+
+[----------] 66 tests from Full/GPU_T5LayerNormTest_FP16
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/0
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/0 (483 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/1
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/1 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/2
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/2 (59 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/3
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/3 (41 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/4
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/4 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/5
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/5 (164 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/6
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/6 (505 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/7
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/7 (324 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/8
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/8 (47 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/9
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/9 (325 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/10
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/10 (895 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/11
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/11 (686 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/12
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/12 (74 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/13
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/13 (287 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/14
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/14 (469 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/15
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/15 (41 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/16
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/16 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/17
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/17 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/18
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/18 (1020 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/19
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/19 (70 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/20
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/20 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/21
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/21 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/22
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/22 (109 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/23
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/23 (37 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/24
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/24 (53 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/25
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/25 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/26
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/26 (22 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/27
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/27 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/28
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/28 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/29
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/29 (21 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/30
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/30 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/31
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/31 (41 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/32
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/32 (30 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/33
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/33 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/34
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/34 (124 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/35
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/35 (349 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/36
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/36 (204 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/37
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/37 (36 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/38
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/38 (312 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/39
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/39 (640 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/40
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/40 (554 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/41
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/41 (73 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/42
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/42 (285 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/43
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/43 (466 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/44
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/44 (40 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/45
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/45 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/46
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/46 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/47
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/47 (1252 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/48
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/48 (96 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/49
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/49 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/50
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/50 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/51
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/51 (149 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/52
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/52 (49 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/53
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/53 (74 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/54
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/54 (21 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/55
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/55 (28 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/56
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/56 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/57
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/57 (22 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/58
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/58 (6 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/59
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/59 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/60
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/60 (6 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/61
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/61 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/62
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/62 (0 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/63
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/63 (1 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/64
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/64 (0 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/65
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_FP16.T5LayerNormFwdTest/65 (1 ms)
+[----------] 66 tests from Full/GPU_T5LayerNormTest_FP16 (10894 ms total)
+
+[----------] 66 tests from Full/GPU_T5LayerNormTest_BFP16
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/0
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/0 (469 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/1
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/1 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/2
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/2 (74 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/3
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/3 (51 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/4
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/4 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/5
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/5 (215 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/6
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/6 (486 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/7
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/7 (263 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/8
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/8 (47 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/9
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/9 (334 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/10
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/10 (802 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/11
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/11 (577 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/12
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/12 (69 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/13
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/13 (251 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/14
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/14 (575 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/15
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/15 (50 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/16
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/16 (20 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/17
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/17 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/18
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/18 (1172 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/19
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/19 (89 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/20
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/20 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/21
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/21 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/22
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/22 (143 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/23
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/23 (46 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/24
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/24 (69 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/25
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/25 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/26
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/26 (26 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/27
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/27 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/28
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/28 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/29
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/29 (25 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/30
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/30 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/31
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/31 (53 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/32
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/32 (37 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/33
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/33 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/34
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/34 (182 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/35
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/35 (431 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/36
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/36 (256 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/37
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/37 (47 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/38
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/38 (332 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/39
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/39 (1033 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/40
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/40 (727 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/41
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/41 (96 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/42
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/42 (366 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/43
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/43 (613 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/44
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/44 (51 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/45
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/45 (21 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/46
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/46 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/47
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/47 (1157 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/48
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/48 (89 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/49
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/49 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/50
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/50 (11 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/51
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/51 (140 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/52
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/52 (49 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/53
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/53 (69 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/54
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/54 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/55
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/55 (26 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/56
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/56 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/57
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/57 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/58
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/58 (5 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/59
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/59 (10 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/60
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/60 (5 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/61
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/61 (10 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/62
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/62 (0 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/63
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/63 (0 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/64
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/64 (0 ms)
+[ RUN      ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/65
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormTest_BFP16.T5LayerNormFwdTest/65 (0 ms)
+[----------] 66 tests from Full/GPU_T5LayerNormTest_BFP16 (11945 ms total)
+
+[----------] 66 tests from Full/GPU_T5LayerNormBwdTest_FP32
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/0
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/0 (33 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/1
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/1 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/2
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/2 (100 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/3
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/3 (68 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/4
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/4 (21 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/5
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/5 (375 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/6
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/6 (1293 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/7
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/7 (752 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/8
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/8 (71 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/9
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/9 (751 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/10
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/10 (2232 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/11
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/11 (1647 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/12
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/12 (166 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/13
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/13 (731 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/14
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/14 (942 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/15
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/15 (74 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/16
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/16 (27 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/17
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/17 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/18
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/18 (2867 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/19
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/19 (203 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/20
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/20 (35 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/21
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/21 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/22
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/22 (365 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/23
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/23 (84 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/24
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/24 (131 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/25
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/25 (36 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/26
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/26 (40 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/27
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/27 (22 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/28
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/28 (28 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/29
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/29 (40 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/30
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/30 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/31
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/31 (134 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/32
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/32 (89 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/33
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/33 (25 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/34
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/34 (365 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/35
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/35 (1106 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/36
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/36 (801 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/37
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/37 (74 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/38
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/38 (896 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/39
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/39 (2303 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/40
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/40 (1184 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/41
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/41 (120 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/42
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/42 (634 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/43
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/43 (1071 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/44
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/44 (73 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/45
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/45 (26 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/46
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/46 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/47
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/47 (2773 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/48
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/48 (202 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/49
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/49 (38 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/50
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/50 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/51
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/51 (365 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/52
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/52 (88 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/53
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/53 (134 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/54
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/54 (34 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/55
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/55 (41 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/56
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/56 (22 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/57
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/57 (28 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/58
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/58 (9 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/59
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/59 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/60
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/60 (9 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/61
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/61 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/62
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/62 (2 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/63
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/63 (3 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/64
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/64 (2 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/65
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP32.T5LayerNormBwdTest/65 (3 ms)
+[----------] 66 tests from Full/GPU_T5LayerNormBwdTest_FP32 (25944 ms total)
+
+[----------] 66 tests from Full/GPU_T5LayerNormBwdTest_FP16
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/0
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/0 (40 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/1
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/1 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/2
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/2 (106 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/3
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/3 (69 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/4
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/4 (26 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/5
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/5 (210 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/6
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/6 (912 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/7
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/7 (555 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/8
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/8 (75 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/9
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/9 (501 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/10
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/10 (1486 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/11
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/11 (1064 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/12
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/12 (110 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/13
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/13 (293 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/14
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/14 (463 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/15
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/15 (44 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/16
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/16 (22 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/17
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/17 (12 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/18
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/18 (1661 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/19
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/19 (131 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/20
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/20 (24 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/21
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/21 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/22
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/22 (164 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/23
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/23 (43 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/24
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/24 (71 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/25
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/25 (21 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/26
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/26 (28 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/27
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/27 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/28
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/28 (54 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/29
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/29 (41 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/30
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/30 (18 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/31
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/31 (122 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/32
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/32 (88 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/33
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/33 (32 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/34
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/34 (355 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/35
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/35 (1052 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/36
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/36 (550 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/37
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/37 (102 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/38
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/38 (572 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/39
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/39 (2042 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/40
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/40 (1181 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/41
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/41 (152 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/42
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/42 (441 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/43
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/43 (684 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/44
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/44 (57 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/45
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/45 (27 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/46
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/46 (14 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/47
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/47 (1974 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/48
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/48 (140 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/49
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/49 (29 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/50
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/50 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/51
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/51 (240 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/52
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/52 (56 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/53
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/53 (97 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/54
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/54 (27 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/55
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/55 (39 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/56
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/56 (24 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/57
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/57 (29 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/58
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/58 (10 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/59
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/59 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/60
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/60 (9 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/61
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/61 (16 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/62
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/62 (3 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/63
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/63 (3 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/64
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/64 (2 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/65
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_FP16.T5LayerNormBwdTest/65 (3 ms)
+[----------] 66 tests from Full/GPU_T5LayerNormBwdTest_FP16 (18533 ms total)
+
+[----------] 66 tests from Full/GPU_T5LayerNormBwdTest_BFP16
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/0
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/0 (45 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/1
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/1 (22 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/2
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/2 (113 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/3
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/3 (75 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/4
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/4 (27 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/5
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/5 (287 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/6
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/6 (1024 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/7
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/7 (391 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/8
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/8 (58 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/9
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/9 (586 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/10
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/10 (1651 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/11
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/11 (1299 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/12
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/12 (164 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/13
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/13 (495 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/14
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/14 (672 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/15
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/15 (50 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/16
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/16 (24 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/17
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/17 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/18
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/18 (1992 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/19
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/19 (164 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/20
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/20 (30 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/21
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/21 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/22
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/22 (250 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/23
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/23 (68 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/24
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/24 (115 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/25
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/25 (29 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/26
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/26 (42 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/27
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/27 (23 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/28
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/28 (30 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/29
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/29 (45 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/30
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/30 (17 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/31
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/31 (133 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/32
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/32 (77 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/33
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/33 (27 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/34
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/34 (288 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/35
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/35 (1042 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/36
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/36 (596 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/37
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/37 (81 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/38
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/38 (586 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/39
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/39 (1806 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/40
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/40 (1033 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/41
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/41 (112 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/42
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/42 (329 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/43
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/43 (784 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/44
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/44 (67 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/45
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/45 (28 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/46
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/46 (15 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/47
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/47 (1704 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/48
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/48 (121 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/49
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/49 (24 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/50
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/50 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/51
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/51 (184 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/52
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/52 (52 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/53
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/53 (85 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/54
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/54 (23 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/55
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/55 (32 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/56
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/56 (19 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/57
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/57 (23 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/58
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/58 (7 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/59
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/59 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/60
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/60 (7 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/61
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/61 (13 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/62
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/62 (2 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/63
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/63 (2 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/64
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/64 (2 ms)
+[ RUN      ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/65
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] Full/GPU_T5LayerNormBwdTest_BFP16.T5LayerNormBwdTest/65 (2 ms)
+[----------] 66 tests from Full/GPU_T5LayerNormBwdTest_BFP16 (19187 ms total)
+
+[----------] Global test environment tear-down
+[==========] 396 tests from 6 test suites ran. (104574 ms total)
+[  PASSED  ] 396 tests.

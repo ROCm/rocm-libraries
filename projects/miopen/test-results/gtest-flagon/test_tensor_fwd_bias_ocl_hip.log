@@ -1,0 +1,45 @@
+[==========] Running 18 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 18 tests from Smoke/GPU_OpTensorFwdBiasTest_FP32
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/0 (1345 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/1
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/1 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/2
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/2 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/3
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/3 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/4
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/4 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/5
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/5 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/6
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/6 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/7
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/7 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/8
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/8 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/9
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/9 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/10
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/10 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/11
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/11 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/12
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/12 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/13
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/13 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/14
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/14 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/15
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/15 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/16
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/16 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/17
+[       OK ] Smoke/GPU_OpTensorFwdBiasTest_FP32.PortTest/17 (0 ms)
+[----------] 18 tests from Smoke/GPU_OpTensorFwdBiasTest_FP32 (1349 ms total)
+
+[----------] Global test environment tear-down
+[==========] 18 tests from 1 test suite ran. (1349 ms total)
+[  PASSED  ] 18 tests.

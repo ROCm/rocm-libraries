@@ -1,0 +1,15 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_conv3d_FP32
+[ RUN      ] Full/GPU_conv3d_FP32.FloatTest_conv_3d/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_3d.cpp:73: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_conv3d_FP32.FloatTest_conv_3d/0 (0 ms)
+[----------] 1 test from Full/GPU_conv3d_FP32 (805 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (805 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] Full/GPU_conv3d_FP32.FloatTest_conv_3d/0

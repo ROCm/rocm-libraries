@@ -1,0 +1,1064 @@
+[==========] Running 520 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 90 tests from Full/GPU_SoftMarginLossForward_FP32
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/0 (2913 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/1
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/1 (159 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/2
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/2 (164 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/3
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/3 (5276 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/4
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/4 (123 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/5
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/5 (307 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/6
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/6 (404 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/7
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/7 (100 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/8
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/8 (315 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/9
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/9 (2954 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/10
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/10 (532 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/11
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/11 (127 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/12
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/12 (140 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/13
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/13 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/14
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/14 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/15
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/15 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/16
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/16 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/17
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/17 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/18
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/18 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/19
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/19 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/20
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/20 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/21
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/21 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/22
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/22 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/23
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/23 (2 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/24
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/24 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/25
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/25 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/26
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/26 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/27
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/27 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/28
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/28 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/29
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/29 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/30
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/30 (801 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/31
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/31 (138 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/32
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/32 (120 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/33
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/33 (4349 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/34
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/34 (80 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/35
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/35 (233 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/36
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/36 (107 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/37
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/37 (16 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/38
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/38 (146 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/39
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/39 (833 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/40
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/40 (206 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/41
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/41 (99 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/42
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/42 (43 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/43
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/43 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/44
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/44 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/45
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/45 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/46
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/46 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/47
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/47 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/48
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/48 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/49
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/49 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/50
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/50 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/51
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/51 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/52
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/52 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/53
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/53 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/54
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/54 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/55
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/55 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/56
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/56 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/57
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/57 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/58
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/58 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/59
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/59 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/60
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/60 (809 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/61
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/61 (131 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/62
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/62 (113 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/63
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/63 (3736 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/64
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/64 (81 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/65
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/65 (226 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/66
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/66 (104 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/67
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/67 (17 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/68
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/68 (132 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/69
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/69 (865 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/70
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/70 (205 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/71
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/71 (91 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/72
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/72 (42 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/73
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/73 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/74
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/74 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/75
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/75 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/76
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/76 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/77
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/77 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/78
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/78 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/79
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/79 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/80
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/80 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/81
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/81 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/82
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/82 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/83
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/83 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/84
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/84 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/85
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/85 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/86
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/86 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/87
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/87 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/88
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/88 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP32.Test/89
+[       OK ] Full/GPU_SoftMarginLossForward_FP32.Test/89 (1 ms)
+[----------] 90 tests from Full/GPU_SoftMarginLossForward_FP32 (27331 ms total)
+
+[----------] 79 tests from Full/GPU_SoftMarginLossForward_FP16
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/0
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/0 (860 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/1
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/1 (136 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/2
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/2 (136 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/3
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/3 (4436 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/4
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/4 (95 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/5
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/5 (255 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/6
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/6 (180 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/7
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/7 (43 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/8
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/8 (163 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/9
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/9 (1987 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/10
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/10 (515 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/11
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/11 (186 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/12
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/12 (118 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/13
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/13 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/14
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/14 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/15
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/15 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/16
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/16 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/17
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/17 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/18
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/18 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/19
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/19 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/20
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/20 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/21
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/21 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/22
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/22 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/23
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/23 (2 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/24
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/24 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/25
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/25 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/26
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/26 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/27
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/27 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/28
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/28 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/29
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/29 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/30
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/30 (1068 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/31
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/31 (143 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/32
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/32 (122 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/33
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/33 (3776 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/34
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/34 (82 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/35
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/35 (227 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/36
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/36 (68 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/37
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/37 (30 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/38
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/38 (140 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/39
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/39 (664 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/40
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/40 (148 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/41
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/41 (102 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/42
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/42 (34 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/43
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/43 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/44
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/44 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/45
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/45 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/46
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/46 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/47
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/47 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/48
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/48 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/49
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/49 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/50
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/50 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/51
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/51 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/52
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/52 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/53
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/53 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/54
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/54 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/55
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/55 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/56
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/56 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/57
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/57 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/58
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/58 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/59
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/59 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/60
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/60 (293 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/61
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/61 (31 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/62
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/62 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/63
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/63 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/64
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/64 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/65
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/65 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/66
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/66 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/67
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/67 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/68
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/68 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/69
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/69 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/70
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/70 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/71
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/71 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/72
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/72 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/73
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/73 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/74
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/74 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/75
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/75 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/76
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/76 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/77
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/77 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_FP16.Test/78
+[       OK ] Full/GPU_SoftMarginLossForward_FP16.Test/78 (0 ms)
+[----------] 79 tests from Full/GPU_SoftMarginLossForward_FP16 (16099 ms total)
+
+[----------] 90 tests from Full/GPU_SoftMarginLossForward_BFP16
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/0
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/0 (881 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/1
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/1 (140 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/2
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/2 (140 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/3
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/3 (4750 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/4
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/4 (98 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/5
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/5 (253 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/6
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/6 (223 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/7
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/7 (50 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/8
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/8 (163 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/9
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/9 (2004 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/10
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/10 (492 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/11
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/11 (115 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/12
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/12 (97 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/13
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/13 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/14
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/14 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/15
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/15 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/16
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/16 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/17
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/17 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/18
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/18 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/19
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/19 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/20
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/20 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/21
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/21 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/22
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/22 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/23
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/23 (2 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/24
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/24 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/25
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/25 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/26
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/26 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/27
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/27 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/28
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/28 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/29
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/29 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/30
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/30 (814 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/31
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/31 (125 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/32
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/32 (121 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/33
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/33 (3813 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/34
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/34 (86 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/35
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/35 (233 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/36
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/36 (74 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/37
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/37 (18 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/38
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/38 (147 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/39
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/39 (737 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/40
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/40 (161 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/41
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/41 (99 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/42
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/42 (36 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/43
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/43 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/44
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/44 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/45
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/45 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/46
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/46 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/47
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/47 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/48
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/48 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/49
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/49 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/50
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/50 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/51
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/51 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/52
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/52 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/53
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/53 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/54
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/54 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/55
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/55 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/56
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/56 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/57
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/57 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/58
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/58 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/59
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/59 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/60
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/60 (782 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/61
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/61 (123 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/62
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/62 (151 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/63
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/63 (3811 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/64
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/64 (84 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/65
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/65 (230 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/66
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/66 (75 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/67
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/67 (19 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/68
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/68 (147 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/69
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/69 (728 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/70
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/70 (180 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/71
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/71 (100 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/72
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/72 (37 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/73
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/73 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/74
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/74 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/75
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/75 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/76
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/76 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/77
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/77 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/78
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/78 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/79
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/79 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/80
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/80 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/81
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/81 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/82
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/82 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/83
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/83 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/84
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/84 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/85
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/85 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/86
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/86 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/87
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/87 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/88
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/88 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossForward_BFP16.Test/89
+[       OK ] Full/GPU_SoftMarginLossForward_BFP16.Test/89 (0 ms)
+[----------] 90 tests from Full/GPU_SoftMarginLossForward_BFP16 (22399 ms total)
+
+[----------] 90 tests from Full/GPU_SoftMarginLossBackward_FP32
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/0
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/0 (223 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/1
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/1 (47 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/2
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/2 (41 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/3
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/3 (1651 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/4
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/4 (45 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/5
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/5 (111 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/6
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/6 (441 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/7
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/7 (71 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/8
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/8 (69 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/9
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/9 (2678 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/10
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/10 (792 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/11
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/11 (51 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/12
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/12 (175 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/13
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/13 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/14
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/14 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/15
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/15 (4 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/16
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/16 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/17
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/17 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/18
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/18 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/19
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/19 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/20
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/20 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/21
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/21 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/22
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/22 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/23
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/23 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/24
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/24 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/25
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/25 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/26
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/26 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/27
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/27 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/28
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/28 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/29
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/29 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/30
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/30 (309 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/31
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/31 (59 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/32
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/32 (56 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/33
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/33 (2133 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/34
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/34 (34 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/35
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/35 (74 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/36
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/36 (317 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/37
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/37 (56 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/38
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/38 (55 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/39
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/39 (2564 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/40
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/40 (792 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/41
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/41 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/42
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/42 (130 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/43
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/43 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/44
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/44 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/45
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/45 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/46
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/46 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/47
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/47 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/48
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/48 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/49
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/49 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/50
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/50 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/51
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/51 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/52
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/52 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/53
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/53 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/54
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/54 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/55
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/55 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/56
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/56 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/57
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/57 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/58
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/58 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/59
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/59 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/60
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/60 (222 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/61
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/61 (47 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/62
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/62 (42 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/63
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/63 (1793 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/64
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/64 (48 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/65
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/65 (102 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/66
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/66 (448 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/67
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/67 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/68
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/68 (51 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/69
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/69 (2194 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/70
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/70 (709 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/71
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/71 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/72
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/72 (169 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/73
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/73 (8 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/74
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/74 (2 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/75
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/75 (4 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/76
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/76 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/77
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/77 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/78
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/78 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/79
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/79 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/80
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/80 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/81
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/81 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/82
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/82 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/83
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/83 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/84
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/84 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/85
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/85 (16 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/86
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/86 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/87
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/87 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/88
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/88 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP32.Test/89
+[       OK ] Full/GPU_SoftMarginLossBackward_FP32.Test/89 (14 ms)
+[----------] 90 tests from Full/GPU_SoftMarginLossBackward_FP32 (19585 ms total)
+
+[----------] 81 tests from Full/GPU_SoftMarginLossBackward_FP16
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/0
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/0 (195 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/1
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/1 (61 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/2
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/2 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/3
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/3 (1694 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/4
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/4 (43 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/5
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/5 (89 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/6
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/6 (270 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/7
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/7 (61 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/8
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/8 (61 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/9
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/9 (1699 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/10
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/10 (421 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/11
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/11 (35 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/12
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/12 (79 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/13
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/13 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/14
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/14 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/15
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/15 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/16
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/16 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/17
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/17 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/18
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/18 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/19
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/19 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/20
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/20 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/21
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/21 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/22
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/22 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/23
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/23 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/24
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/24 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/25
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/25 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/26
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/26 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/27
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/27 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/28
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/28 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/29
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/29 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/30
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/30 (181 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/31
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/31 (47 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/32
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/32 (418 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/33
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/33 (109 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/34
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/34 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/35
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/35 (2 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/36
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/36 (4 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/37
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/37 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/38
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/38 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/39
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/39 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/40
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/40 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/41
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/41 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/42
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/42 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/43
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/43 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/44
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/44 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/45
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/45 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/46
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/46 (15 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/47
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/47 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/48
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/48 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/49
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/49 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/50
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/50 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/51
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/51 (194 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/52
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/52 (59 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/53
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/53 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/54
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/54 (1516 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/55
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/55 (42 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/56
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/56 (89 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/57
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/57 (265 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/58
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/58 (62 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/59
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/59 (61 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/60
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/60 (1909 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/61
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/61 (602 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/62
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/62 (48 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/63
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/63 (118 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/64
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/64 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/65
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/65 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/66
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/66 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/67
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/67 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/68
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/68 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/69
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/69 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/70
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/70 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/71
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/71 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/72
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/72 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/73
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/73 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/74
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/74 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/75
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/75 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/76
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/76 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/77
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/77 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/78
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/78 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/79
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/79 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_FP16.Test/80
+[       OK ] Full/GPU_SoftMarginLossBackward_FP16.Test/80 (12 ms)
+[----------] 81 tests from Full/GPU_SoftMarginLossBackward_FP16 (11079 ms total)
+
+[----------] 90 tests from Full/GPU_SoftMarginLossBackward_BFP16
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/0
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/0 (187 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/1
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/1 (84 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/2
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/2 (49 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/3
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/3 (1389 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/4
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/4 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/5
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/5 (115 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/6
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/6 (345 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/7
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/7 (110 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/8
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/8 (81 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/9
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/9 (2181 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/10
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/10 (509 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/11
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/11 (43 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/12
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/12 (106 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/13
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/13 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/14
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/14 (2 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/15
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/15 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/16
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/16 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/17
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/17 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/18
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/18 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/19
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/19 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/20
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/20 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/21
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/21 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/22
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/22 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/23
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/23 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/24
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/24 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/25
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/25 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/26
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/26 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/27
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/27 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/28
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/28 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/29
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/29 (14 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/30
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/30 (181 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/31
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/31 (75 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/32
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/32 (99 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/33
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/33 (1719 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/34
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/34 (39 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/35
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/35 (125 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/36
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/36 (346 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/37
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/37 (65 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/38
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/38 (58 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/39
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/39 (1959 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/40
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/40 (773 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/41
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/41 (44 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/42
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/42 (106 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/43
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/43 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/44
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/44 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/45
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/45 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/46
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/46 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/47
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/47 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/48
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/48 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/49
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/49 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/50
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/50 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/51
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/51 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/52
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/52 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/53
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/53 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/54
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/54 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/55
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/55 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/56
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/56 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/57
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/57 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/58
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/58 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/59
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/59 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/60
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/60 (181 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/61
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/61 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/62
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/62 (49 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/63
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/63 (1835 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/64
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/64 (52 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/65
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/65 (91 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/66
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/66 (242 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/67
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/67 (63 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/68
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/68 (58 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/69
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/69 (1922 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/70
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/70 (520 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/71
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/71 (44 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/72
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/72 (108 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/73
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/73 (0 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/74
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/74 (1 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/75
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/75 (3 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/76
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/76 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/77
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/77 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/78
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/78 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/79
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/79 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/80
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/80 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/81
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/81 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/82
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/82 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/83
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/83 (12 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/84
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/84 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/85
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/85 (13 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/86
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/86 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/87
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/87 (11 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/88
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/88 (10 ms)
+[ RUN      ] Full/GPU_SoftMarginLossBackward_BFP16.Test/89
+[       OK ] Full/GPU_SoftMarginLossBackward_BFP16.Test/89 (11 ms)
+[----------] 90 tests from Full/GPU_SoftMarginLossBackward_BFP16 (16596 ms total)
+
+[----------] Global test environment tear-down
+[==========] 520 tests from 6 test suites ran. (113091 ms total)
+[  PASSED  ] 520 tests.

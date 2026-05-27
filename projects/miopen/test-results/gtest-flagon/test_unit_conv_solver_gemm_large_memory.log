@@ -1,0 +1,36 @@
+[==========] Running 6 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_GemmFwdRest_LargeMemory_FP32
+[ RUN      ] Smoke/GPU_GemmFwdRest_LargeMemory_FP32.GemmFwdRest/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_GemmFwdRest_LargeMemory_FP32.GemmFwdRest/0 (10619 ms)
+[----------] 1 test from Smoke/GPU_GemmFwdRest_LargeMemory_FP32 (10619 ms total)
+
+[----------] 1 test from Smoke/GPU_GemmFwdRest_LargeMemory_FP16
+[ RUN      ] Smoke/GPU_GemmFwdRest_LargeMemory_FP16.GemmFwdRest/0
+[       OK ] Smoke/GPU_GemmFwdRest_LargeMemory_FP16.GemmFwdRest/0 (5538 ms)
+[----------] 1 test from Smoke/GPU_GemmFwdRest_LargeMemory_FP16 (5538 ms total)
+
+[----------] 1 test from Smoke/GPU_GemmBwdRest_LargeMemory_FP32
+[ RUN      ] Smoke/GPU_GemmBwdRest_LargeMemory_FP32.GemmBwdRest/0
+[       OK ] Smoke/GPU_GemmBwdRest_LargeMemory_FP32.GemmBwdRest/0 (8444 ms)
+[----------] 1 test from Smoke/GPU_GemmBwdRest_LargeMemory_FP32 (8444 ms total)
+
+[----------] 1 test from Smoke/GPU_GemmBwdRest_LargeMemory_FP16
+[ RUN      ] Smoke/GPU_GemmBwdRest_LargeMemory_FP16.GemmBwdRest/0
+[       OK ] Smoke/GPU_GemmBwdRest_LargeMemory_FP16.GemmBwdRest/0 (6923 ms)
+[----------] 1 test from Smoke/GPU_GemmBwdRest_LargeMemory_FP16 (6923 ms total)
+
+[----------] 1 test from Smoke/GPU_GemmWrwUniversal_LargeMemory_FP32
+[ RUN      ] Smoke/GPU_GemmWrwUniversal_LargeMemory_FP32.GemmWrwUniversal/0
+[       OK ] Smoke/GPU_GemmWrwUniversal_LargeMemory_FP32.GemmWrwUniversal/0 (5577 ms)
+[----------] 1 test from Smoke/GPU_GemmWrwUniversal_LargeMemory_FP32 (5578 ms total)
+
+[----------] 1 test from Smoke/GPU_GemmWrwUniversal_LargeMemory_FP16
+[ RUN      ] Smoke/GPU_GemmWrwUniversal_LargeMemory_FP16.GemmWrwUniversal/0
+[       OK ] Smoke/GPU_GemmWrwUniversal_LargeMemory_FP16.GemmWrwUniversal/0 (5668 ms)
+[----------] 1 test from Smoke/GPU_GemmWrwUniversal_LargeMemory_FP16 (5668 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 6 test suites ran. (42774 ms total)
+[  PASSED  ] 6 tests.

@@ -1,0 +1,60 @@
+[==========] Running 26 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 26 tests from Full/GPU_ConvNDAIHeuristics_FP32
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_LoadValidArchitecture/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_LoadValidArchitecture/Conv2D (977 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_LoadValidArchitecture/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_LoadValidArchitecture/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeDirection/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeDirection/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeDirection/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeDirection/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodePrecision/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodePrecision/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodePrecision/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodePrecision/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeLayouts/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeLayouts/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeLayouts/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_EncodeLayouts/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.GetNDModel_SupportedDevice/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.GetNDModel_SupportedDevice/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.GetNDModel_SupportedDevice/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.GetNDModel_SupportedDevice/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_CorrectDimension/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_CorrectDimension/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_CorrectDimension/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_CorrectDimension/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_WrongDimension/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_WrongDimension/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_WrongDimension/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_IsProblemSupported_WrongDimension/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_Forward_ReturnsValidPredictions/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_Forward_ReturnsValidPredictions/Conv2D (12 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_Forward_ReturnsValidPredictions/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_Forward_ReturnsValidPredictions/Conv3D (11 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_ReturnsSolvers/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_ReturnsSolvers/Conv2D (12 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_ReturnsSolvers/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_ReturnsSolvers/Conv3D (11 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_UsesCaching/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_UsesCaching/Conv2D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_UsesCaching/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.PredictSolver_UsesCaching/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_DifferentProblemSizes/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_DifferentProblemSizes/Conv2D (29 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_DifferentProblemSizes/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.ModelND_DifferentProblemSizes/Conv3D (29 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_OptionalPattern/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_OptionalPattern/Conv2D (15 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_OptionalPattern/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.MetadataND_OptionalPattern/Conv3D (2 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.TestMIOpenDriverEquivalent/Conv2D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.TestMIOpenDriverEquivalent/Conv2D (11 ms)
+[ RUN      ] Full/GPU_ConvNDAIHeuristics_FP32.TestMIOpenDriverEquivalent/Conv3D
+[       OK ] Full/GPU_ConvNDAIHeuristics_FP32.TestMIOpenDriverEquivalent/Conv3D (11 ms)
+[----------] 26 tests from Full/GPU_ConvNDAIHeuristics_FP32 (1163 ms total)
+
+[----------] Global test environment tear-down
+[==========] 26 tests from 1 test suite ran. (1163 ms total)
+[  PASSED  ] 26 tests.

@@ -1,0 +1,20 @@
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from CPU_UnitTestModifiedZ_NONE
+[ RUN      ] CPU_UnitTestModifiedZ_NONE.TestMean
+[       OK ] CPU_UnitTestModifiedZ_NONE.TestMean (0 ms)
+[ RUN      ] CPU_UnitTestModifiedZ_NONE.TestMedian
+[       OK ] CPU_UnitTestModifiedZ_NONE.TestMedian (0 ms)
+[ RUN      ] CPU_UnitTestModifiedZ_NONE.TestMedianOfSortedData
+[       OK ] CPU_UnitTestModifiedZ_NONE.TestMedianOfSortedData (0 ms)
+[ RUN      ] CPU_UnitTestModifiedZ_NONE.TestMedianAbsoluteDeviation
+[       OK ] CPU_UnitTestModifiedZ_NONE.TestMedianAbsoluteDeviation (0 ms)
+[ RUN      ] CPU_UnitTestModifiedZ_NONE.TestModifiedZScores
+[       OK ] CPU_UnitTestModifiedZ_NONE.TestModifiedZScores (0 ms)
+[ RUN      ] CPU_UnitTestModifiedZ_NONE.TestRemoveHighOutliersAndGetMean
+[       OK ] CPU_UnitTestModifiedZ_NONE.TestRemoveHighOutliersAndGetMean (0 ms)
+[----------] 6 tests from CPU_UnitTestModifiedZ_NONE (674 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (674 ms total)
+[  PASSED  ] 6 tests.

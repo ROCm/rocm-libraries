@@ -1,0 +1,144 @@
+[==========] Running 44 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 22 tests from Full/GPU_DeepBench_LSTM_FP16
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/0
+Empty batch sequence. Filling uniformly with batch size: 16
+PRNG seed: 12345678
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/0 (6609 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/1
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/1 (3065 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/2
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/2 (3825 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/3
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/3 (4520 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/4
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/4 (2303 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/5
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/5 (2278 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/6
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/6 (2853 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/7
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/7 (6977 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/8
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/8 (4427 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/9
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/9 (4442 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/10
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/10 (7900 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/11
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/11 (15275 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/12
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/12 (9550 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/13
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/13 (13454 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/14
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/14 (23374 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/15
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/15 (45551 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/16
+Empty batch sequence. Filling uniformly with batch size: 8
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/16 (3986 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/17
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/17 (4521 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/18
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/18 (6703 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/19
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/19 (7530 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/20
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/20 (5622 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/21
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP16.HalfTest/21 (7425 ms)
+[----------] 22 tests from Full/GPU_DeepBench_LSTM_FP16 (192200 ms total)
+
+[----------] 22 tests from Full/GPU_DeepBench_LSTM_FP32
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/0
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/0 (5237 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/1
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/1 (2954 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/2
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/2 (2897 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/3
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/3 (4333 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/4
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/4 (2312 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/5
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/5 (1869 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/6
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/6 (2880 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/7
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/7 (7387 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/8
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/8 (4726 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/9
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/9 (4711 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/10
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/10 (7327 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/11
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/11 (14775 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/12
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/12 (9133 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/13
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/13 (13461 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/14
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/14 (22345 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/15
+Empty batch sequence. Filling uniformly with batch size: 128
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/15 (41206 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/16
+Empty batch sequence. Filling uniformly with batch size: 8
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/16 (6128 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/17
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/17 (6399 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/18
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/18 (7670 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/19
+Empty batch sequence. Filling uniformly with batch size: 16
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/19 (7189 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/20
+Empty batch sequence. Filling uniformly with batch size: 32
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/20 (6201 ms)
+[ RUN      ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/21
+Empty batch sequence. Filling uniformly with batch size: 64
+[       OK ] Full/GPU_DeepBench_LSTM_FP32.FloatTest/21 (15689 ms)
+[----------] 22 tests from Full/GPU_DeepBench_LSTM_FP32 (196841 ms total)
+
+[----------] Global test environment tear-down
+[==========] 44 tests from 2 test suites ran. (389042 ms total)
+[  PASSED  ] 44 tests.

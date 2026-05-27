@@ -1,0 +1,3 @@
+PRNG seed: 12345678
+[==========] 72 tests from 6 test suites ran. (75948 ms total)
+[  PASSED  ] 72 tests.

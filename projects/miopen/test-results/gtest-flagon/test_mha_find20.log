@@ -1,0 +1,33 @@
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from GPU_TestMhaFind20_FP32
+[ RUN      ] GPU_TestMhaFind20_FP32.MhaForward
+PRNG seed: 12345678
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing a solution...
+Run a solution.
+Solution executed.
+Run via solver infrastructure directly.
+Run via solver infrastructure executed!
+Finished testing solution functions.
+[       OK ] GPU_TestMhaFind20_FP32.MhaForward (1801 ms)
+[ RUN      ] GPU_TestMhaFind20_FP32.MhaBackward
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing a solution...
+Run a solution.
+Solution executed.
+Run via solver infrastructure directly.
+Run via solver infrastructure executed!
+Finished testing solution functions.
+[       OK ] GPU_TestMhaFind20_FP32.MhaBackward (175 ms)
+[----------] 2 tests from GPU_TestMhaFind20_FP32 (1976 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (1978 ms total)
+[  PASSED  ] 2 tests.

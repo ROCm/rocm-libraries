@@ -1,0 +1,570 @@
+[==========] Running 264 tests from 12 test suites.
+[----------] Global test environment set-up.
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer_BFP16
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/0 (4845 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/1 (39 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/2 (13 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/3 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/4 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/5 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/6 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/7 (11 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/8 (35 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/9 (33 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/10 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/11 (16 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/12 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/13 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/14 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Smoke/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/15 (12 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer_BFP16 (5108 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer_BFP16
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/0 (224 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/1 (194 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/2 (1365 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/3 (855 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/4 (749 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/5 (889 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/6 (2010 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/7 (1536 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/8 (7691 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/9 (7683 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/10 (292 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/11 (450 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/12 (551 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/13 (530 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/14 (2447 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/15 (2450 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/16
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/16 (972 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/17
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/17 (683 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/18
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/18 (297 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/19
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/19 (305 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/20
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/20 (758 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/21
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/21 (744 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/22
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/22 (2661 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/23
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/23 (2358 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/24
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/24 (643 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/25
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/25 (615 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/26
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/26 (8772 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/27
+[       OK ] Full/GPU_ConvGrpActivInfer_BFP16.ConvCKIgemmGrpFwdActivFused/27 (8767 ms)
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer_BFP16 (57513 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer3D_BFP16
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/0 (765 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/1 (453 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/2 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/3 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/4 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/5 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/6 (14 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/7 (14 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/8 (514 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/9 (451 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/10 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/11 (17 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/12 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/13 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/14 (13 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/15 (13 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer3D_BFP16 (2395 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer3D_BFP16
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/0 (2303 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/1 (1616 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/2 (1148 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/3 (880 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/4 (1937 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/5 (1580 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/6 (1588 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/7 (1631 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/8 (1341 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/9 (1875 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/10 (812 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/11 (844 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/12 (810 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/13 (814 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/14 (395 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/15 (623 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/16
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/16 (344 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/17
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/17 (316 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/18
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/18 (214 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/19
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/19 (204 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/20
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/20 (897 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/21
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/21 (920 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/22
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/22 (768 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/23
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/23 (794 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/24
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/24 (2865 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/25
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/25 (2785 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/26
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/26 (3393 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/27
+[       OK ] Full/GPU_ConvGrpActivInfer3D_BFP16.ConvCKIgemmGrpFwdActivFused/27 (1796 ms)
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer3D_BFP16 (35511 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer_FP16
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/0 (65 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/1 (29 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/2 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/3 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/4 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/5 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/6 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/7 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/8 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/9 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/10 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/11 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/12 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/13 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/14 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/15 (12 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer_FP16 (301 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer_FP16
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/0 (165 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/1 (130 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/2 (859 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/3 (775 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/4 (705 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/5 (827 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/6 (1279 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/7 (1166 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/8 (5622 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/9 (5259 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/10 (237 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/11 (234 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/12 (566 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/13 (676 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/14 (2293 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/15 (2196 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/16
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/16 (858 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/17
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/17 (594 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/18
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/18 (246 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/19
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/19 (255 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/20
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/20 (543 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/21
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/21 (490 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/22
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/22 (1954 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/23
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/23 (1975 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/24
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/24 (547 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/25
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/25 (532 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/26
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/26 (8340 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/27
+[       OK ] Full/GPU_ConvGrpActivInfer_FP16.ConvCKIgemmGrpFwdActivFused/27 (7995 ms)
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer_FP16 (47335 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer3D_FP16
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/0 (601 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/1 (386 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/2 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/3 (16 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/4 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/5 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/6 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/7 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/8 (463 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/9 (416 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/10 (17 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/11 (16 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/12 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/13 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/14 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/15 (12 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer3D_FP16 (2064 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer3D_FP16
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/0 (2202 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/1 (1721 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/2 (865 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/3 (901 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/4 (2040 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/5 (1383 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/6 (1668 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/7 (1430 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/8 (1695 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/9 (1333 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/10 (701 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/11 (905 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/12 (1008 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/13 (1067 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/14 (563 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/15 (653 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/16
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/16 (304 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/17
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/17 (279 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/18
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/18 (277 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/19
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/19 (261 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/20
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/20 (765 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/21
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/21 (768 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/22
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/22 (634 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/23
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/23 (655 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/24
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/24 (2634 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/25
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/25 (2387 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/26
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/26 (3064 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/27
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP16.ConvCKIgemmGrpFwdActivFused/27 (2030 ms)
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer3D_FP16 (34216 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer_FP32
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/0 (103 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/1 (41 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/2 (15 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/3 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/4 (15 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/5 (15 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/6 (14 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/7 (14 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/8 (40 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/9 (36 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/10 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/11 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/12 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/13 (12 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/14 (11 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Smoke/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/15 (12 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer_FP32 (389 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer_FP32
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/0 (214 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/1 (186 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/2 (1386 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/3 (1323 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/4 (1359 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/5 (1110 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/6 (1858 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/7 (2088 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/8 (9124 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/9 (9034 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/10 (366 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/11 (349 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/12 (721 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/13 (722 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/14 (2986 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/15 (3515 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/16
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/16 (1505 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/17
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/17 (1104 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/18
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/18 (375 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/19
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/19 (372 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/20
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/20 (895 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/21
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/21 (1007 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/22
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/22 (3580 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/23
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/23 (3210 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/24
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/24 (1125 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/25
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/25 (826 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/26
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/26 (11092 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/27
+[       OK ] Full/GPU_ConvGrpActivInfer_FP32.ConvCKIgemmGrpFwdActivFused/27 (11469 ms)
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer_FP32 (72916 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer3D_FP32
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/0 (857 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/1 (594 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/2 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/3 (17 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/4 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/5 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/6 (13 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/7 (13 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/8 (796 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/9 (732 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/10 (18 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/11 (17 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/12 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/13 (19 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/14 (13 ms)
+[ RUN      ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Smoke/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/15 (14 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpActivInfer3D_FP32 (3186 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer3D_FP32
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/0
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/0 (2698 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/1
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/1 (2132 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/2
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/2 (1389 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/3
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/3 (1117 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/4
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/4 (2202 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/5
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/5 (2713 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/6
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/6 (2415 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/7
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/7 (2623 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/8
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/8 (2427 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/9
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/9 (2221 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/10
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/10 (1319 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/11
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/11 (1145 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/12
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/12 (1319 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/13
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/13 (1222 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/14
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/14 (561 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/15
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/15 (551 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/16
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/16 (309 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/17
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/17 (304 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/18
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/18 (402 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/19
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/19 (316 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/20
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/20 (1605 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/21
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/21 (1497 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/22
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/22 (1045 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/23
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/23 (1235 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/24
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/24 (4176 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/25
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/25 (3815 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/26
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/26 (4157 ms)
+[ RUN      ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/27
+[       OK ] Full/GPU_ConvGrpActivInfer3D_FP32.ConvCKIgemmGrpFwdActivFused/27 (2545 ms)
+[----------] 28 tests from Full/GPU_ConvGrpActivInfer3D_FP32 (49482 ms total)
+
+[----------] Global test environment tear-down
+[==========] 264 tests from 12 test suites ran. (310422 ms total)
+[  PASSED  ] 264 tests.

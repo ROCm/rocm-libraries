@@ -1,0 +1,516 @@
+[==========] Running 252 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 126 tests from Full/GPU_TestActivation_FP32
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/0_PASSTHRU
+PRNG seed: 12345678
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/0_PASSTHRU (2606 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/1_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/1_PASSTHRU (80 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/2_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/2_PASSTHRU (48 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/3_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/3_PASSTHRU (34 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/4_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/4_PASSTHRU (32 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/5_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/5_PASSTHRU (31 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/6_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/6_PASSTHRU (2 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/7_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/7_LOGISTIC (246 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/8_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/8_LOGISTIC (58 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/9_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/9_LOGISTIC (48 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/10_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/10_LOGISTIC (34 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/11_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/11_LOGISTIC (33 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/12_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/12_LOGISTIC (31 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/13_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/13_LOGISTIC (2 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/14_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/14_TANH (344 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/15_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/15_TANH (65 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/16_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/16_TANH (61 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/17_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/17_TANH (38 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/18_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/18_TANH (37 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/19_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/19_TANH (37 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/20_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/20_TANH (2 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/21_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/21_RELU (377 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/22_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/22_RELU (76 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/23_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/23_RELU (85 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/24_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/24_RELU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/25_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/25_RELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/26_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/26_RELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/27_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/27_RELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/28_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/28_SOFTRELU (828 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/29_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/29_SOFTRELU (79 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/30_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/30_SOFTRELU (68 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/31_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/31_SOFTRELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/32_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/32_SOFTRELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/33_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/33_SOFTRELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/34_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/34_SOFTRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/35_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/35_ABS (769 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/36_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/36_ABS (94 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/37_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/37_ABS (61 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/38_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/38_ABS (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/39_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/39_ABS (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/40_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/40_ABS (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/41_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/41_ABS (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/42_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/42_POWER (804 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/43_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/43_POWER (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/44_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/44_POWER (60 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/45_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/45_POWER (77 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/46_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/46_POWER (46 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/47_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/47_POWER (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/48_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/48_POWER (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/49_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/49_LEAKYRELU (734 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/50_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/50_LEAKYRELU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/51_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/51_LEAKYRELU (61 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/52_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/52_LEAKYRELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/53_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/53_LEAKYRELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/54_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/54_LEAKYRELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/55_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/55_LEAKYRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/56_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/56_ELU (751 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/57_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/57_ELU (65 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/58_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/58_ELU (58 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/59_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/59_ELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/60_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/60_ELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/61_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/61_ELU (39 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationFwdTest/62_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationFwdTest/62_ELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/0_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/0_PASSTHRU (337 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/1_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/1_PASSTHRU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/2_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/2_PASSTHRU (63 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/3_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/3_PASSTHRU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/4_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/4_PASSTHRU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/5_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/5_PASSTHRU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/6_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/6_PASSTHRU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/7_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/7_LOGISTIC (270 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/8_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/8_LOGISTIC (71 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/9_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/9_LOGISTIC (64 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/10_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/10_LOGISTIC (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/11_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/11_LOGISTIC (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/12_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/12_LOGISTIC (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/13_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/13_LOGISTIC (15 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/14_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/14_TANH (317 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/15_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/15_TANH (70 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/16_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/16_TANH (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/17_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/17_TANH (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/18_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/18_TANH (50 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/19_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/19_TANH (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/20_TANH
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/20_TANH (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/21_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/21_RELU (269 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/22_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/22_RELU (70 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/23_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/23_RELU (65 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/24_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/24_RELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/25_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/25_RELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/26_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/26_RELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/27_RELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/27_RELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/28_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/28_SOFTRELU (339 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/29_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/29_SOFTRELU (69 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/30_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/30_SOFTRELU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/31_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/31_SOFTRELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/32_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/32_SOFTRELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/33_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/33_SOFTRELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/34_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/34_SOFTRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/35_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/35_ABS (268 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/36_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/36_ABS (68 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/37_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/37_ABS (65 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/38_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/38_ABS (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/39_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/39_ABS (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/40_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/40_ABS (40 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/41_ABS
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/41_ABS (4 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/42_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/42_POWER (327 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/43_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/43_POWER (72 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/44_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/44_POWER (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/45_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/45_POWER (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/46_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/46_POWER (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/47_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/47_POWER (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/48_POWER
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/48_POWER (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/49_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/49_LEAKYRELU (277 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/50_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/50_LEAKYRELU (74 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/51_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/51_LEAKYRELU (68 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/52_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/52_LEAKYRELU (58 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/53_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/53_LEAKYRELU (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/54_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/54_LEAKYRELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/55_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/55_LEAKYRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/56_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/56_ELU (273 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/57_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/57_ELU (70 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/58_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/58_ELU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/59_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/59_ELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/60_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/60_ELU (77 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/61_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/61_ELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP32.ActivationBwdTest/62_ELU
+[       OK ] Full/GPU_TestActivation_FP32.ActivationBwdTest/62_ELU (3 ms)
+[----------] 126 tests from Full/GPU_TestActivation_FP32 (15029 ms total)
+
+[----------] 126 tests from Full/GPU_TestActivation_FP16
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/0_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/0_PASSTHRU (642 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/1_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/1_PASSTHRU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/2_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/2_PASSTHRU (62 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/3_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/3_PASSTHRU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/4_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/4_PASSTHRU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/5_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/5_PASSTHRU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/6_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/6_PASSTHRU (4 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/7_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/7_LOGISTIC (188 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/8_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/8_LOGISTIC (62 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/9_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/9_LOGISTIC (61 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/10_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/10_LOGISTIC (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/11_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/11_LOGISTIC (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/12_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/12_LOGISTIC (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/13_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/13_LOGISTIC (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/14_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/14_TANH (182 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/15_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/15_TANH (60 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/16_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/16_TANH (59 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/17_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/17_TANH (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/18_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/18_TANH (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/19_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/19_TANH (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/20_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/20_TANH (4 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/21_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/21_RELU (650 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/22_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/22_RELU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/23_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/23_RELU (71 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/24_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/24_RELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/25_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/25_RELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/26_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/26_RELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/27_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/27_RELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/28_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/28_SOFTRELU (677 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/29_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/29_SOFTRELU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/30_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/30_SOFTRELU (62 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/31_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/31_SOFTRELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/32_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/32_SOFTRELU (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/33_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/33_SOFTRELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/34_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/34_SOFTRELU (4 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/35_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/35_ABS (690 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/36_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/36_ABS (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/37_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/37_ABS (63 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/38_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/38_ABS (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/39_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/39_ABS (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/40_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/40_ABS (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/41_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/41_ABS (4 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/42_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/42_POWER (674 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/43_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/43_POWER (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/44_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/44_POWER (62 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/45_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/45_POWER (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/46_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/46_POWER (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/47_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/47_POWER (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/48_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/48_POWER (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/49_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/49_LEAKYRELU (681 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/50_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/50_LEAKYRELU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/51_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/51_LEAKYRELU (61 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/52_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/52_LEAKYRELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/53_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/53_LEAKYRELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/54_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/54_LEAKYRELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/55_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/55_LEAKYRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/56_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/56_ELU (652 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/57_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/57_ELU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/58_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/58_ELU (61 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/59_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/59_ELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/60_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/60_ELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/61_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/61_ELU (48 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationFwdTest/62_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationFwdTest/62_ELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/0_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/0_PASSTHRU (221 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/1_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/1_PASSTHRU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/2_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/2_PASSTHRU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/3_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/3_PASSTHRU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/4_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/4_PASSTHRU (77 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/5_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/5_PASSTHRU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/6_PASSTHRU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/6_PASSTHRU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/7_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/7_LOGISTIC (235 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/8_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/8_LOGISTIC (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/9_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/9_LOGISTIC (65 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/10_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/10_LOGISTIC (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/11_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/11_LOGISTIC (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/12_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/12_LOGISTIC (40 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/13_LOGISTIC
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/13_LOGISTIC (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/14_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/14_TANH (220 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/15_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/15_TANH (70 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/16_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/16_TANH (64 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/17_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/17_TANH (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/18_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/18_TANH (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/19_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/19_TANH (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/20_TANH
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/20_TANH (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/21_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/21_RELU (217 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/22_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/22_RELU (64 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/23_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/23_RELU (63 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/24_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/24_RELU (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/25_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/25_RELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/26_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/26_RELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/27_RELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/27_RELU (4 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/28_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/28_SOFTRELU (227 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/29_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/29_SOFTRELU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/30_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/30_SOFTRELU (64 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/31_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/31_SOFTRELU (42 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/32_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/32_SOFTRELU (51 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/33_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/33_SOFTRELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/34_SOFTRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/34_SOFTRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/35_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/35_ABS (245 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/36_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/36_ABS (70 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/37_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/37_ABS (65 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/38_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/38_ABS (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/39_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/39_ABS (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/40_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/40_ABS (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/41_ABS
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/41_ABS (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/42_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/42_POWER (223 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/43_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/43_POWER (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/44_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/44_POWER (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/45_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/45_POWER (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/46_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/46_POWER (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/47_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/47_POWER (41 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/48_POWER
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/48_POWER (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/49_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/49_LEAKYRELU (222 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/50_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/50_LEAKYRELU (69 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/51_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/51_LEAKYRELU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/52_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/52_LEAKYRELU (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/53_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/53_LEAKYRELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/54_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/54_LEAKYRELU (43 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/55_LEAKYRELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/55_LEAKYRELU (3 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/56_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/56_ELU (222 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/57_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/57_ELU (67 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/58_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/58_ELU (66 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/59_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/59_ELU (45 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/60_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/60_ELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/61_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/61_ELU (44 ms)
+[ RUN      ] Full/GPU_TestActivation_FP16.ActivationBwdTest/62_ELU
+[       OK ] Full/GPU_TestActivation_FP16.ActivationBwdTest/62_ELU (3 ms)
+[----------] 126 tests from Full/GPU_TestActivation_FP16 (11902 ms total)
+
+[----------] Global test environment tear-down
+[==========] 252 tests from 2 test suites ran. (26932 ms total)
+[  PASSED  ] 252 tests.

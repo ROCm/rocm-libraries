@@ -1,0 +1,32 @@
+[==========] Running 12 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 12 tests from CPU_DbPaths_NONE
+[ RUN      ] CPU_DbPaths_NONE.UserDbPath_LocalFS_NoEnvVar
+[       OK ] CPU_DbPaths_NONE.UserDbPath_LocalFS_NoEnvVar (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.UserDbPath_LocalFS_EnvVarSet
+[       OK ] CPU_DbPaths_NONE.UserDbPath_LocalFS_EnvVarSet (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.UserDbPath_NetworkFS_NoEnvVar
+[       OK ] CPU_DbPaths_NONE.UserDbPath_NetworkFS_NoEnvVar (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.UserDbPath_NetworkFS_EnvVarSet
+[       OK ] CPU_DbPaths_NONE.UserDbPath_NetworkFS_EnvVarSet (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.CachePath_LocalFS_NoEnvVar
+[       OK ] CPU_DbPaths_NONE.CachePath_LocalFS_NoEnvVar (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.CachePath_LocalFS_EnvVarSet
+[       OK ] CPU_DbPaths_NONE.CachePath_LocalFS_EnvVarSet (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.CachePath_NetworkFS_NoEnvVar
+[       OK ] CPU_DbPaths_NONE.CachePath_NetworkFS_NoEnvVar (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.CachePath_NetworkFS_EnvVarSet
+[       OK ] CPU_DbPaths_NONE.CachePath_NetworkFS_EnvVarSet (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.UserDbSuffix_ContainsVersionInfo
+[       OK ] CPU_DbPaths_NONE.UserDbSuffix_ContainsVersionInfo (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.UserAndSystemCachePaths_AreDifferent
+[       OK ] CPU_DbPaths_NONE.UserAndSystemCachePaths_AreDifferent (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.Paths_AreValid
+[       OK ] CPU_DbPaths_NONE.Paths_AreValid (0 ms)
+[ RUN      ] CPU_DbPaths_NONE.CacheDisabled_ReturnsCorrectly
+[       OK ] CPU_DbPaths_NONE.CacheDisabled_ReturnsCorrectly (0 ms)
+[----------] 12 tests from CPU_DbPaths_NONE (861 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 1 test suite ran. (861 ms total)
+[  PASSED  ] 12 tests.

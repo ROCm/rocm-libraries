@@ -1,0 +1,70 @@
+[==========] Running 26 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_FusionCreateOpConvForward_FP32
+[ RUN      ] CPU_FusionCreateOpConvForward_FP32.TestInvalidConvLayout
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[       OK ] CPU_FusionCreateOpConvForward_FP32.TestInvalidConvLayout (12 ms)
+[----------] 1 test from CPU_FusionCreateOpConvForward_FP32 (718 ms total)
+
+[----------] 23 tests from Full/GPU_FusionSetArg_FP16
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/0
+PRNG seed: 12345678
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942130.HIP.fusion.fdb.txt"
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/0 (4898 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/1
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/1 (181 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/2
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/2 (269 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/3
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/3 (222 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/4
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/4 (834 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/5
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/5 (317 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/6
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/6 (144 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/7
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/7 (394 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/8
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/8 (97 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/9
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/9 (136 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/10
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/10 (976 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/11
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/11 (1122 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/12
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/12 (717 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/13
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/13 (1480 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/14
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/14 (137 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/15
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/15 (634 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/16
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/16 (364 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/17
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/17 (479 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/18
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/18 (232 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/19
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/19 (101 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/20
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/20 (1705 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/21
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/21 (533 ms)
+[ RUN      ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/22
+[       OK ] Full/GPU_FusionSetArg_FP16.TestSetArgApiCall/22 (577 ms)
+[----------] 23 tests from Full/GPU_FusionSetArg_FP16 (16578 ms total)
+
+[----------] 2 tests from Smoke/GPU_CBAFind2FusionWorkspace_FP32
+[ RUN      ] Smoke/GPU_CBAFind2FusionWorkspace_FP32.CBAFind2_testFindWorkspace/0
+[       OK ] Smoke/GPU_CBAFind2FusionWorkspace_FP32.CBAFind2_testFindWorkspace/0 (292 ms)
+[ RUN      ] Smoke/GPU_CBAFind2FusionWorkspace_FP32.CBAFind2_testWorkspaceInvalidSize/0
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/fusion.cpp:1235: The provided workspace size is less than required. Req:1416192 Given:1416182
+[       OK ] Smoke/GPU_CBAFind2FusionWorkspace_FP32.CBAFind2_testWorkspaceInvalidSize/0 (1 ms)
+[----------] 2 tests from Smoke/GPU_CBAFind2FusionWorkspace_FP32 (294 ms total)
+
+[----------] Global test environment tear-down
+[==========] 26 tests from 3 test suites ran. (17590 ms total)
+[  PASSED  ] 26 tests.

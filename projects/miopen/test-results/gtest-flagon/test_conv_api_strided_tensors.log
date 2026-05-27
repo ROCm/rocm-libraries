@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from GPU_ConvStridedTensors_FP32
+[ RUN      ] GPU_ConvStridedTensors_FP32.ConvStridedTensorsNotImplemented
+[       OK ] GPU_ConvStridedTensors_FP32.ConvStridedTensorsNotImplemented (918 ms)
+[----------] 1 test from GPU_ConvStridedTensors_FP32 (918 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (918 ms total)
+[  PASSED  ] 1 test.

@@ -1,0 +1,86 @@
+[==========] Running 6 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from GPU_SoftmaxFind20_FP32
+[ RUN      ] GPU_SoftmaxFind20_FP32.softmaxForward
+PRNG seed: 12345678
+Creating softmax tensor descriptors...
+Created softmax tensor descriptors.
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing solution functions...
+Run a solution.
+Finished testing solution functions.
+[       OK ] GPU_SoftmaxFind20_FP32.softmaxForward (2049 ms)
+[ RUN      ] GPU_SoftmaxFind20_FP32.softmaxBackward_fp32
+Creating softmax tensor descriptors...
+Created softmax tensor descriptors.
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing solution functions...
+Run a solution.
+error =  9.06107e-09
+Finished testing solution functions.
+[       OK ] GPU_SoftmaxFind20_FP32.softmaxBackward_fp32 (397 ms)
+[----------] 2 tests from GPU_SoftmaxFind20_FP32 (2447 ms total)
+
+[----------] 2 tests from GPU_SoftmaxFind20_FP16
+[ RUN      ] GPU_SoftmaxFind20_FP16.softmaxBackward_log_instance_mode_fp16
+Creating softmax tensor descriptors...
+Created softmax tensor descriptors.
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing solution functions...
+Run a solution.
+error =  4.98529e-05
+Finished testing solution functions.
+[       OK ] GPU_SoftmaxFind20_FP16.softmaxBackward_log_instance_mode_fp16 (251 ms)
+[ RUN      ] GPU_SoftmaxFind20_FP16.softmaxBackward_log_channel_mode_fp16
+Creating softmax tensor descriptors...
+Created softmax tensor descriptors.
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing solution functions...
+Run a solution.
+error =  5.4367e-05
+Finished testing solution functions.
+[       OK ] GPU_SoftmaxFind20_FP16.softmaxBackward_log_channel_mode_fp16 (260 ms)
+[----------] 2 tests from GPU_SoftmaxFind20_FP16 (512 ms total)
+
+[----------] 2 tests from GPU_SoftmaxFind20_BFP16
+[ RUN      ] GPU_SoftmaxFind20_BFP16.softmaxBackward_log_instance_mode_bfp16
+Creating softmax tensor descriptors...
+Created softmax tensor descriptors.
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing solution functions...
+Run a solution.
+error =  0.000630892
+Finished testing solution functions.
+[       OK ] GPU_SoftmaxFind20_BFP16.softmaxBackward_log_instance_mode_bfp16 (312 ms)
+[ RUN      ] GPU_SoftmaxFind20_BFP16.softmaxBackward_log_channel_mode_bfp16
+Creating softmax tensor descriptors...
+Created softmax tensor descriptors.
+Testing miopenFindSolutions...
+Finished testing miopenFindSolutions.
+Testing miopenGetSolution<Attribute>...
+Finished testing miopenGetSolution<Attribute>.
+Testing solution functions...
+Run a solution.
+error =  0.000859123
+Finished testing solution functions.
+[       OK ] GPU_SoftmaxFind20_BFP16.softmaxBackward_log_channel_mode_bfp16 (275 ms)
+[----------] 2 tests from GPU_SoftmaxFind20_BFP16 (588 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 3 test suites ran. (3548 ms total)
+[  PASSED  ] 6 tests.

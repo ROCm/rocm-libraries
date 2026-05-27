@@ -1,0 +1,141 @@
+[==========] Running 18 tests from 9 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32.DeterministicTest/0
+PRNG seed: 12345678
+Testing configuration: G:8 N:1 C:16 K:16 H:14 W:14 y:3 x:3
+Using solver: ConvHipImplicitGemmGroupBwdXdlops
+Performance config: DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32.DeterministicTest/0 (6979 ms)
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32.DeterministicTest/1
+Testing configuration: G:4 N:2 C:8 K:8 H:16 W:16 y:2 x:2
+Using solver: ConvHipImplicitGemmGroupBwdXdlops
+Performance config: DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32.DeterministicTest/1 (26 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32 (7005 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16.DeterministicTest/0
+Testing configuration: G:8 N:1 C:16 K:16 H:14 W:14 y:3 x:3
+Using solver: ConvHipImplicitGemmGroupBwdXdlops
+Performance config: DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16.DeterministicTest/0 (51 ms)
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16.DeterministicTest/1
+Testing configuration: G:4 N:2 C:8 K:8 H:16 W:16 y:2 x:2
+Using solver: ConvHipImplicitGemmGroupBwdXdlops
+Performance config: DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16.DeterministicTest/1 (8 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16 (60 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16.DeterministicTest/0
+Testing configuration: G:8 N:1 C:16 K:16 H:14 W:14 y:3 x:3
+Using solver: ConvHipImplicitGemmGroupBwdXdlops
+Performance config: DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16.DeterministicTest/0 (47 ms)
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16.DeterministicTest/1
+Testing configuration: G:4 N:2 C:8 K:8 H:16 W:16 y:2 x:2
+Using solver: ConvHipImplicitGemmGroupBwdXdlops
+Performance config: DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16.DeterministicTest/1 (8 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16 (55 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32.DeterministicTest/0
+Testing configuration: G:8 N:1 C:16 K:16 H:14 W:14 y:3 x:3
+Using solver: ConvHipImplicitGemmGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32.DeterministicTest/0 (47 ms)
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32.DeterministicTest/1
+Testing configuration: G:4 N:2 C:8 K:8 H:16 W:16 y:2 x:2
+Using solver: ConvHipImplicitGemmGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<64, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 2>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32.DeterministicTest/1 (5 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32 (52 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_WRW_FP16
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP16.DeterministicTest/0
+Testing configuration: G:8 N:1 C:16 K:16 H:14 W:14 y:3 x:3
+Using solver: ConvHipImplicitGemmGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<256, 64, 64, 64, Default, 8, 1, 1, 2, 8, 2, 8, 1, 1, 2, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP16.DeterministicTest/0 (251 ms)
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP16.DeterministicTest/1
+Testing configuration: G:4 N:2 C:8 K:8 H:16 W:16 y:2 x:2
+Using solver: ConvHipImplicitGemmGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_WRW_FP16.DeterministicTest/1 (8 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_WRW_FP16 (259 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_WRW_BFP16
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_WRW_BFP16.DeterministicTest/0
+Testing configuration: G:8 N:1 C:16 K:16 H:14 W:14 y:3 x:3
+Using solver: ConvHipImplicitGemmGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<256, 64, 64, 64, Default, 8, 1, 1, 2, 8, 2, 8, 1, 1, 2, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_WRW_BFP16.DeterministicTest/0 (244 ms)
+[ RUN      ] Smoke/GPU_GroupConv2D_Deterministic_WRW_BFP16.DeterministicTest/1
+Testing configuration: G:4 N:2 C:8 K:8 H:16 W:16 y:2 x:2
+Using solver: ConvHipImplicitGemmGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v5, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv2D_Deterministic_WRW_BFP16.DeterministicTest/1 (9 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv2D_Deterministic_WRW_BFP16 (253 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32
+[ RUN      ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32.DeterministicTest/0
+Testing configuration: G:4 N:1 C:8 K:8 D:8 H:14 W:14 z:3 y:3 x:3
+Using solver: ConvHipImplicitGemm3DGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32.DeterministicTest/0 (49 ms)
+[ RUN      ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32.DeterministicTest/1
+Testing configuration: G:2 N:2 C:4 K:4 D:6 H:12 W:12 z:2 y:2 x:2
+Using solver: ConvHipImplicitGemm3DGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32.DeterministicTest/1 (5 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32 (54 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv3D_Deterministic_WRW_FP16
+[ RUN      ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP16.DeterministicTest/0
+Testing configuration: G:4 N:1 C:8 K:8 D:8 H:14 W:14 z:3 y:3 x:3
+Using solver: ConvHipImplicitGemm3DGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<256, 64, 64, 64, Default, 8, 1, 1, 2, 8, 2, 8, 1, 1, 2, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP16.DeterministicTest/0 (166 ms)
+[ RUN      ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP16.DeterministicTest/1
+Testing configuration: G:2 N:2 C:4 K:4 D:6 H:12 W:12 z:2 y:2 x:2
+Using solver: ConvHipImplicitGemm3DGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v5, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv3D_Deterministic_WRW_FP16.DeterministicTest/1 (14 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv3D_Deterministic_WRW_FP16 (180 ms total)
+
+[----------] 2 tests from Smoke/GPU_GroupConv3D_Deterministic_WRW_BFP16
+[ RUN      ] Smoke/GPU_GroupConv3D_Deterministic_WRW_BFP16.DeterministicTest/0
+Testing configuration: G:4 N:1 C:8 K:8 D:8 H:14 W:14 z:3 y:3 x:3
+Using solver: ConvHipImplicitGemm3DGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v5, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv3D_Deterministic_WRW_BFP16.DeterministicTest/0 (116 ms)
+[ RUN      ] Smoke/GPU_GroupConv3D_Deterministic_WRW_BFP16.DeterministicTest/1
+Testing configuration: G:2 N:2 C:4 K:4 D:6 H:12 W:12 z:2 y:2 x:2
+Using solver: ConvHipImplicitGemm3DGroupWrwXdlops
+Performance config: DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v5, 1>+1
+✓ All 10 iterations produced bit-exact results
+[       OK ] Smoke/GPU_GroupConv3D_Deterministic_WRW_BFP16.DeterministicTest/1 (13 ms)
+[----------] 2 tests from Smoke/GPU_GroupConv3D_Deterministic_WRW_BFP16 (130 ms total)
+
+[----------] Global test environment tear-down
+[==========] 18 tests from 9 test suites ran. (8053 ms total)
+[  PASSED  ] 18 tests.

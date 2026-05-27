@@ -1,0 +1,52 @@
+[==========] Running 6 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinograd3x3UFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinograd3x3UFwd_FP32.ConvBinWinograd3x3U/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinograd3x3UFwd_FP32.ConvBinWinograd3x3U/0 (777 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinograd3x3UFwd_FP32 (777 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinograd3x3UBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinograd3x3UBwd_FP32.ConvBinWinograd3x3U/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinograd3x3UBwd_FP32.ConvBinWinograd3x3U/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinograd3x3UBwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinograd3x3UDevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverBinWinograd3x3UDevApplicabilityFwd_NONE.ConvBinWinograd3x3U/0
+[       OK ] Smoke/CPU_UnitTestConvSolverBinWinograd3x3UDevApplicabilityFwd_NONE.ConvBinWinograd3x3U/0 (78 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinograd3x3UDevApplicabilityFwd_NONE (78 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UFwd_FP32.TransposedConvBinWinograd3x3U/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UFwd_FP32.TransposedConvBinWinograd3x3U/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UFwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UBwd_FP32.TransposedConvBinWinograd3x3U/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UBwd_FP32.TransposedConvBinWinograd3x3U/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UBwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinograd3x3UDevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedBinWinograd3x3UDevApplicabilityFwd_NONE.TransposedConvBinWinograd3x3U/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedBinWinograd3x3UDevApplicabilityFwd_NONE.TransposedConvBinWinograd3x3U/0 (64 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinograd3x3UDevApplicabilityFwd_NONE (64 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 6 test suites ran. (921 ms total)
+[  PASSED  ] 2 tests.
+[  SKIPPED ] 4 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinograd3x3UFwd_FP32.ConvBinWinograd3x3U/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverBinWinograd3x3UBwd_FP32.ConvBinWinograd3x3U/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UFwd_FP32.TransposedConvBinWinograd3x3U/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedBinWinograd3x3UBwd_FP32.TransposedConvBinWinograd3x3U/0

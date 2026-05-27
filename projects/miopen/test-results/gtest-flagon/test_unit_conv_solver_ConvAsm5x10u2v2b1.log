@@ -1,0 +1,13 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverAsm5x10u2v2b1DevApplicabilityBwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverAsm5x10u2v2b1DevApplicabilityBwd_NONE.ConvAsm5x10u2v2b1/0
+[       OK ] Smoke/CPU_UnitTestConvSolverAsm5x10u2v2b1DevApplicabilityBwd_NONE.ConvAsm5x10u2v2b1/0 (859 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverAsm5x10u2v2b1DevApplicabilityBwd_NONE (859 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (859 ms total)
+[  PASSED  ] 1 test.
+
+  YOU HAVE 1 DISABLED TEST
+

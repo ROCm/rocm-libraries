@@ -1,0 +1,61 @@
+[==========] Running 7 tests from 7 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP16.ConvWinograd3x3MultipassWrWF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP16.ConvWinograd3x3MultipassWrWF5x3/0 (768 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP16 (768 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_BFP16.ConvWinograd3x3MultipassWrWF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_BFP16.ConvWinograd3x3MultipassWrWF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_BFP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP32.ConvWinograd3x3MultipassWrWF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP32.ConvWinograd3x3MultipassWrWF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE.ConvWinograd3x3MultipassWrWF5x3/0
+[       OK ] Smoke/CPU_UnitTestConvSolverWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE.ConvWinograd3x3MultipassWrWF5x3/0 (65 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE (65 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP16.TransposedConvWinograd3x3MultipassWrWF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP16.TransposedConvWinograd3x3MultipassWrWF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP32.TransposedConvWinograd3x3MultipassWrWF5x3/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP32.TransposedConvWinograd3x3MultipassWrWF5x3/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE.TransposedConvWinograd3x3MultipassWrWF5x3/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE.TransposedConvWinograd3x3MultipassWrWF5x3/0 (64 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3DevApplicabilityWrw_NONE (64 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 7 test suites ran. (898 ms total)
+[  PASSED  ] 2 tests.
+[  SKIPPED ] 5 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP16.ConvWinograd3x3MultipassWrWF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_BFP16.ConvWinograd3x3MultipassWrWF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverWinograd3x3MultipassF5x3Wrw_FP32.ConvWinograd3x3MultipassWrWF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP16.TransposedConvWinograd3x3MultipassWrWF5x3/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF5x3Wrw_FP32.TransposedConvWinograd3x3MultipassWrWF5x3/0

@@ -1,0 +1,257 @@
+[==========] Running 94 tests from 14 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP32
+[ RUN      ] GPU_HipBLASLtGEMMTest_FP32.CheckHipBLASLtGEMMException
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/hipblaslt_gemm.cpp:275: Skipped
+
+
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_FP32.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP32 (1702 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP16
+[ RUN      ] GPU_HipBLASLtGEMMTest_FP16.CheckHipBLASLtGEMMException
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/hipblaslt_gemm.cpp:275: Skipped
+
+
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_FP16.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP16 (0 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_BFP16
+[ RUN      ] GPU_HipBLASLtGEMMTest_BFP16.CheckHipBLASLtGEMMException
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/hipblaslt_gemm.cpp:275: Skipped
+
+
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_BFP16.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_BFP16 (0 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP8
+[ RUN      ] GPU_HipBLASLtGEMMTest_FP8.CheckHipBLASLtGEMMException
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/hipblaslt_gemm.cpp:275: Skipped
+
+
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_FP8.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP8 (0 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_BFP8
+[ RUN      ] GPU_HipBLASLtGEMMTest_BFP8.CheckHipBLASLtGEMMException
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/hipblaslt_gemm.cpp:275: Skipped
+
+
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_BFP8.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_BFP8 (0 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_I64
+[ RUN      ] GPU_HipBLASLtGEMMTest_I64.CheckHipBLASLtGEMMException
+[       OK ] GPU_HipBLASLtGEMMTest_I64.CheckHipBLASLtGEMMException (645 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_I64 (645 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_I32
+[ RUN      ] GPU_HipBLASLtGEMMTest_I32.CheckHipBLASLtGEMMException
+[       OK ] GPU_HipBLASLtGEMMTest_I32.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_I32 (0 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_I8
+[ RUN      ] GPU_HipBLASLtGEMMTest_I8.CheckHipBLASLtGEMMException
+[       OK ] GPU_HipBLASLtGEMMTest_I8.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_I8 (0 ms total)
+
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP64
+[ RUN      ] GPU_HipBLASLtGEMMTest_FP64.CheckHipBLASLtGEMMException
+[       OK ] GPU_HipBLASLtGEMMTest_FP64.CheckHipBLASLtGEMMException (0 ms)
+[----------] 1 test from GPU_HipBLASLtGEMMTest_FP64 (0 ms total)
+
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_FP32
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/0 (6157 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/1
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/1 (8883 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/2
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/2 (8220 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/3
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/3 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/4
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/4 (4 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/5
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/5 (5 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/6
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/6 (4 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/7
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/7 (4 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/8
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/8 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/9
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/9 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/10
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/10 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/11
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/11 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/12
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/12 (4 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/13
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/13 (4 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/14
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/14 (5 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/15
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/15 (5 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/16
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP32.RunHipBLASLtGEMM/16 (4 ms)
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_FP32 (23307 ms total)
+
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_FP16
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/0
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/0 (3494 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/1
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/1 (2851 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/2
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/2 (2767 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/3
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/3 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/4
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/4 (8 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/5
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/5 (9 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/6
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/6 (7 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/7
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/7 (7 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/8
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/8 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/9
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/9 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/10
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/10 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/11
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/11 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/12
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/12 (8 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/13
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/13 (7 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/14
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/14 (8 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/15
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/15 (8 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/16
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP16.RunHipBLASLtGEMM/16 (7 ms)
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_FP16 (9195 ms total)
+
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_BFP16
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/0
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/0 (1829 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/1
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/1 (1274 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/2
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/2 (1330 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/3
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/3 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/4
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/4 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/5
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/5 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/6
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/6 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/7
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/7 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/8
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/8 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/9
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/9 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/10
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/10 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/11
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/11 (0 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/12
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/12 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/13
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/13 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/14
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/14 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/15
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/15 (3 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/16
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP16.RunHipBLASLtGEMM/16 (3 ms)
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_BFP16 (4471 ms total)
+
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_FP8
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/0
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/0 (1864 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/1
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/1 (3129 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/2
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/2 (2901 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/3
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/3 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/4
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/4 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/5
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/5 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/6
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/6 (11 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/7
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/7 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/8
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/8 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/9
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/9 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/10
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/10 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/11
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/11 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/12
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/12 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/13
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/13 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/14
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/14 (13 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/15
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/15 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/16
+[       OK ] Full/GPU_HipBLASLtGEMMTest_FP8.RunHipBLASLtGEMM/16 (11 ms)
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_FP8 (8014 ms total)
+
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_BFP8
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/0
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/0 (1265 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/1
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/1 (960 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/2
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/2 (637 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/3
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/3 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/4
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/4 (10 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/5
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/5 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/6
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/6 (11 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/7
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/7 (11 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/8
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/8 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/9
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/9 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/10
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/10 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/11
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/11 (1 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/12
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/12 (10 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/13
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/13 (10 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/14
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/14 (12 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/15
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/15 (11 ms)
+[ RUN      ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/16
+[       OK ] Full/GPU_HipBLASLtGEMMTest_BFP8.RunHipBLASLtGEMM/16 (11 ms)
+[----------] 17 tests from Full/GPU_HipBLASLtGEMMTest_BFP8 (2972 ms total)
+
+[----------] Global test environment tear-down
+[==========] 94 tests from 14 test suites ran. (50309 ms total)
+[  PASSED  ] 89 tests.
+[  SKIPPED ] 5 tests, listed below:
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_FP32.CheckHipBLASLtGEMMException
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_FP16.CheckHipBLASLtGEMMException
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_BFP16.CheckHipBLASLtGEMMException
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_FP8.CheckHipBLASLtGEMMException
+[  SKIPPED ] GPU_HipBLASLtGEMMTest_BFP8.CheckHipBLASLtGEMMException

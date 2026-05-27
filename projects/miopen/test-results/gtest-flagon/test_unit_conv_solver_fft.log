@@ -1,0 +1,129 @@
+[==========] Running 57 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 28 tests from Smoke/GPU_UnitTestConvSolverFFTFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/0 (2015 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/1
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/1 (486 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/2
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/2 (384 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/3
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/3 (399 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/4
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/4 (451 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/5
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/5 (467 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/6
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/6 (395 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/7
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/7 (427 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/8
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/8 (405 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/9
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/9 (423 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/10
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/10 (412 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/11
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/11 (475 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/12
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/12 (555 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/13
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/13 (716 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/14
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/14 (742 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/15
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/15 (801 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/16
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/16 (651 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/17
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/17 (458 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/18
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/18 (686 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/19
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/19 (721 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/20
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/20 (456 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/21
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/21 (454 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/22
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/22 (455 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/23
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/23 (474 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/24
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/24 (449 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/25
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/25 (523 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/26
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/26 (602 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/27
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTFwd_FP32.fft/27 (764 ms)
+[----------] 28 tests from Smoke/GPU_UnitTestConvSolverFFTFwd_FP32 (16260 ms total)
+
+[----------] 28 tests from Smoke/GPU_UnitTestConvSolverFFTBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/0
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/0 (430 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/1
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/1 (395 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/2
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/2 (602 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/3
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/3 (647 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/4
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/4 (743 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/5
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/5 (507 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/6
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/6 (390 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/7
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/7 (406 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/8
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/8 (415 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/9
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/9 (409 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/10
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/10 (436 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/11
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/11 (469 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/12
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/12 (474 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/13
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/13 (409 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/14
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/14 (448 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/15
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/15 (453 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/16
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/16 (438 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/17
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/17 (441 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/18
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/18 (635 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/19
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/19 (657 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/20
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/20 (454 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/21
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/21 (438 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/22
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/22 (472 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/23
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/23 (442 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/24
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/24 (462 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/25
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/25 (516 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/26
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/26 (551 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/27
+[       OK ] Smoke/GPU_UnitTestConvSolverFFTBwd_FP32.fft/27 (461 ms)
+[----------] 28 tests from Smoke/GPU_UnitTestConvSolverFFTBwd_FP32 (13613 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE.fft/0
+[       OK ] Smoke/CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE.fft/0 (42 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE (42 ms total)
+
+[----------] Global test environment tear-down
+[==========] 57 tests from 3 test suites ran. (29917 ms total)
+[  PASSED  ] 57 tests.

@@ -1,0 +1,68 @@
+[==========] Running 6 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_DBSync_NONE
+[ RUN      ] CPU_DBSync_NONE.KDBTargetID
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/db_sync.cpp:547: Failure
+Value of: 0 || fs::exists(kdb_file_path)
+  Actual: false
+Expected: true
+Db file does not exist"/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942.kdb"
+
+unknown file: Failure
+C++ exception with description "filesystem error: cannot get file size: No such file or directory [/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942.kdb]" thrown in the test body.
+
+[  FAILED  ] CPU_DBSync_NONE.KDBTargetID (851 ms)
+[ DISABLED ] CPU_DBSync_NONE.DISABLED_DynamicFDBSync
+[----------] 1 test from CPU_DBSync_NONE (851 ms total)
+
+[----------] 5 tests from Smoke/CPU_DBSync_NONE
+[ RUN      ] Smoke/CPU_DBSync_NONE.StaticFDBSync/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/db_sync.cpp:967: Skipped
+
+
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/0 (1 ms)
+[ RUN      ] Smoke/CPU_DBSync_NONE.StaticFDBSync/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/db_sync.cpp:967: Skipped
+
+
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/1 (0 ms)
+[ RUN      ] Smoke/CPU_DBSync_NONE.StaticFDBSync/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/db_sync.cpp:967: Skipped
+
+
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/2 (0 ms)
+[ RUN      ] Smoke/CPU_DBSync_NONE.StaticFDBSync/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/db_sync.cpp:547: Failure
+Value of: 0 || fs::exists(kdb_file_path)
+  Actual: false
+Expected: true
+Db file does not exist"/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942.kdb"
+
+Handle CU count: 304 Parameter Value: 304
+FDB: "/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942130.HIP.fdb.txt", PDB: "/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942130.db.txt", KDB: "/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942.kdb"
+unknown file: Failure
+C++ exception with description "filesystem error: cannot get file size: No such file or directory [/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942.kdb]" thrown in the test body.
+
+[  FAILED  ] Smoke/CPU_DBSync_NONE.StaticFDBSync/3, where GetParam() = ("gfx942", 304) (0 ms)
+[ RUN      ] Smoke/CPU_DBSync_NONE.StaticFDBSync/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/db_sync.cpp:967: Skipped
+
+
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/4 (0 ms)
+[----------] 5 tests from Smoke/CPU_DBSync_NONE (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 2 test suites ran. (853 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 4 tests, listed below:
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/0
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/1
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/2
+[  SKIPPED ] Smoke/CPU_DBSync_NONE.StaticFDBSync/4
+[  FAILED  ] 2 tests, listed below:
+[  FAILED  ] CPU_DBSync_NONE.KDBTargetID
+[  FAILED  ] Smoke/CPU_DBSync_NONE.StaticFDBSync/3, where GetParam() = ("gfx942", 304)
+
+ 2 FAILED TESTS
+  YOU HAVE 1 DISABLED TEST
+

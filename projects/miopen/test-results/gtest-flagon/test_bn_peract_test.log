@@ -1,0 +1,246 @@
+[==========] Running 111 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_BnPeract_FP16
+[ RUN      ] Smoke/GPU_BnPeract_FP16.TestFloat16/dims_16x32x8x8_test_id_0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_BnPeract_FP16.TestFloat16/dims_16x32x8x8_test_id_0 (2182 ms)
+[----------] 1 test from Smoke/GPU_BnPeract_FP16 (2182 ms total)
+
+[----------] 36 tests from Full/GPU_BnPeract_FP16
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x3x224x224_test_id_0
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x3x224x224_test_id_0 (1200 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x4x1024x2048_test_id_1
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x4x1024x2048_test_id_1 (13663 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x32x256x512_test_id_2
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x32x256x512_test_id_2 (6089 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x64x14x14_test_id_3
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x64x14x14_test_id_3 (1255 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x64x56x56_test_id_4
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x64x56x56_test_id_4 (1084 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x64x112x112_test_id_5
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x64x112x112_test_id_5 (1599 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x96x28x28_test_id_6
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x96x28x28_test_id_6 (867 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x4x4_test_id_7
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x4x4_test_id_7 (785 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x7x7_test_id_8
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x7x7_test_id_8 (816 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x14x14_test_id_9
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x14x14_test_id_9 (841 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x28x28_test_id_10
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x128x28x28_test_id_10 (924 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x160x7x7_test_id_11
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x160x7x7_test_id_11 (848 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x192x7x7_test_id_12
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x192x7x7_test_id_12 (869 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x192x14x14_test_id_13
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x192x14x14_test_id_13 (904 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x192x56x56_test_id_14
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x192x56x56_test_id_14 (1276 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x224x14x14_test_id_15
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x224x14x14_test_id_15 (1184 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x256x7x7_test_id_16
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x256x7x7_test_id_16 (840 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x256x14x14_test_id_17
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x256x14x14_test_id_17 (861 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x256x28x28_test_id_18
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x256x28x28_test_id_18 (946 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x352x7x7_test_id_19
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x352x7x7_test_id_19 (1289 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x480x128x256_test_id_20
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x480x128x256_test_id_20 (18726 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x528x64x128_test_id_21
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x528x64x128_test_id_21 (5164 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x1024x1x1_test_id_22
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_8x1024x1x1_test_id_22 (1193 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_16x64x112x112_test_id_23
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_16x64x112x112_test_id_23 (2421 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_25x3x32x32_test_id_24
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_25x3x32x32_test_id_24 (1436 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_25x32x8x8_test_id_25
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_25x32x8x8_test_id_25 (1149 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_32x256x12x12_test_id_26
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_32x256x12x12_test_id_26 (1108 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x3x227x227_test_id_27
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x3x227x227_test_id_27 (2524 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x64x56x56_test_id_28
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x64x56x56_test_id_28 (1722 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x64x112x112_test_id_29
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x64x112x112_test_id_29 (5920 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x256x14x14_test_id_30
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x256x14x14_test_id_30 (559 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x256x56x56_test_id_31
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x256x56x56_test_id_31 (5699 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x512x7x7_test_id_32
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x512x7x7_test_id_32 (454 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x512x28x28_test_id_33
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x512x28x28_test_id_33 (2939 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x1024x14x14_test_id_34
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x1024x14x14_test_id_34 (2163 ms)
+[ RUN      ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x2048x7x7_test_id_35
+[       OK ] Full/GPU_BnPeract_FP16.TestFloat16/dims_64x2048x7x7_test_id_35 (740 ms)
+[----------] 36 tests from Full/GPU_BnPeract_FP16 (92076 ms total)
+
+[----------] 1 test from Smoke/GPU_BnPeract_FP32
+[ RUN      ] Smoke/GPU_BnPeract_FP32.TestFloat32/dims_16x32x8x8_test_id_0
+[       OK ] Smoke/GPU_BnPeract_FP32.TestFloat32/dims_16x32x8x8_test_id_0 (856 ms)
+[----------] 1 test from Smoke/GPU_BnPeract_FP32 (856 ms total)
+
+[----------] 36 tests from Full/GPU_BnPeract_FP32
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x3x224x224_test_id_0
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x3x224x224_test_id_0 (1068 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x4x1024x2048_test_id_1
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x4x1024x2048_test_id_1 (18662 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x32x256x512_test_id_2
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x32x256x512_test_id_2 (8078 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x64x14x14_test_id_3
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x64x14x14_test_id_3 (803 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x64x56x56_test_id_4
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x64x56x56_test_id_4 (1174 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x64x112x112_test_id_5
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x64x112x112_test_id_5 (1549 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x96x28x28_test_id_6
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x96x28x28_test_id_6 (852 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x4x4_test_id_7
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x4x4_test_id_7 (818 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x7x7_test_id_8
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x7x7_test_id_8 (792 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x14x14_test_id_9
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x14x14_test_id_9 (829 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x28x28_test_id_10
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x128x28x28_test_id_10 (854 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x160x7x7_test_id_11
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x160x7x7_test_id_11 (797 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x192x7x7_test_id_12
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x192x7x7_test_id_12 (832 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x192x14x14_test_id_13
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x192x14x14_test_id_13 (842 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x192x56x56_test_id_14
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x192x56x56_test_id_14 (1308 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x224x14x14_test_id_15
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x224x14x14_test_id_15 (1331 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x256x7x7_test_id_16
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x256x7x7_test_id_16 (856 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x256x14x14_test_id_17
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x256x14x14_test_id_17 (849 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x256x28x28_test_id_18
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x256x28x28_test_id_18 (960 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x352x7x7_test_id_19
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x352x7x7_test_id_19 (819 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x480x128x256_test_id_20
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x480x128x256_test_id_20 (26979 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x528x64x128_test_id_21
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x528x64x128_test_id_21 (6960 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x1024x1x1_test_id_22
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_8x1024x1x1_test_id_22 (811 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_16x64x112x112_test_id_23
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_16x64x112x112_test_id_23 (2664 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_25x3x32x32_test_id_24
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_25x3x32x32_test_id_24 (868 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_25x32x8x8_test_id_25
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_25x32x8x8_test_id_25 (911 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_32x256x12x12_test_id_26
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_32x256x12x12_test_id_26 (1282 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x3x227x227_test_id_27
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x3x227x227_test_id_27 (3300 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x64x56x56_test_id_28
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x64x56x56_test_id_28 (2708 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x64x112x112_test_id_29
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x64x112x112_test_id_29 (9046 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x256x14x14_test_id_30
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x256x14x14_test_id_30 (560 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x256x56x56_test_id_31
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x256x56x56_test_id_31 (9437 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x512x7x7_test_id_32
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x512x7x7_test_id_32 (505 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x512x28x28_test_id_33
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x512x28x28_test_id_33 (4885 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x1024x14x14_test_id_34
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x1024x14x14_test_id_34 (2823 ms)
+[ RUN      ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x2048x7x7_test_id_35
+[       OK ] Full/GPU_BnPeract_FP32.TestFloat32/dims_64x2048x7x7_test_id_35 (1329 ms)
+[----------] 36 tests from Full/GPU_BnPeract_FP32 (119160 ms total)
+
+[----------] 1 test from Smoke/GPU_BnPeract_BFP16
+[ RUN      ] Smoke/GPU_BnPeract_BFP16.TestBFloat16/dims_16x32x8x8_test_id_0
+[       OK ] Smoke/GPU_BnPeract_BFP16.TestBFloat16/dims_16x32x8x8_test_id_0 (1401 ms)
+[----------] 1 test from Smoke/GPU_BnPeract_BFP16 (1401 ms total)
+
+[----------] 36 tests from Full/GPU_BnPeract_BFP16
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x3x224x224_test_id_0
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x3x224x224_test_id_0 (1224 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x4x1024x2048_test_id_1
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x4x1024x2048_test_id_1 (16211 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x32x256x512_test_id_2
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x32x256x512_test_id_2 (5713 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x64x14x14_test_id_3
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x64x14x14_test_id_3 (1279 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x64x56x56_test_id_4
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x64x56x56_test_id_4 (1333 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x64x112x112_test_id_5
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x64x112x112_test_id_5 (1469 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x96x28x28_test_id_6
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x96x28x28_test_id_6 (870 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x4x4_test_id_7
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x4x4_test_id_7 (978 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x7x7_test_id_8
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x7x7_test_id_8 (834 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x14x14_test_id_9
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x14x14_test_id_9 (824 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x28x28_test_id_10
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x128x28x28_test_id_10 (876 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x160x7x7_test_id_11
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x160x7x7_test_id_11 (858 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x192x7x7_test_id_12
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x192x7x7_test_id_12 (835 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x192x14x14_test_id_13
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x192x14x14_test_id_13 (865 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x192x56x56_test_id_14
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x192x56x56_test_id_14 (1226 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x224x14x14_test_id_15
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x224x14x14_test_id_15 (888 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x256x7x7_test_id_16
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x256x7x7_test_id_16 (843 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x256x14x14_test_id_17
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x256x14x14_test_id_17 (849 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x256x28x28_test_id_18
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x256x28x28_test_id_18 (977 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x352x7x7_test_id_19
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x352x7x7_test_id_19 (848 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x480x128x256_test_id_20
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x480x128x256_test_id_20 (18422 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x528x64x128_test_id_21
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x528x64x128_test_id_21 (5830 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x1024x1x1_test_id_22
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_8x1024x1x1_test_id_22 (1401 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_16x64x112x112_test_id_23
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_16x64x112x112_test_id_23 (2205 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_25x3x32x32_test_id_24
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_25x3x32x32_test_id_24 (847 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_25x32x8x8_test_id_25
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_25x32x8x8_test_id_25 (893 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_32x256x12x12_test_id_26
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_32x256x12x12_test_id_26 (1381 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x3x227x227_test_id_27
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x3x227x227_test_id_27 (3097 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x64x56x56_test_id_28
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x64x56x56_test_id_28 (1625 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x64x112x112_test_id_29
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x64x112x112_test_id_29 (7081 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x256x14x14_test_id_30
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x256x14x14_test_id_30 (870 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x256x56x56_test_id_31
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x256x56x56_test_id_31 (6337 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x512x7x7_test_id_32
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x512x7x7_test_id_32 (729 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x512x28x28_test_id_33
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x512x28x28_test_id_33 (2688 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x1024x14x14_test_id_34
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x1024x14x14_test_id_34 (1895 ms)
+[ RUN      ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x2048x7x7_test_id_35
+[       OK ] Full/GPU_BnPeract_BFP16.TestBFloat16/dims_64x2048x7x7_test_id_35 (1112 ms)
+[----------] 36 tests from Full/GPU_BnPeract_BFP16 (96233 ms total)
+
+[----------] Global test environment tear-down
+[==========] 111 tests from 6 test suites ran. (311918 ms total)
+[  PASSED  ] 111 tests.

@@ -1,0 +1,85 @@
+[==========] Running 23 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/kernel_tuning_net.cpp:209: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/0 (1593 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/1
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/1 (8129 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/2
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/2 (43 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/3
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/3 (39 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/4
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/4 (41 ms)
+[----------] 5 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32 (9847 ms total)
+
+[----------] 2 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/0
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/0 (28 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/1
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/1 (111 ms)
+[----------] 2 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16 (139 ms total)
+
+[----------] 4 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/0
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/0 (193 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/1
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/1 (137 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/2
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/2 (126 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/3
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/3 (248 ms)
+[----------] 4 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32 (707 ms total)
+
+[----------] 3 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/kernel_tuning_net.cpp:209: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/0 (0 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/1
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/1 (212 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/2
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/2 (350 ms)
+[----------] 3 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16 (562 ms total)
+
+[----------] 5 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/0
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/0 (84 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/1
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/1 (18 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/2
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/2 (136 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/3
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/3 (128 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/4
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/4 (166 ms)
+[----------] 5 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32 (533 ms total)
+
+[----------] 4 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/0
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/0 (739 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/1
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/1 (30 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/2
+[       OK ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/2 (1304 ms)
+[ RUN      ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/kernel_tuning_net.cpp:209: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/3 (0 ms)
+[----------] 4 tests from Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16 (2074 ms total)
+
+[----------] Global test environment tear-down
+[==========] 23 tests from 6 test suites ran. (13865 ms total)
+[  PASSED  ] 20 tests.
+[  SKIPPED ] 3 tests, listed below:
+[  SKIPPED ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32.ConvHipIgemmGroupFwdXdlopsParameterPredictionModel/0
+[  SKIPPED ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16.ConvHipIgemmGroupBwdXdlopsParameterPredictionModel/0
+[  SKIPPED ] Smoke/GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16.ConvHipIgemmGroupWrwXdlopsParameterPredictionModel/3
+
+  YOU HAVE 2 DISABLED TESTS
+

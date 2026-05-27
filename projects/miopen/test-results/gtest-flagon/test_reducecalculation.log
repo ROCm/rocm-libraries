@@ -1,0 +1,168 @@
+[==========] Running 72 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 12 tests from FullSUM/GPU_ReduceCalculationTest_FP32
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/0
+PRNG seed: 12345678
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/0 (2005 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/1
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/1 (1 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/2
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/2 (20 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/3
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/3 (71 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/4
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/4 (22 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/5
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/5 (64 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/6
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/6 (110 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/7
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/7 (161 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/8
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/8 (968 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/9
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/9 (1108 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/10
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/10 (2947 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/11
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/11 (1908 ms)
+[----------] 12 tests from FullSUM/GPU_ReduceCalculationTest_FP32 (9391 ms total)
+
+[----------] 12 tests from FullPROD/GPU_ReduceCalculationTest_FP32
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/0
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/0 (407 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/1
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/1 (1 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/2
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/2 (7 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/3
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/3 (78 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/4
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/4 (17 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/5
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/5 (84 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/6
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/6 (147 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/7
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/7 (142 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/8
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/8 (1024 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/9
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/9 (986 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/10
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/10 (2467 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/11
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP32.ReduceCalculationTestFw/11 (2374 ms)
+[----------] 12 tests from FullPROD/GPU_ReduceCalculationTest_FP32 (7742 ms total)
+
+[----------] 12 tests from FullSUM/GPU_ReduceCalculationTest_FP16
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/0
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/0 (264 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/1
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/1 (1 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/2
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/2 (6 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/3
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/3 (49 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/4
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/4 (7 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/5
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/5 (48 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/6
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/6 (102 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/7
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/7 (123 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/8
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/8 (710 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/9
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/9 (739 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/10
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/10 (1708 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/11
+[       OK ] FullSUM/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/11 (1872 ms)
+[----------] 12 tests from FullSUM/GPU_ReduceCalculationTest_FP16 (5635 ms total)
+
+[----------] 12 tests from FullPROD/GPU_ReduceCalculationTest_FP16
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/0
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/0 (399 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/1
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/1 (1 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/2
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/2 (8 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/3
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/3 (56 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/4
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/4 (7 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/5
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/5 (50 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/6
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/6 (138 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/7
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/7 (126 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/8
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/8 (778 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/9
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/9 (777 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/10
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/10 (1759 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/11
+[       OK ] FullPROD/GPU_ReduceCalculationTest_FP16.ReduceCalculationTestFw/11 (1853 ms)
+[----------] 12 tests from FullPROD/GPU_ReduceCalculationTest_FP16 (5959 ms total)
+
+[----------] 12 tests from FullSUM/GPU_ReduceCalculationTest_BFP16
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/0
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/0 (397 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/1
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/1 (2 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/2
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/2 (7 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/3
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/3 (58 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/4
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/4 (7 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/5
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/5 (83 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/6
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/6 (115 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/7
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/7 (128 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/8
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/8 (787 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/9
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/9 (738 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/10
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/10 (1528 ms)
+[ RUN      ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/11
+[       OK ] FullSUM/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/11 (1903 ms)
+[----------] 12 tests from FullSUM/GPU_ReduceCalculationTest_BFP16 (5760 ms total)
+
+[----------] 12 tests from FullPROD/GPU_ReduceCalculationTest_BFP16
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/0
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/0 (399 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/1
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/1 (1 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/2
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/2 (9 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/3
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/3 (62 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/4
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/4 (9 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/5
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/5 (58 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/6
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/6 (110 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/7
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/7 (132 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/8
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/8 (790 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/9
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/9 (897 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/10
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/10 (2144 ms)
+[ RUN      ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/11
+[       OK ] FullPROD/GPU_ReduceCalculationTest_BFP16.ReduceCalculationTestFw/11 (2023 ms)
+[----------] 12 tests from FullPROD/GPU_ReduceCalculationTest_BFP16 (6640 ms total)
+
+[----------] Global test environment tear-down
+[==========] 72 tests from 6 test suites ran. (41131 ms total)
+[  PASSED  ] 72 tests.

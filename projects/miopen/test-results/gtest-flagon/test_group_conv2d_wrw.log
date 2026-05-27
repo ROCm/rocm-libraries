@@ -1,0 +1,132 @@
+[==========] Running 40 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 20 tests from Full/GPU_GroupConv2D_BackwardWeights_FP32
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/0
+PRNG seed: 12345678
+ G:1 N:1 C:1 K:1 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/0 (6833 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/1
+ G:1 N:1 C:1 K:1 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/1 (11 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/2
+ G:1 N:1 C:4 K:4 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/2 (27 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/3
+ G:1 N:1 C:4 K:4 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/3 (23 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/4
+ G:1 N:1 C:1 K:1 H:8 W:8 y:2 x:2 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/4 (3 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/5
+ G:1 N:1 C:1 K:1 H:8 W:8 y:2 x:2 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/5 (3 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/6
+ G:8 N:256 C:192 K:192 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/6 (694 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/7
+ G:8 N:256 C:192 K:192 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/7 (627 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/8
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/8 (1255 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/9
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/9 (838 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/10
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/10 (3826 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/11
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/11 (4558 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/12
+ G:1 N:6 C:448 K:896 H:118 W:182 y:3 x:3 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/12 (2286 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/13
+ G:1 N:6 C:448 K:896 H:118 W:182 y:3 x:3 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/13 (2208 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/14
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/14 (745 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/15
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/15 (743 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/16
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/16 (2124 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/17
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/17 (2148 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/18
+ G:1 N:6 C:448 K:896 H:118 W:182 y:1 x:1 pad.y:0 pad.x:0 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/18 (522 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/19
+ G:1 N:6 C:448 K:896 H:118 W:182 y:1 x:1 pad.y:0 pad.x:0 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_FP32.GroupConv2D_BackwardWeights_float_Test/19 (690 ms)
+[----------] 20 tests from Full/GPU_GroupConv2D_BackwardWeights_FP32 (30185 ms total)
+
+[----------] 20 tests from Full/GPU_GroupConv2D_BackwardWeights_BFP16
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/0
+ G:1 N:1 C:1 K:1 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/0 (236 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/1
+ G:1 N:1 C:1 K:1 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/1 (13 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/2
+ G:1 N:1 C:4 K:4 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/2 (27 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/3
+ G:1 N:1 C:4 K:4 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/3 (28 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/4
+ G:1 N:1 C:1 K:1 H:8 W:8 y:2 x:2 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/4 (8 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/5
+ G:1 N:1 C:1 K:1 H:8 W:8 y:2 x:2 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/5 (7 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/6
+ G:8 N:256 C:192 K:192 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/6 (686 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/7
+ G:8 N:256 C:192 K:192 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/7 (538 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/8
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/8 (745 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/9
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/9 (1083 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/10
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/10 (3847 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/11
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/11 (4329 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/12
+ G:1 N:6 C:448 K:896 H:118 W:182 y:3 x:3 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/12 (2123 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/13
+ G:1 N:6 C:448 K:896 H:118 W:182 y:3 x:3 pad.y:0 pad.x:0 stride.y:1 stride.x1 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/13 (1963 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/14
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/14 (669 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/15
+ G:8 N:256 C:384 K:384 H:28 W:28 y:2 x:2 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/15 (663 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/16
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/16 (1909 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/17
+ G:32 N:256 C:1024 K:2048 H:28 W:28 y:3 x:3 pad.y:1 pad.x:1 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/17 (1806 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/18
+ G:1 N:6 C:448 K:896 H:118 W:182 y:1 x:1 pad.y:0 pad.x:0 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/18 (397 ms)
+[ RUN      ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/19
+ G:1 N:6 C:448 K:896 H:118 W:182 y:1 x:1 pad.y:0 pad.x:0 stride.y:2 stride.x2 dilation.y:1 dilation.x1
+[       OK ] Full/GPU_GroupConv2D_BackwardWeights_BFP16.GroupConv2D_BackwardWeights_bfloat16_Test/19 (405 ms)
+[----------] 20 tests from Full/GPU_GroupConv2D_BackwardWeights_BFP16 (21493 ms total)
+
+[----------] Global test environment tear-down
+[==========] 40 tests from 2 test suites ran. (51686 ms total)
+[  PASSED  ] 40 tests.

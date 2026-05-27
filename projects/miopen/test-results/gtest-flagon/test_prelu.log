@@ -1,0 +1,177 @@
+[==========] Running 72 tests from 9 test suites.
+[----------] Global test environment set-up.
+[----------] 8 tests from Smoke/GPU_PReLU_bwd_FP32
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/0 (2255 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/1
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/1 (4 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/2
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/2 (6 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/3
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/3 (3 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/4
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/4 (49 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/5
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/5 (32 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/6
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/6 (23 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP32.Test/7
+[       OK ] Smoke/GPU_PReLU_bwd_FP32.Test/7 (23 ms)
+[----------] 8 tests from Smoke/GPU_PReLU_bwd_FP32 (2399 ms total)
+
+[----------] 12 tests from Full/GPU_PReLU_bwd_FP32
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/0
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/0 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/1
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/1 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/2
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/2 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/3
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/3 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/4
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/4 (24 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/5
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/5 (24 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/6
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/6 (21 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/7
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/7 (21 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/8
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/8 (50 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/9
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/9 (60 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/10
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/10 (63 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP32.Test/11
+[       OK ] Full/GPU_PReLU_bwd_FP32.Test/11 (67 ms)
+[----------] 12 tests from Full/GPU_PReLU_bwd_FP32 (348 ms total)
+
+[----------] 4 tests from Perf/GPU_PReLU_bwd_FP32
+[ RUN      ] Perf/GPU_PReLU_bwd_FP32.Test/0
+[       OK ] Perf/GPU_PReLU_bwd_FP32.Test/0 (62 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_FP32.Test/1
+[       OK ] Perf/GPU_PReLU_bwd_FP32.Test/1 (60 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_FP32.Test/2
+[       OK ] Perf/GPU_PReLU_bwd_FP32.Test/2 (60 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_FP32.Test/3
+[       OK ] Perf/GPU_PReLU_bwd_FP32.Test/3 (62 ms)
+[----------] 4 tests from Perf/GPU_PReLU_bwd_FP32 (246 ms total)
+
+[----------] 8 tests from Smoke/GPU_PReLU_bwd_FP16
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/0
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/0 (932 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/1
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/1 (4 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/2
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/2 (5 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/3
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/3 (3 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/4
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/4 (25 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/5
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/5 (23 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/6
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/6 (21 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_FP16.Test/7
+[       OK ] Smoke/GPU_PReLU_bwd_FP16.Test/7 (22 ms)
+[----------] 8 tests from Smoke/GPU_PReLU_bwd_FP16 (1039 ms total)
+
+[----------] 12 tests from Full/GPU_PReLU_bwd_FP16
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/0
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/0 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/1
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/1 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/2
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/2 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/3
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/3 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/4
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/4 (22 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/5
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/5 (22 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/6
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/6 (22 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/7
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/7 (21 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/8
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/8 (34 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/9
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/9 (31 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/10
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/10 (29 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_FP16.Test/11
+[       OK ] Full/GPU_PReLU_bwd_FP16.Test/11 (29 ms)
+[----------] 12 tests from Full/GPU_PReLU_bwd_FP16 (228 ms total)
+
+[----------] 4 tests from Perf/GPU_PReLU_bwd_FP16
+[ RUN      ] Perf/GPU_PReLU_bwd_FP16.Test/0
+[       OK ] Perf/GPU_PReLU_bwd_FP16.Test/0 (30 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_FP16.Test/1
+[       OK ] Perf/GPU_PReLU_bwd_FP16.Test/1 (29 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_FP16.Test/2
+[       OK ] Perf/GPU_PReLU_bwd_FP16.Test/2 (28 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_FP16.Test/3
+[       OK ] Perf/GPU_PReLU_bwd_FP16.Test/3 (32 ms)
+[----------] 4 tests from Perf/GPU_PReLU_bwd_FP16 (121 ms total)
+
+[----------] 8 tests from Smoke/GPU_PReLU_bwd_BFP16
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/0
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/0 (906 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/1
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/1 (4 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/2
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/2 (5 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/3
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/3 (3 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/4
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/4 (23 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/5
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/5 (24 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/6
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/6 (21 ms)
+[ RUN      ] Smoke/GPU_PReLU_bwd_BFP16.Test/7
+[       OK ] Smoke/GPU_PReLU_bwd_BFP16.Test/7 (21 ms)
+[----------] 8 tests from Smoke/GPU_PReLU_bwd_BFP16 (1011 ms total)
+
+[----------] 12 tests from Full/GPU_PReLU_bwd_BFP16
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/0
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/0 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/1
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/1 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/2
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/2 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/3
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/3 (3 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/4
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/4 (23 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/5
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/5 (24 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/6
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/6 (21 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/7
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/7 (41 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/8
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/8 (35 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/9
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/9 (31 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/10
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/10 (30 ms)
+[ RUN      ] Full/GPU_PReLU_bwd_BFP16.Test/11
+[       OK ] Full/GPU_PReLU_bwd_BFP16.Test/11 (30 ms)
+[----------] 12 tests from Full/GPU_PReLU_bwd_BFP16 (254 ms total)
+
+[----------] 4 tests from Perf/GPU_PReLU_bwd_BFP16
+[ RUN      ] Perf/GPU_PReLU_bwd_BFP16.Test/0
+[       OK ] Perf/GPU_PReLU_bwd_BFP16.Test/0 (31 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_BFP16.Test/1
+[       OK ] Perf/GPU_PReLU_bwd_BFP16.Test/1 (31 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_BFP16.Test/2
+[       OK ] Perf/GPU_PReLU_bwd_BFP16.Test/2 (29 ms)
+[ RUN      ] Perf/GPU_PReLU_bwd_BFP16.Test/3
+[       OK ] Perf/GPU_PReLU_bwd_BFP16.Test/3 (30 ms)
+[----------] 4 tests from Perf/GPU_PReLU_bwd_BFP16 (122 ms total)
+
+[----------] Global test environment tear-down
+[==========] 72 tests from 9 test suites ran. (5771 ms total)
+[  PASSED  ] 72 tests.

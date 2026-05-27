@@ -1,0 +1,28 @@
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from CPU_test_errors_NONE
+[ RUN      ] CPU_test_errors_NONE.test_ocl_error
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/test_errors.cpp:41: Skipped
+Skipped for HIP backend
+
+[  SKIPPED ] CPU_test_errors_NONE.test_ocl_error (0 ms)
+[ RUN      ] CPU_test_errors_NONE.test_try
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/test_errors.cpp:48: 
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/test_errors.cpp:50: 
+MIOpen Error: 
+[       OK ] CPU_test_errors_NONE.test_try (0 ms)
+[ RUN      ] CPU_test_errors_NONE.test_error_string
+[       OK ] CPU_test_errors_NONE.test_error_string (0 ms)
+[ RUN      ] CPU_test_errors_NONE.test_miopen_throw
+[       OK ] CPU_test_errors_NONE.test_miopen_throw (0 ms)
+[ RUN      ] CPU_test_errors_NONE.test_miopen_throw_if
+[       OK ] CPU_test_errors_NONE.test_miopen_throw_if (0 ms)
+[ RUN      ] CPU_test_errors_NONE.test_exception_setcontext_directly
+[       OK ] CPU_test_errors_NONE.test_exception_setcontext_directly (0 ms)
+[----------] 6 tests from CPU_test_errors_NONE (818 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (818 ms total)
+[  PASSED  ] 5 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] CPU_test_errors_NONE.test_ocl_error

@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_type_name_NONE
+[ RUN      ] CPU_type_name_NONE.check_type_name
+[       OK ] CPU_type_name_NONE.check_type_name (0 ms)
+[----------] 1 test from CPU_type_name_NONE (628 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (628 ms total)
+[  PASSED  ] 1 test.

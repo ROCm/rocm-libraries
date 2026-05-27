@@ -1,0 +1,28 @@
+[==========] Running 8 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from Full/GPU_LSTM_dropout_FP16
+[ RUN      ] Full/GPU_LSTM_dropout_FP16.HalfTest/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_LSTM_dropout_FP16.HalfTest/0 (3367 ms)
+[ RUN      ] Full/GPU_LSTM_dropout_FP16.HalfTest/1
+[       OK ] Full/GPU_LSTM_dropout_FP16.HalfTest/1 (686 ms)
+[ RUN      ] Full/GPU_LSTM_dropout_FP16.HalfTest/2
+[       OK ] Full/GPU_LSTM_dropout_FP16.HalfTest/2 (691 ms)
+[ RUN      ] Full/GPU_LSTM_dropout_FP16.HalfTest/3
+[       OK ] Full/GPU_LSTM_dropout_FP16.HalfTest/3 (414 ms)
+[----------] 4 tests from Full/GPU_LSTM_dropout_FP16 (5160 ms total)
+
+[----------] 4 tests from Full/GPU_LSTM_dropout_FP32
+[ RUN      ] Full/GPU_LSTM_dropout_FP32.FloatTest/0
+[       OK ] Full/GPU_LSTM_dropout_FP32.FloatTest/0 (1018 ms)
+[ RUN      ] Full/GPU_LSTM_dropout_FP32.FloatTest/1
+[       OK ] Full/GPU_LSTM_dropout_FP32.FloatTest/1 (262 ms)
+[ RUN      ] Full/GPU_LSTM_dropout_FP32.FloatTest/2
+[       OK ] Full/GPU_LSTM_dropout_FP32.FloatTest/2 (609 ms)
+[ RUN      ] Full/GPU_LSTM_dropout_FP32.FloatTest/3
+[       OK ] Full/GPU_LSTM_dropout_FP32.FloatTest/3 (347 ms)
+[----------] 4 tests from Full/GPU_LSTM_dropout_FP32 (2239 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 2 test suites ran. (7399 ms total)
+[  PASSED  ] 8 tests.

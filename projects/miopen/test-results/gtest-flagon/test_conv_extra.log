@@ -1,0 +1,42 @@
+[==========] Running 4 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_conv_extra_FP32
+[ RUN      ] Full/GPU_conv_extra_FP32.FloatTest_conv_extra/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_extra.cpp:103: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_conv_extra_FP32.FloatTest_conv_extra/0 (0 ms)
+[----------] 1 test from Full/GPU_conv_extra_FP32 (834 ms total)
+
+[----------] 1 test from Full/GPU_conv_extra_FP16
+[ RUN      ] Full/GPU_conv_extra_FP16.HalfTest_conv_extra/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_extra.cpp:108: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_conv_extra_FP16.HalfTest_conv_extra/0 (0 ms)
+[----------] 1 test from Full/GPU_conv_extra_FP16 (0 ms total)
+
+[----------] 1 test from Full/GPU_conv_extra_BFP16
+[ RUN      ] Full/GPU_conv_extra_BFP16.bHalfTest_conv_extra/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_extra.cpp:113: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_conv_extra_BFP16.bHalfTest_conv_extra/0 (0 ms)
+[----------] 1 test from Full/GPU_conv_extra_BFP16 (0 ms total)
+
+[----------] 1 test from Full/GPU_conv_extra_I8
+[ RUN      ] Full/GPU_conv_extra_I8.Int8Test_conv_extra/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_extra.cpp:118: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_conv_extra_I8.Int8Test_conv_extra/0 (0 ms)
+[----------] 1 test from Full/GPU_conv_extra_I8 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 4 test suites ran. (834 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 4 tests, listed below:
+[  SKIPPED ] Full/GPU_conv_extra_FP32.FloatTest_conv_extra/0
+[  SKIPPED ] Full/GPU_conv_extra_FP16.HalfTest_conv_extra/0
+[  SKIPPED ] Full/GPU_conv_extra_BFP16.bHalfTest_conv_extra/0
+[  SKIPPED ] Full/GPU_conv_extra_I8.Int8Test_conv_extra/0

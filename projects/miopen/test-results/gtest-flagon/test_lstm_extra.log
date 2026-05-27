@@ -1,0 +1,228 @@
+[==========] Running 60 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 30 tests from Full/GPU_LSTM_extra_FP16
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/0 (2215 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/1
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/1 (135 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/2
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/2 (121 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/3
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/3 (2578 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/4
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/4 (111 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/5
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/5 (425 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/6
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/6 (427 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/7
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/7 (1629 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/8
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/8 (239 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/9
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/9 (192 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/10
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/10 (1690 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/11
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/11 (199 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/12
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/12 (529 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/13
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/13 (531 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/14
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/14 (161 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/15
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/15 (133 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/16
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/16 (134 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/17
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/17 (134 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/18
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/18 (131 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/19
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/19 (138 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/20
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/20 (133 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/21
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/21 (232 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/22
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/22 (243 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/23
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/23 (233 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/24
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/24 (235 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/25
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/25 (241 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/26
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/26 (262 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/27
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/27 (237 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/28
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Hidden state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Cell state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden state dhx tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden cell dcx tensor report.
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/28 (119 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP16.HalfTest/29
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Hidden state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Cell state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden state dhx tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden cell dcx tensor report.
+[       OK ] Full/GPU_LSTM_extra_FP16.HalfTest/29 (194 ms)
+[----------] 30 tests from Full/GPU_LSTM_extra_FP16 (13997 ms total)
+
+[----------] 30 tests from Full/GPU_LSTM_extra_FP32
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/0
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/0 (320 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/1
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/1 (133 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/2
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/2 (110 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/3
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/3 (2139 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/4
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/4 (138 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/5
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/5 (591 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/6
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/6 (590 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/7
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/7 (2243 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/8
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/8 (232 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/9
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/9 (188 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/10
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/10 (2411 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/11
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/11 (235 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/12
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/12 (664 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/13
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/13 (522 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/14
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/14 (134 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/15
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/15 (132 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/16
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/16 (132 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/17
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/17 (132 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/18
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/18 (137 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/19
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/19 (131 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/20
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/20 (131 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/21
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/21 (232 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/22
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/22 (239 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/23
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/23 (233 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/24
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/24 (238 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/25
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/25 (232 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/26
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/26 (234 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/27
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/27 (242 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/28
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Hidden state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Cell state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden state dhx tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 0 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 0
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden cell dcx tensor report.
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/28 (111 ms)
+[ RUN      ] Full/GPU_LSTM_extra_FP32.FloatTest/29
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Hidden state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Forward Train LSTM: 
+Cell state tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden state dhx tensor report.
+Warning: Both CPU and GPU data is all zero
+MIOpenDriver rnn -n 32,32,32 -m lstm  -k 3 -H 128 -W 128 -l 1 -F 0  -r 1 -b 0 -p 0 -q 0
+inputMode: 0 biasMode: 0 dirMode: 1
+hz: 128 batch_n: 96 seqLength: 3 inputLen: 128 numLayers: 1 useDropout: 0
+Backward Data LSTM: 
+Hidden cell dcx tensor report.
+[       OK ] Full/GPU_LSTM_extra_FP32.FloatTest/29 (189 ms)
+[----------] 30 tests from Full/GPU_LSTM_extra_FP32 (13410 ms total)
+
+[----------] Global test environment tear-down
+[==========] 60 tests from 2 test suites ran. (27408 ms total)
+[  PASSED  ] 60 tests.

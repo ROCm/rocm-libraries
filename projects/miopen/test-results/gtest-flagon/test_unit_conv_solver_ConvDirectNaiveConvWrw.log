@@ -1,0 +1,527 @@
+[==========] Running 250 tests from 7 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/0 (843 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP16 (843 ms total)
+
+[----------] 82 tests from Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/0
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/0 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/1
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/1 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/2
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/2 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/3
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/3 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/4
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/4 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/5
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/5 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/6
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/6 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/7
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/7 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/8
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/8 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/9
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/9 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/10
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/10 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/11
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/11 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/12
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/12 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/13
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/13 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/14
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/14 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/15
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/15 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/16
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/16 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/17
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/17 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/18
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/18 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/19
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/19 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/20
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/20 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/21
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/21 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/22
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/22 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/23
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/23 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/24
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/24 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/25
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/25 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/26
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/26 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/27
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/27 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/28
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/28 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/29
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/29 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/30
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/30 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/31
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/31 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/32
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/32 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/33
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/33 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/34
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/34 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/35
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/35 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/36
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/36 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/37
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/37 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/38
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/38 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/39
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/39 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/40
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/40 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/41
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/41 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/42
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/42 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/43
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/43 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/44
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/44 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/45
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/45 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/46
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/46 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/47
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/47 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/48
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/48 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/49
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/49 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/50
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/50 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/51
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/51 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/52
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/52 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/53
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/53 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/54
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/54 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/55
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/55 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/56
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/56 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/57
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/57 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/58
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/58 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/59
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/59 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/60
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/60 (14 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/61
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/61 (18 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/62
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/62 (18 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/63
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/63 (19 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/64
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/64 (24 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/65
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/65 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/66
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/66 (22 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/67
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/67 (22 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/68
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/68 (24 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/69
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/69 (34 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/70
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/70 (114 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/71
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/71 (15 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/72
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/72 (18 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/73
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/73 (20 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/74
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/74 (22 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/75
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/75 (24 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/76
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/76 (29 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/77
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/77 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/78
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/78 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/79
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/79 (29 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/80
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/80 (37 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/81
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16.ConvDirectNaiveConvWrw/81 (145 ms)
+[----------] 82 tests from Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP16 (771 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/0
+[       OK ] Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/0 (42 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16 (42 ms total)
+
+[----------] 82 tests from Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/0
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/0 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/1
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/1 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/2
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/2 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/3
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/3 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/4
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/4 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/5
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/5 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/6
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/6 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/7
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/7 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/8
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/8 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/9
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/9 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/10
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/10 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/11
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/11 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/12
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/12 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/13
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/13 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/14
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/14 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/15
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/15 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/16
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/16 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/17
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/17 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/18
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/18 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/19
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/19 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/20
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/20 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/21
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/21 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/22
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/22 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/23
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/23 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/24
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/24 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/25
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/25 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/26
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/26 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/27
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/27 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/28
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/28 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/29
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/29 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/30
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/30 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/31
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/31 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/32
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/32 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/33
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/33 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/34
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/34 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/35
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/35 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/36
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/36 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/37
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/37 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/38
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/38 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/39
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/39 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/40
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/40 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/41
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/41 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/42
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/42 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/43
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/43 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/44
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/44 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/45
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/45 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/46
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/46 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/47
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/47 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/48
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/48 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/49
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/49 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/50
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/50 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/51
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/51 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/52
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/52 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/53
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/53 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/54
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/54 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/55
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/55 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/56
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/56 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/57
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/57 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/58
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/58 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/59
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/59 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/60
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/60 (13 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/61
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/61 (16 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/62
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/62 (16 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/63
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/63 (21 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/64
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/64 (22 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/65
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/65 (27 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/66
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/66 (24 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/67
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/67 (23 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/68
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/68 (28 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/69
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/69 (48 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/70
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/70 (121 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/71
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/71 (14 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/72
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/72 (17 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/73
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/73 (18 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/74
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/74 (19 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/75
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/75 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/76
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/76 (32 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/77
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/77 (27 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/78
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/78 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/79
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/79 (31 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/80
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/80 (38 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/81
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16.ConvDirectNaiveConvWrw/81 (147 ms)
+[----------] 82 tests from Full/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16 (799 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/0
+[       OK ] Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/0 (43 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP32 (43 ms total)
+
+[----------] 82 tests from Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/0
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/0 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/1
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/1 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/2
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/2 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/3
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/3 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/4
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/4 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/5
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/5 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/6
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/6 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/7
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/7 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/8
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/8 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/9
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/9 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/10
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/10 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/11
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/11 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/12
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/12 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/13
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/13 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/14
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/14 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/15
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/15 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/16
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/16 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/17
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/17 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/18
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/18 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/19
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/19 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/20
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/20 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/21
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/21 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/22
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/22 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/23
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/23 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/24
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/24 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/25
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/25 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/26
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/26 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/27
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/27 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/28
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/28 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/29
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/29 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/30
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/30 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/31
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/31 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/32
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/32 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/33
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/33 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/34
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/34 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/35
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/35 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/36
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/36 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/37
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/37 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/38
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/38 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/39
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/39 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/40
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/40 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/41
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/41 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/42
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/42 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/43
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/43 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/44
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/44 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/45
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/45 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/46
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/46 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/47
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/47 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/48
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/48 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/49
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/49 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/50
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/50 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/51
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/51 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/52
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/52 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/53
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/53 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/54
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/54 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/55
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/55 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/56
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/56 (4 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/57
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/57 (0 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/58
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/58 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/59
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/59 (3 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/60
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/60 (14 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/61
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/61 (17 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/62
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/62 (14 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/63
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/63 (18 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/64
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/64 (22 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/65
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/65 (23 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/66
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/66 (20 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/67
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/67 (20 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/68
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/68 (44 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/69
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/69 (28 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/70
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/70 (104 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/71
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/71 (14 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/72
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/72 (18 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/73
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/73 (19 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/74
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/74 (23 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/75
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/75 (32 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/76
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/76 (35 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/77
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/77 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/78
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/78 (26 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/79
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/79 (27 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/80
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/80 (36 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/81
+[       OK ] Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32.ConvDirectNaiveConvWrw/81 (140 ms)
+[----------] 82 tests from Full/GPU_UnitTestConvSolverDirectNaiveWrw_FP32 (767 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverDirectNaiveDevApplicabilityWrw_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverDirectNaiveDevApplicabilityWrw_NONE.ConvDirectNaiveConvWrw/0
+[       OK ] Smoke/CPU_UnitTestConvSolverDirectNaiveDevApplicabilityWrw_NONE.ConvDirectNaiveConvWrw/0 (52 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverDirectNaiveDevApplicabilityWrw_NONE (52 ms total)
+
+[----------] Global test environment tear-down
+[==========] 250 tests from 7 test suites ran. (3321 ms total)
+[  PASSED  ] 250 tests.

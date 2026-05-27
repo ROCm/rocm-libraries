@@ -1,0 +1,9 @@
+PRNG seed: 12345678
+(n=1) is not supported for BN operation.
+(n=1) is not supported for BN operation.
+(n=1) is not supported for BN operation.
+(n=1) is not supported for BN operation.
+(n=1) is not supported for BN operation.
+(n=1) is not supported for BN operation.
+[==========] 30 tests from 2 test suites ran. (46339 ms total)
+[  PASSED  ] 30 tests.

@@ -1,0 +1,69 @@
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from Smoke/CPU_Handle_NONE
+[ RUN      ] Smoke/CPU_Handle_NONE.TestHIP/with_stream_false_test_id_0
+PRNG seed: 12345678
+MIOpen(HIP): Error [Compile] 'hiprtcCompileProgram(prog.get(), c_options.size(), c_options.data())' error_hip.cpp: HIPRTC_ERROR_COMPILATION (6)
+MIOpen(HIP): Error [BuildHip] HIPRTC status = HIPRTC_ERROR_COMPILATION (6), source file: error_hip.cpp
+MIOpen(HIP): Warning [BuildHip] /tmp/comgr-1238244-6-3c2633/input/error_hip.cpp:6:10: error: use of undeclared identifier 'num'
+    6 |     data[num] *= 2;
+      |          ^~~
+1 error generated when compiling for gfx942.
+MIOpen(HIP): Error [Compile] 'hiprtcCompileProgram(prog.get(), c_options.size(), c_options.data())' error_hip.cpp: HIPRTC_ERROR_COMPILATION (6)
+MIOpen(HIP): Error [BuildHip] HIPRTC status = HIPRTC_ERROR_COMPILATION (6), source file: error_hip.cpp
+MIOpen(HIP): Warning [BuildHip] /tmp/comgr-1238244-7-da837a/input/error_hip.cpp:6:10: error: use of undeclared identifier 'num'
+    6 |     data[num] *= 2;
+      |          ^~~
+1 error generated when compiling for gfx942.
+[       OK ] Smoke/CPU_Handle_NONE.TestHIP/with_stream_false_test_id_0 (2428 ms)
+[ RUN      ] Smoke/CPU_Handle_NONE.TestHIP/with_stream_true_test_id_1
+MIOpen(HIP): Error [Compile] 'hiprtcCompileProgram(prog.get(), c_options.size(), c_options.data())' error_hip.cpp: HIPRTC_ERROR_COMPILATION (6)
+MIOpen(HIP): Error [BuildHip] HIPRTC status = HIPRTC_ERROR_COMPILATION (6), source file: error_hip.cpp
+MIOpen(HIP): Warning [BuildHip] /tmp/comgr-1238244-8-badb1c/input/error_hip.cpp:6:10: error: use of undeclared identifier 'num'
+    6 |     data[num] *= 2;
+      |          ^~~
+1 error generated when compiling for gfx942.
+MIOpen(HIP): Error [Compile] 'hiprtcCompileProgram(prog.get(), c_options.size(), c_options.data())' error_hip.cpp: HIPRTC_ERROR_COMPILATION (6)
+MIOpen(HIP): Error [BuildHip] HIPRTC status = HIPRTC_ERROR_COMPILATION (6), source file: error_hip.cpp
+MIOpen(HIP): Warning [BuildHip] /tmp/comgr-1238244-9-a4c3ad/input/error_hip.cpp:6:10: error: use of undeclared identifier 'num'
+    6 |     data[num] *= 2;
+      |          ^~~
+1 error generated when compiling for gfx942.
+[       OK ] Smoke/CPU_Handle_NONE.TestHIP/with_stream_true_test_id_1 (679 ms)
+[ RUN      ] Smoke/CPU_Handle_NONE.TestCL/with_stream_false_test_id_0
+MIOpen(HIP): Error [Do] 'amd_comgr_do_action(kind, handle, in.GetHandle(), out.GetHandle())' 12: ERROR (1)
+MIOpen(HIP): Error [BuildOcl] comgr status = ERROR (1)
+MIOpen(HIP): Warning [BuildOcl] /tmp/comgr-1238244-13-e42d55/input/error_ocl.cl:1:48: error: use of undeclared identifier 'i'
+    1 | __kernel void write(__global int* data) { data[i] = 0; }
+      |                                                ^
+1 error generated.
+
+MIOpen(HIP): Error [Do] 'amd_comgr_do_action(kind, handle, in.GetHandle(), out.GetHandle())' 12: ERROR (1)
+MIOpen(HIP): Error [BuildOcl] comgr status = ERROR (1)
+MIOpen(HIP): Warning [BuildOcl] /tmp/comgr-1238244-14-8ef5f0/input/error_ocl.cl:1:48: error: use of undeclared identifier 'i'
+    1 | __kernel void write(__global int* data) { data[i] = 0; }
+      |                                                ^
+1 error generated.
+
+[       OK ] Smoke/CPU_Handle_NONE.TestCL/with_stream_false_test_id_0 (324 ms)
+[ RUN      ] Smoke/CPU_Handle_NONE.TestCL/with_stream_true_test_id_1
+MIOpen(HIP): Error [Do] 'amd_comgr_do_action(kind, handle, in.GetHandle(), out.GetHandle())' 12: ERROR (1)
+MIOpen(HIP): Error [BuildOcl] comgr status = ERROR (1)
+MIOpen(HIP): Warning [BuildOcl] /tmp/comgr-1238244-15-858324/input/error_ocl.cl:1:48: error: use of undeclared identifier 'i'
+    1 | __kernel void write(__global int* data) { data[i] = 0; }
+      |                                                ^
+1 error generated.
+
+MIOpen(HIP): Error [Do] 'amd_comgr_do_action(kind, handle, in.GetHandle(), out.GetHandle())' 12: ERROR (1)
+MIOpen(HIP): Error [BuildOcl] comgr status = ERROR (1)
+MIOpen(HIP): Warning [BuildOcl] /tmp/comgr-1238244-16-253535/input/error_ocl.cl:1:48: error: use of undeclared identifier 'i'
+    1 | __kernel void write(__global int* data) { data[i] = 0; }
+      |                                                ^
+1 error generated.
+
+[       OK ] Smoke/CPU_Handle_NONE.TestCL/with_stream_true_test_id_1 (96 ms)
+[----------] 4 tests from Smoke/CPU_Handle_NONE (3528 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (3529 ms total)
+[  PASSED  ] 4 tests.

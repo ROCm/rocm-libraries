@@ -1,0 +1,591 @@
+[==========] Running 288 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 96 tests from Smoke/GPU_OpTensorFwdBiasGenericTest_FP16
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/0 (1536 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/1
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/1 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/2
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/2 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/3
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/3 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/4
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/4 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/5
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/5 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/6
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/6 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/7
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/7 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/8
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/8 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/9
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/9 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/10
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/10 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/11
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/11 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/12
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/12 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/13
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/13 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/14
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/14 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/15
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/15 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/16
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/16 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/17
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/17 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/18
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/18 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/19
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/19 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/20
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/20 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/21
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/21 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/22
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/22 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/23
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/23 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/24
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/24 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/25
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/25 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/26
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/26 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/27
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/27 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/28
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/28 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/29
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/29 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/30
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/30 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/31
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/31 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/32
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/32 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/33
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/33 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/34
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/34 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/35
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/35 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/36
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/36 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/37
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/37 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/38
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/38 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/39
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/39 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/40
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/40 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/41
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/41 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/42
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/42 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/43
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/43 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/44
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/44 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/45
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/45 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/46
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/46 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/47
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/47 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/48
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/48 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/49
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/49 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/50
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/50 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/51
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/51 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/52
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/52 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/53
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/53 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/54
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/54 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/55
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/55 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/56
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/56 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/57
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/57 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/58
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/58 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/59
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/59 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/60
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/60 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/61
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/61 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/62
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/62 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/63
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/63 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/64
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/64 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/65
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/65 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/66
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/66 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/67
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/67 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/68
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/68 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/69
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/69 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/70
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/70 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/71
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/71 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/72
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/72 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/73
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/73 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/74
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/74 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/75
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/75 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/76
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/76 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/77
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/77 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/78
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/78 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/79
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/79 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/80
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/80 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/81
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/81 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/82
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/82 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/83
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/83 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/84
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/84 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/85
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/85 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/86
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/86 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/87
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/87 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/88
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/88 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/89
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/89 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/90
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/90 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/91
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/91 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/92
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/92 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/93
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/93 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/94
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/94 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/95
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP16.PortTest/95 (0 ms)
+[----------] 96 tests from Smoke/GPU_OpTensorFwdBiasGenericTest_FP16 (1562 ms total)
+
+[----------] 96 tests from Smoke/GPU_OpTensorFwdBiasGenericTest_FP32
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/0
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/0 (592 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/1
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/1 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/2
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/2 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/3
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/3 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/4
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/4 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/5
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/5 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/6
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/6 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/7
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/7 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/8
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/8 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/9
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/9 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/10
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/10 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/11
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/11 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/12
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/12 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/13
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/13 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/14
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/14 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/15
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/15 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/16
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/16 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/17
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/17 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/18
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/18 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/19
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/19 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/20
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/20 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/21
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/21 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/22
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/22 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/23
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/23 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/24
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/24 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/25
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/25 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/26
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/26 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/27
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/27 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/28
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/28 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/29
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/29 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/30
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/30 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/31
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/31 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/32
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/32 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/33
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/33 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/34
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/34 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/35
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/35 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/36
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/36 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/37
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/37 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/38
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/38 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/39
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/39 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/40
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/40 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/41
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/41 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/42
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/42 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/43
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/43 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/44
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/44 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/45
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/45 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/46
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/46 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/47
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/47 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/48
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/48 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/49
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/49 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/50
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/50 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/51
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/51 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/52
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/52 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/53
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/53 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/54
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/54 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/55
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/55 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/56
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/56 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/57
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/57 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/58
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/58 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/59
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/59 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/60
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/60 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/61
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/61 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/62
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/62 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/63
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/63 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/64
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/64 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/65
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/65 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/66
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/66 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/67
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/67 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/68
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/68 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/69
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/69 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/70
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/70 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/71
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/71 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/72
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/72 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/73
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/73 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/74
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/74 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/75
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/75 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/76
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/76 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/77
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/77 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/78
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/78 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/79
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/79 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/80
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/80 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/81
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/81 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/82
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/82 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/83
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/83 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/84
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/84 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/85
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/85 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/86
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/86 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/87
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/87 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/88
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/88 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/89
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/89 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/90
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/90 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/91
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/91 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/92
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/92 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/93
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/93 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/94
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/94 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/95
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP32.PortTest/95 (0 ms)
+[----------] 96 tests from Smoke/GPU_OpTensorFwdBiasGenericTest_FP32 (619 ms total)
+
+[----------] 96 tests from Smoke/GPU_OpTensorFwdBiasGenericTest_FP64
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/0
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/0 (459 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/1
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/1 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/2
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/2 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/3
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/3 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/4
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/4 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/5
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/5 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/6
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/6 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/7
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/7 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/8
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/8 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/9
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/9 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/10
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/10 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/11
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/11 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/12
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/12 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/13
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/13 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/14
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/14 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/15
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/15 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/16
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/16 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/17
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/17 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/18
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/18 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/19
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/19 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/20
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/20 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/21
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/21 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/22
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/22 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/23
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/23 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/24
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/24 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/25
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/25 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/26
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/26 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/27
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/27 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/28
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/28 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/29
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/29 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/30
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/30 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/31
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/31 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/32
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/32 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/33
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/33 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/34
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/34 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/35
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/35 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/36
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/36 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/37
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/37 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/38
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/38 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/39
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/39 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/40
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/40 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/41
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/41 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/42
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/42 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/43
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/43 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/44
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/44 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/45
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/45 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/46
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/46 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/47
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/47 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/48
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/48 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/49
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/49 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/50
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/50 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/51
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/51 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/52
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/52 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/53
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/53 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/54
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/54 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/55
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/55 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/56
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/56 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/57
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/57 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/58
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/58 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/59
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/59 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/60
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/60 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/61
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/61 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/62
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/62 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/63
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/63 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/64
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/64 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/65
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/65 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/66
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/66 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/67
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/67 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/68
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/68 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/69
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/69 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/70
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/70 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/71
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/71 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/72
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/72 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/73
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/73 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/74
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/74 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/75
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/75 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/76
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/76 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/77
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/77 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/78
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/78 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/79
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/79 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/80
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/80 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/81
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/81 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/82
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/82 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/83
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/83 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/84
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/84 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/85
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/85 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/86
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/86 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/87
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/87 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/88
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/88 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/89
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/89 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/90
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/90 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/91
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/91 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/92
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/92 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/93
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/93 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/94
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/94 (0 ms)
+[ RUN      ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/95
+[       OK ] Smoke/GPU_OpTensorFwdBiasGenericTest_FP64.PortTest/95 (0 ms)
+[----------] 96 tests from Smoke/GPU_OpTensorFwdBiasGenericTest_FP64 (482 ms total)
+
+[----------] Global test environment tear-down
+[==========] 288 tests from 3 test suites ran. (2664 ms total)
+[  PASSED  ] 288 tests.

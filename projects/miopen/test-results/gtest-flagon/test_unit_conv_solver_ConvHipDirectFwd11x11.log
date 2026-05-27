@@ -1,0 +1,32 @@
+[==========] Running 7 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP16.ConvHipDirectFwd11x11/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP16.ConvHipDirectFwd11x11/0 (1238 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP16.ConvHipDirectFwd11x11/1
+[       OK ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP16.ConvHipDirectFwd11x11/1 (1601 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP16 (2839 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_BFP16.ConvHipDirectFwd11x11/0
+[       OK ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_BFP16.ConvHipDirectFwd11x11/0 (342 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_BFP16.ConvHipDirectFwd11x11/1
+[       OK ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_BFP16.ConvHipDirectFwd11x11/1 (1659 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_BFP16 (2002 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP32.ConvHipDirectFwd11x11/0
+[       OK ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP32.ConvHipDirectFwd11x11/0 (369 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP32.ConvHipDirectFwd11x11/1
+[       OK ] Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP32.ConvHipDirectFwd11x11/1 (1335 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverHipDirectFwd11x11_FP32 (1705 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipDirectFwd11x11DevApplicability_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverHipDirectFwd11x11DevApplicability_NONE.ConvHipDirectFwd11x11/0
+[       OK ] Smoke/CPU_UnitTestConvSolverHipDirectFwd11x11DevApplicability_NONE.ConvHipDirectFwd11x11/0 (39 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipDirectFwd11x11DevApplicability_NONE (39 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 4 test suites ran. (6587 ms total)
+[  PASSED  ] 7 tests.

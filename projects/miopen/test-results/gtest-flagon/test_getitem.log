@@ -1,0 +1,51 @@
+[==========] Running 18 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 6 tests from Full/GPU_GetitemBwd_FP32
+[ RUN      ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/0 (1720 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/1
+[       OK ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/1 (1 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/2
+[       OK ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/2 (62 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/3
+[       OK ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/3 (0 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/4
+[       OK ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/4 (13 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/5
+[       OK ] Full/GPU_GetitemBwd_FP32.GetitemBwdTest/5 (12 ms)
+[----------] 6 tests from Full/GPU_GetitemBwd_FP32 (1811 ms total)
+
+[----------] 6 tests from Full/GPU_GetitemBwd_FP16
+[ RUN      ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/0
+[       OK ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/0 (277 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/1
+[       OK ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/1 (0 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/2
+[       OK ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/2 (22 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/3
+[       OK ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/3 (0 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/4
+[       OK ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/4 (11 ms)
+[ RUN      ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/5
+[       OK ] Full/GPU_GetitemBwd_FP16.GetitemBwdTest/5 (10 ms)
+[----------] 6 tests from Full/GPU_GetitemBwd_FP16 (324 ms total)
+
+[----------] 6 tests from Full/GPU_GetitemBwd_BFP16
+[ RUN      ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/0
+[       OK ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/0 (424 ms)
+[ RUN      ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/1
+[       OK ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/1 (0 ms)
+[ RUN      ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/2
+[       OK ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/2 (44 ms)
+[ RUN      ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/3
+[       OK ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/3 (1 ms)
+[ RUN      ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/4
+[       OK ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/4 (16 ms)
+[ RUN      ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/5
+[       OK ] Full/GPU_GetitemBwd_BFP16.GetitemBwdTest/5 (14 ms)
+[----------] 6 tests from Full/GPU_GetitemBwd_BFP16 (502 ms total)
+
+[----------] Global test environment tear-down
+[==========] 18 tests from 3 test suites ran. (2640 ms total)
+[  PASSED  ] 18 tests.

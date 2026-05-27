@@ -1,0 +1,8 @@
+ 0x0000000000000001 (NEEDED)             Shared library: [libMIOpen_private.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libamd_comgr.so.3]
+ 0x0000000000000001 (NEEDED)             Shared library: [librocblas.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libamdhip64.so.7]
+ 0x0000000000000001 (NEEDED)             Shared library: [libstdc++.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]

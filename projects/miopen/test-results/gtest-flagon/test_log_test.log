@@ -1,0 +1,41 @@
+[==========] Running 7 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from CPU_LOG_TEST_ASSERT_NONE
+[ RUN      ] CPU_LOG_TEST_ASSERT_NONE.AssertLogCmdOutput
+[       OK ] CPU_LOG_TEST_ASSERT_NONE.AssertLogCmdOutput (689 ms)
+[ RUN      ] CPU_LOG_TEST_ASSERT_NONE.AssertLogFindCmdOutput
+[       OK ] CPU_LOG_TEST_ASSERT_NONE.AssertLogFindCmdOutput (0 ms)
+[ RUN      ] CPU_LOG_TEST_ASSERT_NONE.AssertLogBufferOff
+MIOpen(HIP): Warning [TestLogBufferOff] warn
+MIOpen(HIP): Info [TestLogBufferOff] info
+MIOpen(HIP): Error [TestLogBufferOff] error
+[       OK ] CPU_LOG_TEST_ASSERT_NONE.AssertLogBufferOff (0 ms)
+[ RUN      ] CPU_LOG_TEST_ASSERT_NONE.AssertLogBufferEnvEnabled
+MIOpen(HIP): Warning [TestLogBufferEnvEnabled] warn
+MIOpen(HIP): Info [TestLogBufferEnvEnabled] info
+MIOpen(HIP): Error [TestLogBufferEnvEnabled] error
+Buffered 4 messages to file: 684148a436c9:/tmp/miopen_error_1255567.log
+MIOpen(HIP): Warning [TestLogBufferEnvEnabled] warn 2nd
+MIOpen(HIP): Info [TestLogBufferEnvEnabled] info 2nd
+MIOpen(HIP): Error [TestLogBufferEnvEnabled] error 2nd
+Buffered 4 messages to file: 684148a436c9:/tmp/miopen_error_1255567.log
+[       OK ] CPU_LOG_TEST_ASSERT_NONE.AssertLogBufferEnvEnabled (0 ms)
+[ RUN      ] CPU_LOG_TEST_ASSERT_NONE.AssertLogBufferOffAtHighLevel
+MIOpen(HIP): Warning [TestLogBufferOffAtHighLevel] warn
+MIOpen(HIP): Info [TestLogBufferOffAtHighLevel] info
+MIOpen(HIP): Info2 [TestLogBufferOffAtHighLevel] info2
+MIOpen(HIP): Error [TestLogBufferOffAtHighLevel] error
+[       OK ] CPU_LOG_TEST_ASSERT_NONE.AssertLogBufferOffAtHighLevel (0 ms)
+[----------] 5 tests from CPU_LOG_TEST_ASSERT_NONE (690 ms total)
+
+[----------] 2 tests from CPU_LOG_TEST_FUSION_NONE
+[ RUN      ] CPU_LOG_TEST_FUSION_NONE.AssertTestLogCmdCBAFusionOutput
+[       OK ] CPU_LOG_TEST_FUSION_NONE.AssertTestLogCmdCBAFusionOutput (0 ms)
+[ RUN      ] CPU_LOG_TEST_FUSION_NONE.AssertTestLogCmdBNormFusionOutput
+PRNG seed: 12345678
+[       OK ] CPU_LOG_TEST_FUSION_NONE.AssertTestLogCmdBNormFusionOutput (346 ms)
+[----------] 2 tests from CPU_LOG_TEST_FUSION_NONE (346 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 2 test suites ran. (1037 ms total)
+[  PASSED  ] 7 tests.

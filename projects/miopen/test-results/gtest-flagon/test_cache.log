@@ -1,0 +1,17 @@
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from CPU_Cache_NONE
+[ RUN      ] CPU_Cache_NONE.check_bz2_compress
+PRNG seed: 12345678
+[       OK ] CPU_Cache_NONE.check_bz2_compress (10 ms)
+[ RUN      ] CPU_Cache_NONE.check_bz2_decompress
+[       OK ] CPU_Cache_NONE.check_bz2_decompress (1 ms)
+[ RUN      ] CPU_Cache_NONE.check_kern_db
+[       OK ] CPU_Cache_NONE.check_kern_db (8 ms)
+[ RUN      ] CPU_Cache_NONE.check_cache_file
+[       OK ] CPU_Cache_NONE.check_cache_file (0 ms)
+[----------] 4 tests from CPU_Cache_NONE (984 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (984 ms total)
+[  PASSED  ] 4 tests.

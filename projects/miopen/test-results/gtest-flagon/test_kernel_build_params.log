@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_kernel_build_params_NONE
+[ RUN      ] CPU_kernel_build_params_NONE.check_kernel_build_params
+[       OK ] CPU_kernel_build_params_NONE.check_kernel_build_params (0 ms)
+[----------] 1 test from CPU_kernel_build_params_NONE (1465 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1465 ms total)
+[  PASSED  ] 1 test.

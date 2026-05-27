@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionTest_FP16
+[ RUN      ] Full/GPU_MIOpenDriverRegressionTest_FP16.MIOpenDriverRegressionHalf/0
+[       OK ] Full/GPU_MIOpenDriverRegressionTest_FP16.MIOpenDriverRegressionHalf/0 (5804 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionTest_FP16 (5804 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (5805 ms total)
+[  PASSED  ] 1 test.

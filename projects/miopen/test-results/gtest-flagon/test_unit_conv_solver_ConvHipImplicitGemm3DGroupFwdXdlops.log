@@ -1,0 +1,152 @@
+[==========] Running 58 tests from 10 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/0 (6022 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/1 (761 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16 (6784 ms total)
+
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/0 (3574 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/1 (19 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/2
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/2 (1834 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/3
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/3 (1009 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/4
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/4 (2581 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/5
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/5 (301 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/6
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/6 (2169 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/7
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/7 (37 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/8
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/8 (1517 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/9
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/9 (1166 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/10
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/10 (3314 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/11
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/11 (307 ms)
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16 (17834 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/0 (1057 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/1 (1105 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16 (2162 ms total)
+
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/0 (4465 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/1 (17 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/2
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/2 (1943 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/3
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/3 (1217 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/4
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/4 (4015 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/5
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/5 (608 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/6
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/6 (2653 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/7
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/7 (33 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/8
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/8 (1903 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/9
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/9 (1578 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/10
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/10 (4273 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/11
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.ConvHipImplicitGemm3DGroupFwdXdlops/11 (414 ms)
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16 (23125 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/0 (1593 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/1 (1441 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32 (3035 ms total)
+
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/0 (4406 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/1 (19 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/2
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/2 (2523 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/3
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/3 (1251 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/4
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/4 (4529 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/5
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/5 (363 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/6
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/6 (2732 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/7
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/7 (31 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/8
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/8 (2883 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/9
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/9 (1315 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/10
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/10 (4010 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/11
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32.ConvHipImplicitGemm3DGroupFwdXdlops/11 (344 ms)
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32 (24412 ms total)
+
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/0 (1479 ms)
+[ RUN      ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/1 (1520 ms)
+[----------] 2 tests from Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32 (3000 ms total)
+
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/0 (4078 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/1
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/1 (14 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/2
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/2 (2121 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/3
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/3 (1659 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/4
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/4 (3864 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/5
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/5 (315 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/6
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/6 (2806 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/7
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/7 (33 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/8
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/8 (2607 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/9
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/9 (1758 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/10
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/10 (4818 ms)
+[ RUN      ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/11
+[       OK ] Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32.ConvHipImplicitGemm3DGroupFwdXdlops/11 (326 ms)
+[----------] 12 tests from Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_TF32 (24407 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDevApplicability_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDevApplicability_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDevApplicability_FP16.ConvHipImplicitGemm3DGroupFwdXdlops/0 (7 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDevApplicability_FP16 (7 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDeterministicApplicability_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDeterministicApplicability_NONE.ConvHipImplicitGemm3DGroupFwdXdlops/0
+[       OK ] Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDeterministicApplicability_NONE.ConvHipImplicitGemm3DGroupFwdXdlops/0 (65 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDeterministicApplicability_NONE (65 ms total)
+
+[----------] Global test environment tear-down
+[==========] 58 tests from 10 test suites ran. (104850 ms total)
+[  PASSED  ] 58 tests.

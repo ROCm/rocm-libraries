@@ -1,0 +1,1726 @@
+[==========] Running 496 tests from 15 test suites.
+[----------] Global test environment set-up.
+[----------] 92 tests from Smoke/GPU_ConvBiasActivInfer_FP32
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/0
+PRNG seed: 12345678
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/0 (5123 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/1 (89 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/2 (80 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/3 (48 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/4 (126 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/5 (154 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/6 (29 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/7 (50 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/8 (15 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/9 (70 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/10 (371 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/11 (255 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/12 (326 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/13 (242 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/14 (22 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/15 (130 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/16 (108 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/17 (221 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/18 (25 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/19 (14 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/20 (261 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/21 (108 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvBiasActivAsm1x1U Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/22 (102 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/0 (106 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/1 (69 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/2 (70 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/3 (42 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/4 (98 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/5 (155 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/6 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/7 (44 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/8 (9 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/9 (42 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/10 (260 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/11 (368 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/12 (220 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/13 (169 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/14 (22 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/15 (128 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/16 (111 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/17 (216 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/18 (18 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/19 (14 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/20 (259 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/21 (111 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/22 (104 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/0 (80 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/1 (107 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/2 (58 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/3 (31 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/4 (93 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/5 (103 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/6 (37 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/7 (48 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/8 (15 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/9 (69 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/10 (367 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/11 (245 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/12 (322 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/13 (241 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/14 (23 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/15 (134 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/16 (164 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/17 (194 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/18 (16 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/19 (9 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/20 (199 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/21 (76 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvBinWinogradRxSFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/22 (76 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/0
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/0 (207 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/1
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/1 (96 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/2
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/2 (163 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/3
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/3 (165 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/4
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/4 (811 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/5
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/5 (226 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/6
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/6 (66 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/7
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/7 (324 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/8
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/8 (75 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/9
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/9 (92 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/10
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/10 (910 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/11
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/11 (1100 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/12
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/12 (495 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/13
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/13 (1177 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/14
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/14 (68 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/15
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/15 (482 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/16
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/16 (279 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/17
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/17 (546 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/18
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/18 (119 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/19
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/19 (56 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/20
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/20 (1402 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/21
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/21 (367 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/22
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSf2x3g1Fused/22 (347 ms)
+[----------] 92 tests from Smoke/GPU_ConvBiasActivInfer_FP32 (23012 ms total)
+
+[----------] 138 tests from Smoke/GPU_ConvBiasActivInfer_FP16
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/0 (31 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/1 (27 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/2 (23 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/3 (23 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/4 (24 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/5 (24 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/6 (13 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/7 (13 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/8 (20 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/9 (18 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/10 (52 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/11 (50 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/12 (14 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/13 (13 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/14 (9 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/15 (9 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/16 (7 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/17 (7 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/18 (23 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/19 (24 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/20 (158 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/21 (168 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/22 (163 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/23
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/23 (168 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/24
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/24 (165 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/25
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/25 (157 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/26
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/26 (127 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/27
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/27 (125 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/28 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/29
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/29 (28 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/30
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/30 (92 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/31
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/31 (90 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/32 (85 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/33
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/33 (84 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/34
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/34 (87 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/35
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/35 (86 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/36
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/36 (11 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/37
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/37 (11 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/38
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/38 (14 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/39
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/39 (14 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/40
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/40 (140 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/41
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/41 (136 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/42
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/42 (53 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/43
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/43 (76 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/44
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/44 (49 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/45
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoFuryRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/45 (28 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/0 (28 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/1 (28 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/2
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/2 (99 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/3 (31 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/4
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/4 (111 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/5 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/6
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/6 (90 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/7 (16 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/8
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/8 (513 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/9 (60 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/10 (117 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/11 (84 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/12
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/12 (57 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/13 (17 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/14
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/14 (156 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/15 (12 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/16
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/16 (59 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/17 (9 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/18 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/19 (29 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/20
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/20 (541 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/21 (184 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/22 (289 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/23
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/23 (289 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/24
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/24 (457 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/25
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/25 (255 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/26
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/26 (121 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/27
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/27 (120 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/28 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/29
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/29 (29 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/30
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/30 (117 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/31
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/31 (115 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/32
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/32 (168 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/33
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/33 (78 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/34
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/34 (228 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/35
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/35 (90 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/36
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/36 (86 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/37
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/37 (8 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/38
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/38 (51 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/39
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/39 (9 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/40
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/40 (754 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/41
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/41 (106 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/42
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/42 (195 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/43
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/43 (40 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/44
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/44 (184 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/45
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:57: Skipped
+ConvWinoRageRxSFused<2-3> Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/45 (39 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/0 (33 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/1 (161 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/2 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/3 (93 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:1024 H:14 W:14 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/4 (32 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/5 (160 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/6 (17 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/7 (118 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:28 W:28 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/8 (49 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/9 (403 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:128 H:56 W:56 k: 128 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/10 (81 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/11 (185 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:2048 H:7 W:7 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/12 (18 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/13 (72 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/14 (12 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/15 (164 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:14 W:14 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/16 (16 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/17
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/17 (90 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:28 W:28 k: 256 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/18 (31 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/19
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/19 (113 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/20 (206 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/21
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/21 (592 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 512 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/22 (284 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/23
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/23 (690 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/24
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:256 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/24 (179 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/25
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/25 (331 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/26
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:3 H:224 W:224 k: 64 y:7 x:7 pad_y:3 pad_x:3 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/26 (128 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/27
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/27 (1004 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:14 W:14 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/28 (30 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/29
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/29 (115 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/30
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 1024 y:1 x:1 pad_y:0 pad_x:0 stride_y:2 stride_x:2 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/30 (120 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/31
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/31 (340 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 128 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/32 (74 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/33
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/33 (158 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/34
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:28 W:28 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/34 (74 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/35
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/35 (243 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/36
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 2048 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/36 (12 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/37
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/37 (100 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/38
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:512 H:7 W:7 k: 512 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/38 (10 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/39
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/39 (82 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/40
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 256 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/40 (131 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/41
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/41 (945 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/42
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/42 (53 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/43
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/43 (269 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/44
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvCKIgemmFwdBiasActivFused Not Applicable(N: 64 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/44 (53 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/45
+[       OK ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/45 (258 ms)
+[----------] 138 tests from Smoke/GPU_ConvBiasActivInfer_FP16 (17377 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer_BFP16
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0 (124 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1 (97 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2 (29 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8 (45 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9 (44 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15 (28 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer_BFP16 (610 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer_BFP16
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0 (182 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1 (148 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2 (1046 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3 (810 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4 (746 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5 (1173 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6 (2397 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7 (1454 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8 (7870 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9 (7295 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10 (361 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11 (284 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12 (656 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13 (576 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14 (2939 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15 (2606 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/16
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/16 (1185 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/17
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/17 (738 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/18
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/18 (462 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/19
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/19 (310 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/20
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/20 (666 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/21
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/21 (619 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/22
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/22 (3269 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/23
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/23 (2436 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/24
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/24 (891 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/25
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/25 (844 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/26
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/26 (8912 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/27
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_BFP16.ConvCKIgemmGrpFwdBiasActivFused/27 (9008 ms)
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer_BFP16 (59935 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0 (706 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1 (655 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2 (45 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3 (35 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4 (38 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5 (38 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6 (34 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7 (30 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8 (683 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9 (523 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10 (47 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11 (36 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12 (39 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13 (40 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14 (31 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15 (30 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer3D_BFP16 (3016 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer3D_BFP16
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/0 (3132 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/1 (1782 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/2 (1263 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/3 (1053 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/4 (2349 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/5 (1924 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/6 (2343 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/7 (1637 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/8 (1741 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/9 (1710 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/10 (894 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/11 (1273 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/12 (1092 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/13 (996 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/14 (423 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/15 (426 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/16
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/16 (294 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/17
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/17 (378 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/18
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/18 (360 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/19
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/19 (351 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/20
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/20 (1015 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/21
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/21 (1366 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/22
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/22 (1003 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/23
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/23 (876 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/24
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/24 (3000 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/25
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/25 (2970 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/26
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/26 (3628 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/27
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_BFP16.ConvCKIgemmGrpFwdBiasActivFused/27 (2139 ms)
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer3D_BFP16 (41487 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer_FP16
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/0 (78 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/1 (51 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/2 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/3 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/4 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/5 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/6 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/7 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/8 (50 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/9 (49 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/10 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/11 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/12 (33 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/13 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/14 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/15 (27 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer_FP16 (571 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer_FP16
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/0 (203 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/1 (193 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/2 (1059 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/3 (836 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/4 (936 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/5 (631 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/6 (1331 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/7 (1197 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/8 (5685 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/9 (5736 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/10 (358 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/11 (237 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/12 (553 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/13 (499 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/14 (1852 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/15 (2110 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/16
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/16 (917 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/17
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/17 (618 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/18
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/18 (287 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/19
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/19 (261 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/20
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/20 (562 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/21
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/21 (532 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/22
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/22 (1983 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/23
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/23 (2066 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/24
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/24 (623 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/25
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/25 (689 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/26
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/26 (8332 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/27
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP16.ConvCKIgemmGrpFwdBiasActivFused/27 (6944 ms)
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer_FP16 (47272 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer3D_FP16
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/0 (537 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/1 (554 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/2 (37 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/3 (32 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/4 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/5 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/6 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/7 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/8 (551 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/9 (462 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/10 (40 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/11 (26 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/12 (31 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/13 (29 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/14 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/15 (23 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer3D_FP16 (2455 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer3D_FP16
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/0 (1891 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/1 (1414 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/2 (779 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/3 (742 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/4 (1442 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/5 (1368 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/6 (1710 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/7 (1376 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/8 (1462 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/9 (1189 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/10 (900 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/11 (751 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/12 (749 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/13 (754 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/14 (416 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/15 (398 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/16
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/16 (237 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/17
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/17 (224 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/18
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/18 (223 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/19
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/19 (223 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/20
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/20 (897 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/21
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/21 (909 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/22
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/22 (742 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/23
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/23 (715 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/24
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/24 (3261 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/25
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/25 (2378 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/26
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/26 (3083 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/27
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP16.ConvCKIgemmGrpFwdBiasActivFused/27 (1603 ms)
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer3D_FP16 (31886 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer_FP32
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/0 (61 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/1 (39 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/2 (21 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/3 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/4 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/5 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/6 (20 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/7 (21 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/8 (39 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/9 (40 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/10 (22 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/11 (22 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/12 (22 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/13 (22 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/14 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/15 (21 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer_FP32 (445 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer_FP32
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/0 (229 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/1 (193 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/2 (1235 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/3 (1229 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/4 (1007 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/5 (1001 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/6 (2016 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/7 (2304 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/8 (9096 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/9 (9300 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/10 (585 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/11 (394 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/12 (841 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/13 (788 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/14 (3028 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/15 (2813 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/16
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/16 (1308 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/17
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/17 (1068 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/18
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/18 (437 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/19
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/19 (424 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/20
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/20 (933 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/21
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/21 (1049 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/22
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/22 (3947 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/23
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/23 (3950 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/24
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/24 (926 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/25
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/25 (863 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/26
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/26 (13962 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/27
+[       OK ] Full/GPU_ConvGrpBiasActivInfer_FP32.ConvCKIgemmGrpFwdBiasActivFused/27 (11404 ms)
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer_FP32 (76376 ms total)
+
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer3D_FP32
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/0 (753 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/1 (761 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/2 (30 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/3 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/4 (29 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/5 (28 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/6 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/7 (23 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/8 (720 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/9 (614 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/10 (32 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/11 (26 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/12 (29 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/13 (27 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/14 (22 ms)
+[ RUN      ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Smoke/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/15 (23 ms)
+[----------] 16 tests from Smoke/GPU_ConvGrpBiasActivInfer3D_FP32 (3202 ms total)
+
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer3D_FP32
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/0
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/0 (2872 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/1
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/1 (3333 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/2
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/2 (1535 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/3
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/3 (1204 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/4
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/4 (2330 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/5
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/5 (2653 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/6
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/6 (2912 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/7
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/7 (3039 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/8
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/8 (2494 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/9
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/9 (1883 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/10
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/10 (1247 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/11
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/11 (1201 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/12
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/12 (1262 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/13
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/13 (1218 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/14
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/14 (887 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/15
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/15 (822 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/16
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/16 (308 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/17
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/17 (286 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/18
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/18 (306 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/19
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/19 (282 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/20
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/20 (1564 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/21
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/21 (1273 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/22
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/22 (1048 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/23
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/23 (1134 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/24
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/24 (4271 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/25
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/25 (3799 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/26
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/26 (3968 ms)
+[ RUN      ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/27
+[       OK ] Full/GPU_ConvGrpBiasActivInfer3D_FP32.ConvCKIgemmGrpFwdBiasActivFused/27 (2998 ms)
+[----------] 28 tests from Full/GPU_ConvGrpBiasActivInfer3D_FP32 (52225 ms total)
+
+[----------] 2 tests from Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32
+[ RUN      ] Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32.ConvBiasActivAsm1x1UFloat_testCompile/0
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvCKIgemmGrpFwdBiasActivFused, enforce: SEARCH_DB_UPDATE(4)
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 1 C:64 H:56 W:56 k: 64 y:1 x:1 pad_y:0 pad_x:0 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32.ConvBiasActivAsm1x1UFloat_testCompile/0 (283 ms)
+[ RUN      ] Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32.ConvBiasActivAsm1x1UFloat_testCompile/1
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvCKIgemmGrpFwdBiasActivFused, enforce: SEARCH_DB_UPDATE(4)
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/cba_infer.cpp:119: Skipped
+ConvOclDirectFwdFused Not Applicable(N: 1 C:64 H:56 W:56 k: 64 y:3 x:3 pad_y:1 pad_x:1 stride_y:1 stride_x:1 dilation_y:1 dilation_x:1 conv_mode:0 )
+
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32.ConvBiasActivAsm1x1UFloat_testCompile/1 (70 ms)
+[----------] 2 tests from Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32 (353 ms total)
+
+[----------] Global test environment tear-down
+[==========] 496 tests from 15 test suites ran. (360237 ms total)
+[  PASSED  ] 326 tests.
+[  SKIPPED ] 170 tests, listed below:
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/1
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/2
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/3
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/4
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/5
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/6
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/7
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/8
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/9
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/10
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/11
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/12
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/13
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/14
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/15
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/16
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/17
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/18
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/19
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/20
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/21
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBiasActivAsm1x1UFloat/22
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/1
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/2
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/3
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/4
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/5
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/6
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/7
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/8
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/9
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/10
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/11
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/12
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/13
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/14
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/15
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/16
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/17
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/18
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/19
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/20
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/21
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvOclDirectFwdFused/22
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/1
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/2
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/3
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/4
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/5
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/6
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/7
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/8
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/9
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/10
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/11
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/12
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/13
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/14
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/15
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/16
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/17
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/18
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/19
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/20
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/21
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP32.ConvBinWinogradRxSFused/22
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/1
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/2
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/3
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/4
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/5
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/6
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/7
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/8
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/9
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/10
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/11
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/12
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/13
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/14
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/15
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/16
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/17
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/18
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/19
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/20
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/21
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/22
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/23
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/24
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/25
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/26
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/27
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/28
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/29
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/30
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/31
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/32
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/33
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/34
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/35
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/36
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/37
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/38
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/39
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/40
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/41
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/42
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/43
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/44
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoFuryRxSf2x3Fused/45
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/1
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/3
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/5
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/7
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/9
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/10
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/11
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/13
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/15
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/17
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/18
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/19
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/21
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/22
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/23
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/25
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/26
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/27
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/28
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/29
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/30
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/31
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/33
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/35
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/37
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/39
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/41
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/43
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvWinoRageRxSf2x3Fused/45
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/2
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/4
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/6
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/8
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/10
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/12
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/14
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/16
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/18
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/20
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/22
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/24
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/26
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/28
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/30
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/32
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/34
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/36
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/38
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/40
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/42
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInfer_FP16.ConvCKIgemmFwdBiasActivFused/44
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32.ConvBiasActivAsm1x1UFloat_testCompile/0
+[  SKIPPED ] Smoke/GPU_ConvBiasActivInferFusionCompileStep_FP32.ConvBiasActivAsm1x1UFloat_testCompile/1

@@ -1,0 +1,21 @@
+[==========] Running 3 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_dropout_NONE
+[ RUN      ] CPU_dropout_NONE.test_dropout_miopen_throw
+[       OK ] CPU_dropout_NONE.test_dropout_miopen_throw (860 ms)
+[----------] 1 test from CPU_dropout_NONE (860 ms total)
+
+[----------] 1 test from Smoke/GPU_Dropout_FP32
+[ RUN      ] Smoke/GPU_Dropout_FP32.TestFloat/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_Dropout_FP32.TestFloat/0 (3296 ms)
+[----------] 1 test from Smoke/GPU_Dropout_FP32 (3296 ms total)
+
+[----------] 1 test from Smoke/GPU_Dropout_FP16
+[ RUN      ] Smoke/GPU_Dropout_FP16.TestFloat16/0
+[       OK ] Smoke/GPU_Dropout_FP16.TestFloat16/0 (2665 ms)
+[----------] 1 test from Smoke/GPU_Dropout_FP16 (2665 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 3 test suites ran. (6823 ms total)
+[  PASSED  ] 3 tests.

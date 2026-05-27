@@ -1,0 +1,635 @@
+MIOpenDriver convbfp16 -n 8 -c 480 -H 48 -W 32 -k 480 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 5 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:09:20 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.028024 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 8, 480, 48, 32, 1, 1, 480, 1132462080, 23592960, 92160, 40410, 845, 0.028024
+Backward Convolution Weights Verifies OK on GPU reference (0.00560714 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 48 -W 32 -k 288 -y 3 -x 3 -p 1 -q 1 -u 2 -v 2 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 3 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:09:30 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.051839 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u2, 8, 288, 24, 16, 3, 3, 288, 1528823808, 8847360, 497664, 29492, 180, 0.051839
+Backward Convolution Weights Verifies OK on GPU reference (0.00344515 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 24 -W 16 -k 288 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 3 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:09:38 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.033797 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x3u1, 8, 288, 24, 16, 1, 3, 288, 509607936, 3538944, 165888, 15078, 110, 0.033797
+Backward Convolution Weights Verifies OK on GPU reference (0.00344994 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 24 -W 16 -k 288 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 3 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:09:47 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.051879 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x1u1, 8, 288, 24, 16, 3, 1, 288, 509607936, 3538944, 165888, 9823, 71, 0.051879
+Backward Convolution Weights Verifies OK on GPU reference (0.00350747 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 24 -W 16 -k 288 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 3 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:09:56 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.020807 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 8, 288, 24, 16, 1, 1, 288, 169869312, 3538944, 55296, 8164, 173, 0.020807
+Backward Convolution Weights Verifies OK on GPU reference (0.00436809 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 1152 -H 4 -W 8 -k 3840 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:10:06 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.108490 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 136, 1152, 4, 8, 1, 1, 3840, 38503710720, 43450368, 8847360, 354906, 482, 0.108490
+Backward Convolution Weights Verifies OK on GPU reference (3.20981e-05 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 1152 -H 4 -W 8 -k 3840 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:10:19 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.158765 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 136, 1152, 4, 8, 1, 1, 3840, 38503710720, 42270720, 10027008, 242520, 329, 0.158765
+Backward Convolution Data Verifies OK on GPU reference (0.000795449 < 0.656)
+MIOpenDriver convbfp16 -n 24 -c 4608 -H 2 -W 4 -k 4608 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:10:31 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.078621 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 24, 4608, 2, 4, 1, 1, 4608, 8153726976, 44236800, 1769472, 103709, 585, 0.078621
+Forward Convolution Verifies OK on GPU reference (6.32769e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 768 -H 48 -W 32 -k 2048 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:10:40 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.944411 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x3u1, 8, 768, 48, 32, 3, 3, 2048, 347892350976, 78643200, 18874368, 368370, 103, 0.944411
+Backward Convolution Data Verifies OK on GPU reference (8.50523e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 4608 -H 2 -W 4 -k 4608 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:10:56 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.032274 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 8, 4608, 2, 4, 1, 1, 4608, 2717908992, 43057152, 589824, 84214, 1352, 0.032274
+Forward Convolution Verifies OK on GPU reference (7.71169e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 13 -H 225 -W 225 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:11:06 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 155/ConvHipImplicitGemmGroupBwdXdlops
+GPU Kernel Time Backward Data Conv. Elapsed: 0.107407 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x3u1, 8, 13, 225, 225, 3, 3, 64, 6065280000, 51854976, 10530000, 56470, 581, 0.107407
+Backward Convolution Data Verifies OK on GPU reference (5.58236e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 768 -H 48 -W 32 -k 2048 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:11:14 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.696401 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 768, 48, 32, 3, 3, 2048, 347892350976, 69206016, 28311552, 499557, 140, 0.696401
+Backward Convolution Weights Verifies OK on GPU reference (0.00408742 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:11:33 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.175164 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 64, 225, 225, 3, 3, 64, 29859840000, 103680000, 73728, 170468, 592, 0.175164
+Backward Convolution Weights Verifies OK on GPU reference (3.1953e-05 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:11:49 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.042658 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 136, 32, 24, 48, 1, 1, 32, 320864256, 20054016, 2048, 7522, 470, 0.042658
+Backward Convolution Weights Verifies OK on GPU reference (0.014855 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 194 -H 24 -W 16 -k 192 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:12:04 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.072527 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 8, 194, 24, 16, 3, 3, 192, 2059665408, 1862400, 1179648, 28399, 42, 0.072527
+Forward Convolution Verifies OK on GPU reference (4.74148e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 24 -W 16 -k 288 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:12:12 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.025419 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 8, 288, 24, 16, 1, 1, 288, 509607936, 3538944, 165888, 20048, 146, 0.025419
+Backward Convolution Weights Verifies OK on GPU reference (0.00351151 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 576 -H 48 -W 32 -k 576 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:12:24 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.236745 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 576, 48, 32, 3, 3, 576, 73383542784, 28311552, 5971968, 309969, 145, 0.236745
+Backward Convolution Weights Verifies OK on GPU reference (2.1302e-05 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 576 -H 48 -W 32 -k 576 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:12:35 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.239871 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x3u1, 8, 576, 48, 32, 3, 3, 576, 73383542784, 20127744, 14155776, 305929, 143, 0.239871
+Backward Convolution Data Verifies OK on GPU reference (0.000830797 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:12:46 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.147058 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x3u1, 8, 64, 225, 225, 3, 3, 64, 29859840000, 51913728, 51840000, 203048, 706, 0.147058
+Backward Convolution Data Verifies OK on GPU reference (0.000856185 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:12:57 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.082510 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x3u1, 8, 64, 225, 225, 1, 3, 64, 9953280000, 103680000, 24576, 120631, 1257, 0.082510
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 2048 -H 48 -W 32 -k 3840 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:13:12 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.475212 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 8, 2048, 48, 32, 1, 1, 3840, 193273528320, 144703488, 15728640, 406710, 338, 0.475212
+Backward Convolution Weights Verifies OK on GPU reference (0.00401645 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 1152 -H 4 -W 8 -k 3840 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:13:39 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.106766 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 136, 1152, 4, 8, 1, 1, 3840, 38503710720, 18874368, 33423360, 360636, 490, 0.106766
+Forward Convolution Verifies OK on GPU reference (5.79071e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:13:48 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.110855 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 8, 64, 225, 225, 3, 3, 64, 29859840000, 51913728, 51840000, 269359, 936, 0.110855
+Forward Convolution Verifies OK on GPU reference (4.65036e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 2048 -H 48 -W 32 -k 3840 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:13:57 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.485837 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 8, 2048, 48, 32, 1, 1, 3840, 193273528320, 110100480, 50331648, 397816, 330, 0.485837
+Backward Convolution Data Verifies OK on GPU reference (0.000301811 < 0.656)
+MIOpenDriver convbfp16 -n 136 -c 128 -H 24 -W 48 -k 32 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:14:12 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.027022 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 136, 128, 24, 48, 1, 1, 32, 1283457024, 10035200, 40108032, 47497, 1856, 0.027022
+Backward Convolution Data Verifies OK on GPU reference (0.000808214 < 0.656)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:14:23 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.039049 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x3u1, 136, 32, 24, 48, 1, 3, 32, 962592768, 20054016, 6144, 24651, 514, 0.039049
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 128 -H 24 -W 48 -k 32 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:14:35 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.035161 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 136, 128, 24, 48, 1, 1, 32, 1283457024, 50135040, 8192, 36502, 1426, 0.035161
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 96 -W 64 -k 96 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:14:49 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.030229 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 8, 96, 96, 64, 1, 1, 96, 905969664, 18874368, 18432, 29970, 625, 0.030229
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:15:02 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.016438 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 136, 32, 24, 48, 1, 1, 32, 320864256, 10029056, 10027008, 19520, 1220, 0.016438
+Forward Convolution Verifies OK on GPU reference (2.39864e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:15:10 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.077620 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x1u1, 8, 64, 225, 225, 3, 1, 64, 9953280000, 103680000, 24576, 128231, 1336, 0.077620
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 48 -W 32 -k 96 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:15:24 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 156/ConvHipImplicitGemmGroupWrwXdlops
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.030590 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x1u1, 8, 96, 48, 32, 1, 1, 96, 226492416, 4718592, 18432, 7404, 155, 0.030590
+Backward Convolution Weights Verifies OK on GPU reference (0.00555688 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:15:34 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.017360 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 136, 32, 24, 48, 1, 1, 32, 320864256, 10029056, 10027008, 18483, 1155, 0.017360
+Backward Convolution Data Verifies OK on GPU reference (0.00108236 < 0.656)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:15:43 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.041416 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x1u1, 136, 32, 24, 48, 3, 1, 32, 962592768, 20054016, 6144, 23242, 484, 0.041416
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 576 -H 1 -W 30 -k 3 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:15:53 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 155/ConvHipImplicitGemmGroupBwdXdlops
+GPU Kernel Time Backward Data Conv. Elapsed: 0.033436 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 8, 576, 1, 30, 1, 1, 3, 829440, 4896, 276480, 25, 8, 0.033436
+Backward Convolution Data Verifies OK on GPU reference (0 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 24 -W 16 -k 288 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:01 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.015636 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 8, 288, 24, 16, 1, 1, 288, 509607936, 1935360, 1769472, 32592, 237, 0.015636
+Backward Convolution Data Verifies OK on GPU reference (0.000914862 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 288 -H 24 -W 16 -k 288 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:09 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.022531 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 8, 288, 24, 16, 1, 1, 288, 509607936, 1935360, 1769472, 22618, 164, 0.022531
+Forward Convolution Verifies OK on GPU reference (6.61435e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 24 -W 16 -k 96 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:17 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.018122 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv1x3u1, 8, 96, 24, 16, 1, 3, 96, 169869312, 1179648, 55296, 9374, 68, 0.018122
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 4 -H 450 -W 450 -k 16 -y 2 -x 2 -p 0 -q 0 -u 2 -v 2 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:26 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 155/ConvHipImplicitGemmGroupBwdXdlops
+GPU Kernel Time Backward Data Conv. Elapsed: 0.068999 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv2x2u2, 8, 4, 225, 225, 2, 2, 16, 207360000, 12960512, 12960000, 3005, 376, 0.068999
+Backward Convolution Data Verifies OK on GPU reference (3.37671e-07 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 24 -W 16 -k 96 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:33 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.017119 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x1u1, 8, 96, 24, 16, 3, 1, 96, 169869312, 1179648, 55296, 9923, 72, 0.017119
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 24 -c 4608 -H 2 -W 4 -k 8 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:43 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 107/ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC
+GPU Kernel Time Forward Conv. Elapsed: 0.018643 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 24, 4608, 2, 4, 1, 1, 8, 14155776, 1843200, 3072, 759, 99, 0.018643
+Forward Convolution Verifies OK on GPU reference (0 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:16:51 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.085877 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x1u1, 8, 64, 225, 225, 3, 1, 64, 9953280000, 51864576, 51840000, 115902, 1208, 0.085877
+Backward Convolution Data Verifies OK on GPU reference (0.000849444 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:02 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.061943 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x3u1, 8, 64, 225, 225, 1, 3, 64, 9953280000, 51864576, 51840000, 160684, 1674, 0.061943
+Backward Convolution Data Verifies OK on GPU reference (0.000826889 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 4608 -H 2 -W 4 -k 8 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:13 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 107/ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC
+GPU Kernel Time Forward Conv. Elapsed: 0.017201 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 8, 4608, 2, 4, 1, 1, 8, 4718592, 663552, 1024, 274, 39, 0.017201
+Forward Convolution Verifies OK on GPU reference (0 < 0.656)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:22 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.021649 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x1u1, 136, 32, 24, 48, 3, 1, 32, 962592768, 10033152, 10027008, 44464, 927, 0.021649
+Backward Convolution Data Verifies OK on GPU reference (0.000899669 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 3 -p 1 -q 1 -u 3 -v 3 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:30 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.049795 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x3u3, 8, 64, 75, 75, 3, 3, 64, 3317760000, 5833728, 51840000, 66628, 1158, 0.049795
+Backward Convolution Data Verifies OK on GPU reference (0.000840707 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 194 -H 24 -W 16 -k 192 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:40 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 155/ConvHipImplicitGemmGroupBwdXdlops
+GPU Kernel Time Backward Data Conv. Elapsed: 0.057773 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv3x3u1, 8, 194, 24, 16, 3, 3, 192, 2059665408, 1850112, 1191936, 35651, 53, 0.057773
+Backward Convolution Data Verifies OK on GPU reference (0.000766287 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 225 -W 225 -k 64 -y 3 -x 3 -p 1 -q 1 -u 3 -v 3 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:48 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.042418 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u3, 8, 64, 75, 75, 3, 3, 64, 3317760000, 57600000, 73728, 78216, 1360, 0.042418
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:17:58 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.021689 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x3u1, 136, 32, 24, 48, 1, 3, 32, 962592768, 10033152, 10027008, 44382, 925, 0.021689
+Backward Convolution Data Verifies OK on GPU reference (0.000919477 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 75 -W 75 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:18:06 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.044903 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 64, 75, 75, 3, 3, 64, 3317760000, 11520000, 73728, 73887, 258, 0.044903
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 194 -H 24 -W 16 -k 192 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:18:16 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.030911 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 194, 24, 16, 3, 3, 192, 2059665408, 2371584, 670464, 66632, 98, 0.030911
+Backward Convolution Weights Verifies OK on GPU reference (1.78065e-05 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 96 -W 64 -k 96 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:18:23 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.069681 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 96, 96, 64, 3, 3, 96, 8153726976, 18874368, 165888, 117015, 273, 0.069681
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 48 -W 32 -k 96 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 2 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:18:33 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupBwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Data Conv. Algorithm: 5, Solution: 108/ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC
+GPU Kernel Time Backward Data Conv. Elapsed: 0.013191 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdd-conv1x1u1, 8, 96, 48, 32, 1, 1, 96, 226492416, 2377728, 2359296, 17170, 359, 0.013191
+Backward Convolution Data Verifies OK on GPU reference (0.000994524 < 0.656)
+MIOpenDriver convbfp16 -n 24 -c 4608 -H 2 -W 4 -k 4608 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 36 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:18:40 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.016879 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x1u1, 24, 4608, 2, 4, 3, 1, 4608, 679477248, 5308416, 1769472, 40256, 419, 0.016879
+Forward Convolution Verifies OK on GPU reference (9.95995e-07 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 768 -H 48 -W 32 -k 2048 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:18:48 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.826259 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 8, 768, 48, 32, 3, 3, 2048, 347892350976, 47185920, 50331648, 421045, 118, 0.826259
+Forward Convolution Verifies OK on GPU reference (8.94144e-06 < 0.656)
+MIOpenDriver convbfp16 -n 136 -c 32 -H 24 -W 48 -k 32 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:07 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.010465 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x1u1, 136, 32, 24, 48, 3, 1, 32, 962592768, 10033152, 10027008, 91982, 1917, 0.010465
+Forward Convolution Verifies OK on GPU reference (2.31064e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 24 -W 16 -k 96 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:14 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.014232 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x1u1, 8, 96, 24, 16, 3, 1, 96, 169869312, 645120, 589824, 11936, 87, 0.014232
+Forward Convolution Verifies OK on GPU reference (2.04356e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 24 -W 16 -k 96 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:22 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.015956 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x3u1, 8, 96, 24, 16, 1, 3, 96, 169869312, 645120, 589824, 10646, 77, 0.015956
+Forward Convolution Verifies OK on GPU reference (3.14553e-06 < 0.656)
+MIOpenDriver convbfp16 -n 24 -c 32 -H 24 -W 48 -k 32 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:30 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.010584 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x3u1, 24, 32, 24, 48, 1, 3, 32, 169869312, 1775616, 1769472, 16050, 335, 0.010584
+Forward Convolution Verifies OK on GPU reference (2.69845e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 48 -W 32 -k 96 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:38 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.030149 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x3u1, 8, 96, 48, 32, 3, 3, 96, 2038431744, 4718592, 165888, 67612, 162, 0.030149
+Backward Convolution Weights Verifies OK on GPU reference (2.14335e-05 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 24 -W 16 -k 96 -y 3 -x 1 -p 2 -q 0 -u 1 -v 1 -l 2 -j 2 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:46 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.017881 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x1u1, 8, 96, 24, 16, 3, 1, 96, 169869312, 1179648, 55296, 9500, 69, 0.017881
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 38 -W 19 -k 64 -y 5 -x 1 -p 2 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:19:55 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.017521 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv5x1u1, 8, 64, 38, 19, 5, 1, 64, 236584960, 1478656, 40960, 13503, 87, 0.017521
+Backward Convolution Weights Verifies OK on GPU reference (0 < 0.1312)
+MIOpenDriver convbfp16 -n 8 -c 64 -H 75 -W 75 -k 64 -y 3 -x 1 -p 1 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 4 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:20:05 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupWrwXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Backward Weights Conv. Algorithm: 5, Solution: 110/ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC
+GPU Kernel Time Backward Weights Conv. Elapsed: 0.031152 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: bwdw-conv3x1u1, 8, 64, 75, 75, 3, 1, 64, 1105920000, 11520000, 24576, 35501, 371, 0.031152
+Backward Convolution Weights Verifies OK on GPU reference (6.17883e-05 < 0.1312)
+MIOpenDriver convbfp16 -n 136 -c 128 -H 24 -W 48 -k 32 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:20:14 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.026100 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 136, 128, 24, 48, 1, 1, 32, 1283457024, 40116224, 10027008, 49175, 1921, 0.026100
+Forward Convolution Verifies OK on GPU reference (3.38082e-06 < 0.656)
+MIOpenDriver convbfp16 -n 8 -c 96 -H 48 -W 32 -k 96 -y 1 -x 1 -p 0 -q 0 -u 1 -v 1 -l 1 -j 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC -m conv -g 1 -t 1 -F 1 --iter 1
+PRNG seed: 12345678
+Timestamp: 2026-05-27 11:20:21 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC, enforce: SEARCH_DB_UPDATE(4)
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: ConvHipImplicitGemmGroupFwdXdlops, enforce: SEARCH_DB_UPDATE(4)
+MIOpen Forward Conv. Algorithm: 5, Solution: 137/ConvHipImplicitGemmGroupFwdXdlops
+GPU Kernel Time Forward Conv. Elapsed: 0.018282 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv1x1u1, 8, 96, 48, 32, 1, 1, 96, 226492416, 2377728, 2359296, 12389, 259, 0.018282
+Forward Convolution Verifies OK on GPU reference (1.77329e-06 < 0.656)
+Duration: 668 seconds.

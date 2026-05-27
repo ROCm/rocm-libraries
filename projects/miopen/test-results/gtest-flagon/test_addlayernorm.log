@@ -1,0 +1,15 @@
+PRNG seed: 12345678
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+MIOpen(HIP): Warning [GetLayoutEnum] Failed to convert layout string 'UNKNOWN' to enum: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/tensor.cpp:821: Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC
+[==========] 198 tests from 3 test suites ran. (45967 ms total)
+[  PASSED  ] 198 tests.

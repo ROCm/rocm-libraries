@@ -1,0 +1,76 @@
+[==========] Running 32 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 32 tests from Full/GPU_CandidateSelection_FP32
+[ RUN      ] Full/GPU_CandidateSelection_FP32.FilesExist_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.FilesExist_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1313 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.FilesExist_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.FilesExist_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.MetadataAndModelInit_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.MetadataAndModelInit_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.MetadataAndModelInit_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.MetadataAndModelInit_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ModelCaching_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ModelCaching_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ModelCaching_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ModelCaching_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeInputFeatures_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeInputFeatures_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (7 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeInputFeatures_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeInputFeatures_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (7 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigs_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigs_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (14 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigs_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigs_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (13 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeInputFeaturesEdgeCases_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeInputFeaturesEdgeCases_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (12 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeInputFeaturesEdgeCases_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeInputFeaturesEdgeCases_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigsEdgeCases_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigsEdgeCases_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigsEdgeCases_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeKernelConfigsEdgeCases_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.KernelStrMappingUnknownKernelThrows_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.KernelStrMappingUnknownKernelThrows_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.KernelStrMappingUnknownKernelThrows_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.KernelStrMappingUnknownKernelThrows_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.OutputConstantRetrieval_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.OutputConstantRetrieval_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.OutputConstantRetrieval_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.OutputConstantRetrieval_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.InputOutputParamIndexThrows_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.InputOutputParamIndexThrows_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.InputOutputParamIndexThrows_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.InputOutputParamIndexThrows_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeKernelParamsBadValueThrows_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+MIOpen(HIP): Warning [EncodeKernelParams] Index 10 out of bounds for candidate of size 3 in kernel DeviceGroupedConvBwdWeight_Xdl_CShuffle
+MIOpen(HIP): Warning [EncodeKernelParams] Skipping candidate due to invalid kernel string mapping. Kernel: DeviceGroupedConvBwdWeight_Xdl_CShuffle, Candidate: ["DeviceGroupedConvBwdWeight_Xdl_CShuffle", "nonexistent_value", "nan"], Total mappings: 17
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeKernelParamsBadValueThrows_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.EncodeKernelParamsBadValueThrows_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+MIOpen(HIP): Warning [EncodeKernelParams] Index 10 out of bounds for candidate of size 3 in kernel DeviceGroupedConvBwdWeight_Xdl_CShuffle
+MIOpen(HIP): Warning [EncodeKernelParams] Skipping candidate due to invalid kernel string mapping. Kernel: DeviceGroupedConvBwdWeight_Xdl_CShuffle, Candidate: ["DeviceGroupedConvBwdWeight_Xdl_CShuffle", "nonexistent_value", "nan"], Total mappings: 17
+[       OK ] Full/GPU_CandidateSelection_FP32.EncodeKernelParamsBadValueThrows_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateValid_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateValid_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateValid_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateValid_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateEmptyInput_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateEmptyInput_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateEmptyInput_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.SelectBestCandidateEmptyInput_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ModelSelectBestCandidate_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ModelSelectBestCandidate_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ModelSelectBestCandidate_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ModelSelectBestCandidate_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (2 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitK_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitK_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitK_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitK_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitKFunctionality_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitKFunctionality_Test/gfx942_ConvHipImplicitGemmGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[ RUN      ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitKFunctionality_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8
+[       OK ] Full/GPU_CandidateSelection_FP32.ExpandKernelParamsWithSplitKFunctionality_Test/gfx942_ConvHipImplicitGemm3DGroupWrwXdlops_DeviceGroupedConvBwdWeight_Xdl_CShuffle_splitk8 (1 ms)
+[----------] 32 tests from Full/GPU_CandidateSelection_FP32 (1416 ms total)
+
+[----------] Global test environment tear-down
+[==========] 32 tests from 1 test suite ran. (1416 ms total)
+[  PASSED  ] 32 tests.

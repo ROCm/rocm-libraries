@@ -1,0 +1,140 @@
+[==========] Running 64 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 32 tests from Full/GPU_LSTM_FP16
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/0
+PRNG seed: 12345678
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/0 (4205 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/1
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/1 (533 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/2
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/2 (1151 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/3
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/3 (14 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/4
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/4 (1924 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/5
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/5 (8 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/6
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/6 (15 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/7
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/7 (16 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/8
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/8 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/9
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/9 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/10
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/10 (10 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/11
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/11 (10 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/12
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/12 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/13
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/13 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/14
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/14 (10 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/15
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/15 (10 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/16
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/16 (8 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/17
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/17 (8 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/18
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/18 (305 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/19
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/19 (14 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/20
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/20 (7 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/21
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/21 (7 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/22
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/22 (12 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/23
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/23 (12 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/24
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/24 (5 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/25
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/25 (5 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/26
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/26 (10 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/27
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/27 (10 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/28
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/28 (5 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/29
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/29 (5 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/30
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/30 (11 ms)
+[ RUN      ] Full/GPU_LSTM_FP16.HalfTest/31
+[       OK ] Full/GPU_LSTM_FP16.HalfTest/31 (10 ms)
+[----------] 32 tests from Full/GPU_LSTM_FP16 (8381 ms total)
+
+[----------] 32 tests from Full/GPU_LSTM_FP32
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/0
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/0 (1522 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/1
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/1 (265 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/2
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/2 (1111 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/3
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/3 (9 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/4
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/4 (1983 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/5
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/5 (5 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/6
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/6 (8 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/7
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/7 (7 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/8
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/8 (3 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/9
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/9 (3 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/10
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/10 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/11
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/11 (8 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/12
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/12 (3 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/13
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/13 (3 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/14
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/14 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/15
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/15 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/16
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/16 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/17
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/17 (5 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/18
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/18 (281 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/19
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/19 (7 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/20
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/20 (4 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/21
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/21 (4 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/22
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/22 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/23
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/23 (7 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/24
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/24 (4 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/25
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/25 (4 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/26
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/26 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/27
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/27 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/28
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/28 (3 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/29
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/29 (3 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/30
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/30 (6 ms)
+[ RUN      ] Full/GPU_LSTM_FP32.FloatTest/31
+[       OK ] Full/GPU_LSTM_FP32.FloatTest/31 (6 ms)
+[----------] 32 tests from Full/GPU_LSTM_FP32 (5322 ms total)
+
+[----------] Global test environment tear-down
+[==========] 64 tests from 2 test suites ran. (13704 ms total)
+[  PASSED  ] 64 tests.

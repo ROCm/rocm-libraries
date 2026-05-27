@@ -1,0 +1,14 @@
+[==========] Running 3 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 3 tests from CPU_UnitConvSolverToleranceTests_NONE
+[ RUN      ] CPU_UnitConvSolverToleranceTests_NONE.testThrows
+[       OK ] CPU_UnitConvSolverToleranceTests_NONE.testThrows (0 ms)
+[ RUN      ] CPU_UnitConvSolverToleranceTests_NONE.testSetAllUnique
+[       OK ] CPU_UnitConvSolverToleranceTests_NONE.testSetAllUnique (0 ms)
+[ RUN      ] CPU_UnitConvSolverToleranceTests_NONE.testSetMulti
+[       OK ] CPU_UnitConvSolverToleranceTests_NONE.testSetMulti (0 ms)
+[----------] 3 tests from CPU_UnitConvSolverToleranceTests_NONE (1573 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 1 test suite ran. (1573 ms total)
+[  PASSED  ] 3 tests.

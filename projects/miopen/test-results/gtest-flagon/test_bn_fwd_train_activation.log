@@ -1,0 +1,405 @@
+[==========] Running 195 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 78 tests from Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_0 (5034 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_1
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_1 (3728 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_2
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_2 (399 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_3
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_3 (377 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_4
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_4 (553 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_5
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_5 (852 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_6
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_6 (436 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_7
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_7 (404 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_8
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_8 (105 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_9
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_9 (104 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_10
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_10 (102 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_11
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_11 (101 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_12
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_12 (921 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_13
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_13 (631 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_14
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_14 (381 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_15
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_15 (436 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_16
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_16 (594 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_17
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_17 (389 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_18
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_18 (1707 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_19
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_19 (1936 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_20
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_20 (1419 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_21
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_21 (1981 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_22
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_22 (1562 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_23
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_23 (5777 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_24
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_24 (500 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_25
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_25 (914 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_26
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_26 (152 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_27
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_27 (626 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_28
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_28 (150 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_29
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_29 (163 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_30
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_30 (989 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_31
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_31 (2757 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32 (710 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_33
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_33 (2050 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_34
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_34 (659 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_35
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_35 (684 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_36
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_36 (359 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_37
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_37 (389 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_38
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_38 (44 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_39
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_39 (41 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_40
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_40 (41 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_41
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_41 (40 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_42
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_42 (1523 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_43
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_43 (2809 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_44
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_44 (1242 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_45
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_45 (1276 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_46
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_46 (1215 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_47
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_47 (1266 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_48
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_48 (645 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_49
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_49 (626 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_50
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_50 (336 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_51
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_51 (303 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_52
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_52 (306 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_53
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_53 (313 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_54
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_54 (460 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_55
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_55 (542 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_56
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_56 (1271 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_57
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_57 (1659 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_58
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_58 (666 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_59
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_59 (945 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_60
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_60 (598 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_61
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_61 (967 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_62
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_62 (1937 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_63
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_63 (1907 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_64
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_64 (354 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_65
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_65 (370 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_66
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_66 (345 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_67
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_67 (392 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_68
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_68 (315 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_69
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_69 (346 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_70
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_70 (387 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_71
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_71 (372 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_72
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_72 (1834 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_73
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_73 (1767 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_74
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_74 (3752 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_75
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_75 (3459 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_76
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_76 (348 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_77
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16.BnV2LargeFWD_TrainOCLfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_77 (414 ms)
+[----------] 78 tests from Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_FP16 (78508 ms total)
+
+[----------] 78 tests from Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_0
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_0 (2943 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_1
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_1 (3014 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_2
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_2 (326 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_3
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_3 (371 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_4
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_4 (520 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_5
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_5 (639 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_6
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_6 (399 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_7
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_7 (430 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_8
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_8 (109 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_9
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_9 (106 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_10
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_10 (113 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_11
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_11 (107 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_12
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_12 (665 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_13
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_13 (1037 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_14
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_14 (389 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_15
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_15 (417 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_16
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_16 (389 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_17
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_17 (349 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_18
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_18 (1706 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_19
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_19 (9660 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_20
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_20 (1218 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_21
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_21 (1427 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_22
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_22 (1329 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_23
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_23 (1281 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_24
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_24 (483 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_25
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_25 (990 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_26
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_26 (187 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_27
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_27 (154 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_28
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_28 (152 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_29
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_29 (190 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_30
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_30 (1040 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_31
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_31 (10059 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32 (654 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_33
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_33 (4008 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_34
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_34 (648 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_35
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_35 (3822 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_36
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_36 (343 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_37
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_37 (382 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_38
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_38 (45 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_39
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_39 (44 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_40
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_40 (47 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_41
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_41 (43 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_42
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_42 (1664 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_43
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_43 (1756 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_44
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_44 (1238 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_45
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_45 (1908 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_46
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_46 (1319 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_47
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_47 (2175 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_48
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_48 (669 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_49
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_49 (652 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_50
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_50 (316 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_51
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_51 (315 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_52
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_52 (342 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_53
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_53 (322 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_54
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_54 (485 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_55
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_55 (528 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_56
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_56 (1260 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_57
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_57 (1306 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_58
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_58 (546 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_59
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_59 (819 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_60
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_60 (638 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_61
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_61 (977 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_62
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_62 (1763 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_63
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_63 (1782 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_64
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_64 (364 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_65
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_65 (473 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_66
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_66 (344 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_67
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_67 (382 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_68
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_68 (321 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_69
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_69 (370 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_70
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_70 (363 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_71
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_71 (373 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_72
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_72 (1770 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_73
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_73 (1691 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_74
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_74 (3208 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_75
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_75 (3164 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_76
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_76 (343 ms)
+[ RUN      ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_77
+[       OK ] Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16.BnV2LargeFWD_TrainOCLbfp16Activation/NHWC_BNSpatial_testBNAPIV1_Dim_2_test_id_77 (359 ms)
+[----------] 78 tests from Smoke/GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16 (88579 ms total)
+
+[----------] 39 tests from Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_0
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_0 (3269 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_1
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_1 (363 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_2
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_2 (551 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_3
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_3 (459 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_4
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_4 (141 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_5
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_5 (142 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_6
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_6 (1077 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_7
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_7 (388 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_8
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_8 (456 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_9
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_9 (2216 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_10
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_10 (1756 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_11
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_11 (1756 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_12
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_12 (582 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_13
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_13 (234 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_14
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_14 (195 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_15
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_15 (1297 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_16
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_16 (818 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_17
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_17 (691 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_18
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_18 (478 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_19
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_19 (56 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_20
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_20 (54 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_21
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_21 (1909 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_22
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_22 (1358 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_23
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_23 (1592 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_24
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_24 (824 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_25
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_25 (450 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_26
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_26 (468 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_27
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_27 (680 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_28
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_28 (1772 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_29
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_29 (677 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_30
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_30 (573 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_31
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_31 (1873 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32 (630 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_33
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_33 (364 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_34
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_34 (332 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_35
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_35 (362 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_36
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_36 (1859 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_37
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_37 (3405 ms)
+[ RUN      ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_38
+[       OK ] Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_38 (354 ms)
+[----------] 39 tests from Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32 (36482 ms total)
+
+[----------] Global test environment tear-down
+[==========] 195 tests from 3 test suites ran. (203569 ms total)
+[  PASSED  ] 195 tests.

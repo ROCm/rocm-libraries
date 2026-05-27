@@ -1,0 +1,42 @@
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from CPU_TuningPolicy_NONE
+[ RUN      ] CPU_TuningPolicy_NONE.TestTuningPolicyGetterAndSetterValidValues
+[       OK ] CPU_TuningPolicy_NONE.TestTuningPolicyGetterAndSetterValidValues (1331 ms)
+[ RUN      ] CPU_TuningPolicy_NONE.TestTuningPolicyGetterAndSetterErrorHandling
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/api/tuning.cpp:39: miopenSetTuningPolicy called with invalid value of -1
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/api/tuning.cpp:39: miopenSetTuningPolicy called with invalid value of 0
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/api/tuning.cpp:39: miopenSetTuningPolicy called with invalid value of 6
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/api/tuning.cpp:39: miopenSetTuningPolicy called with invalid value of 1000
+[       OK ] CPU_TuningPolicy_NONE.TestTuningPolicyGetterAndSetterErrorHandling (22 ms)
+[ RUN      ] CPU_TuningPolicy_NONE.TestNullHandleForTuningPolicy
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+[       OK ] CPU_TuningPolicy_NONE.TestNullHandleForTuningPolicy (0 ms)
+[ RUN      ] CPU_TuningPolicy_NONE.TestNullPolicyPointer
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/api/tuning.cpp:51: miopenGetTuningPolicy called with null
+[       OK ] CPU_TuningPolicy_NONE.TestNullPolicyPointer (0 ms)
+[ RUN      ] CPU_TuningPolicy_NONE.TestGetApiLogged
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_tuning_policy.cpp:105: Failure
+Value of: output
+Expected: has substring " miopenGetTuningPolicy("
+  Actual: "MIOpen(HIP): miopenStatus_t miopenGetTuningPolicy_impl(miopenHandle_t, miopenTuningPolicy_t *){\nMIOpen(HIP): \thandle = stream: 0, device_id: 0\nMIOpen(HIP): \tvalue = 21990\nMIOpen(HIP): }\n"
+
+[  FAILED  ] CPU_TuningPolicy_NONE.TestGetApiLogged (0 ms)
+[ RUN      ] CPU_TuningPolicy_NONE.TestSetApiLogged
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_tuning_policy.cpp:123: Failure
+Value of: output
+Expected: has substring " miopenSetTuningPolicy("
+  Actual: "MIOpen(HIP): miopenStatus_t miopenSetTuningPolicy_impl(miopenHandle_t, miopenTuningPolicy_t){\nMIOpen(HIP): \thandle = stream: 0, device_id: 0\nMIOpen(HIP): \tnewValue = 3\nMIOpen(HIP): }\n"
+
+[  FAILED  ] CPU_TuningPolicy_NONE.TestSetApiLogged (0 ms)
+[----------] 6 tests from CPU_TuningPolicy_NONE (1354 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (1354 ms total)
+[  PASSED  ] 4 tests.
+[  FAILED  ] 2 tests, listed below:
+[  FAILED  ] CPU_TuningPolicy_NONE.TestGetApiLogged
+[  FAILED  ] CPU_TuningPolicy_NONE.TestSetApiLogged
+
+ 2 FAILED TESTS

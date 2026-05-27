@@ -1,0 +1,618 @@
+[==========] Running 200 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from Smoke/GPU_RNNVanilla_FP32
+[ RUN      ] Smoke/GPU_RNNVanilla_FP32.FloatTest/0
+Empty batch sequence. Filling uniformly with batch size: 5
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_RNNVanilla_FP32.FloatTest/0 (1293 ms)
+[ RUN      ] Smoke/GPU_RNNVanilla_FP32.FloatTest/1
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP32.FloatTest/1 (1 ms)
+[ RUN      ] Smoke/GPU_RNNVanilla_FP32.FloatTest/2
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP32.FloatTest/2 (681 ms)
+[ RUN      ] Smoke/GPU_RNNVanilla_FP32.FloatTest/3
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP32.FloatTest/3 (5 ms)
+[----------] 4 tests from Smoke/GPU_RNNVanilla_FP32 (1982 ms total)
+
+[----------] 96 tests from Full/GPU_RNNVanilla_FP32
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/0
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/0 (297 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/1
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/1 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/2
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/2 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/3
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/3 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/4
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/4 (0 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/5
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/5 (0 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/6
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/6 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/7
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/7 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/8
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/8 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/9
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/9 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/10
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/10 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/11
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/11 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/12
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/12 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/13
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/13 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/14
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/14 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/15
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/15 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/16
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/16 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/17
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/17 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/18
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/18 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/19
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/19 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/20
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/20 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/21
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/21 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/22
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/22 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/23
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/23 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/24
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/24 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/25
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/25 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/26
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/26 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/27
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/27 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/28
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/28 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/29
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/29 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/30
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/30 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/31
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/31 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/32
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/32 (10 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/33
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/33 (8 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/34
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/34 (291 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/35
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/35 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/36
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/36 (8 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/37
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/37 (8 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/38
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/38 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/39
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/39 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/40
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/40 (25 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/41
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/41 (26 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/42
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/42 (103 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/43
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/43 (127 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/44
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/44 (26 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/45
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/45 (26 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/46
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/46 (101 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/47
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/47 (102 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/48
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/48 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/49
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/49 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/50
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/50 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/51
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/51 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/52
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/52 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/53
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/53 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/54
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/54 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/55
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/55 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/56
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/56 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/57
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/57 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/58
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/58 (75 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/59
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/59 (69 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/60
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/60 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/61
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/61 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/62
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/62 (68 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/63
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/63 (68 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/64
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/64 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/65
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/65 (7 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/66
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/66 (8 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/67
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/67 (9 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/68
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/68 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/69
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/69 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/70
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/70 (8 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/71
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/71 (17 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/72
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/72 (34 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/73
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/73 (18 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/74
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/74 (88 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/75
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/75 (86 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/76
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/76 (18 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/77
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/77 (18 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/78
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/78 (85 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/79
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/79 (86 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/80
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/80 (577 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/81
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/81 (37 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/82
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/82 (560 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/83
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/83 (41 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/84
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/84 (3361 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/85
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/85 (132 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/86
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/86 (694 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/87
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/87 (222 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/88
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/88 (142 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/89
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/89 (167 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/90
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/90 (265 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/91
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/91 (239 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/92
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/92 (429 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/93
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/93 (410 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/94
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/94 (759 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP32.FloatTest/95
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP32.FloatTest/95 (875 ms)
+[----------] 96 tests from Full/GPU_RNNVanilla_FP32 (11047 ms total)
+
+[----------] 4 tests from Smoke/GPU_RNNVanilla_FP16
+[ RUN      ] Smoke/GPU_RNNVanilla_FP16.FloatTest/0
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP16.FloatTest/0 (17 ms)
+[ RUN      ] Smoke/GPU_RNNVanilla_FP16.FloatTest/1
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP16.FloatTest/1 (2 ms)
+[ RUN      ] Smoke/GPU_RNNVanilla_FP16.FloatTest/2
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP16.FloatTest/2 (687 ms)
+[ RUN      ] Smoke/GPU_RNNVanilla_FP16.FloatTest/3
+Empty batch sequence. Filling uniformly with batch size: 5
+[       OK ] Smoke/GPU_RNNVanilla_FP16.FloatTest/3 (14 ms)
+[----------] 4 tests from Smoke/GPU_RNNVanilla_FP16 (723 ms total)
+
+[----------] 96 tests from Full/GPU_RNNVanilla_FP16
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/0
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/0 (410 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/1
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/1 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/2
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/2 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/3
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/3 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/4
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/4 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/5
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/5 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/6
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/6 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/7
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/7 (1 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/8
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/8 (5 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/9
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/9 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/10
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/10 (10 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/11
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/11 (7 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/12
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/12 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/13
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/13 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/14
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/14 (7 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/15
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/15 (7 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/16
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/16 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/17
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/17 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/18
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/18 (8 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/19
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/19 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/20
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/20 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/21
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/21 (2 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/22
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/22 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/23
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/23 (3 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/24
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/24 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/25
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/25 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/26
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/26 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/27
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/27 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/28
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/28 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/29
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/29 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/30
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/30 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/31
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/31 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/32
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/32 (24 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/33
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/33 (22 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/34
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/34 (495 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/35
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/35 (60 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/36
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/36 (22 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/37
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/37 (22 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/38
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/38 (40 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/39
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/39 (41 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/40
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/40 (76 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/41
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/41 (76 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/42
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/42 (208 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/43
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/43 (213 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/44
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/44 (75 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/45
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/45 (76 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/46
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/46 (213 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/47
+Empty batch sequence. Filling uniformly with batch size: 1
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/47 (228 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/48
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/48 (7 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/49
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/49 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/50
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/50 (9 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/51
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/51 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/52
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/52 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/53
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/53 (4 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/54
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/54 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/55
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/55 (6 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/56
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/56 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/57
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/57 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/58
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/58 (128 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/59
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/59 (133 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/60
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/60 (15 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/61
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/61 (15 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/62
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/62 (137 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/63
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/63 (143 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/64
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/64 (16 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/65
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/65 (13 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/66
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/66 (22 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/67
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/67 (21 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/68
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/68 (13 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/69
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/69 (14 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/70
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/70 (23 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/71
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/71 (24 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/72
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/72 (50 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/73
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/73 (53 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/74
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/74 (191 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/75
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/75 (203 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/76
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/76 (50 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/77
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/77 (51 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/78
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/78 (225 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/79
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/79 (204 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/80
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/80 (1437 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/81
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/81 (72 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/82
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/82 (600 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/83
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/83 (126 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/84
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/84 (3906 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/85
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/85 (253 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/86
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/86 (449 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/87
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/87 (460 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/88
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/88 (320 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/89
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/89 (270 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/90
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/90 (504 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/91
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/91 (493 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/92
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/92 (825 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/93
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/93 (848 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/94
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/94 (1445 ms)
+[ RUN      ] Full/GPU_RNNVanilla_FP16.FloatTest/95
+Empty batch sequence. Filling uniformly with batch size: 17
+[       OK ] Full/GPU_RNNVanilla_FP16.FloatTest/95 (1210 ms)
+[----------] 96 tests from Full/GPU_RNNVanilla_FP16 (17547 ms total)
+
+[----------] Global test environment tear-down
+[==========] 200 tests from 4 test suites ran. (31300 ms total)
+[  PASSED  ] 200 tests.

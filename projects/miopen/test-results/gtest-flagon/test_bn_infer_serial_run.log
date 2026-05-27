@@ -1,0 +1,47 @@
+[==========] Running 16 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 8 tests from Full/GPU_BNOCLInferSerialRun3D_FP16
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNSpatial_testBNAPIV1_Dim_3_test_id_0
+PRNG seed: 12345678
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNSpatial_testBNAPIV1_Dim_3_test_id_0 (2171 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_1
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_1 (1962 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNPerActivation_testBNAPIV1_Dim_3_test_id_2
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNPerActivation_testBNAPIV1_Dim_3_test_id_2 (2452 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_3
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_3 (2209 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNSpatial_testBNAPIV1_Dim_3_test_id_4
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNSpatial_testBNAPIV1_Dim_3_test_id_4 (2090 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_5
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_5 (2035 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNPerActivation_testBNAPIV1_Dim_3_test_id_6
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNPerActivation_testBNAPIV1_Dim_3_test_id_6 (6467 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_7
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_FP16.BnV2SerialRunInferOCLfp16_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_7 (2151 ms)
+[----------] 8 tests from Full/GPU_BNOCLInferSerialRun3D_FP16 (21540 ms total)
+
+[----------] 8 tests from Full/GPU_BNOCLInferSerialRun3D_BFP16
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNSpatial_testBNAPIV1_Dim_3_test_id_0
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNSpatial_testBNAPIV1_Dim_3_test_id_0 (1892 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_1
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNSpatial_testBNAPIV2_Dim_3_test_id_1 (1706 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNPerActivation_testBNAPIV1_Dim_3_test_id_2
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNPerActivation_testBNAPIV1_Dim_3_test_id_2 (2273 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_3
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NCDHW_BNPerActivation_testBNAPIV2_Dim_3_test_id_3 (2150 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNSpatial_testBNAPIV1_Dim_3_test_id_4
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNSpatial_testBNAPIV1_Dim_3_test_id_4 (5272 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_5
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNSpatial_testBNAPIV2_Dim_3_test_id_5 (1578 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNPerActivation_testBNAPIV1_Dim_3_test_id_6
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNPerActivation_testBNAPIV1_Dim_3_test_id_6 (6073 ms)
+[ RUN      ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_7
+[       OK ] Full/GPU_BNOCLInferSerialRun3D_BFP16.BnV2SerialRunInferOCLbfp16_3D/NDHWC_BNPerActivation_testBNAPIV2_Dim_3_test_id_7 (2147 ms)
+[----------] 8 tests from Full/GPU_BNOCLInferSerialRun3D_BFP16 (23095 ms total)
+
+[----------] Global test environment tear-down
+[==========] 16 tests from 2 test suites ran. (44636 ms total)
+[  PASSED  ] 16 tests.
+
+  YOU HAVE 4 DISABLED TESTS
+

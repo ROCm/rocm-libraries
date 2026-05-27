@@ -1,0 +1,89 @@
+[==========] Running 40 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 40 tests from Smoke/GPU_CTC_FP32
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_0 (1511 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_1
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_1 (270 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_2
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_2 (297 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_3
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_3 (270 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_4
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_4 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_5
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_5 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_6
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_6 (523 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_7
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_1_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_7 (472 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_8
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_8 (788 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_9
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_9 (274 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_10
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_10 (445 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_11
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_11 (362 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_12
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_12 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_13
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_13 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_14
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_14 (560 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_15
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_16_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_15 (807 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_16
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_16 (654 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_17
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_17 (333 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_18
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_18 (326 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_19
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_19 (362 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_20
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_20 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_21
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_21 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_22
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_22 (951 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_23
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_32_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_23 (1087 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_24
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_24 (863 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_25
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_25 (289 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_26
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_26 (302 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_27
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_27 (283 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_28
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_28 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_29
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_29 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_30
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_30 (1486 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_31
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_64_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_31 (1585 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_32
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_0_test_id_32 (547 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_33
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_true_blank_id_1000_test_id_33 (304 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_34
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_0_test_id_34 (432 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_35
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_28_is_softmax_applied_false_blank_id_1000_test_id_35 (503 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_36
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_0_test_id_36 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_37
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_true_blank_id_1000_test_id_37 (0 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_38
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_0_test_id_38 (2812 ms)
+[ RUN      ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_39
+[       OK ] Smoke/GPU_CTC_FP32.TestFloat/batchSize_128_inputLen_100_labelLen_40_numClass_5000_is_softmax_applied_false_blank_id_1000_test_id_39 (2699 ms)
+[----------] 40 tests from Smoke/GPU_CTC_FP32 (22416 ms total)
+
+[----------] Global test environment tear-down
+[==========] 40 tests from 1 test suite ran. (22416 ms total)
+[  PASSED  ] 40 tests.

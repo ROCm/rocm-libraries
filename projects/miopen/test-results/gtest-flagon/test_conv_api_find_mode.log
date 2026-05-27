@@ -1,0 +1,16 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_ConvFindModeAPI_NONE
+[ RUN      ] CPU_ConvFindModeAPI_NONE.ConvFindModeAPI
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/convolution_api.cpp:206: Invalid enum value specified for findMode
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/convolution_api.cpp:206: Invalid enum value specified for findMode
+MIOpen Error: 684148a436c9:/data/nhanna/repos/rocm-libraries/projects/miopen/src/convolution_api.cpp:206: Invalid enum value specified for findMode
+[       OK ] CPU_ConvFindModeAPI_NONE.ConvFindModeAPI (10 ms)
+[----------] 1 test from CPU_ConvFindModeAPI_NONE (741 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (741 ms total)
+[  PASSED  ] 1 test.

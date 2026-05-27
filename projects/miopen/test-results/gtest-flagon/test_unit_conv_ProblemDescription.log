@@ -1,0 +1,72 @@
+[==========] Running 32 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 32 tests from Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/0
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/0 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/1
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/1 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/2
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/2 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/3
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/3 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/4
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/4 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/5
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/5 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/6
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/6 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/7
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/7 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/8
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/8 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/9
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/9 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/10
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/10 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/11
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/11 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/12
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/12 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/13
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/13 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/14
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/14 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/15
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/15 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/16
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/16 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/17
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/17 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/18
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/18 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/19
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/19 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/20
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/20 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/21
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/21 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/22
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/22 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/23
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/23 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/24
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/24 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/25
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/25 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/26
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/26 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/27
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/27 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/28
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/28 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/29
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/29 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/30
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/30 (0 ms)
+[ RUN      ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/31
+[       OK ] Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE.ConvProblemDescription/31 (0 ms)
+[----------] 32 tests from Full/CPU_ConvProblemDescriptionTestLayoutCalc_NONE (632 ms total)
+
+[----------] Global test environment tear-down
+[==========] 32 tests from 1 test suite ran. (632 ms total)
+[  PASSED  ] 32 tests.

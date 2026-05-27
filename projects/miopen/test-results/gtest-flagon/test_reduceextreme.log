@@ -1,0 +1,210 @@
+[==========] Running 84 tests from 12 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from FullMIN/GPU_ReduceExtremeTest_FP32
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0
+PRNG seed: 12345678
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0 (1828 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1 (21 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2 (19 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3 (23 ms)
+[----------] 4 tests from FullMIN/GPU_ReduceExtremeTest_FP32 (1892 ms total)
+
+[----------] 4 tests from FullMAX/GPU_ReduceExtremeTest_FP32
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0 (403 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1 (24 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2 (22 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3 (22 ms)
+[----------] 4 tests from FullMAX/GPU_ReduceExtremeTest_FP32 (473 ms total)
+
+[----------] 10 tests from FullARGMIN/GPU_ReduceExtremeTest_FP32
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0 (1681 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1 (1888 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2 (1441 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3 (1111 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/4
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/4 (44 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/5
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/5 (71 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/6
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/6 (286 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/7
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/7 (419 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/8
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/8 (47 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/9
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/9 (39 ms)
+[----------] 10 tests from FullARGMIN/GPU_ReduceExtremeTest_FP32 (7032 ms total)
+
+[----------] 10 tests from FullARGMAX/GPU_ReduceExtremeTest_FP32
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/0 (1576 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/1 (1900 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/2 (1521 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/3 (1161 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/4
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/4 (43 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/5
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/5 (44 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/6
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/6 (278 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/7
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/7 (423 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/8
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/8 (48 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/9
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP32.ReduceExtremeTestFw/9 (40 ms)
+[----------] 10 tests from FullARGMAX/GPU_ReduceExtremeTest_FP32 (7039 ms total)
+
+[----------] 4 tests from FullMIN/GPU_ReduceExtremeTest_FP16
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0 (455 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1 (25 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2 (24 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3
+[       OK ] FullMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3 (24 ms)
+[----------] 4 tests from FullMIN/GPU_ReduceExtremeTest_FP16 (529 ms total)
+
+[----------] 4 tests from FullMAX/GPU_ReduceExtremeTest_FP16
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0 (426 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1 (23 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2 (22 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3
+[       OK ] FullMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3 (22 ms)
+[----------] 4 tests from FullMAX/GPU_ReduceExtremeTest_FP16 (495 ms total)
+
+[----------] 10 tests from FullARGMIN/GPU_ReduceExtremeTest_FP16
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0 (1161 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1 (1190 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2 (881 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3 (722 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/4
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/4 (45 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/5
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/5 (42 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/6
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/6 (166 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/7
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/7 (311 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/8
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/8 (44 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/9
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/9 (39 ms)
+[----------] 10 tests from FullARGMIN/GPU_ReduceExtremeTest_FP16 (4607 ms total)
+
+[----------] 10 tests from FullARGMAX/GPU_ReduceExtremeTest_FP16
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/0 (1148 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/1 (1132 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/2 (964 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/3 (720 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/4
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/4 (44 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/5
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/5 (42 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/6
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/6 (168 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/7
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/7 (268 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/8
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/8 (45 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/9
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_FP16.ReduceExtremeTestFw/9 (38 ms)
+[----------] 10 tests from FullARGMAX/GPU_ReduceExtremeTest_FP16 (4583 ms total)
+
+[----------] 4 tests from FullMIN/GPU_ReduceExtremeTest_BFP16
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0
+[       OK ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0 (419 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1
+[       OK ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1 (22 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2
+[       OK ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2 (24 ms)
+[ RUN      ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3
+[       OK ] FullMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3 (23 ms)
+[----------] 4 tests from FullMIN/GPU_ReduceExtremeTest_BFP16 (489 ms total)
+
+[----------] 4 tests from FullMAX/GPU_ReduceExtremeTest_BFP16
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0
+[       OK ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0 (400 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1
+[       OK ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1 (21 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2
+[       OK ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2 (21 ms)
+[ RUN      ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3
+[       OK ] FullMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3 (22 ms)
+[----------] 4 tests from FullMAX/GPU_ReduceExtremeTest_BFP16 (466 ms total)
+
+[----------] 10 tests from FullARGMIN/GPU_ReduceExtremeTest_BFP16
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0 (1263 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1 (1146 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2 (923 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3 (768 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/4
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/4 (43 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/5
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/5 (43 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/6
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/6 (170 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/7
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/7 (289 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/8
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/8 (47 ms)
+[ RUN      ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/9
+[       OK ] FullARGMIN/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/9 (41 ms)
+[----------] 10 tests from FullARGMIN/GPU_ReduceExtremeTest_BFP16 (4737 ms total)
+
+[----------] 10 tests from FullARGMAX/GPU_ReduceExtremeTest_BFP16
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/0 (1239 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/1 (1194 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/2 (943 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/3 (737 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/4
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/4 (44 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/5
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/5 (43 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/6
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/6 (172 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/7
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/7 (279 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/8
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/8 (45 ms)
+[ RUN      ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/9
+[       OK ] FullARGMAX/GPU_ReduceExtremeTest_BFP16.ReduceExtremeTestFw/9 (39 ms)
+[----------] 10 tests from FullARGMAX/GPU_ReduceExtremeTest_BFP16 (4741 ms total)
+
+[----------] Global test environment tear-down
+[==========] 84 tests from 12 test suites ran. (37087 ms total)
+[  PASSED  ] 84 tests.

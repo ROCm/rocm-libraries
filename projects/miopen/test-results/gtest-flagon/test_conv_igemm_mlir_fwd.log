@@ -1,0 +1,33 @@
+[==========] Running 3 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmFwd_FP32
+[ RUN      ] Full/GPU_Conv2dMLIRTestIGemmFwd_FP32.FloatTest_conv_igemm_mlir_fwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_igemm_mlir_fwd.cpp:72: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmFwd_FP32.FloatTest_conv_igemm_mlir_fwd/0 (0 ms)
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmFwd_FP32 (970 ms total)
+
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmFwd_FP16
+[ RUN      ] Full/GPU_Conv2dMLIRTestIGemmFwd_FP16.HalfTest_conv_igemm_mlir_fwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_igemm_mlir_fwd.cpp:76: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmFwd_FP16.HalfTest_conv_igemm_mlir_fwd/0 (0 ms)
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmFwd_FP16 (0 ms total)
+
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmFwd_I8
+[ RUN      ] Full/GPU_Conv2dMLIRTestIGemmFwd_I8.Int8Test_conv_igemm_mlir_fwd/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/conv_igemm_mlir_fwd.cpp:80: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmFwd_I8.Int8Test_conv_igemm_mlir_fwd/0 (0 ms)
+[----------] 1 test from Full/GPU_Conv2dMLIRTestIGemmFwd_I8 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 3 test suites ran. (970 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 3 tests, listed below:
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmFwd_FP32.FloatTest_conv_igemm_mlir_fwd/0
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmFwd_FP16.HalfTest_conv_igemm_mlir_fwd/0
+[  SKIPPED ] Full/GPU_Conv2dMLIRTestIGemmFwd_I8.Int8Test_conv_igemm_mlir_fwd/0

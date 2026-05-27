@@ -1,0 +1,90 @@
+[==========] Running 40 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 40 tests from Full/GPU_ConvFwdBiasResAddActiv_FP16
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/0
+PRNG seed: 12345678
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/data/nhanna/repos/rocm-libraries/projects/miopen/build-flagon/share/miopen/db/gfx942130.HIP.fusion.fdb.txt"
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/0 (5095 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/1
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/1 (6 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/2
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/2 (6 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/3
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/3 (5 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/4
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/4 (1 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/5
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/5 (1 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/6
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/6 (1 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/7
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/7 (0 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/8
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/8 (3 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/9
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/9 (4 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/10
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/10 (3 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/11
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/11 (2 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/12
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/12 (1 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/13
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/13 (0 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/14
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/14 (0 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/15
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/15 (0 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/16
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/16 (35 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/17
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/17 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/18
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/18 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/19
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/19 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/20
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/20 (17 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/21
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/21 (16 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/22
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/22 (15 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/23
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/23 (17 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/24
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/24 (17 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/25
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/25 (19 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/26
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/26 (16 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/27
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/27 (16 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/28
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/28 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/29
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/29 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/30
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/30 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/31
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/31 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/32
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/32 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/33
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/33 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/34
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/34 (15 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/35
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/35 (13 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/36
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/36 (19 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/37
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/37 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/38
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/38 (14 ms)
+[ RUN      ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/39
+[       OK ] Full/GPU_ConvFwdBiasResAddActiv_FP16.ConvFusedAPI/39 (13 ms)
+[----------] 40 tests from Full/GPU_ConvFwdBiasResAddActiv_FP16 (5532 ms total)
+
+[----------] Global test environment tear-down
+[==========] 40 tests from 1 test suite ran. (5532 ms total)
+[  PASSED  ] 40 tests.

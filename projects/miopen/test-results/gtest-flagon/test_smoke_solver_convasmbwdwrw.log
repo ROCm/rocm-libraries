@@ -1,0 +1,42 @@
+[==========] Running 4 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_Conv2dTuningAsmBwdWrw_FP32
+[ RUN      ] Smoke/GPU_Conv2dTuningAsmBwdWrw_FP32.FloatTest_smoke_solver_convasmbwdwrw/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_solver_convasmbwdwrw.cpp:92: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Smoke/GPU_Conv2dTuningAsmBwdWrw_FP32.FloatTest_smoke_solver_convasmbwdwrw/0 (0 ms)
+[----------] 1 test from Smoke/GPU_Conv2dTuningAsmBwdWrw_FP32 (1117 ms total)
+
+[----------] 1 test from Smoke/GPU_Conv2dSingleAsmBwdWrw_FP32
+[ RUN      ] Smoke/GPU_Conv2dSingleAsmBwdWrw_FP32.FloatTest_smoke_solver_convasmbwdwrw/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_solver_convasmbwdwrw.cpp:87: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Smoke/GPU_Conv2dSingleAsmBwdWrw_FP32.FloatTest_smoke_solver_convasmbwdwrw/0 (0 ms)
+[----------] 1 test from Smoke/GPU_Conv2dSingleAsmBwdWrw_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_Conv2dTuningAsmBwdWrw_FP16
+[ RUN      ] Smoke/GPU_Conv2dTuningAsmBwdWrw_FP16.HalfTest_smoke_solver_convasmbwdwrw/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_solver_convasmbwdwrw.cpp:97: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Smoke/GPU_Conv2dTuningAsmBwdWrw_FP16.HalfTest_smoke_solver_convasmbwdwrw/0 (0 ms)
+[----------] 1 test from Smoke/GPU_Conv2dTuningAsmBwdWrw_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_Conv2dTuningAsmBwdWrw_BFP16
+[ RUN      ] Smoke/GPU_Conv2dTuningAsmBwdWrw_BFP16.Bf16Test_smoke_solver_convasmbwdwrw/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_solver_convasmbwdwrw.cpp:102: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Smoke/GPU_Conv2dTuningAsmBwdWrw_BFP16.Bf16Test_smoke_solver_convasmbwdwrw/0 (0 ms)
+[----------] 1 test from Smoke/GPU_Conv2dTuningAsmBwdWrw_BFP16 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 4 test suites ran. (1118 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 4 tests, listed below:
+[  SKIPPED ] Smoke/GPU_Conv2dTuningAsmBwdWrw_FP32.FloatTest_smoke_solver_convasmbwdwrw/0
+[  SKIPPED ] Smoke/GPU_Conv2dSingleAsmBwdWrw_FP32.FloatTest_smoke_solver_convasmbwdwrw/0
+[  SKIPPED ] Smoke/GPU_Conv2dTuningAsmBwdWrw_FP16.HalfTest_smoke_solver_convasmbwdwrw/0
+[  SKIPPED ] Smoke/GPU_Conv2dTuningAsmBwdWrw_BFP16.Bf16Test_smoke_solver_convasmbwdwrw/0

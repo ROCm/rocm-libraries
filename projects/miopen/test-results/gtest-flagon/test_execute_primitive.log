@@ -1,0 +1,16 @@
+[==========] Running 2 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_ExecutePrimitive_NONE
+[ RUN      ] CPU_ExecutePrimitive_NONE.NoParams
+[       OK ] CPU_ExecutePrimitive_NONE.NoParams (836 ms)
+[----------] 1 test from CPU_ExecutePrimitive_NONE (836 ms total)
+
+[----------] 1 test from CPU_ExecutePrimitiveSearchUpdate_NONE
+[ RUN      ] CPU_ExecutePrimitiveSearchUpdate_NONE.SearchUpdate
+MIOpen(HIP): Warning [FindSolutionImpl] Perf Db: load skipped: TunableTestSolver, enforce: NONE(1)
+[       OK ] CPU_ExecutePrimitiveSearchUpdate_NONE.SearchUpdate (0 ms)
+[----------] 1 test from CPU_ExecutePrimitiveSearchUpdate_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (837 ms total)
+[  PASSED  ] 2 tests.

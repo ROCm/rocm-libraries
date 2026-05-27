@@ -1,0 +1,29 @@
+[==========] Running 3 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32.ConvAsm3x3U/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32.ConvAsm3x3U/0 (925 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32 (925 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverAsm3x3UBwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverAsm3x3UBwd_FP32.ConvAsm3x3U/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverAsm3x3UBwd_FP32.ConvAsm3x3U/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverAsm3x3UBwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverAsm3x3UDevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverAsm3x3UDevApplicabilityFwd_NONE.ConvAsm3x3U/0
+[       OK ] Smoke/CPU_UnitTestConvSolverAsm3x3UDevApplicabilityFwd_NONE.ConvAsm3x3U/0 (40 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverAsm3x3UDevApplicabilityFwd_NONE (40 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 3 test suites ran. (966 ms total)
+[  PASSED  ] 1 test.
+[  SKIPPED ] 2 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32.ConvAsm3x3U/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverAsm3x3UBwd_FP32.ConvAsm3x3U/0

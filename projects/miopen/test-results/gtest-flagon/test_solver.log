@@ -1,0 +1,11 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/CPU_SolverTest_NONE
+[ RUN      ] Smoke/CPU_SolverTest_NONE.TestSolver/SearchesDoneTest
+PRNG seed: 12345678
+[       OK ] Smoke/CPU_SolverTest_NONE.TestSolver/SearchesDoneTest (1929 ms)
+[----------] 1 test from Smoke/CPU_SolverTest_NONE (1929 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1929 ms total)
+[  PASSED  ] 1 test.

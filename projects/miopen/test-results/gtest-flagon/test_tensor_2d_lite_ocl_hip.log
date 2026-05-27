@@ -1,0 +1,21 @@
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from Smoke/GPU_Op2dTensorLiteTest_FP32
+[ RUN      ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/0 (1111 ms)
+[ RUN      ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/1
+[       OK ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/1 (3 ms)
+[ RUN      ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/2
+[       OK ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/2 (21 ms)
+[ RUN      ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/3
+[       OK ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/3 (32 ms)
+[ RUN      ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/4
+[       OK ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/4 (180 ms)
+[ RUN      ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/5
+[       OK ] Smoke/GPU_Op2dTensorLiteTest_FP32.PortTest/5 (159 ms)
+[----------] 6 tests from Smoke/GPU_Op2dTensorLiteTest_FP32 (1508 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (1508 ms total)
+[  PASSED  ] 6 tests.

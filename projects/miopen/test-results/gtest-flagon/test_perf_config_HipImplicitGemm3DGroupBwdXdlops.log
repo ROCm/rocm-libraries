@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16
+[ RUN      ] GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16.SearchStartsAtKernelZero
+[       OK ] GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16.SearchStartsAtKernelZero (4542 ms)
+[----------] 1 test from GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16 (4542 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4542 ms total)
+[  PASSED  ] 1 test.

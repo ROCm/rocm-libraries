@@ -1,0 +1,12 @@
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from Standard/GPU_LSTM_LargeWorkspace_FP16
+[ RUN      ] Standard/GPU_LSTM_LargeWorkspace_FP16.GetWorkspaceSizeOverflowsInt/0
+[       OK ] Standard/GPU_LSTM_LargeWorkspace_FP16.GetWorkspaceSizeOverflowsInt/0 (1506 ms)
+[ RUN      ] Standard/GPU_LSTM_LargeWorkspace_FP16.ForwardInferenceSucceedsWhenWorkspaceExceedsInt/0
+[       OK ] Standard/GPU_LSTM_LargeWorkspace_FP16.ForwardInferenceSucceedsWhenWorkspaceExceedsInt/0 (4321 ms)
+[----------] 2 tests from Standard/GPU_LSTM_LargeWorkspace_FP16 (5827 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (5827 ms total)
+[  PASSED  ] 2 tests.

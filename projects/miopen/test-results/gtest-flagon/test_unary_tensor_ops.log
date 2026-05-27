@@ -1,0 +1,1029 @@
+[==========] Running 440 tests from 10 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from Smoke/GPU_unaryTensorOps_FP32
+PRNG seed: 12345678
+[ RUN      ] Smoke/GPU_unaryTensorOps_FP32.TestTensorScale/0
+[       OK ] Smoke/GPU_unaryTensorOps_FP32.TestTensorScale/0 (1465 ms)
+[ RUN      ] Smoke/GPU_unaryTensorOps_FP32.TestTensorSet/0
+[       OK ] Smoke/GPU_unaryTensorOps_FP32.TestTensorSet/0 (394 ms)
+[----------] 2 tests from Smoke/GPU_unaryTensorOps_FP32 (1860 ms total)
+
+[----------] 108 tests from Full/GPU_unaryTensorOps_FP32
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/0
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/0 (285 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/1
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/1 (18 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/2
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/2 (16 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/3
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/3 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/4
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/4 (16 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/5
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/5 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/6
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/6 (256 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/7
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/8
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/9
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/10
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/11
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/12
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/13
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/14
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/15
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/16
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/17
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/18
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/18 (250 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/19
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/20
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/21
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/22
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/23
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/24
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/24 (266 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/25
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/26
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/27
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/28
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/29
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/30
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/30 (251 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/31
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/32
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/33
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/34
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/35
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/36
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/36 (314 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/37
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/38
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/39
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/40
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/41
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/42
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/42 (409 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/43
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/44
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/45
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/46
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/47
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/48
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/48 (440 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/49
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/50
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/51
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/52
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/53
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorScale/53 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/0
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/0 (491 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/1
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/1 (29 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/2
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/2 (25 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/3
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/3 (25 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/4
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/4 (25 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/5
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/5 (25 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/6
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/6 (371 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/7
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/8
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/9
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/10
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/11
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/12
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/13
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/14
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/15
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/16
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/17
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/18
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/18 (287 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/19
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/20
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/21
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/22
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/23
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/24
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/24 (257 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/25
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/26
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/27
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/28
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/29
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/30
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/30 (259 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/31
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/32
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/33
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/34
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/35
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/36
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/36 (253 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/37
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/38
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/39
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/40
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/41
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/42
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/42 (277 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/43
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/44
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/45
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/46
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/47
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/48
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/48 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/49
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/50
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/51
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/52
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/53
+[       OK ] Full/GPU_unaryTensorOps_FP32.TestTensorSet/53 (0 ms)
+[----------] 108 tests from Full/GPU_unaryTensorOps_FP32 (4921 ms total)
+
+[----------] 2 tests from Smoke/GPU_unaryTensorOps_FP16
+[ RUN      ] Smoke/GPU_unaryTensorOps_FP16.TestTensorScale/0
+[       OK ] Smoke/GPU_unaryTensorOps_FP16.TestTensorScale/0 (240 ms)
+[ RUN      ] Smoke/GPU_unaryTensorOps_FP16.TestTensorSet/0
+[       OK ] Smoke/GPU_unaryTensorOps_FP16.TestTensorSet/0 (265 ms)
+[----------] 2 tests from Smoke/GPU_unaryTensorOps_FP16 (506 ms total)
+
+[----------] 108 tests from Full/GPU_unaryTensorOps_FP16
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/0
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/0 (255 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/1
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/1 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/2
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/2 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/3
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/3 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/4
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/4 (16 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/5
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/5 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/6
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/6 (244 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/7
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/8
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/9
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/10
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/11
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/12
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/12 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/13
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/14
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/15
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/16
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/17
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/18
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/18 (422 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/19
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/20
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/21
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/22
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/23
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/24
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/24 (407 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/25
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/26
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/27
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/28
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/29
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/30
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/30 (331 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/31
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/32
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/33
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/34
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/35
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/36
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/36 (244 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/37
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/38
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/39
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/40
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/41
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/42
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/42 (272 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/43
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/44
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/45
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/46
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/47
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/48
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/48 (256 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/49
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/50
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/51
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/52
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/53
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorScale/53 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/0
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/0 (292 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/1
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/1 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/2
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/2 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/3
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/3 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/4
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/4 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/5
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/5 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/6
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/6 (277 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/7
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/8
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/9
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/10
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/11
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/12
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/13
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/14
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/15
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/16
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/17
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/18
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/18 (277 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/19
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/20
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/21
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/22
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/23
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/24
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/24 (267 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/25
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/26
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/27
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/28
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/29
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/30
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/30 (262 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/31
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/32
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/33
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/34
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/35
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/36
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/36 (404 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/37
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/38
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/39
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/40
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/41
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/42
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/42 (428 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/43
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/44
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/45
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/46
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/47
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/48
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/48 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/49
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/50
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/51
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/52
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/53
+[       OK ] Full/GPU_unaryTensorOps_FP16.TestTensorSet/53 (0 ms)
+[----------] 108 tests from Full/GPU_unaryTensorOps_FP16 (4826 ms total)
+
+[----------] 2 tests from Smoke/GPU_unaryTensorOps_I32
+[ RUN      ] Smoke/GPU_unaryTensorOps_I32.TestTensorScale/0
+[       OK ] Smoke/GPU_unaryTensorOps_I32.TestTensorScale/0 (406 ms)
+[ RUN      ] Smoke/GPU_unaryTensorOps_I32.TestTensorSet/0
+[       OK ] Smoke/GPU_unaryTensorOps_I32.TestTensorSet/0 (429 ms)
+[----------] 2 tests from Smoke/GPU_unaryTensorOps_I32 (835 ms total)
+
+[----------] 108 tests from Full/GPU_unaryTensorOps_I32
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/0
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/0 (343 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/1
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/1 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/2
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/2 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/3
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/3 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/4
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/4 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/5
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/5 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/6
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/6 (241 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/7
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/8
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/9
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/10
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/11
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/12
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/13
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/14
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/15
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/16
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/17
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/18
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/18 (334 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/19
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/20
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/21
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/22
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/23
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/24
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/24 (366 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/25
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/26
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/27
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/28
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/29
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/30
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/30 (252 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/31
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/32
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/33
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/34
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/35
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/36
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/36 (257 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/37
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/38
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/39
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/40
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/41
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/42
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/42 (256 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/43
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/44
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/45
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/46
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/47
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/48
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/48 (248 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/49
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/50
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/51
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/52
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorScale/53
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorScale/53 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/0
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/0 (289 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/1
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/1 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/2
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/2 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/3
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/3 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/4
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/4 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/5
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/5 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/6
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/6 (265 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/7
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/7 (2 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/8
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/9
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/10
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/11
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/12
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/13
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/14
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/15
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/16
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/17
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/18
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/18 (271 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/19
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/20
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/21
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/22
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/23
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/24
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/24 (294 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/25
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/26
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/27
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/28
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/29
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/30
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/30 (263 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/31
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/32
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/33
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/34
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/35
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/36
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/36 (446 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/37
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/38
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/39
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/40
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/41
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/42
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/42 (258 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/43
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/44
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/45
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/46
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/47
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/48
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/48 (255 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/49
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/50
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/51
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/52
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I32.TestTensorSet/53
+[       OK ] Full/GPU_unaryTensorOps_I32.TestTensorSet/53 (0 ms)
+[----------] 108 tests from Full/GPU_unaryTensorOps_I32 (4906 ms total)
+
+[----------] 1 test from Smoke/GPU_unaryTensorOps_I8
+[ DISABLED ] Smoke/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/0
+[ RUN      ] Smoke/GPU_unaryTensorOps_I8.TestTensorSet/0
+[       OK ] Smoke/GPU_unaryTensorOps_I8.TestTensorSet/0 (272 ms)
+[----------] 1 test from Smoke/GPU_unaryTensorOps_I8 (272 ms total)
+
+[----------] 54 tests from Full/GPU_unaryTensorOps_I8
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/0
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/1
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/2
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/3
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/4
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/5
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/6
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/7
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/8
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/9
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/10
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/11
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/12
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/13
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/14
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/15
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/16
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/17
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/18
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/19
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/20
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/21
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/22
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/23
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/24
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/25
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/26
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/27
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/28
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/29
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/30
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/31
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/32
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/33
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/34
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/35
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/36
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/37
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/38
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/39
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/40
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/41
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/42
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/43
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/44
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/45
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/46
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/47
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/48
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/49
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/50
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/51
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/52
+[ DISABLED ] Full/GPU_unaryTensorOps_I8.DISABLED_TestTensorScale/53
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/0
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/0 (297 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/1
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/1 (20 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/2
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/2 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/3
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/3 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/4
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/4 (22 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/5
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/5 (21 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/6
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/6 (291 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/7
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/8
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/9
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/10
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/11
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/12
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/13
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/14
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/15
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/16
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/17
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/18
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/18 (277 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/19
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/20
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/21
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/22
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/23
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/24
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/24 (269 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/25
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/26
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/27
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/28
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/29
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/30
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/30 (274 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/31
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/32
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/33
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/34
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/35
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/36
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/36 (268 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/37
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/38
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/39
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/40
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/41
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/42
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/42 (265 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/43
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/44
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/45
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/46
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/47
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/48
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/48 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/49
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/50
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/51
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/52
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_I8.TestTensorSet/53
+[       OK ] Full/GPU_unaryTensorOps_I8.TestTensorSet/53 (0 ms)
+[----------] 54 tests from Full/GPU_unaryTensorOps_I8 (2072 ms total)
+
+[----------] 1 test from Smoke/GPU_unaryTensorOps_BFP16
+[ DISABLED ] Smoke/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/0
+[ RUN      ] Smoke/GPU_unaryTensorOps_BFP16.TestTensorSet/0
+[       OK ] Smoke/GPU_unaryTensorOps_BFP16.TestTensorSet/0 (289 ms)
+[----------] 1 test from Smoke/GPU_unaryTensorOps_BFP16 (289 ms total)
+
+[----------] 54 tests from Full/GPU_unaryTensorOps_BFP16
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/0
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/1
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/2
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/3
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/4
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/5
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/6
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/7
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/8
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/9
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/10
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/11
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/12
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/13
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/14
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/15
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/16
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/17
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/18
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/19
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/20
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/21
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/22
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/23
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/24
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/25
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/26
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/27
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/28
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/29
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/30
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/31
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/32
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/33
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/34
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/35
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/36
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/37
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/38
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/39
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/40
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/41
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/42
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/43
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/44
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/45
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/46
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/47
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/48
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/49
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/50
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/51
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/52
+[ DISABLED ] Full/GPU_unaryTensorOps_BFP16.DISABLED_TestTensorScale/53
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/0
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/0 (295 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/1
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/1 (15 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/2
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/2 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/3
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/3 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/4
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/4 (16 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/5
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/5 (14 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/6
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/6 (274 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/7
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/7 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/8
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/8 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/9
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/9 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/10
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/10 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/11
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/11 (1 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/12
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/12 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/13
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/13 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/14
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/14 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/15
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/15 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/16
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/16 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/17
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/17 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/18
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/18 (271 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/19
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/19 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/20
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/20 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/21
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/21 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/22
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/22 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/23
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/23 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/24
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/24 (272 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/25
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/25 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/26
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/26 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/27
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/27 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/28
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/28 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/29
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/29 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/30
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/30 (263 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/31
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/31 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/32
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/32 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/33
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/33 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/34
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/34 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/35
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/35 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/36
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/36 (261 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/37
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/37 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/38
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/38 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/39
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/39 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/40
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/40 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/41
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/41 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/42
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/42 (257 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/43
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/43 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/44
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/44 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/45
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/45 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/46
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/46 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/47
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/47 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/48
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/48 (264 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/49
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/49 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/50
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/50 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/51
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/51 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/52
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/52 (0 ms)
+[ RUN      ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/53
+[       OK ] Full/GPU_unaryTensorOps_BFP16.TestTensorSet/53 (0 ms)
+[----------] 54 tests from Full/GPU_unaryTensorOps_BFP16 (2253 ms total)
+
+[----------] Global test environment tear-down
+[==========] 440 tests from 10 test suites ran. (22879 ms total)
+[  PASSED  ] 440 tests.
+
+  YOU HAVE 110 DISABLED TESTS
+

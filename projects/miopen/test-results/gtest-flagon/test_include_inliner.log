@@ -1,0 +1,15 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_kernel_inliner_NONE
+[ RUN      ] CPU_kernel_inliner_NONE.InlinerTest
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/include_inliner.cpp:45: Skipped
+Depends on addkernels and should be invoked by make
+
+[  SKIPPED ] CPU_kernel_inliner_NONE.InlinerTest (0 ms)
+[----------] 1 test from CPU_kernel_inliner_NONE (1961 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1962 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] CPU_kernel_inliner_NONE.InlinerTest

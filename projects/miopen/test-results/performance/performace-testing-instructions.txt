@@ -1,0 +1,28 @@
+Performance Testing Instructions
+
+Before the OOTB test, delete the `~/.cache/miopen` and `~/.config/miopen` folders to simulate a completely fresh run.
+
+Then follow the steps using the script located at `~/test-data/model_f_short.sh` with the CMD var set to the build-flagoff MIOpenDriver.  Once the data has been collected for this, clear the cache and config folders once again and then repeat the performance test with the build-flagon MIOpenDriver.
+
+Do not try to run the first OOTB test followed by the second one for the other build.  You must run through each step for a single build, then clean the cache/config again, then run through the steps again for the other build.
+
+1. Run the script once and capture the output and this is the out of the box (OOTB) results:
+
+    ```
+    ./model_f_full.sh 2>&1 | tee model_f_ootb.log
+    ```
+
+2. Edit the script and change the iteration count to 1 and run again with env var set to force full tuning:
+
+    ```
+    MIOPEN_FIND_ENFORCE=4 ./model_f_full.sh 2>&1 | tee model_f_tuning.log
+    ```
+
+3. Edit it again and reset the iteration count to at least 10 and add -S 0 to the args and run without setting env:
+
+    ```
+    ./model_f_full.sh 2>&1 | tee model_f_tuned.log
+    ```
+
+After completion, return the script to it's initial state for the CMD and ARGS vars.
+Then conduct a comparison of the outputs from each build and create a summary called `PerformanceComparison.md`

@@ -1,0 +1,24 @@
+[==========] Running 8 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 8 tests from Full/CPU_TestTensorSequence_FP16
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/0
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/0 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/1
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/1 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/2
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/2 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/3
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/3 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/4
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/4 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/5
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/5 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/6
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/6 (0 ms)
+[ RUN      ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/7
+[       OK ] Full/CPU_TestTensorSequence_FP16.SeqTensorDescriptor/7 (0 ms)
+[----------] 8 tests from Full/CPU_TestTensorSequence_FP16 (647 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (648 ms total)
+[  PASSED  ] 8 tests.

@@ -1,0 +1,9 @@
+===== flagoff =====
+MIOpenDriver convfp16 -n 1 -c 1 -H 8 -W 8 -k 1 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 -i 1 -V 0
+PRNG seed: 12345678
+Timestamp: 2026-05-27 14:44:05 UTC; Host Name: 684148a436c9; Operating System: Linux 5.15.0-173-generic; ROCm: 7.13.61040; MIOpen Driver: 3.5.2; CPU Vendor: Intel; CPU Model: 2 x Intel(R) Xeon(R) Platinum 8480C; RAM Size: 2015 GB; GPU Model: 8 x AMD Instinct MI300X; AMDGPU Driver: 6.16.13
+MIOpen Forward Conv. Algorithm: 1, Solution: 85/ConvDirectNaiveConvFwd
+GPU Kernel Time Forward Conv. Elapsed: 0.007137 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 1, 1, 8, 8, 3, 3, 1, 1152, 146, 128, 0, 0, 0.007137
+exit=0

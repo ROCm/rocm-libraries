@@ -1,0 +1,177 @@
+[==========] Running 81 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 27 tests from Full/GPU_Cat_FP32
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_2x32x128x128x128_2x32x128x128x128_dim_1_test_id_0
+PRNG seed: 12345678
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_2x32x128x128x128_2x32x128x128x128_dim_1_test_id_0 (6179 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_32x16x31x64_32x16x1x64_dim_2_test_id_1
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_32x16x31x64_32x16x1x64_dim_2_test_id_1 (38 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_32x16x114x64_32x16x1x64_dim_2_test_id_2
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_32x16x114x64_32x16x1x64_dim_2_test_id_2 (74 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x256x32x32_16x256x32x32_16x256x32x32_16x256x32x32_dim_1_test_id_3
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x256x32x32_16x256x32x32_16x256x32x32_16x256x32x32_dim_1_test_id_3 (320 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_64x1056x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_dim_1_test_id_4
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_64x1056x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_dim_1_test_id_4 (91 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_65536x16_65536x351_dim_1_test_id_5
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_65536x16_65536x351_dim_1_test_id_5 (555 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_512x49x1024_512x49x1024_dim_2_test_id_6
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_512x49x1024_512x49x1024_dim_2_test_id_6 (1478 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x112x14x14_256x288x14x14_256x64x14x14_256x64x14x14_dim_1_test_id_7
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x112x14x14_256x288x14x14_256x64x14x14_256x64x14x14_dim_1_test_id_7 (675 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x256x7x7_256x320x7x7_256x128x7x7_256x128x7x7_dim_1_test_id_8
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x256x7x7_256x320x7x7_256x128x7x7_256x128x7x7_dim_1_test_id_8 (273 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_2x1024x768_2x1024x768_2x1024x768_dim_0_test_id_9
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_2x1024x768_2x1024x768_2x1024x768_dim_0_test_id_9 (78 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x192000x1_16x48000x1_16x12000x1_16x3000x1_16x780x1_dim_1_test_id_10
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x192000x1_16x48000x1_16x12000x1_16x3000x1_16x780x1_dim_1_test_id_10 (78 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_3990480x1x1_3990480x1x1_3990480x1x1_3990480x1x1_dim_2_test_id_11
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_3990480x1x1_3990480x1x1_3990480x1x1_3990480x1x1_dim_2_test_id_11 (521 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_64x320x8x8_64x192x8x8_64x768x8x8_dim_1_test_id_12
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_64x320x8x8_64x192x8x8_64x768x8x8_dim_1_test_id_12 (116 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_12277440x1_12277440x1_12277440x1_12277440x1_dim_1_test_id_13
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_12277440x1_12277440x1_12277440x1_12277440x1_dim_1_test_id_13 (1035 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_6x182400x4_6x45600x4_6x11400x4_6x2850x4_6x741x4_dim_1_test_id_14
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_6x182400x4_6x45600x4_6x11400x4_6x2850x4_6x741x4_dim_1_test_id_14 (129 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_255780_255780_255780_255780_255780_255780_dim_0_test_id_15
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_255780_255780_255780_255780_255780_255780_dim_0_test_id_15 (32 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_4x136800x91_4x34200x91_4x8550x91_4x2223x91_4x630x91_dim_1_test_id_16
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_4x136800x91_4x34200x91_4x8550x91_4x2223x91_4x630x91_dim_1_test_id_16 (1379 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x232x7x7_256x232x7x7_dim_1_test_id_17
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x232x7x7_256x232x7x7_dim_1_test_id_17 (103 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x116x14x14_256x116x14x14_dim_1_test_id_18
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x116x14x14_256x116x14x14_dim_1_test_id_18 (214 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_2x192x80x80_2x192x80x80_dim_1_test_id_19
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_2x192x80x80_2x192x80x80_dim_1_test_id_19 (98 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x320x20x20_16x320x20x20_dim_1_test_id_20
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x320x20x20_16x320x20x20_dim_1_test_id_20 (74 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_4096x1312_4096x1312_dim_0_test_id_21
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_4096x1312_4096x1312_dim_0_test_id_21 (324 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_9600x384_128x384_dim_0_test_id_22
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_9600x384_128x384_dim_0_test_id_22 (94 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x81x5776_256x81x2166_256x81x600_256x81x150_256x81x36_256x81x4_dim_2_test_id_23
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_256x81x5776_256x81x2166_256x81x600_256x81x150_256x81x36_256x81x4_dim_2_test_id_23 (3675 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x256x32x32_16x128x32x32_16x64x32x32_16x64x32x32_dim_1_test_id_24
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_16x256x32x32_16x128x32x32_16x64x32x32_16x64x32x32_dim_1_test_id_24 (238 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_1536x256x13x13_1536x256x13x13_dim_1_test_id_25
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_1536x256x13x13_1536x256x13x13_dim_1_test_id_25 (2530 ms)
+[ RUN      ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_724x64x55x55_724x64x55x55_dim_1_test_id_26
+[       OK ] Full/GPU_Cat_FP32.CatTestFP32Fw/inputs_724x64x55x55_724x64x55x55_dim_1_test_id_26 (5798 ms)
+[----------] 27 tests from Full/GPU_Cat_FP32 (26221 ms total)
+
+[----------] 27 tests from Full/GPU_Cat_FP16
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_2x32x128x128x128_2x32x128x128x128_dim_1_test_id_0
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_2x32x128x128x128_2x32x128x128x128_dim_1_test_id_0 (5801 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_32x16x31x64_32x16x1x64_dim_2_test_id_1
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_32x16x31x64_32x16x1x64_dim_2_test_id_1 (12 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_32x16x114x64_32x16x1x64_dim_2_test_id_2
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_32x16x114x64_32x16x1x64_dim_2_test_id_2 (41 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x256x32x32_16x256x32x32_16x256x32x32_16x256x32x32_dim_1_test_id_3
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x256x32x32_16x256x32x32_16x256x32x32_16x256x32x32_dim_1_test_id_3 (232 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_64x1056x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_dim_1_test_id_4
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_64x1056x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_dim_1_test_id_4 (64 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_65536x16_65536x351_dim_1_test_id_5
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_65536x16_65536x351_dim_1_test_id_5 (550 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_512x49x1024_512x49x1024_dim_2_test_id_6
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_512x49x1024_512x49x1024_dim_2_test_id_6 (1045 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x112x14x14_256x288x14x14_256x64x14x14_256x64x14x14_dim_1_test_id_7
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x112x14x14_256x288x14x14_256x64x14x14_256x64x14x14_dim_1_test_id_7 (372 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x256x7x7_256x320x7x7_256x128x7x7_256x128x7x7_dim_1_test_id_8
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x256x7x7_256x320x7x7_256x128x7x7_256x128x7x7_dim_1_test_id_8 (139 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_2x1024x768_2x1024x768_2x1024x768_dim_0_test_id_9
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_2x1024x768_2x1024x768_2x1024x768_dim_0_test_id_9 (56 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x192000x1_16x48000x1_16x12000x1_16x3000x1_16x780x1_dim_1_test_id_10
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x192000x1_16x48000x1_16x12000x1_16x3000x1_16x780x1_dim_1_test_id_10 (44 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_3990480x1x1_3990480x1x1_3990480x1x1_3990480x1x1_dim_2_test_id_11
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_3990480x1x1_3990480x1x1_3990480x1x1_3990480x1x1_dim_2_test_id_11 (218 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_64x320x8x8_64x192x8x8_64x768x8x8_dim_1_test_id_12
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_64x320x8x8_64x192x8x8_64x768x8x8_dim_1_test_id_12 (58 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_12277440x1_12277440x1_12277440x1_12277440x1_dim_1_test_id_13
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_12277440x1_12277440x1_12277440x1_12277440x1_dim_1_test_id_13 (934 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_6x182400x4_6x45600x4_6x11400x4_6x2850x4_6x741x4_dim_1_test_id_14
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_6x182400x4_6x45600x4_6x11400x4_6x2850x4_6x741x4_dim_1_test_id_14 (135 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_255780_255780_255780_255780_255780_255780_dim_0_test_id_15
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_255780_255780_255780_255780_255780_255780_dim_0_test_id_15 (29 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_4x136800x91_4x34200x91_4x8550x91_4x2223x91_4x630x91_dim_1_test_id_16
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_4x136800x91_4x34200x91_4x8550x91_4x2223x91_4x630x91_dim_1_test_id_16 (1072 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x232x7x7_256x232x7x7_dim_1_test_id_17
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x232x7x7_256x232x7x7_dim_1_test_id_17 (72 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x116x14x14_256x116x14x14_dim_1_test_id_18
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x116x14x14_256x116x14x14_dim_1_test_id_18 (161 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_2x192x80x80_2x192x80x80_dim_1_test_id_19
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_2x192x80x80_2x192x80x80_dim_1_test_id_19 (61 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x320x20x20_16x320x20x20_dim_1_test_id_20
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x320x20x20_16x320x20x20_dim_1_test_id_20 (43 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_4096x1312_4096x1312_dim_0_test_id_21
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_4096x1312_4096x1312_dim_0_test_id_21 (138 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_9600x384_128x384_dim_0_test_id_22
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_9600x384_128x384_dim_0_test_id_22 (47 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x81x5776_256x81x2166_256x81x600_256x81x150_256x81x36_256x81x4_dim_2_test_id_23
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_256x81x5776_256x81x2166_256x81x600_256x81x150_256x81x36_256x81x4_dim_2_test_id_23 (2571 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x256x32x32_16x128x32x32_16x64x32x32_16x64x32x32_dim_1_test_id_24
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_16x256x32x32_16x128x32x32_16x64x32x32_16x64x32x32_dim_1_test_id_24 (114 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_1536x256x13x13_1536x256x13x13_dim_1_test_id_25
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_1536x256x13x13_1536x256x13x13_dim_1_test_id_25 (2406 ms)
+[ RUN      ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_724x64x55x55_724x64x55x55_dim_1_test_id_26
+[       OK ] Full/GPU_Cat_FP16.CatTestFP16Fw/inputs_724x64x55x55_724x64x55x55_dim_1_test_id_26 (4465 ms)
+[----------] 27 tests from Full/GPU_Cat_FP16 (20895 ms total)
+
+[----------] 27 tests from Full/GPU_Cat_BFP16
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_2x32x128x128x128_2x32x128x128x128_dim_1_test_id_0
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_2x32x128x128x128_2x32x128x128x128_dim_1_test_id_0 (4727 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_32x16x31x64_32x16x1x64_dim_2_test_id_1
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_32x16x31x64_32x16x1x64_dim_2_test_id_1 (28 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_32x16x114x64_32x16x1x64_dim_2_test_id_2
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_32x16x114x64_32x16x1x64_dim_2_test_id_2 (100 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x256x32x32_16x256x32x32_16x256x32x32_16x256x32x32_dim_1_test_id_3
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x256x32x32_16x256x32x32_16x256x32x32_16x256x32x32_dim_1_test_id_3 (360 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_64x1056x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_dim_1_test_id_4
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_64x1056x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_64x48x7x7_dim_1_test_id_4 (61 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_65536x16_65536x351_dim_1_test_id_5
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_65536x16_65536x351_dim_1_test_id_5 (414 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_512x49x1024_512x49x1024_dim_2_test_id_6
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_512x49x1024_512x49x1024_dim_2_test_id_6 (884 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x112x14x14_256x288x14x14_256x64x14x14_256x64x14x14_dim_1_test_id_7
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x112x14x14_256x288x14x14_256x64x14x14_256x64x14x14_dim_1_test_id_7 (587 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x256x7x7_256x320x7x7_256x128x7x7_256x128x7x7_dim_1_test_id_8
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x256x7x7_256x320x7x7_256x128x7x7_256x128x7x7_dim_1_test_id_8 (176 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_2x1024x768_2x1024x768_2x1024x768_dim_0_test_id_9
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_2x1024x768_2x1024x768_2x1024x768_dim_0_test_id_9 (80 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x192000x1_16x48000x1_16x12000x1_16x3000x1_16x780x1_dim_1_test_id_10
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x192000x1_16x48000x1_16x12000x1_16x3000x1_16x780x1_dim_1_test_id_10 (55 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_3990480x1x1_3990480x1x1_3990480x1x1_3990480x1x1_dim_2_test_id_11
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_3990480x1x1_3990480x1x1_3990480x1x1_3990480x1x1_dim_2_test_id_11 (264 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_64x320x8x8_64x192x8x8_64x768x8x8_dim_1_test_id_12
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_64x320x8x8_64x192x8x8_64x768x8x8_dim_1_test_id_12 (125 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_12277440x1_12277440x1_12277440x1_12277440x1_dim_1_test_id_13
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_12277440x1_12277440x1_12277440x1_12277440x1_dim_1_test_id_13 (988 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_6x182400x4_6x45600x4_6x11400x4_6x2850x4_6x741x4_dim_1_test_id_14
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_6x182400x4_6x45600x4_6x11400x4_6x2850x4_6x741x4_dim_1_test_id_14 (103 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_255780_255780_255780_255780_255780_255780_dim_0_test_id_15
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_255780_255780_255780_255780_255780_255780_dim_0_test_id_15 (22 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_4x136800x91_4x34200x91_4x8550x91_4x2223x91_4x630x91_dim_1_test_id_16
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_4x136800x91_4x34200x91_4x8550x91_4x2223x91_4x630x91_dim_1_test_id_16 (1141 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x232x7x7_256x232x7x7_dim_1_test_id_17
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x232x7x7_256x232x7x7_dim_1_test_id_17 (85 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x116x14x14_256x116x14x14_dim_1_test_id_18
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x116x14x14_256x116x14x14_dim_1_test_id_18 (189 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_2x192x80x80_2x192x80x80_dim_1_test_id_19
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_2x192x80x80_2x192x80x80_dim_1_test_id_19 (72 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x320x20x20_16x320x20x20_dim_1_test_id_20
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x320x20x20_16x320x20x20_dim_1_test_id_20 (57 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_4096x1312_4096x1312_dim_0_test_id_21
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_4096x1312_4096x1312_dim_0_test_id_21 (169 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_9600x384_128x384_dim_0_test_id_22
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_9600x384_128x384_dim_0_test_id_22 (57 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x81x5776_256x81x2166_256x81x600_256x81x150_256x81x36_256x81x4_dim_2_test_id_23
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_256x81x5776_256x81x2166_256x81x600_256x81x150_256x81x36_256x81x4_dim_2_test_id_23 (3263 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x256x32x32_16x128x32x32_16x64x32x32_16x64x32x32_dim_1_test_id_24
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_16x256x32x32_16x128x32x32_16x64x32x32_16x64x32x32_dim_1_test_id_24 (228 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_1536x256x13x13_1536x256x13x13_dim_1_test_id_25
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_1536x256x13x13_1536x256x13x13_dim_1_test_id_25 (3063 ms)
+[ RUN      ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_724x64x55x55_724x64x55x55_dim_1_test_id_26
+[       OK ] Full/GPU_Cat_BFP16.CatTestBFP16Fw/inputs_724x64x55x55_724x64x55x55_dim_1_test_id_26 (5281 ms)
+[----------] 27 tests from Full/GPU_Cat_BFP16 (22601 ms total)
+
+[----------] Global test environment tear-down
+[==========] 81 tests from 3 test suites ran. (69718 ms total)
+[  PASSED  ] 81 tests.

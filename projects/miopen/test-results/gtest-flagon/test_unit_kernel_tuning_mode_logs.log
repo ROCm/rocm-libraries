@@ -1,0 +1,42 @@
+[==========] Running 17 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 17 tests from CPU_KernelTuningModeLogs_NONE
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.PhaseToStringMapping
+[       OK ] CPU_KernelTuningModeLogs_NONE.PhaseToStringMapping (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.ScopedKernelPhaseRestoresPrevious
+[       OK ] CPU_KernelTuningModeLogs_NONE.ScopedKernelPhaseRestoresPrevious (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.IsTransposeOrTransformKernelDetectsPatterns
+[       OK ] CPU_KernelTuningModeLogs_NONE.IsTransposeOrTransformKernelDetectsPatterns (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.JsonEscapeHandlesSpecialChars
+[       OK ] CPU_KernelTuningModeLogs_NONE.JsonEscapeHandlesSpecialChars (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.LoggingDisabledWhenEnvUnset
+[       OK ] CPU_KernelTuningModeLogs_NONE.LoggingDisabledWhenEnvUnset (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.LoggingDisabledAtLevelZero
+[       OK ] CPU_KernelTuningModeLogs_NONE.LoggingDisabledAtLevelZero (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.LowLevelLogsOnlyExecutionPhase
+[       OK ] CPU_KernelTuningModeLogs_NONE.LowLevelLogsOnlyExecutionPhase (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.LevelTwoStillExecutionOnly
+[       OK ] CPU_KernelTuningModeLogs_NONE.LevelTwoStillExecutionOnly (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.HighLevelLogsAllPhases
+[       OK ] CPU_KernelTuningModeLogs_NONE.HighLevelLogsAllPhases (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.AccumulatorNoOpWhenLoggingDisabled
+[       OK ] CPU_KernelTuningModeLogs_NONE.AccumulatorNoOpWhenLoggingDisabled (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.AddInvokerTimesWarnsWithoutConfig
+[       OK ] CPU_KernelTuningModeLogs_NONE.AddInvokerTimesWarnsWithoutConfig (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.FlushEmitsJsonAtLevelOne
+[       OK ] CPU_KernelTuningModeLogs_NONE.FlushEmitsJsonAtLevelOne (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.FlushIncludesKernelsArrayAtLevelTwo
+[       OK ] CPU_KernelTuningModeLogs_NONE.FlushIncludesKernelsArrayAtLevelTwo (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.LogSolutionNameOnlyEmitsOnChange
+[       OK ] CPU_KernelTuningModeLogs_NONE.LogSolutionNameOnlyEmitsOnChange (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.FlushWithoutDataEmitsNothing
+[       OK ] CPU_KernelTuningModeLogs_NONE.FlushWithoutDataEmitsNothing (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.NonExecutionPhaseSuppressedAtLowLevel
+[       OK ] CPU_KernelTuningModeLogs_NONE.NonExecutionPhaseSuppressedAtLowLevel (0 ms)
+[ RUN      ] CPU_KernelTuningModeLogs_NONE.HighLevelEmitsTuningPhase
+[       OK ] CPU_KernelTuningModeLogs_NONE.HighLevelEmitsTuningPhase (0 ms)
+[----------] 17 tests from CPU_KernelTuningModeLogs_NONE (723 ms total)
+
+[----------] Global test environment tear-down
+[==========] 17 tests from 1 test suite ran. (723 ms total)
+[  PASSED  ] 17 tests.

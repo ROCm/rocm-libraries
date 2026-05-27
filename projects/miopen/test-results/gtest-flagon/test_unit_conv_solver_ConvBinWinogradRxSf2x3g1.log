@@ -1,0 +1,86 @@
+[==========] Running 16 tests from 16 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP16.ConvBinWinogradRxSf2x3g1/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP16.ConvBinWinogradRxSf2x3g1/0 (1149 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP16 (1150 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP16.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP16.ConvBinWinogradRxSf2x3g1/0 (1 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP16 (1 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP16.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP16.ConvBinWinogradRxSf2x3g1/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP32.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP32.ConvBinWinogradRxSf2x3g1/0 (41 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Fwd_FP32 (41 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP32.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP32.ConvBinWinogradRxSf2x3g1/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Bwd_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP32.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP32.ConvBinWinogradRxSf2x3g1/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverBinWinogradRxSf2x3g1Wrw_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16.ConvBinWinogradRxSf2x3g1/0 (65 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16 (65 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32
+[ RUN      ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32.ConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32.ConvBinWinogradRxSf2x3g1/0 (64 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32 (64 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP16.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP16.TransposedConvBinWinogradRxSf2x3g1/0 (7 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP16 (7 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP16.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP16.TransposedConvBinWinogradRxSf2x3g1/0 (1 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP16 (1 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP16.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP16.TransposedConvBinWinogradRxSf2x3g1/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP32.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP32.TransposedConvBinWinogradRxSf2x3g1/0 (1 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Fwd_FP32 (1 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP32.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP32.TransposedConvBinWinogradRxSf2x3g1/0 (1 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Bwd_FP32 (1 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP32.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP32.TransposedConvBinWinogradRxSf2x3g1/0 (1 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1Wrw_FP32 (1 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16.TransposedConvBinWinogradRxSf2x3g1/0 (65 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP16 (65 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32
+[ RUN      ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32.TransposedConvBinWinogradRxSf2x3g1/0
+[       OK ] Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32.TransposedConvBinWinogradRxSf2x3g1/0 (66 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverTransposedBinWinogradRxSf2x3g1DevApplicabilityFwd_FP32 (66 ms total)
+
+[----------] Global test environment tear-down
+[==========] 16 tests from 16 test suites ran. (1470 ms total)
+[  PASSED  ] 16 tests.

@@ -1,0 +1,38 @@
+[==========] Running 4 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP16.ConvOclBwdWrW53/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP16.ConvOclBwdWrW53/0 (1038 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP16 (1038 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclBwdWrW53_BFP16
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_BFP16.ConvOclBwdWrW53/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_BFP16.ConvOclBwdWrW53/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclBwdWrW53_BFP16 (0 ms total)
+
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP32.ConvOclBwdWrW53/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP32.ConvOclBwdWrW53/0 (0 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP32 (0 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE.ConvOclBwdWrW53/0
+[       OK ] Smoke/CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE.ConvOclBwdWrW53/0 (64 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE (64 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 4 test suites ran. (1104 ms total)
+[  PASSED  ] 1 test.
+[  SKIPPED ] 3 tests, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP16.ConvOclBwdWrW53/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_BFP16.ConvOclBwdWrW53/0
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverOclBwdWrW53_FP32.ConvOclBwdWrW53/0

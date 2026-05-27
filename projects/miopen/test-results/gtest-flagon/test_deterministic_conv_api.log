@@ -1,0 +1,11 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/CPU_DeterministicConvApi_NONE
+[ RUN      ] Smoke/CPU_DeterministicConvApi_NONE.Test/conv_params_0_0_1_1_1_1_conv_attr_1_test_id_0
+PRNG seed: 12345678
+[       OK ] Smoke/CPU_DeterministicConvApi_NONE.Test/conv_params_0_0_1_1_1_1_conv_attr_1_test_id_0 (0 ms)
+[----------] 1 test from Smoke/CPU_DeterministicConvApi_NONE (814 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (814 ms total)
+[  PASSED  ] 1 test.

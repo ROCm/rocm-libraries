@@ -1,0 +1,546 @@
+PRNG seed: 12345678
+[==========] Running 240 tests from 20 test suites.
+[----------] Global test environment set-up.
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/0 (1264 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/1 (22 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/2 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/4 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/5 (5 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/6 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/7 (5 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/8 (10 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/9 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/10 (6 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float_P/11 (12 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP32 (1340 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/10 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_float16_P/11 (2 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_FP16 (23 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/10 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_bfloat16_P/11 (2 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_BFP16 (24 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/5 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/10 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint16_t_P/11 (2 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I16 (23 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/8 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/10 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8.LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_uint8_t_P/11 (3 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionDefault2Nhwc_I8 (24 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/1 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/2 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/4 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/5 (4 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/6 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/7 (5 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/8 (8 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/9 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/10 (7 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float_P/11 (11 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP32 (54 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/10 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_float16_P/11 (2 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_FP16 (23 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/10 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_bfloat16_P/11 (4 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_BFP16 (27 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/10 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint16_t_P/11 (3 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I16 (24 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/0 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/1 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/2 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/3 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/4 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/5 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/6 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/7 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/8 (3 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/9 (1 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/10 (2 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8.LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_uint8_t_P/11 (3 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_2D_TransposeSolutionNhwc2Default_I8 (24 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/0 (36 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/1 (121 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/2 (219 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/3 (85 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/4 (329 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/5 (604 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/6 (107 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/7 (239 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/8 (491 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/9 (229 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/10 (898 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float_P/11 (1066 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP32 (4431 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/0 (11 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/1 (19 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/2 (31 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/3 (14 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/4 (30 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/5 (44 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/6 (20 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/7 (50 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/8 (101 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/9 (29 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/10 (68 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_float16_P/11 (205 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_FP16 (628 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/0 (13 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/1 (31 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/2 (58 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/3 (21 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/4 (53 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/5 (105 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/6 (41 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/7 (93 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/8 (177 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/9 (36 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/10 (86 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_bfloat16_P/11 (181 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_BFP16 (900 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/0 (13 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/1 (25 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/2 (37 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/3 (19 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/4 (42 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/5 (58 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/6 (32 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/7 (71 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/8 (151 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/9 (33 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/10 (92 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint16_t_P/11 (147 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I16 (726 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/0 (13 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/1 (21 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/2 (36 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/3 (15 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/4 (35 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/5 (62 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/6 (25 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/7 (66 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/8 (127 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/9 (20 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/10 (53 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8.LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_uint8_t_P/11 (111 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionDefault2Ndhwc_I8 (589 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/0 (25 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/1 (71 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/2 (149 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/3 (43 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/4 (135 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/5 (260 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/6 (69 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/7 (257 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/8 (488 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/9 (126 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/10 (359 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float_P/11 (1240 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP32 (3227 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/0 (24 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/1 (26 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/2 (41 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/3 (17 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/4 (37 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/5 (71 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/6 (27 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/7 (60 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/8 (105 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/9 (15 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/10 (39 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_float16_P/11 (59 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_FP16 (529 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/0 (10 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/1 (20 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/2 (32 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/3 (14 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/4 (30 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/5 (55 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/6 (22 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/7 (60 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/8 (118 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/9 (23 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/10 (78 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_bfloat16_P/11 (122 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_BFP16 (590 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/0 (10 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/1 (17 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/2 (27 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/3 (13 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/4 (32 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/5 (40 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/6 (17 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/7 (47 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/8 (103 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/9 (20 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/10 (56 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint16_t_P/11 (93 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I16 (479 ms total)
+
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/0
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/0 (10 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/1
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/1 (15 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/2
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/2 (25 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/3
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/3 (11 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/4
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/4 (25 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/5
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/5 (38 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/6
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/6 (17 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/7
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/7 (42 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/8
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/8 (79 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/9
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/9 (19 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/10
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/10 (55 ms)
+[ RUN      ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/11
+[       OK ] Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8.LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_uint8_t_P/11 (102 ms)
+[----------] 12 tests from Full/GPU_LayoutTransposeTest_3D_TransposeSolutionNdhwc2Default_I8 (445 ms total)
+
+[----------] Global test environment tear-down
+[==========] 240 tests from 20 test suites ran. (14139 ms total)
+[  PASSED  ] 240 tests.

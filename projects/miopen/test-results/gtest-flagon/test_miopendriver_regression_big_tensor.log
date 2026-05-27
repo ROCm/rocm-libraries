@@ -1,0 +1,10 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32
+[ RUN      ] Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32.MIOpenDriverRegressionBigTensor/0
+[       OK ] Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32.MIOpenDriverRegressionBigTensor/0 (95234 ms)
+[----------] 1 test from Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32 (95234 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (95234 ms total)
+[  PASSED  ] 1 test.

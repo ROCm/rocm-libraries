@@ -1,0 +1,20 @@
+[==========] Running 2 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1Bwd_FP32
+[ RUN      ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1Bwd_FP32.ConvHipImplicitGemmBwdDataV4R1/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_conv_solver.cpp:885: Skipped
+
+
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1Bwd_FP32.ConvHipImplicitGemmBwdDataV4R1/0 (1044 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1Bwd_FP32 (1044 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1DevApplicabilityBwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1DevApplicabilityBwd_NONE.ConvHipImplicitGemmBwdDataV4R1/0
+[       OK ] Smoke/CPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1DevApplicabilityBwd_NONE.ConvHipImplicitGemmBwdDataV4R1/0 (65 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1DevApplicabilityBwd_NONE (65 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (1110 ms total)
+[  PASSED  ] 1 test.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] Smoke/GPU_UnitTestConvSolverHipImplicitGemmBwdDataV4R1Bwd_FP32.ConvHipImplicitGemmBwdDataV4R1/0

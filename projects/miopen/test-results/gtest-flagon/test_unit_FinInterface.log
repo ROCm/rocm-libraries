@@ -1,0 +1,618 @@
+[==========] Running 99 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/CPU_FinInterfaceTestGetAllConvSolvers_NONE
+[ RUN      ] Full/CPU_FinInterfaceTestGetAllConvSolvers_NONE.FinInterface/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:517: Skipped
+
+
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetAllConvSolvers_NONE.FinInterface/0 (0 ms)
+[----------] 1 test from Full/CPU_FinInterfaceTestGetAllConvSolvers_NONE (974 ms total)
+
+[----------] 1 test from Full/CPU_FinInterfaceTestGetConvSolvers_NONE
+[ RUN      ] Full/CPU_FinInterfaceTestGetConvSolvers_NONE.FinInterface/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:552: Skipped
+
+
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetConvSolvers_NONE.FinInterface/0 (0 ms)
+[----------] 1 test from Full/CPU_FinInterfaceTestGetConvSolvers_NONE (0 ms total)
+
+[----------] 90 tests from Full/GPU_FinInterfaceTestGetConvSolver_FP32
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/0 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/1 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/2 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/3 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/4 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/5
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/5 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/6 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/7
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/7 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/8
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/8 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/9
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/9 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/10
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/10 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/11
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/11 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/12 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/13
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/13 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/14
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/14 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/15
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/15 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/16
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/16 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/17
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/17 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/18
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/18 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/19
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/19 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/20
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/20 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/21
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/21 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/22
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/22 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/23
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/23 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/24
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/24 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/25
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/25 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/26
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/26 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/27
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/27 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/28
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/28 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/29
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/29 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/30
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/30 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/31
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/31 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/32
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/32 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/33
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/33 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/34
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/34 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/35
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/35 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/36
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/36 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/37
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/37 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/38
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/38 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/39
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/39 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/40
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/40 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/41
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/41 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/42
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/42 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/43
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/43 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/44
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/44 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/45
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/45 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/46
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/46 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/47
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/47 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/48
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/48 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/49
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/49 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/50
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/50 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/51
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/51 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/52
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/52 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/53
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/53 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/54
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/54 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/55
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/55 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/56
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/56 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/57
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/57 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/58
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/58 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/59
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/59 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/60
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/60 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/61
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/61 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/62
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/62 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/63
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/63 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/64
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/64 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/65
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/65 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/66
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/66 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/67
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/67 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/68
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/68 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/69
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/69 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/70
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/70 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/71
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/71 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/72
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/72 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/73
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/73 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/74
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/74 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/75
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/75 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/76
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/76 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/77
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/77 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/78
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/78 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/79
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/79 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/80
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/80 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/81
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/81 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/82
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/82 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/83
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/83 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/84
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/84 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/85
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/85 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/86
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/86 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/87
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/87 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/88
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/88 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/89
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/89 (0 ms)
+[----------] 90 tests from Full/GPU_FinInterfaceTestGetConvSolver_FP32 (0 ms total)
+
+[----------] 1 test from Full/CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE
+[ RUN      ] Full/CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE.FinInterface/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:517: Skipped
+
+
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE.FinInterface/0 (0 ms)
+[----------] 1 test from Full/CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_FinInterfaceTestGetBatchNormSolvers_NONE
+[ RUN      ] Full/CPU_FinInterfaceTestGetBatchNormSolvers_NONE.FinInterface/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:552: Skipped
+
+
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetBatchNormSolvers_NONE.FinInterface/0 (0 ms)
+[----------] 1 test from Full/CPU_FinInterfaceTestGetBatchNormSolvers_NONE (0 ms total)
+
+[----------] 5 tests from Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32
+[ RUN      ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/0 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/1
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/1 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/2
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/2 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/3
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/3 (0 ms)
+[ RUN      ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/4
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/unit_FinInterface.cpp:575: Skipped
+
+
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/4 (0 ms)
+[----------] 5 tests from Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 99 tests from 6 test suites ran. (974 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 99 tests, listed below:
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetAllConvSolvers_NONE.FinInterface/0
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetConvSolvers_NONE.FinInterface/0
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/0
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/1
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/2
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/3
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/4
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/5
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/6
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/7
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/8
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/9
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/10
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/11
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/12
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/13
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/14
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/15
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/16
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/17
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/18
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/19
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/20
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/21
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/22
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/23
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/24
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/25
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/26
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/27
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/28
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/29
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/30
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/31
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/32
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/33
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/34
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/35
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/36
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/37
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/38
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/39
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/40
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/41
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/42
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/43
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/44
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/45
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/46
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/47
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/48
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/49
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/50
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/51
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/52
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/53
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/54
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/55
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/56
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/57
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/58
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/59
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/60
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/61
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/62
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/63
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/64
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/65
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/66
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/67
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/68
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/69
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/70
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/71
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/72
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/73
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/74
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/75
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/76
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/77
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/78
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/79
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/80
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/81
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/82
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/83
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/84
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/85
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/86
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/87
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/88
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetConvSolver_FP32.FinInterface/89
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE.FinInterface/0
+[  SKIPPED ] Full/CPU_FinInterfaceTestGetBatchNormSolvers_NONE.FinInterface/0
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/0
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/1
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/2
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/3
+[  SKIPPED ] Full/GPU_FinInterfaceTestGetBatchNormSolver_FP32.FinInterface/4

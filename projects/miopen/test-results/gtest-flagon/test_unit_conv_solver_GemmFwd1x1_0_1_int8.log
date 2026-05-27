@@ -1,0 +1,16 @@
+[==========] Running 2 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8Fwd_I8
+[ RUN      ] Smoke/GPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8Fwd_I8.GemmFwd1x1_0_1_int8/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8Fwd_I8.GemmFwd1x1_0_1_int8/0 (1530 ms)
+[----------] 1 test from Smoke/GPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8Fwd_I8 (1530 ms total)
+
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8DevApplicabilityFwd_NONE
+[ RUN      ] Smoke/CPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8DevApplicabilityFwd_NONE.GemmFwd1x1_0_1_int8/0
+[       OK ] Smoke/CPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8DevApplicabilityFwd_NONE.GemmFwd1x1_0_1_int8/0 (42 ms)
+[----------] 1 test from Smoke/CPU_UnitTestConvSolverGemmFwd1x1_0_1_Int8DevApplicabilityFwd_NONE (42 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (1572 ms total)
+[  PASSED  ] 2 tests.

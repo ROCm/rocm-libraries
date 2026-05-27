@@ -1,0 +1,45 @@
+[==========] Running 8 tests from 8 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarGetUnknownVariable_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarGetUnknownVariable_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarGetUnknownVariable_NONE.LibEnvVar/0 (9 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarGetUnknownVariable_NONE (801 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarUpdateUnknownVariable_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarUpdateUnknownVariable_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarUpdateUnknownVariable_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarUpdateUnknownVariable_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarClearUnknownVariable_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarClearUnknownVariable_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarClearUnknownVariable_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarClearUnknownVariable_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarRestore_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarRestore_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarRestore_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarRestore_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarBool_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarBool_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarBool_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarBool_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarUInt64_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarUInt64_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarUInt64_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarUInt64_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarString_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarString_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarString_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarString_NONE (0 ms total)
+
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarWrapper_NONE
+[ RUN      ] Full/CPU_UnitTestLibEnvVarWrapper_NONE.LibEnvVar/0
+[       OK ] Full/CPU_UnitTestLibEnvVarWrapper_NONE.LibEnvVar/0 (0 ms)
+[----------] 1 test from Full/CPU_UnitTestLibEnvVarWrapper_NONE (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 8 test suites ran. (801 ms total)
+[  PASSED  ] 8 tests.

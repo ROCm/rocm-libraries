@@ -1,0 +1,79 @@
+[==========] Running 32 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 12 tests from Smoke/GPU_MultiMarginLoss_FP32
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/0 (1660 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/1
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/1 (376 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/2
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/2 (248 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/3
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/3 (21 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/4
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/4 (1 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/5
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/5 (2 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/6
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/6 (60 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/7
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/7 (84 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/8
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/8 (47 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/9
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/9 (330 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/10
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/10 (386 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP32.Test/11
+[       OK ] Smoke/GPU_MultiMarginLoss_FP32.Test/11 (388 ms)
+[----------] 12 tests from Smoke/GPU_MultiMarginLoss_FP32 (3609 ms total)
+
+[----------] 8 tests from Smoke/GPU_MultiMarginLoss_FP16
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/0
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/0 (779 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/1
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/1 (379 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/2
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/2 (351 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/3
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/3 (1 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/4
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/4 (1 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/5
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/5 (2 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/6
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/6 (60 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_FP16.Test/7
+[       OK ] Smoke/GPU_MultiMarginLoss_FP16.Test/7 (490 ms)
+[----------] 8 tests from Smoke/GPU_MultiMarginLoss_FP16 (2067 ms total)
+
+[----------] 12 tests from Smoke/GPU_MultiMarginLoss_BFP16
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/0
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/0 (789 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/1
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/1 (221 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/2
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/2 (217 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/3
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/3 (1 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/4
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/4 (1 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/5
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/5 (1 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/6
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/6 (28 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/7
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/7 (39 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/8
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/8 (30 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/9
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/9 (237 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/10
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/10 (358 ms)
+[ RUN      ] Smoke/GPU_MultiMarginLoss_BFP16.Test/11
+[       OK ] Smoke/GPU_MultiMarginLoss_BFP16.Test/11 (471 ms)
+[----------] 12 tests from Smoke/GPU_MultiMarginLoss_BFP16 (2398 ms total)
+
+[----------] Global test environment tear-down
+[==========] 32 tests from 3 test suites ran. (8075 ms total)
+[  PASSED  ] 32 tests.

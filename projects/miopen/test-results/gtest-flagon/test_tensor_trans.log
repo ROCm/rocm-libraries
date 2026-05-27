@@ -1,0 +1,975 @@
+[==========] Running 480 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 160 tests from Smoke/GPU_TensorTrans_I8
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_0 (1788 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_1
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_1 (172 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_2
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_2 (265 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_3
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_3 (341 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_4
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_4 (389 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_5
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_5 (137 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_6
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_6 (401 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_7
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_7 (277 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_true_stride_h_1_test_id_8
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_true_stride_h_1_test_id_8 (1012 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_true_stride_h_2_test_id_9
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_true_stride_h_2_test_id_9 (354 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_false_stride_h_1_test_id_10
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_false_stride_h_1_test_id_10 (1000 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_false_stride_h_2_test_id_11
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x56x56_forw_false_stride_h_2_test_id_11 (853 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_12
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_12 (231 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_13
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_13 (73 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_14
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_14 (249 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_15
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_15 (195 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_16
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_16 (221 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_17
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_17 (77 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_18
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_18 (217 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_19
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_19 (185 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_true_stride_h_1_test_id_20
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_true_stride_h_1_test_id_20 (950 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_true_stride_h_2_test_id_21
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_true_stride_h_2_test_id_21 (331 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_false_stride_h_1_test_id_22
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_false_stride_h_1_test_id_22 (981 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_false_stride_h_2_test_id_23
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x55x55_forw_false_stride_h_2_test_id_23 (1295 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_24
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_24 (188 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_25
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_25 (59 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_26
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_26 (189 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_27
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_27 (160 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_28
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_28 (624 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_29
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_29 (203 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_30
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_30 (568 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_31
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_31 (655 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_32
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_32 (369 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_33
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_33 (117 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_34
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_34 (363 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_35
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_35 (320 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_36
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_36 (176 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_37
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_37 (84 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_38
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_38 (169 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_39
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_39 (123 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_40
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_40 (222 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_41
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_41 (72 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_42
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_42 (216 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_43
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_43 (191 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_44
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_44 (459 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_45
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_45 (269 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_46
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_46 (761 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_47
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_47 (685 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_true_stride_h_1_test_id_48
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_true_stride_h_1_test_id_48 (954 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_true_stride_h_2_test_id_49
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_true_stride_h_2_test_id_49 (291 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_false_stride_h_1_test_id_50
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_false_stride_h_1_test_id_50 (576 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_false_stride_h_2_test_id_51
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x640x28x28_forw_false_stride_h_2_test_id_51 (480 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_52
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_52 (205 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_53
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_53 (73 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_54
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_54 (220 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_55
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_55 (187 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_56
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_56 (233 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_57
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_57 (75 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_58
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_58 (231 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_59
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_59 (200 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_60
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_60 (68 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_61
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_61 (19 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_62
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_62 (49 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_63
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_63 (42 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_64
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_64 (50 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_65
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_65 (18 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_66
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_66 (47 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_67
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_67 (44 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_68
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_68 (106 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_69
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_69 (34 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_70
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_70 (96 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_71
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_71 (88 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_72
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_72 (95 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_73
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_73 (33 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_74
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_74 (95 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_75
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_75 (83 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_76
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_76 (225 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_77
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_77 (74 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_78
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_78 (222 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_79
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_79 (198 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_true_stride_h_1_test_id_80
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_true_stride_h_1_test_id_80 (283 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_true_stride_h_2_test_id_81
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_true_stride_h_2_test_id_81 (82 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_false_stride_h_1_test_id_82
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_false_stride_h_1_test_id_82 (277 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_false_stride_h_2_test_id_83
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1280x14x14_forw_false_stride_h_2_test_id_83 (239 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_84
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_84 (108 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_85
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_85 (35 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_86
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_86 (96 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_87
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_87 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_88
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_88 (24 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_89
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_89 (8 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_90
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_90 (26 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_91
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_91 (22 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_92
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_92 (25 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_93
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_93 (7 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_94
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_94 (26 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_95
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_95 (22 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_96
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_96 (98 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_97
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_97 (28 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_98
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_98 (98 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_99
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_99 (87 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_true_stride_h_1_test_id_100
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_true_stride_h_1_test_id_100 (131 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_true_stride_h_2_test_id_101
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_true_stride_h_2_test_id_101 (36 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_false_stride_h_1_test_id_102
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_false_stride_h_1_test_id_102 (131 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_false_stride_h_2_test_id_103
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2560x7x7_forw_false_stride_h_2_test_id_103 (105 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_104
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_104 (50 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_105
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_105 (15 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_106
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_106 (48 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_107
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_107 (44 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_108
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_108 (55 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_109
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_109 (15 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_110
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_110 (56 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_111
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_111 (47 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_112
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_112 (55 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_113
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_113 (15 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_114
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_114 (51 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_115
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_115 (44 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_116
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_116 (113 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_117
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_117 (33 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_118
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_118 (111 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_119
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_119 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_true_stride_h_1_test_id_120
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_true_stride_h_1_test_id_120 (224 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_true_stride_h_2_test_id_121
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_true_stride_h_2_test_id_121 (77 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_false_stride_h_1_test_id_122
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_false_stride_h_1_test_id_122 (251 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_false_stride_h_2_test_id_123
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x28_forw_false_stride_h_2_test_id_123 (201 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_true_stride_h_1_test_id_124
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_true_stride_h_1_test_id_124 (227 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_true_stride_h_2_test_id_125
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_true_stride_h_2_test_id_125 (78 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_false_stride_h_1_test_id_126
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_false_stride_h_1_test_id_126 (212 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_false_stride_h_2_test_id_127
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x14_forw_false_stride_h_2_test_id_127 (196 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_true_stride_h_1_test_id_128
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_true_stride_h_1_test_id_128 (391 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_true_stride_h_2_test_id_129
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_true_stride_h_2_test_id_129 (113 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_false_stride_h_1_test_id_130
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_false_stride_h_1_test_id_130 (294 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_false_stride_h_2_test_id_131
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_512x511x7x7_forw_false_stride_h_2_test_id_131 (198 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_true_stride_h_1_test_id_132
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_true_stride_h_1_test_id_132 (220 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_true_stride_h_2_test_id_133
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_true_stride_h_2_test_id_133 (76 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_false_stride_h_1_test_id_134
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_false_stride_h_1_test_id_134 (210 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_false_stride_h_2_test_id_135
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_63x63x56x56_forw_false_stride_h_2_test_id_135 (197 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_true_stride_h_1_test_id_136
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_true_stride_h_1_test_id_136 (222 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_true_stride_h_2_test_id_137
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_true_stride_h_2_test_id_137 (77 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_false_stride_h_1_test_id_138
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_false_stride_h_1_test_id_138 (215 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_false_stride_h_2_test_id_139
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_127x127x28x28_forw_false_stride_h_2_test_id_139 (197 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_true_stride_h_1_test_id_140
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_true_stride_h_1_test_id_140 (232 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_true_stride_h_2_test_id_141
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_true_stride_h_2_test_id_141 (75 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_false_stride_h_1_test_id_142
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_false_stride_h_1_test_id_142 (214 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_false_stride_h_2_test_id_143
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_255x255x14x14_forw_false_stride_h_2_test_id_143 (194 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_true_stride_h_1_test_id_144
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_true_stride_h_1_test_id_144 (239 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_true_stride_h_2_test_id_145
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_true_stride_h_2_test_id_145 (67 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_false_stride_h_1_test_id_146
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_false_stride_h_1_test_id_146 (229 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_false_stride_h_2_test_id_147
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_511x511x7x7_forw_false_stride_h_2_test_id_147 (198 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_true_stride_h_1_test_id_148
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_true_stride_h_1_test_id_148 (110 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_true_stride_h_2_test_id_149
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_true_stride_h_2_test_id_149 (37 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_false_stride_h_1_test_id_150
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_false_stride_h_1_test_id_150 (99 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_false_stride_h_2_test_id_151
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_64x63x56x28_forw_false_stride_h_2_test_id_151 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_true_stride_h_1_test_id_152
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_true_stride_h_1_test_id_152 (101 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_true_stride_h_2_test_id_153
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_true_stride_h_2_test_id_153 (35 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_false_stride_h_1_test_id_154
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_false_stride_h_1_test_id_154 (94 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_false_stride_h_2_test_id_155
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_128x127x28x14_forw_false_stride_h_2_test_id_155 (88 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_true_stride_h_1_test_id_156
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_true_stride_h_1_test_id_156 (110 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_true_stride_h_2_test_id_157
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_true_stride_h_2_test_id_157 (33 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_false_stride_h_1_test_id_158
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_false_stride_h_1_test_id_158 (103 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_false_stride_h_2_test_id_159
+[       OK ] Smoke/GPU_TensorTrans_I8.TestInt8/src_lens_256x255x14x7_forw_false_stride_h_2_test_id_159 (84 ms)
+[----------] 160 tests from Smoke/GPU_TensorTrans_I8 (33947 ms total)
+
+[----------] 160 tests from Smoke/GPU_TensorTrans_FP16
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_0
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_0 (543 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_1
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_1 (73 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_2
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_2 (174 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_3
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_3 (151 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_4
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_4 (167 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_5
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_5 (68 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_6
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_6 (185 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_7
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_7 (168 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_true_stride_h_1_test_id_8
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_true_stride_h_1_test_id_8 (938 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_true_stride_h_2_test_id_9
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_true_stride_h_2_test_id_9 (542 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_false_stride_h_1_test_id_10
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_false_stride_h_1_test_id_10 (969 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_false_stride_h_2_test_id_11
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x56x56_forw_false_stride_h_2_test_id_11 (806 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_12
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_12 (184 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_13
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_13 (69 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_14
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_14 (169 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_15
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_15 (144 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_16
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_16 (167 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_17
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_17 (65 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_18
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_18 (164 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_19
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_19 (142 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_true_stride_h_1_test_id_20
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_true_stride_h_1_test_id_20 (938 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_true_stride_h_2_test_id_21
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_true_stride_h_2_test_id_21 (340 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_false_stride_h_1_test_id_22
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_false_stride_h_1_test_id_22 (1153 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_false_stride_h_2_test_id_23
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x55x55_forw_false_stride_h_2_test_id_23 (1183 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_24
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_24 (137 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_25
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_25 (56 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_26
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_26 (131 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_27
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_27 (125 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_28
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_28 (424 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_29
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_29 (145 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_30
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_30 (401 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_31
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_31 (359 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_32
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_32 (173 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_33
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_33 (73 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_34
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_34 (165 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_35
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_35 (155 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_36
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_36 (81 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_37
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_37 (34 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_38
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_38 (77 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_39
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_39 (72 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_40
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_40 (165 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_41
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_41 (72 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_42
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_42 (163 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_43
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_43 (155 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_44
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_44 (412 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_45
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_45 (141 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_46
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_46 (434 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_47
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_47 (373 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_true_stride_h_1_test_id_48
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_true_stride_h_1_test_id_48 (578 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_true_stride_h_2_test_id_49
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_true_stride_h_2_test_id_49 (203 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_false_stride_h_1_test_id_50
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_false_stride_h_1_test_id_50 (546 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_false_stride_h_2_test_id_51
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x640x28x28_forw_false_stride_h_2_test_id_51 (497 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_52
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_52 (179 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_53
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_53 (71 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_54
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_54 (163 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_55
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_55 (154 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_56
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_56 (180 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_57
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_57 (79 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_58
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_58 (185 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_59
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_59 (183 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_60
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_60 (45 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_61
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_61 (18 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_62
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_62 (44 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_63
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_63 (41 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_64
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_64 (42 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_65
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_65 (18 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_66
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_66 (42 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_67
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_67 (40 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_68
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_68 (89 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_69
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_69 (36 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_70
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_70 (87 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_71
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_71 (87 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_72
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_72 (89 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_73
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_73 (35 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_74
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_74 (87 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_75
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_75 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_76
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_76 (180 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_77
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_77 (75 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_78
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_78 (183 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_79
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_79 (174 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_true_stride_h_1_test_id_80
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_true_stride_h_1_test_id_80 (259 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_true_stride_h_2_test_id_81
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_true_stride_h_2_test_id_81 (99 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_false_stride_h_1_test_id_82
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_false_stride_h_1_test_id_82 (257 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_false_stride_h_2_test_id_83
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1280x14x14_forw_false_stride_h_2_test_id_83 (224 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_84
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_84 (90 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_85
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_85 (35 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_86
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_86 (87 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_87
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_87 (88 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_88
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_88 (24 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_89
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_89 (7 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_90
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_90 (24 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_91
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_91 (21 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_92
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_92 (23 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_93
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_93 (7 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_94
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_94 (25 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_95
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_95 (23 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_96
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_96 (109 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_97
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_97 (34 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_98
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_98 (105 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_99
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_99 (92 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_true_stride_h_1_test_id_100
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_true_stride_h_1_test_id_100 (127 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_true_stride_h_2_test_id_101
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_true_stride_h_2_test_id_101 (40 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_false_stride_h_1_test_id_102
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_false_stride_h_1_test_id_102 (134 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_false_stride_h_2_test_id_103
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2560x7x7_forw_false_stride_h_2_test_id_103 (116 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_104
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_104 (50 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_105
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_105 (15 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_106
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_106 (48 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_107
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_107 (42 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_108
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_108 (46 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_109
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_109 (14 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_110
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_110 (50 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_111
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_111 (42 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_112
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_112 (48 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_113
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_113 (15 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_114
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_114 (51 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_115
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_115 (48 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_116
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_116 (114 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_117
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_117 (36 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_118
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_118 (115 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_119
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_119 (99 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_true_stride_h_1_test_id_120
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_true_stride_h_1_test_id_120 (201 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_true_stride_h_2_test_id_121
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_true_stride_h_2_test_id_121 (80 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_false_stride_h_1_test_id_122
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_false_stride_h_1_test_id_122 (171 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_false_stride_h_2_test_id_123
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x28_forw_false_stride_h_2_test_id_123 (159 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_true_stride_h_1_test_id_124
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_true_stride_h_1_test_id_124 (178 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_true_stride_h_2_test_id_125
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_true_stride_h_2_test_id_125 (76 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_false_stride_h_1_test_id_126
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_false_stride_h_1_test_id_126 (180 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_false_stride_h_2_test_id_127
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x14_forw_false_stride_h_2_test_id_127 (175 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_true_stride_h_1_test_id_128
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_true_stride_h_1_test_id_128 (202 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_true_stride_h_2_test_id_129
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_true_stride_h_2_test_id_129 (64 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_false_stride_h_1_test_id_130
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_false_stride_h_1_test_id_130 (185 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_false_stride_h_2_test_id_131
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_512x511x7x7_forw_false_stride_h_2_test_id_131 (180 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_true_stride_h_1_test_id_132
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_true_stride_h_1_test_id_132 (166 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_true_stride_h_2_test_id_133
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_true_stride_h_2_test_id_133 (66 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_false_stride_h_1_test_id_134
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_false_stride_h_1_test_id_134 (161 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_false_stride_h_2_test_id_135
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_63x63x56x56_forw_false_stride_h_2_test_id_135 (152 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_true_stride_h_1_test_id_136
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_true_stride_h_1_test_id_136 (166 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_true_stride_h_2_test_id_137
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_true_stride_h_2_test_id_137 (73 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_false_stride_h_1_test_id_138
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_false_stride_h_1_test_id_138 (170 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_false_stride_h_2_test_id_139
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_127x127x28x28_forw_false_stride_h_2_test_id_139 (156 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_true_stride_h_1_test_id_140
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_true_stride_h_1_test_id_140 (182 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_true_stride_h_2_test_id_141
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_true_stride_h_2_test_id_141 (73 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_false_stride_h_1_test_id_142
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_false_stride_h_1_test_id_142 (175 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_false_stride_h_2_test_id_143
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_255x255x14x14_forw_false_stride_h_2_test_id_143 (197 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_true_stride_h_1_test_id_144
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_true_stride_h_1_test_id_144 (228 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_true_stride_h_2_test_id_145
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_true_stride_h_2_test_id_145 (74 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_false_stride_h_1_test_id_146
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_false_stride_h_1_test_id_146 (228 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_false_stride_h_2_test_id_147
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_511x511x7x7_forw_false_stride_h_2_test_id_147 (198 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_true_stride_h_1_test_id_148
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_true_stride_h_1_test_id_148 (98 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_true_stride_h_2_test_id_149
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_true_stride_h_2_test_id_149 (41 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_false_stride_h_1_test_id_150
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_false_stride_h_1_test_id_150 (94 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_false_stride_h_2_test_id_151
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_64x63x56x28_forw_false_stride_h_2_test_id_151 (87 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_true_stride_h_1_test_id_152
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_true_stride_h_1_test_id_152 (91 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_true_stride_h_2_test_id_153
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_true_stride_h_2_test_id_153 (32 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_false_stride_h_1_test_id_154
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_false_stride_h_1_test_id_154 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_false_stride_h_2_test_id_155
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_128x127x28x14_forw_false_stride_h_2_test_id_155 (83 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_true_stride_h_1_test_id_156
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_true_stride_h_1_test_id_156 (88 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_true_stride_h_2_test_id_157
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_true_stride_h_2_test_id_157 (32 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_false_stride_h_1_test_id_158
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_false_stride_h_1_test_id_158 (91 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_false_stride_h_2_test_id_159
+[       OK ] Smoke/GPU_TensorTrans_FP16.TestFloat16/src_lens_256x255x14x7_forw_false_stride_h_2_test_id_159 (91 ms)
+[----------] 160 tests from Smoke/GPU_TensorTrans_FP16 (26746 ms total)
+
+[----------] 160 tests from Smoke/GPU_TensorTrans_FP32
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_0
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_0 (695 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_1
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_1 (216 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_2
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_2 (522 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_3
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_3 (408 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_4
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_1_test_id_4 (349 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_5
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_true_stride_h_2_test_id_5 (208 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_6
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_1_test_id_6 (486 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_7
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x56x56_forw_false_stride_h_2_test_id_7 (424 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_true_stride_h_1_test_id_8
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_true_stride_h_1_test_id_8 (2082 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_true_stride_h_2_test_id_9
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_true_stride_h_2_test_id_9 (623 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_false_stride_h_1_test_id_10
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_false_stride_h_1_test_id_10 (1463 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_false_stride_h_2_test_id_11
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x56x56_forw_false_stride_h_2_test_id_11 (1173 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_12
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_12 (345 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_13
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_13 (182 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_14
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_14 (464 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_15
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_15 (272 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_16
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_1_test_id_16 (323 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_17
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_true_stride_h_2_test_id_17 (125 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_18
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_1_test_id_18 (338 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_19
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x64x55x55_forw_false_stride_h_2_test_id_19 (302 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_true_stride_h_1_test_id_20
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_true_stride_h_1_test_id_20 (1402 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_true_stride_h_2_test_id_21
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_true_stride_h_2_test_id_21 (770 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_false_stride_h_1_test_id_22
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_false_stride_h_1_test_id_22 (1422 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_false_stride_h_2_test_id_23
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x55x55_forw_false_stride_h_2_test_id_23 (1475 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_24
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_24 (232 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_25
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_25 (98 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_26
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_26 (252 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_27
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_27 (194 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_28
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_28 (909 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_29
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_29 (443 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_30
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_30 (803 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_31
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_31 (557 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_32
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_32 (330 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_33
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_33 (149 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_34
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_34 (350 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_35
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_35 (401 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_36
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_1_test_id_36 (228 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_37
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_true_stride_h_2_test_id_37 (100 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_38
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_1_test_id_38 (279 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_39
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x128x28x28_forw_false_stride_h_2_test_id_39 (157 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_40
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_40 (375 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_41
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_41 (227 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_42
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_42 (517 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_43
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_43 (280 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_44
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_1_test_id_44 (885 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_45
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_true_stride_h_2_test_id_45 (428 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_46
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_1_test_id_46 (731 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_47
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x28x28_forw_false_stride_h_2_test_id_47 (683 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_true_stride_h_1_test_id_48
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_true_stride_h_1_test_id_48 (898 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_true_stride_h_2_test_id_49
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_true_stride_h_2_test_id_49 (371 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_false_stride_h_1_test_id_50
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_false_stride_h_1_test_id_50 (1237 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_false_stride_h_2_test_id_51
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x640x28x28_forw_false_stride_h_2_test_id_51 (771 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_52
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_1_test_id_52 (393 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_53
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_true_stride_h_2_test_id_53 (224 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_54
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_1_test_id_54 (533 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_55
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x28x28_forw_false_stride_h_2_test_id_55 (285 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_56
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_56 (370 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_57
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_57 (215 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_58
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_58 (535 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_59
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_59 (417 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_60
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_60 (118 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_61
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_61 (36 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_62
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_62 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_63
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_63 (59 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_64
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_1_test_id_64 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_65
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_true_stride_h_2_test_id_65 (28 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_66
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_1_test_id_66 (74 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_67
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x256x14x14_forw_false_stride_h_2_test_id_67 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_68
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_68 (244 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_69
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_69 (100 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_70
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_70 (256 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_71
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_71 (198 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_72
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_72 (255 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_73
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_73 (99 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_74
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_74 (255 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_75
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_75 (196 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_76
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_1_test_id_76 (468 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_77
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_true_stride_h_2_test_id_77 (155 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_78
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_1_test_id_78 (367 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_79
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x14x14_forw_false_stride_h_2_test_id_79 (423 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_true_stride_h_1_test_id_80
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_true_stride_h_1_test_id_80 (503 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_true_stride_h_2_test_id_81
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_true_stride_h_2_test_id_81 (315 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_false_stride_h_1_test_id_82
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_false_stride_h_1_test_id_82 (682 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_false_stride_h_2_test_id_83
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1280x14x14_forw_false_stride_h_2_test_id_83 (530 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_84
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_1_test_id_84 (240 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_85
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_true_stride_h_2_test_id_85 (101 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_86
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_1_test_id_86 (256 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_87
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x14x14_forw_false_stride_h_2_test_id_87 (197 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_88
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_88 (64 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_89
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_89 (12 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_90
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_90 (36 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_91
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_91 (29 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_92
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_1_test_id_92 (36 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_93
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_true_stride_h_2_test_id_93 (12 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_94
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_1_test_id_94 (31 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_95
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x512x7x7_forw_false_stride_h_2_test_id_95 (18 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_96
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_96 (162 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_97
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_97 (64 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_98
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_98 (172 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_99
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_99 (116 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_true_stride_h_1_test_id_100
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_true_stride_h_1_test_id_100 (221 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_true_stride_h_2_test_id_101
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_true_stride_h_2_test_id_101 (85 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_false_stride_h_1_test_id_102
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_false_stride_h_1_test_id_102 (353 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_false_stride_h_2_test_id_103
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2560x7x7_forw_false_stride_h_2_test_id_103 (246 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_104
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_104 (116 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_105
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_105 (34 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_106
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_106 (113 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_107
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_107 (89 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_108
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_108 (115 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_109
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_109 (26 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_110
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_110 (86 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_111
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_111 (68 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_112
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_1_test_id_112 (97 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_113
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_true_stride_h_2_test_id_113 (26 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_114
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_1_test_id_114 (82 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_115
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x1024x7x7_forw_false_stride_h_2_test_id_115 (67 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_116
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_1_test_id_116 (185 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_117
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_true_stride_h_2_test_id_117 (64 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_118
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_1_test_id_118 (182 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_119
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x2048x7x7_forw_false_stride_h_2_test_id_119 (128 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_true_stride_h_1_test_id_120
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_true_stride_h_1_test_id_120 (369 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_true_stride_h_2_test_id_121
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_true_stride_h_2_test_id_121 (180 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_false_stride_h_1_test_id_122
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_false_stride_h_1_test_id_122 (527 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_false_stride_h_2_test_id_123
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x28_forw_false_stride_h_2_test_id_123 (424 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_true_stride_h_1_test_id_124
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_true_stride_h_1_test_id_124 (592 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_true_stride_h_2_test_id_125
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_true_stride_h_2_test_id_125 (141 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_false_stride_h_1_test_id_126
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_false_stride_h_1_test_id_126 (360 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_false_stride_h_2_test_id_127
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x14_forw_false_stride_h_2_test_id_127 (396 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_true_stride_h_1_test_id_128
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_true_stride_h_1_test_id_128 (568 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_true_stride_h_2_test_id_129
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_true_stride_h_2_test_id_129 (185 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_false_stride_h_1_test_id_130
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_false_stride_h_1_test_id_130 (573 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_false_stride_h_2_test_id_131
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_512x511x7x7_forw_false_stride_h_2_test_id_131 (290 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_true_stride_h_1_test_id_132
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_true_stride_h_1_test_id_132 (358 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_true_stride_h_2_test_id_133
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_true_stride_h_2_test_id_133 (143 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_false_stride_h_1_test_id_134
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_false_stride_h_1_test_id_134 (328 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_false_stride_h_2_test_id_135
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_63x63x56x56_forw_false_stride_h_2_test_id_135 (264 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_true_stride_h_1_test_id_136
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_true_stride_h_1_test_id_136 (559 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_true_stride_h_2_test_id_137
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_true_stride_h_2_test_id_137 (205 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_false_stride_h_1_test_id_138
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_false_stride_h_1_test_id_138 (489 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_false_stride_h_2_test_id_139
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_127x127x28x28_forw_false_stride_h_2_test_id_139 (403 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_true_stride_h_1_test_id_140
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_true_stride_h_1_test_id_140 (368 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_true_stride_h_2_test_id_141
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_true_stride_h_2_test_id_141 (204 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_false_stride_h_1_test_id_142
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_false_stride_h_1_test_id_142 (532 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_false_stride_h_2_test_id_143
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_255x255x14x14_forw_false_stride_h_2_test_id_143 (287 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_true_stride_h_1_test_id_144
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_true_stride_h_1_test_id_144 (375 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_true_stride_h_2_test_id_145
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_true_stride_h_2_test_id_145 (137 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_false_stride_h_1_test_id_146
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_false_stride_h_1_test_id_146 (373 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_false_stride_h_2_test_id_147
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_511x511x7x7_forw_false_stride_h_2_test_id_147 (286 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_true_stride_h_1_test_id_148
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_true_stride_h_1_test_id_148 (149 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_true_stride_h_2_test_id_149
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_true_stride_h_2_test_id_149 (69 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_false_stride_h_1_test_id_150
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_false_stride_h_1_test_id_150 (169 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_false_stride_h_2_test_id_151
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_64x63x56x28_forw_false_stride_h_2_test_id_151 (124 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_true_stride_h_1_test_id_152
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_true_stride_h_1_test_id_152 (150 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_true_stride_h_2_test_id_153
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_true_stride_h_2_test_id_153 (70 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_false_stride_h_1_test_id_154
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_false_stride_h_1_test_id_154 (172 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_false_stride_h_2_test_id_155
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_128x127x28x14_forw_false_stride_h_2_test_id_155 (123 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_true_stride_h_1_test_id_156
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_true_stride_h_1_test_id_156 (177 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_true_stride_h_2_test_id_157
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_true_stride_h_2_test_id_157 (74 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_false_stride_h_1_test_id_158
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_false_stride_h_1_test_id_158 (176 ms)
+[ RUN      ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_false_stride_h_2_test_id_159
+[       OK ] Smoke/GPU_TensorTrans_FP32.TestFloat32/src_lens_256x255x14x7_forw_false_stride_h_2_test_id_159 (127 ms)
+[----------] 160 tests from Smoke/GPU_TensorTrans_FP32 (53092 ms total)
+
+[----------] Global test environment tear-down
+[==========] 480 tests from 3 test suites ran. (113786 ms total)
+[  PASSED  ] 480 tests.

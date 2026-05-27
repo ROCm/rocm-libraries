@@ -1,0 +1,15 @@
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Smoke/GPU_Conv2dTuning_BFP16
+[ RUN      ] Smoke/GPU_Conv2dTuning_BFP16.Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp:73: Skipped
+-> GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built 
+
+[  SKIPPED ] Smoke/GPU_Conv2dTuning_BFP16.Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16/0 (0 ms)
+[----------] 1 test from Smoke/GPU_Conv2dTuning_BFP16 (1121 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1121 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] Smoke/GPU_Conv2dTuning_BFP16.Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16/0

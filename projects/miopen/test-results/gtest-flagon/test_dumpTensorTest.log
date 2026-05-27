@@ -1,0 +1,36 @@
+[==========] Running 6 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from CPU_Dump_FP32
+[ RUN      ] CPU_Dump_FP32.testDump
+PRNG seed: 12345678
+[       OK ] CPU_Dump_FP32.testDump (857 ms)
+[----------] 1 test from CPU_Dump_FP32 (857 ms total)
+
+[----------] 1 test from CPU_Dump_NAN_FP32
+[ RUN      ] CPU_Dump_NAN_FP32.testDump
+[       OK ] CPU_Dump_NAN_FP32.testDump (729 ms)
+[----------] 1 test from CPU_Dump_NAN_FP32 (730 ms total)
+
+[----------] 1 test from CPU_Dump_FP16
+[ RUN      ] CPU_Dump_FP16.testDump
+[       OK ] CPU_Dump_FP16.testDump (1 ms)
+[----------] 1 test from CPU_Dump_FP16 (1 ms total)
+
+[----------] 1 test from CPU_Dump_NAN_FP16
+[ RUN      ] CPU_Dump_NAN_FP16.testDump
+[       OK ] CPU_Dump_NAN_FP16.testDump (3 ms)
+[----------] 1 test from CPU_Dump_NAN_FP16 (3 ms total)
+
+[----------] 1 test from CPU_Dump_BFP16
+[ RUN      ] CPU_Dump_BFP16.testDump
+[       OK ] CPU_Dump_BFP16.testDump (2 ms)
+[----------] 1 test from CPU_Dump_BFP16 (2 ms total)
+
+[----------] 1 test from CPU_Dump_NAN_BFP16
+[ RUN      ] CPU_Dump_NAN_BFP16.testDump
+[       OK ] CPU_Dump_NAN_BFP16.testDump (5 ms)
+[----------] 1 test from CPU_Dump_NAN_BFP16 (5 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 6 test suites ran. (1603 ms total)
+[  PASSED  ] 6 tests.

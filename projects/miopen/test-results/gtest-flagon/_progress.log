@@ -1,0 +1,8 @@
+started Wed May 27 14:24:53 UTC 2026
+[1/265] test_adam ec=0 dur=30s pass=0 fail=0 skip=0
+[2/265] test_addlayernorm ec=0 dur=47s pass=0 fail=0 skip=0
+[3/265] test_api_convbiasactiv ec=0 dur=0s pass=0 fail=0 skip=0
+[4/265] test_bad_fusion_plan ec=0 dur=1s pass=0 fail=0 skip=1
+[5/265] test_binary_tensor_ops ec=0 dur=62s pass=0 fail=0 skip=0
+[6/265] test_bn_3d_peract_test ec=0 dur=77s pass=0 fail=0 skip=0
+[7/265] test_bn_3d_spatial_test ec=0 dur=47s pass=0 fail=0 skip=0

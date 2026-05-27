@@ -1,0 +1,24 @@
+[==========] Running 5 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16
+[ RUN      ] GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16.SearchStartsAtKernelZero
+[       OK ] GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16.SearchStartsAtKernelZero (4477 ms)
+[----------] 1 test from GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 (4477 ms total)
+
+[----------] 2 tests from Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16
+[ RUN      ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16.All/0
+[       OK ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16.All/0 (29 ms)
+[ RUN      ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16.All/1
+[       OK ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16.All/1 (0 ms)
+[----------] 2 tests from Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16 (30 ms total)
+
+[----------] 2 tests from Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16
+[ RUN      ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16.All/0
+[       OK ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16.All/0 (1 ms)
+[ RUN      ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16.All/1
+[       OK ] Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16.All/1 (0 ms)
+[----------] 2 tests from Full/GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 3 test suites ran. (4509 ms total)
+[  PASSED  ] 5 tests.

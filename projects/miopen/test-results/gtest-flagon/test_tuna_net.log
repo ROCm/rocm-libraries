@@ -1,0 +1,60 @@
+[==========] Running 6 tests from 6 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from SmokeGfx908/GPU_TunaNetTest_FP32
+[ RUN      ] SmokeGfx908/GPU_TunaNetTest_FP32.TestSolverPredictionModelFloat/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/tuna_net.cpp:132: Skipped
+
+
+[  SKIPPED ] SmokeGfx908/GPU_TunaNetTest_FP32.TestSolverPredictionModelFloat/0 (808 ms)
+[----------] 1 test from SmokeGfx908/GPU_TunaNetTest_FP32 (808 ms total)
+
+[----------] 1 test from SmokeGfx90a/GPU_TunaNetTest_FP32
+[ RUN      ] SmokeGfx90a/GPU_TunaNetTest_FP32.TestSolverPredictionModelFloat/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/tuna_net.cpp:132: Skipped
+
+
+[  SKIPPED ] SmokeGfx90a/GPU_TunaNetTest_FP32.TestSolverPredictionModelFloat/0 (47 ms)
+[----------] 1 test from SmokeGfx90a/GPU_TunaNetTest_FP32 (47 ms total)
+
+[----------] 1 test from SmokeGfx908/GPU_TunaNetTest_FP16
+[ RUN      ] SmokeGfx908/GPU_TunaNetTest_FP16.TestSolverPredictionModelHalf/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/tuna_net.cpp:132: Skipped
+
+
+[  SKIPPED ] SmokeGfx908/GPU_TunaNetTest_FP16.TestSolverPredictionModelHalf/0 (8 ms)
+[----------] 1 test from SmokeGfx908/GPU_TunaNetTest_FP16 (8 ms total)
+
+[----------] 1 test from SmokeGfx90a/GPU_TunaNetTest_FP16
+[ RUN      ] SmokeGfx90a/GPU_TunaNetTest_FP16.TestSolverPredictionModelHalf/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/tuna_net.cpp:132: Skipped
+
+
+[  SKIPPED ] SmokeGfx90a/GPU_TunaNetTest_FP16.TestSolverPredictionModelHalf/0 (3 ms)
+[----------] 1 test from SmokeGfx90a/GPU_TunaNetTest_FP16 (3 ms total)
+
+[----------] 1 test from SmokeGfx908/GPU_TunaNetTest_BFP16
+[ RUN      ] SmokeGfx908/GPU_TunaNetTest_BFP16.TestSolverPredictionModelBF16/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/tuna_net.cpp:132: Skipped
+
+
+[  SKIPPED ] SmokeGfx908/GPU_TunaNetTest_BFP16.TestSolverPredictionModelBF16/0 (5 ms)
+[----------] 1 test from SmokeGfx908/GPU_TunaNetTest_BFP16 (5 ms total)
+
+[----------] 1 test from SmokeGfx90a/GPU_TunaNetTest_BFP16
+[ RUN      ] SmokeGfx90a/GPU_TunaNetTest_BFP16.TestSolverPredictionModelBF16/0
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/tuna_net.cpp:132: Skipped
+
+
+[  SKIPPED ] SmokeGfx90a/GPU_TunaNetTest_BFP16.TestSolverPredictionModelBF16/0 (0 ms)
+[----------] 1 test from SmokeGfx90a/GPU_TunaNetTest_BFP16 (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 6 test suites ran. (873 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 6 tests, listed below:
+[  SKIPPED ] SmokeGfx908/GPU_TunaNetTest_FP32.TestSolverPredictionModelFloat/0
+[  SKIPPED ] SmokeGfx90a/GPU_TunaNetTest_FP32.TestSolverPredictionModelFloat/0
+[  SKIPPED ] SmokeGfx908/GPU_TunaNetTest_FP16.TestSolverPredictionModelHalf/0
+[  SKIPPED ] SmokeGfx90a/GPU_TunaNetTest_FP16.TestSolverPredictionModelHalf/0
+[  SKIPPED ] SmokeGfx908/GPU_TunaNetTest_BFP16.TestSolverPredictionModelBF16/0
+[  SKIPPED ] SmokeGfx90a/GPU_TunaNetTest_BFP16.TestSolverPredictionModelBF16/0

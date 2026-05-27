@@ -1,0 +1,12 @@
+ld-linux-x86-64.so.2
+libamd_comgr.so.3
+libamdhip64.so.7
+libc.so.6
+libgcc_s.so.1
+libhipblaslt.so.1
+libhiprtc.so.7
+libm.so.6
+librocblas.so.5
+libroctx64.so.4
+libstdc++.so.6
+libzstd.so.1

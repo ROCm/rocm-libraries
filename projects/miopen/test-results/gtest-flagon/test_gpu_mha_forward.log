@@ -1,0 +1,72 @@
+[==========] Running 24 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 16 tests from Smoke/GPU_Fwd_Mha_FP32
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/0
+PRNG seed: 12345678
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/0 (2448 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/1
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/1 (6 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/2
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/2 (6 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/3
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/3 (3 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/4
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/4 (15 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/5
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/5 (125 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/6
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/6 (101 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/7
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/7 (181 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/8
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/8 (190 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/9
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/9 (171 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/10
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/10 (287 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/11
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/11 (2 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/12
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_forward.cpp:127: Skipped
+CPU Dropout currently supports only fully occupied warps
+
+[  SKIPPED ] Smoke/GPU_Fwd_Mha_FP32.Test_float/12 (0 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/13
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/13 (187 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/14
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/14 (195 ms)
+[ RUN      ] Smoke/GPU_Fwd_Mha_FP32.Test_float/15
+[       OK ] Smoke/GPU_Fwd_Mha_FP32.Test_float/15 (1485 ms)
+[----------] 16 tests from Smoke/GPU_Fwd_Mha_FP32 (5410 ms total)
+
+[----------] 8 tests from Full/GPU_Fwd_Mha_FP32
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/0
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/0 (5930 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/1
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/1 (295 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/2
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/2 (222 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/3
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/3 (5639 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/4
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/4 (559 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/5
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/5 (409 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/6
+/data/nhanna/repos/rocm-libraries/projects/miopen/test/gtest/gpu_mha_forward.cpp:127: Skipped
+CPU Dropout currently supports only fully occupied warps
+
+[  SKIPPED ] Full/GPU_Fwd_Mha_FP32.Test_float/6 (0 ms)
+[ RUN      ] Full/GPU_Fwd_Mha_FP32.Test_float/7
+[       OK ] Full/GPU_Fwd_Mha_FP32.Test_float/7 (109509 ms)
+[----------] 8 tests from Full/GPU_Fwd_Mha_FP32 (122565 ms total)
+
+[----------] Global test environment tear-down
+[==========] 24 tests from 2 test suites ran. (127976 ms total)
+[  PASSED  ] 22 tests.
+[  SKIPPED ] 2 tests, listed below:
+[  SKIPPED ] Smoke/GPU_Fwd_Mha_FP32.Test_float/12
+[  SKIPPED ] Full/GPU_Fwd_Mha_FP32.Test_float/6
+
+  YOU HAVE 24 DISABLED TESTS
+

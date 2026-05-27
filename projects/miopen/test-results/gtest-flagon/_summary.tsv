@@ -1,0 +1,8 @@
+name	exit_code	duration_s	pass	fail	skip
+test_adam	0	30	0	0	0
+test_addlayernorm	0	47	0	0	0
+test_api_convbiasactiv	0	0	0	0	0
+test_bad_fusion_plan	0	1	0	0	1
+test_binary_tensor_ops	0	62	0	0	0
+test_bn_3d_peract_test	0	77	0	0	0
+test_bn_3d_spatial_test	0	47	0	0	0
