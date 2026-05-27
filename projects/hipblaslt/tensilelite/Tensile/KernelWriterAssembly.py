@@ -4869,10 +4869,8 @@ class KernelWriterAssembly(KernelWriter):
         return False
       return True
 
-    if not (_eligible(tPA) and _eligible(tPB)):
-      module.add(self.tailLoopBoundaryDtlLoad(kernel, tPA))
-      module.add(self.tailLoopBoundaryDtlLoad(kernel, tPB))
-      return module
+    assert _eligible(tPA) and _eligible(tPB), \
+      "tailLoopBoundaryDtlLoadAB requires bf16/subtile eligibility for both A and B"
 
     # Both eligible — emit shared K math once, then per-tensor M/load blocks.
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
