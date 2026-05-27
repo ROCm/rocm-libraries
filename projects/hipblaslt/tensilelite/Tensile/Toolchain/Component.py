@@ -169,8 +169,8 @@ class Assembler(Component):
             destPath: The destination path for the generated object file.
         """
         args = self._default_args
-        # Add gfx1250-specific parameters
-        if targetGfx == "gfx1250":
+        # Enable true16 syntax on targets that support +real-true16.
+        if targetGfx in ("gfx1250", "gfx1201", "gfx1200", "gfx1100"):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,

@@ -75,6 +75,7 @@
 /**
  * @brief Primary namespace for Tensile host code.
  */
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -125,6 +126,8 @@ namespace TensileLite
         std::string codeObjectFile; //Code object file kernel is located in
 
         bool isSingleCall = false;
+
+        dim3 clusterDim{1, 1, 1};
 
         dim3   workGroupSize;
         dim3   numWorkGroups;
@@ -205,5 +208,6 @@ namespace TensileLite
         LoadLibraryData(std::vector<uint8_t> const& data);
 #endif
 } // namespace TensileLite
+TENSILE_HIDDEN_END
 
 /** @} */

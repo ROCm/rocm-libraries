@@ -64,7 +64,7 @@ namespace
                 archName = archName.substr(0, colonPos);
 
             auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path(archName) / "hipblasltTransform.hsaco");
+                std::filesystem::path("hipblasltTransform_" + archName + ".hsaco"));
             if(perArchPath)
                 return *perArchPath;
         }
@@ -74,6 +74,12 @@ namespace
         if(path)
             return *path;
         return std::filesystem::path(DEFAULT_CO_PATH);
+    }
+
+    const std::string& transformCodeObjectFileName()
+    {
+        static const std::string name = transformCodeObjectPath().filename().string();
+        return name;
     }
 
     TensileLite::hip::SolutionAdapter& transformAdapter()
@@ -205,8 +211,9 @@ namespace
 
         constexpr auto                NUM_WORKITEMS{NumThreadsM * NumThreadsN};
         TensileLite::KernelInvocation invocation{kernelName,
-                                                 "hipblasltTransform.hsaco",
+                                                 transformCodeObjectFileName(),
                                                  false,
+                                                 {1, 1, 1},
                                                  {NUM_WORKITEMS, 1, 1},
                                                  {numWg, 1, batchSize},
                                                  {numWg * NUM_WORKITEMS, 1, batchSize},

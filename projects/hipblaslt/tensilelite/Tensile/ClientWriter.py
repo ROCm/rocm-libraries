@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -77,6 +77,7 @@ class DataInitName(Enum):
   TrigIndCos = 24
   TrigIndAbsSin = 25
   TrigIndAbsCos = 26
+  UniformLowPrecision = 27
 
 class ClientLogLevel(Enum):
   Error = 0
@@ -128,14 +129,15 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   printSolutionRejectionReason = True
   printIndexAssignmentInfo = False
   for logicFileName in logicFiles:
-    (scheduleName, _, problemType, _, exactLogic, newLibrary) \
-        = LibraryIO.parseLibraryLogicFile(logicFileName,
-                                          assembler,
-                                          splitGSU,
-                                          printSolutionRejectionReason,
-                                          printIndexAssignmentInfo,
-                                          isaInfoMap,
-                                          globalParameters["LazyLibraryLoading"])
+    logic = LibraryIO.parseLibraryLogicFile(logicFileName,
+                                            assembler,
+                                            splitGSU,
+                                            printSolutionRejectionReason,
+                                            printIndexAssignmentInfo,
+                                            isaInfoMap,
+                                            globalParameters["LazyLibraryLoading"])
+    scheduleName, problemType, exactLogic, newLibrary = \
+        logic.schedule, logic.problemType, logic.exactLogic, logic.library
     functions.append((scheduleName, problemType))
     functionNames.append("tensile_%s" % (problemType))
     problemSizes = ProblemSizesMock(exactLogic) if exactLogic else ProblemSizesMockDummy()
@@ -211,6 +213,10 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
   clientExe = getClientExecutablePath()
   iniFile = "--config-file={}".format(clientParametersPath)
   args = [clientExe, iniFile]
+
+  # Add MX scale format if set
+  if globalParameters["MXScaleFormat"]:
+    args.extend(["--mx-scale-format", str(globalParameters["MXScaleFormat"])])
 
   try:
     subprocess.run(args, check=True)
@@ -327,8 +333,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
 
     clientExe = getClientExecutablePath()
     timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
+    mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}{}\n".format(clientExe, configFile, timingFlag))
+      runScriptFile.write("{} --config-file {}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -350,8 +357,9 @@ fi
         runScriptFile.write("%s -d 0 --resetclocks\n" % globalParameters["ROCmSMIPath"])
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
+    mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1\n".format(getClientExecutablePath(), configFile))
+      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
@@ -728,10 +736,12 @@ def writeClientConfig(
       gfxName: str,
       configBase = "ClientParameters",
       libraryFile = None,
-      probSolMap = {}
+      probSolMap = {},
+      sourceDir = None
     ):
 
-    sourceDir = os.path.join(stepBaseDir, "source")
+    if sourceDir is None:
+        sourceDir = os.path.join(stepBaseDir, "source")
 
     if tileAwareSelection:
       filename = os.path.join(sourceDir, "%s_Granularity.ini"%configBase)

@@ -32,8 +32,13 @@
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -66,7 +71,13 @@ const std::vector<PassInfo> availablePasses = {
     {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", []() { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }},
-    {"StinkyIRVerifierPass", []() { return createStinkyIRVerifierPass(); }}};
+    {"StinkyIRVerifierPass", []() { return createStinkyIRVerifierPass(); }},
+    {"RemoveDelayAluPass", []() { return createRemoveDelayAluPass(); }},
+    {"InsertDelayAluPass", []() { return createInsertDelayAluPass(); }},
+    {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
+    {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
+    {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+};
 
 /**
  * Create default DebugPrintInstrumentation for stinkytofu-opt.

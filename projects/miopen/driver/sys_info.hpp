@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include <iostream>
@@ -33,6 +10,9 @@
 #include <map>
 #include <set>
 #include <string>
+
+#include <miopen/env.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 
 #ifdef __linux__
 #include <unistd.h>
@@ -65,6 +45,9 @@ public:
     void ShowSysInfo()
     {
 #ifdef __linux__
+        // Check if JSON mode is enabled
+        const bool json_mode = miopen::IsPerformanceLoggingEnabled();
+
         // System information collection
         const std::string timestamp = GetTimestamp();
         const std::string hostname  = GetHostname();
@@ -76,20 +59,74 @@ public:
         const std::string amdgpuVer = GetAmdGpuVersion();
 
         // Format final output
-        std::cout << "Timestamp: " << timestamp << "; " << "Host Name: " << hostname << "; "
-                  << "Operating System: " << osInfo << "; " << "ROCm: " << hipVer << "; "
-                  << "MIOpen Driver: " << miopMajor << "." << miopMinor << "." << miopPatch << "; "
-                  << "CPU Vendor: " << cpuVendor << "; " << "CPU Model: " << cpuModel << "; "
-                  << "RAM Size: " << ramSize << "; " << "GPU Model: " << gpuInfo << "; "
-                  << "AMDGPU Driver: " << amdgpuVer << std::endl;
+        if(json_mode)
+        {
+            std::cout << "{\"timestamp\":\"" << JsonEscape(timestamp) << "\","
+                      << "\"system_info\":{" << "\"hostname\":\"" << JsonEscape(hostname) << "\","
+                      << "\"os\":\"" << JsonEscape(osInfo) << "\"," << "\"cpu_vendor\":\""
+                      << JsonEscape(cpuVendor) << "\"," << "\"cpu_model\":\""
+                      << JsonEscape(cpuModel) << "\"," << "\"ram_size\":\"" << JsonEscape(ramSize)
+                      << "\"," << "\"gpu_model\":\"" << JsonEscape(gpuInfo) << "\"},"
+                      << "\"build_info\":{" << "\"rocm\":\"" << JsonEscape(hipVer) << "\","
+                      << "\"miopen_version\":\"" << miopMajor << "." << miopMinor << "."
+                      << miopPatch << "\"," << "\"amdgpu_driver\":\"" << JsonEscape(amdgpuVer)
+                      << "\"}}" << std::endl;
+        }
+        else
+        {
+            std::cout << "Timestamp: " << timestamp << "; " << "Host Name: " << hostname << "; "
+                      << "Operating System: " << osInfo << "; " << "ROCm: " << hipVer << "; "
+                      << "MIOpen Driver: " << miopMajor << "." << miopMinor << "." << miopPatch
+                      << "; " << "CPU Vendor: " << cpuVendor << "; " << "CPU Model: " << cpuModel
+                      << "; " << "RAM Size: " << ramSize << "; " << "GPU Model: " << gpuInfo << "; "
+                      << "AMDGPU Driver: " << amdgpuVer << std::endl;
+        }
 #else
-        (void)miopMajor;
-        (void)miopMinor;
-        (void)miopPatch;
+        const bool json_mode = miopen::IsPerformanceLoggingEnabled();
+        if(json_mode)
+        {
+            std::cout << "{\"build_info\":{" << "\"miopen_version\":\"" << miopMajor << "."
+                      << miopMinor << "." << miopPatch << "\"}}" << std::endl;
+        }
+        else
+        {
+            (void)miopMajor;
+            (void)miopMinor;
+            (void)miopPatch;
+        }
 #endif
     }
 
 private:
+    std::string JsonEscape(const std::string& str)
+    {
+        std::ostringstream oss;
+        for(char c : str)
+        {
+            switch(c)
+            {
+            case '"': oss << "\\\""; break;
+            case '\\': oss << "\\\\"; break;
+            case '\b': oss << "\\b"; break;
+            case '\f': oss << "\\f"; break;
+            case '\n': oss << "\\n"; break;
+            case '\r': oss << "\\r"; break;
+            case '\t': oss << "\\t"; break;
+            default:
+                if(c < 32 || c > 126)
+                {
+                    oss << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<int>(static_cast<unsigned char>(c));
+                }
+                else
+                {
+                    oss << c;
+                }
+            }
+        }
+        return oss.str();
+    }
+
     std::string GetTimestamp()
     {
         std::stringstream ss;

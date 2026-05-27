@@ -62,13 +62,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto [oAttr, statsAttr] = graph->sdpa(qAttr, kAttr, vAttr, std::move(sdpaAttributes));
     oAttr->set_output(true);
 
-    auto buildStatus = graph->build(handle);
-    if(!buildStatus.is_good())
-    {
-        std::cout << "Skipping: no engine available for this configuration ("
-                  << buildStatus.get_message() << ").\n\n";
-        return true;
-    }
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> qTensor(qAttr->get_dim(), layout);
