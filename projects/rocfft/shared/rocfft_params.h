@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "../shared/fft_params.h"
 #include "../shared/gpubuf.h"
 #include "../shared/precision_type.h"
+#include "../shared/rocfft_hip.h"
 #include "rocfft/rocfft.h"
 #include "rocfft_enums_vs_fft_enums.h"
 
@@ -78,8 +79,8 @@ public:
     rocfft_plan             plan = nullptr;
     rocfft_execution_info   info = nullptr;
     rocfft_plan_description desc = nullptr;
-    gpubuf_t<void>          wbuffer;
-    size_t                  workbuffersize = 0;
+    std::vector<gpubuf>     wbuffers;
+    std::vector<size_t>     workbuffersizes;
 
     explicit rocfft_params_base() = default;
 
@@ -135,7 +136,7 @@ public:
             rocfft.plan_description_destroy(desc);
             desc = nullptr;
         }
-        wbuffer.free();
+        wbuffers.clear();
     }
 
     void validate_fields() const override
@@ -153,16 +154,20 @@ public:
         return rocfft_precision_from_fftparams(precision);
     }
 
-    size_t vram_footprint() override
+    std::vector<size_t> vram_footprint() override
     {
-        size_t val = fft_params::vram_footprint();
+        auto footprint = io_vram_footprint();
         if(setup_structs() != fft_status_success)
         {
             throw std::runtime_error("Struct setup failed");
         }
-        val += workbuffersize;
 
-        return val;
+        // add work buffer sizes returned by library
+        for(size_t i = 0; i < footprint.size(); ++i)
+        {
+            footprint[i] += workbuffersizes[i];
+        }
+        return footprint;
     }
 
     // Convert the generic fft_field structure to a rocfft_field
@@ -298,12 +303,19 @@ public:
             }
         }
 
-        fft_status = rocfft.plan_get_work_buffer_size(plan, &workbuffersize);
-        if(fft_status != rocfft_status_success)
+        // Set work buffers for all HIP devices
+        const int ndevices = rocfft_scoped_device::device_count();
+        workbuffersizes.resize(ndevices);
+        wbuffers.resize(ndevices);
+        for(int device = 0; device < ndevices; ++device)
         {
-            throw std::runtime_error("rocfft_plan_get_work_buffer_size failed");
+            rocfft_scoped_device dev(device);
+            fft_status = rocfft.plan_get_work_buffer_size(plan, workbuffersizes.data() + device);
+            if(fft_status != rocfft_status_success)
+            {
+                throw std::runtime_error("rocfft_plan_get_work_buffer_size failed");
+            }
         }
-
         return fft_status_from_rocfftparams(fft_status);
     }
 
@@ -315,23 +327,35 @@ public:
             return ret;
         }
         // default behavior is to feed rocfft with a work area if it needs one
-        if(workbuffersize > 0 && auto_allocate != fft_auto_allocation_on)
+        bool need_workbuffers = std::any_of(
+            workbuffersizes.begin(), workbuffersizes.end(), [](size_t s) { return s > 0; });
+        if(need_workbuffers && auto_allocate != fft_auto_allocation_on)
         {
-            hipError_t hip_status = hipSuccess;
-            hip_status            = wbuffer.alloc(workbuffersize);
-            if(hip_status != hipSuccess)
+            const int ndevices = rocfft_scoped_device::device_count();
+            for(int device = 0; device < ndevices; ++device)
             {
-                std::ostringstream oss;
-                oss << "work buffer allocation failed (" << byte_size_to_str(workbuffersize)
-                    << " requested)";
-                throw work_buffer_alloc_failure(oss.str(), workbuffersize);
-            }
+                if(workbuffersizes[device] == 0)
+                    continue;
 
-            auto rocret
-                = rocfft.execution_info_set_work_buffer(info, wbuffer.data(), workbuffersize);
-            if(rocret != rocfft_status_success)
-            {
-                throw std::runtime_error("rocfft_execution_info_set_work_buffer failed");
+                rocfft_scoped_device dev(device);
+
+                hipError_t hip_status = hipSuccess;
+                hip_status            = wbuffers[device].alloc(workbuffersizes[device]);
+                if(hip_status != hipSuccess)
+                {
+                    std::ostringstream oss;
+                    oss << "work buffer allocation failed ("
+                        << byte_size_to_str(workbuffersizes[device]) << " requested)";
+                    oss << "\n" << device_memory_accountant::singleton().get_details(device);
+                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
+                }
+
+                auto rocret = rocfft.execution_info_set_work_buffer(
+                    info, wbuffers[device].data(), workbuffersizes[device]);
+                if(rocret != rocfft_status_success)
+                {
+                    throw std::runtime_error("rocfft_execution_info_set_work_buffer failed");
+                }
             }
         }
 
@@ -404,8 +428,8 @@ public:
         return fft_status_from_rocfftparams(ret);
     }
 
-    void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
-                           std::vector<gpubuf>& /* input_data_gpu (unused) */,
+    void multi_gpu_prepare(const std::vector<hostbuf>& input_data_host,
+                           const std::vector<gpubuf>& /* input_data_gpu (unused) */,
                            std::vector<void*>& mgpu_ibuffers,
                            std::vector<void*>& mgpu_obuffers) override
     {

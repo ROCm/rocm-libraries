@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,9 @@ namespace rocsparse
                                    T* __restrict__ dval_)
 
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static constexpr uint32_t nid = BLOCKSIZE / WFSIZE;
         const J                   lid = hipThreadIdx_x & (WFSIZE - 1);
         const J                   wid = hipThreadIdx_x / WFSIZE;
@@ -259,6 +262,9 @@ namespace rocsparse
                            const floating_data_t<T>* nrm0_)
 
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         floating_data_t<T> nrm = 0;
         __shared__ floating_data_t<T> sdata[BLOCKSIZE / WFSIZE];
 

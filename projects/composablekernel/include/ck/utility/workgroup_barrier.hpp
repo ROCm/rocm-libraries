@@ -5,6 +5,10 @@
 #include <hip/hip_runtime.h>
 #include <stdint.h>
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 struct workgroup_barrier
 {
@@ -60,3 +64,7 @@ struct workgroup_barrier
     uint32_t* base_ptr;
 };
 } // namespace ck
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

@@ -9,6 +9,10 @@
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck_tile::core::arch::mma {
 
 /*! @enum MmaPipelineOptionFlag
@@ -341,3 +345,7 @@ concept MmaPipelineInterface = std::derived_from<Derived, MmaPipelineBase<Flags,
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 } // namespace ck_tile::core::arch::mma
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

@@ -87,6 +87,7 @@ set( rocfft-test_source
   buffer_hash_test.cpp
   validate_length_stride.cpp
   random.cpp
+  rocfft_c.c
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
@@ -98,15 +99,10 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 # rocFFT device code builds with -O3 by default.  rocfft-test
 # contains device code for callback functions, so ensure the device
 # code is built with the same optimization level to minimize chance
-# of a mismatch
-target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
-
-# callback functions need to be built as relocatable device code
-# (causes failure at link stage on Windows)
-if (NOT WIN32)
-  target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
-  target_link_options( rocfft-test PRIVATE -fgpu-rdc )
-endif()
+# of a mismatch.
+# rocfft_c.c is plain C and must not receive HIP device flags.
+target_compile_options( rocfft-test PRIVATE
+  $<$<NOT:$<COMPILE_LANGUAGE:C>>:-Xarch_device -O3> )
 
 option( BUILD_FFTW "Download and build FFTW" OFF )
 

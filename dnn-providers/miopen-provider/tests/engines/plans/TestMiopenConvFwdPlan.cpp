@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -19,17 +21,18 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    HipdnnMiopenHandle _handle;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
 
 TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -37,7 +40,7 @@ TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params
-    ConvFwdParams params(*attrs, graph.getTensorMap());
+    const ConvFwdParams params(*attrs, graph.getTensorMap());
 
     // All required tensors should be initialized
     EXPECT_NO_THROW(params.x());
@@ -48,16 +51,16 @@ TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
 
 TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)
 {
-    std::vector<int64_t> xDims = {1, 1, 1, 1};
-    std::vector<int64_t> xStrides = {1, 1, 1, 1};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> wStrides = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 1, 1};
-    std::vector<int64_t> yStrides = {1, 1, 1, 1};
-    std::vector<int64_t> convPrePadding = {0, 0}; // Asymmetic padding
-    std::vector<int64_t> convPostPadding = {1, 1};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    const std::vector<int64_t> xDims = {1, 1, 1, 1};
+    const std::vector<int64_t> xStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> wStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> convPrePadding = {0, 0}; // Asymmetic padding
+    const std::vector<int64_t> convPostPadding = {1, 1};
+    const std::vector<int64_t> convStrides = {1, 1};
+    const std::vector<int64_t> convDilation = {1, 1};
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
                                                                        wDims,
@@ -68,8 +71,8 @@ TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -83,16 +86,16 @@ TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)
 
 TEST(TestConvFwdParams, ThrowsOnInvalidPostPaddingVectorSize)
 {
-    std::vector<int64_t> xDims = {1, 1, 1, 1};
-    std::vector<int64_t> xStrides = {1, 1, 1, 1};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> wStrides = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 1, 1};
-    std::vector<int64_t> yStrides = {1, 1, 1, 1};
-    std::vector<int64_t> convPrePadding = {0, 0};
-    std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    const std::vector<int64_t> xDims = {1, 1, 1, 1};
+    const std::vector<int64_t> xStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> wStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> convPrePadding = {0, 0};
+    const std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
+    const std::vector<int64_t> convStrides = {1, 1};
+    const std::vector<int64_t> convDilation = {1, 1};
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
                                                                        wDims,
@@ -103,8 +106,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPostPaddingVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -119,16 +122,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPostPaddingVectorSize)
 TEST(TestConvFwdParams, ThrowsOnInvalidPaddingVectorsSize)
 {
     // Create a convolution graph with invalid conv dims
-    std::vector<int64_t> xDims = {1, 1, 1, 1};
-    std::vector<int64_t> xStrides = {1, 1, 1, 1};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> wStrides = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 1, 1};
-    std::vector<int64_t> yStrides = {1, 1, 1, 1};
-    std::vector<int64_t> convPrePadding = {0, 0, 0}; // Invalid pre padding vector size
-    std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    const std::vector<int64_t> xDims = {1, 1, 1, 1};
+    const std::vector<int64_t> xStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> wStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> convPrePadding = {0, 0, 0}; // Invalid pre padding vector size
+    const std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
+    const std::vector<int64_t> convStrides = {1, 1};
+    const std::vector<int64_t> convDilation = {1, 1};
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
                                                                        wDims,
@@ -139,8 +142,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPaddingVectorsSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -154,16 +157,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPaddingVectorsSize)
 
 TEST(TestConvFwdParams, ThrowsOnInvalidStrideVectorSize)
 {
-    std::vector<int64_t> xDims = {1, 1, 1, 1};
-    std::vector<int64_t> xStrides = {1, 1, 1, 1};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> wStrides = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 1, 1};
-    std::vector<int64_t> yStrides = {1, 1, 1, 1};
-    std::vector<int64_t> convPrePadding = {0, 0};
-    std::vector<int64_t> convPostPadding = {0, 0};
-    std::vector<int64_t> convStrides = {1}; // Invalid strides vector size
-    std::vector<int64_t> convDilation = {1, 1};
+    const std::vector<int64_t> xDims = {1, 1, 1, 1};
+    const std::vector<int64_t> xStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> wStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> convPrePadding = {0, 0};
+    const std::vector<int64_t> convPostPadding = {0, 0};
+    const std::vector<int64_t> convStrides = {1}; // Invalid strides vector size
+    const std::vector<int64_t> convDilation = {1, 1};
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
                                                                        wDims,
@@ -174,8 +177,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidStrideVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -189,16 +192,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidStrideVectorSize)
 
 TEST(TestConvFwdParams, ThrowsOnInvalidDilationVectorSize)
 {
-    std::vector<int64_t> xDims = {1, 1, 1, 1};
-    std::vector<int64_t> xStrides = {1, 1, 1, 1};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> wStrides = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 1, 1};
-    std::vector<int64_t> yStrides = {1, 1, 1, 1};
-    std::vector<int64_t> convPrePadding = {0, 0};
-    std::vector<int64_t> convPostPadding = {0, 0};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1}; // Invalid dilation vector size
+    const std::vector<int64_t> xDims = {1, 1, 1, 1};
+    const std::vector<int64_t> xStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> wStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> convPrePadding = {0, 0};
+    const std::vector<int64_t> convPostPadding = {0, 0};
+    const std::vector<int64_t> convStrides = {1, 1};
+    const std::vector<int64_t> convDilation = {1}; // Invalid dilation vector size
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
                                                                        wDims,
@@ -209,8 +212,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidDilationVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -226,8 +229,8 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -238,23 +241,23 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
     ConvFwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan
-    HipdnnMiopenSettings executionSettings;
-    ConvFwdPlan(_handle, std::move(params), executionSettings);
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdPlan(*_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
 {
     // Create a convolution graph with invalid conv dims
-    std::vector<int64_t> xDims = {1, 1, 1, 1};
-    std::vector<int64_t> xStrides = {1, 1, 1, 1};
-    std::vector<int64_t> wDims = {1, 1, 1}; // Invalid w tensor dims
-    std::vector<int64_t> wStrides = {1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 1, 1};
-    std::vector<int64_t> yStrides = {1, 1, 1, 1};
-    std::vector<int64_t> convPrePadding = {0, 0};
-    std::vector<int64_t> convPostPadding = {0, 0};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    const std::vector<int64_t> xDims = {1, 1, 1, 1};
+    const std::vector<int64_t> xStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> wDims = {1, 1, 1}; // Invalid w tensor dims
+    const std::vector<int64_t> wStrides = {1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yStrides = {1, 1, 1, 1};
+    const std::vector<int64_t> convPrePadding = {0, 0};
+    const std::vector<int64_t> convPostPadding = {0, 0};
+    const std::vector<int64_t> convStrides = {1, 1};
+    const std::vector<int64_t> convDilation = {1, 1};
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
                                                                        wDims,
@@ -265,8 +268,8 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -277,16 +280,16 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
     ConvFwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    HipdnnMiopenSettings executionSettings;
-    EXPECT_THROW(ConvFwdPlan(_handle, std::move(params), executionSettings),
+    const HipdnnMiopenSettings executionSettings;
+    EXPECT_THROW(ConvFwdPlan(*_handle, std::move(params), executionSettings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
@@ -298,15 +301,15 @@ TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
     HipdnnMiopenSettings settings;
     settings.setDefaultWorkspaceSize(defaultSize);
 
-    ConvFwdPlan plan(_handle, std::move(params), settings);
-    EXPECT_EQ(plan.getWorkspaceSize(_handle), defaultSize);
+    const ConvFwdPlan plan(*_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(*_handle), defaultSize);
 }
 
 TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
@@ -320,16 +323,16 @@ TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
     settings.setDefaultWorkspaceSize(defaultSize);
     settings.setWorkspaceSizeLimit(knobLimit);
 
-    ConvFwdPlan plan(_handle, std::move(params), settings);
-    EXPECT_EQ(plan.getWorkspaceSize(_handle), knobLimit);
+    const ConvFwdPlan plan(*_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(*_handle), knobLimit);
 }
 
 TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);

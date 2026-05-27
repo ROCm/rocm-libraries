@@ -175,33 +175,11 @@ __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
     y = static_cast<FloatAccumC>(lcl_data[xlid * 2 + 1] * scale);
 }
 
-template <typename FloatAccum>
-__forceinline__ __device__ void dpp_interleaved_reduction(FloatAccum& temp_sum1,
-                                                          FloatAccum& temp_sum2)
-{
-    __asm__ volatile("s_nop 4\n"
-                     "v_add_f32 %0 %0 %0 row_shr:1 bound_ctrl:0\n"
-                     "v_add_f32 %1 %1 %1 row_shr:1 bound_ctrl:0\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_shr:2 bound_ctrl:0\n"
-                     "v_add_f32 %1 %1 %1 row_shr:2 bound_ctrl:0\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_shr:4 bank_mask:0xe\n"
-                     "v_add_f32 %1 %1 %1 row_shr:4 bank_mask:0xe\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_shr:8 bank_mask:0xc\n"
-                     "v_add_f32 %1 %1 %1 row_shr:8 bank_mask:0xc\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_bcast:15 row_mask:0xa\n"
-                     "v_add_f32 %1 %1 %1 row_bcast:15 row_mask:0xa\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_bcast:31 row_mask:0xc\n"
-                     "v_add_f32 %1 %1 %1 row_bcast:31 row_mask:0xc\n"
-                     "s_nop 0"
-                     : "=v"(temp_sum1), "=v"(temp_sum2)
-                     : "0"(temp_sum1), "1"(temp_sum2));
-}
-
+// Caller must ensure: SizeLclData >= (blockDim.x * blockDim.y * blockDim.z + warpSize - 1) /
+// warpSize
+// @warning Undefined behavior if SizeLclData is too small
+// Caller must ensure: All lanes must be active
+// @warning Undefined behavior if lanes are masked
 template <typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
                                             FloatAccum& y,
@@ -210,10 +188,12 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
                                             FloatAccum (&lcl_data_y)[SizeLclData],
                                             unsigned int lid)
 {
-    const unsigned int ldsidx = lid >> 6;
-    dpp_interleaved_reduction(x, y);
+    const unsigned int ldsidx         = lid / warpSize;
+    constexpr unsigned long long mask = 0xFFFFFFFFFFFFFFFFull;
+    x                                 = __reduce_add_sync(mask, x);
+    y                                 = __reduce_add_sync(mask, y);
     // Last thread
-    if((lid % 64) == 63)
+    if((lid % warpSize) == warpSize - 1)
     {
         lcl_data_x[ldsidx] = x;
         lcl_data_y[ldsidx] = y;

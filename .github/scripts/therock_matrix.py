@@ -5,8 +5,11 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
+    "dnn-providers/fusilli-provider": "fusilli-provider",
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
+    "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "dnn-providers/integration-tests": "dnn-provider-integration-tests",
     "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
@@ -30,6 +33,7 @@ subtree_to_project_map = {
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "blas",
+    "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
 
@@ -58,6 +62,23 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
+    "hip-kernel-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
+        ],
+        "projects_to_test": ["hipkernelprovider"],
+    },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+        ],
+        "projects_to_test": ["hipdnn-integration-tests"],
+    },
+    "fusilli-provider": {
+        "cmake_options": ["-DTHEROCK_ENABLE_IREE_LIBS=ON"],
+        "projects_to_test": ["fusilliprovider"],
+    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -83,9 +104,13 @@ additional_options = {
     "hipdnn": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+            "-DTHEROCK_ENABLE_IREE_LIBS=ON",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -93,6 +118,9 @@ additional_options = {
             "hipdnn-samples",
             "miopenprovider",
             "hipblasltprovider",
+            "hipkernelprovider",
+            "hipdnn-integration-tests",
+            "fusilliprovider",
         ],
         "project_to_add": "miopen",
     },
@@ -121,7 +149,7 @@ additional_options = {
 # If a project has dependencies that are also being built, we combine build options and test options
 # This way, there will be no S3 upload overlap and we save redundant builds
 dependency_graph = {
-    "miopen": ["blas", "rand"],
+    "miopen": ["blas", "rand", "fusilli-provider"],
 }
 
 

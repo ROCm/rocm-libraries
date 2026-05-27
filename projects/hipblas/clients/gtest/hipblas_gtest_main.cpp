@@ -319,6 +319,9 @@ int main(int argc, char** argv)
 
     ::testing::InitGoogleTest(&argc, argv);
 
+    // Free up all temporary data generated during test creation
+    test_cleanup::cleanup();
+
     // Set Google Test listener
     hipblas_set_listener();
 
@@ -343,12 +346,6 @@ int main(int argc, char** argv)
     print_version_info(); // redundant, but convenient when tests fail
 
     hipblas_print_args(args);
-
-    // Tear down HIP context before CRT/static destructors (matches
-    // hipsparse_gtest_main.cpp). Avoids intermittent Windows post-main failures
-    // where dependent DLLs (e.g. amd_comgr) fault during process exit.
-    (void)hipDeviceSynchronize();
-    (void)hipDeviceReset();
 
     return status;
 }

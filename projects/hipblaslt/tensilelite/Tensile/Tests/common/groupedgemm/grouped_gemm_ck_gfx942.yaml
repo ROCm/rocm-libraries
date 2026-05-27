@@ -5,7 +5,8 @@ GlobalParameters:
   NumElementsToValidate: -1
   NumWarmups: 0
   NumBenchmarks: 1
-  SyncsPerBenchmark: 1
+  # SyncsPerBenchmark is not set to 0: this test uses LibraryLogic which
+  # requires benchmark data to build the library table.
   EnqueuesPerSync: 1
   DataInitTypeA: 3
   DataInitTypeB: 3

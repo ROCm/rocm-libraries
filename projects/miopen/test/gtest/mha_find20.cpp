@@ -666,6 +666,12 @@ TEST(GPU_TestMhaFind20_FP32, MhaForward)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutions(handle, solutions);
+
+    for(auto& solution : solutions)
+    {
+        EXPECT_EQUAL(miopenDestroySolution(solution), miopenStatusSuccess);
+    }
+
     test.Finalize();
 }
 
@@ -679,5 +685,11 @@ TEST(GPU_TestMhaFind20_FP32, MhaBackward)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutions(handle, solutions);
+
+    for(auto& solution : solutions)
+    {
+        EXPECT_EQUAL(miopenDestroySolution(solution), miopenStatusSuccess);
+    }
+
     test.Finalize();
 }
