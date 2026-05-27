@@ -70,6 +70,7 @@ import argparse
 import json
 import re
 import subprocess
+import os
 import sys
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -345,6 +346,26 @@ def run_ck_dsl(
     attempts: int,
     experimental_down_reduce: bool = False,
 ) -> Tuple[torch.Tensor, float]:
+    # The streaming kernels (gather / silu_mul / topk_weighted_reduce)
+    # use one CTA per bucket row, so ``streaming_block_size`` must
+    # divide ``hidden``. The spec default (256) is the production-best
+    # choice; we cap at ``hidden`` for small validation shapes where
+    # the default would violate the divisibility constraint.
+    streaming_block_size = min(256, s.hidden)
+    pre_down = os.environ.get("CK_DSL_PRESHUFFLE_W_DOWN", "0") == "1"
+    pre_gu_packed = os.environ.get("CK_DSL_PRESHUFFLE_W_GATE_UP_PACKED", "0") == "1"
+    pre_gu_interleaved = (
+        os.environ.get("CK_DSL_PRESHUFFLE_W_GATE_UP_INTERLEAVED", "0") == "1"
+    )
+    active_tile_skip = os.environ.get("CK_DSL_ACTIVE_TILE_SKIP_GEMMS", "0") == "1"
+    # When the gate-up packed preshuffle is requested, force the
+    # packed kernel path (the only one that uses the BatchedGemm
+    # launcher). When the interleaved preshuffle is requested, keep
+    # the interleaved kernel.
+    if pre_gu_packed:
+        use_intl = False
+    else:
+        use_intl = True
     spec = FusedMoeForwardSpec(
         tokens=s.tokens,
         experts=s.experts,
@@ -352,11 +373,16 @@ def run_ck_dsl(
         hidden=s.hidden,
         intermediate=s.intermediate,
         dtype=s.dtype,
-        streaming_block_size=64,
+        streaming_block_size=streaming_block_size,
         streaming_vec=8,
         sort_block_size=max(64, s.experts),
         router_block_size=max(64, s.experts),
         use_experimental_fused_down_reduce=experimental_down_reduce,
+        preshuffle_w_down=pre_down,
+        preshuffle_w_gate_up_packed=pre_gu_packed,
+        preshuffle_w_gate_up_interleaved=pre_gu_interleaved,
+        use_experimental_interleaved_gate_up_silu=use_intl,
+        active_tile_skip_gemms=active_tile_skip,
     )
     fwd = FusedMoeForward(spec)
     fwd._ensure_compiled()  # keep compile out of the timed region
@@ -418,44 +444,61 @@ def run_ck_dsl(
 def run_torch_eager(
     s: Scenario, inputs: TestInputs, *, warmup: int, attempts: int
 ) -> Tuple[torch.Tensor, float]:
-    """Torch eager forward: vectorised over experts (faster than the
-    Python-loop reference, but still pure torch ops with no fusion).
+    """Torch eager forward: vectorised per-expert mask + scatter.
 
-    Implemented as a per-expert mask + scatter to keep the GEMMs
-    standard. Useful as a "what does plain torch cost" baseline.
-    The pre-computed top-k ids / weights are not used here -- ``call``
-    re-runs the router inside the timed region to match the CK DSL
-    forward.
+    Apples-to-apples target with CK DSL and Triton:
+
+    * **Same precision contract** as CK DSL / Triton — fp16 (or bf16)
+      inputs and weights, fp32 accumulator (implicit inside torch's
+      rocBLAS matmul), fp16 / bf16 output. The previous version of
+      this baseline upcast every operand to fp32 inside the per-expert
+      loop, which doubled the bytes through every matmul and inflated
+      the torch number by roughly 2x; that has been removed.
+    * **Y pre-allocated once** outside the timed window and zeroed in
+      place at the start of each ``call()`` — matches CK DSL (which
+      also takes a pre-allocated ``Y``) and Triton (which pre-allocates
+      ``Y_f32``).
+    * **Router runs inside ``call()``** to match CK DSL (whose
+      ``forward`` includes the router) and Triton (whose ``call``
+      computes ``topk`` / ``softmax`` on the host).
+
+    What the timed region still contains that CK DSL / Triton don't:
+    Python-side per-expert loop, ``mask.nonzero`` work, per-expert
+    matmul launches. That is the irreducible cost of "what torch eager
+    looks like to a real user"; this is the measurement we want.
     """
-    T, H = inputs.X.shape
     Y_dtype = inputs.X.dtype
+    T, H = inputs.X.shape
+    Y_out = torch.zeros(T, H, dtype=Y_dtype, device=inputs.X.device)
 
     def call():
-        # Re-compute router inside the timed region to match CK DSL
-        # (its forward includes the router).
+        # Router runs inside the timed region to match CK DSL.
         top_vals, top_ids_iter = torch.topk(inputs.routing_logits, k=s.topk, dim=-1)
-        top_weights_iter = torch.softmax(top_vals.float(), dim=-1)
+        top_weights_iter = torch.softmax(top_vals, dim=-1).to(Y_dtype)
 
-        Y = torch.zeros(T, H, dtype=torch.float32, device=inputs.X.device)
+        Y_out.zero_()
         for e in range(s.experts):
             mask = top_ids_iter == e  # (T, K)
             if not mask.any():
                 continue
-            # token_idx[i] = which token, slot_idx[i] = which K-slot
             token_idx, slot_idx = mask.nonzero(as_tuple=True)
             if token_idx.numel() == 0:
                 continue
-            sub_X = inputs.X[token_idx].float()  # (count, H)
-            gate = sub_X @ inputs.W_gate[e].float().T  # (count, I)
-            up = sub_X @ inputs.W_up[e].float().T  # (count, I)
+            sub_X = inputs.X[token_idx]  # (count, H)
+            # Torch's fp16/bf16 matmul on rocBLAS uses an fp32
+            # accumulator internally and downcasts the result; same
+            # numerical contract as CK DSL's MFMA pipeline.
+            gate = sub_X @ inputs.W_gate[e].T  # (count, I)
+            up = sub_X @ inputs.W_up[e].T  # (count, I)
             hidden = torch.nn.functional.silu(gate) * up  # (count, I)
-            out = hidden @ inputs.W_down[e].float().T  # (count, H)
+            out = hidden @ inputs.W_down[e].T  # (count, H)
             w = top_weights_iter[token_idx, slot_idx].unsqueeze(-1)  # (count, 1)
-            Y.index_add_(0, token_idx, w * out)
-        return Y.to(Y_dtype)
+            Y_out.index_add_(0, token_idx, w * out)
+        return Y_out
 
-    # Capture one output for correctness check.
-    Y_correct = call()
+    # Capture one output for correctness check (clone so we keep the
+    # value across subsequent timed iterations that overwrite Y_out).
+    Y_correct = call().clone()
     ms = time_callable_ms(lambda: call(), warmup=warmup, attempts=attempts)
     return Y_correct, ms
 
@@ -597,7 +640,13 @@ def run_triton(
     T = s.tokens
     K = s.topk
 
+    # Pre-allocate both the fp32 atomic-add accumulator (Triton's
+    # ``tl.atomic_add`` only accepts fp32) and the fp16/bf16 output
+    # tensor. Doing both outside the timed window keeps the timed
+    # ``call()`` allocation-free, matching CK DSL's contract (output
+    # buffer passed in by the caller).
     Y_f32 = torch.zeros(T, H, dtype=torch.float32, device="cuda")
+    Y_out = torch.empty(T, H, dtype=inputs.X.dtype, device="cuda")
     # BLOCK_H must be a constexpr power-of-2 (Triton's tl.arange).
     # We pick the smallest power-of-2 >= H that fits in shared regs;
     # for H > 4096 we'd need tiling on the H axis too -- for the
@@ -609,7 +658,7 @@ def run_triton(
 
     def call():
         top_vals, top_ids_iter = torch.topk(inputs.routing_logits, k=K, dim=-1)
-        top_w = torch.softmax(top_vals.float(), dim=-1).contiguous()
+        top_w = torch.softmax(top_vals, dim=-1).contiguous()
         top_ids_int = top_ids_iter.to(torch.int32).contiguous()
         Y_f32.zero_()
         _TRITON_MOE_KERNEL[(T * K,)](
@@ -627,7 +676,10 @@ def run_triton(
             BLOCK_H,
             BLOCK_I,
         )
-        return Y_f32.to(inputs.X.dtype)
+        # Cast in-place into the pre-allocated output buffer instead
+        # of allocating a fresh fp16 / bf16 tensor each call.
+        Y_out.copy_(Y_f32)
+        return Y_out
 
     try:
         out = call()

@@ -1,0 +1,76 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "base_tile": {
+    "tile_m": 16,
+    "tile_n": 16,
+    "tile_k": 512,
+    "warp_m": 1,
+    "warp_n": 1,
+    "warp_k": 1,
+    "warp_tile_m": 16,
+    "warp_tile_n": 16,
+    "warp_tile_k": 32
+  },
+  "rocblas_ms": 0.011,
+  "results": [
+    {
+      "label": "llvm_default",
+      "ms_median": 0.01346952747553587,
+      "ms_best": 0.013381224125623703,
+      "tflops_best": 5.015151332193387,
+      "gbs_best": 2510.0244704581164,
+      "pct_hbm": 31.375305880726458,
+      "vs_rocblas_ratio": 1.2164749205112457,
+      "max_abs_diff": 0.0,
+      "compile_ms": 61.56074721366167
+    },
+    {
+      "label": "hipcc_O3",
+      "ms_median": 0.01345883123576641,
+      "ms_best": 0.01341862604022026,
+      "tflops_best": 5.001172534270761,
+      "gbs_best": 2503.0282459118803,
+      "pct_hbm": 31.287853073898503,
+      "vs_rocblas_ratio": 1.2198750945654784,
+      "max_abs_diff": 0.0,
+      "compile_ms": 407.424358651042
+    },
+    {
+      "label": "hipcc_O3_ffast",
+      "ms_median": 0.013407524675130844,
+      "ms_best": 0.013357126154005527,
+      "tflops_best": 5.02419930951056,
+      "gbs_best": 2514.5528770743763,
+      "pct_hbm": 31.431910963429704,
+      "vs_rocblas_ratio": 1.2142841958186843,
+      "max_abs_diff": 0.0,
+      "compile_ms": 405.3792944177985
+    },
+    {
+      "label": "hipcc_O3_flushdenorm",
+      "ms_median": 0.013464321382343769,
+      "ms_best": 0.013394174166023731,
+      "tflops_best": 5.010302476895618,
+      "gbs_best": 2507.5976752041056,
+      "pct_hbm": 31.34497094005132,
+      "vs_rocblas_ratio": 1.2176521969112484,
+      "max_abs_diff": 0.0,
+      "compile_ms": 400.0195739790797
+    },
+    {
+      "label": "hipcc_O3_inline_all",
+      "ms_median": 0.013468773104250431,
+      "ms_best": 0.013384278863668442,
+      "tflops_best": 5.014006707687979,
+      "gbs_best": 2509.4515993067275,
+      "pct_hbm": 31.368144991334095,
+      "vs_rocblas_ratio": 1.2167526239698585,
+      "max_abs_diff": 0.0,
+      "compile_ms": 404.17667012661695
+    }
+  ]
+}

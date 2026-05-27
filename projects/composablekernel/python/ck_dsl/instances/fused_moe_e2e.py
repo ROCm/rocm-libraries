@@ -292,6 +292,67 @@ class FusedMoeForwardSpec:
     loses to the older two-kernel ``scatter -> gather`` sequence's
     memory pattern. Kept opt-in for further tuning.
     """
+    preshuffle_w_down: bool = False
+    """Pre-shuffle ``W_down`` and use a ``preshuffle_b=True`` BatchedGemm
+    for the down stage.
+
+    The host re-arranges ``W_down`` from ``(E, hidden, intermediate)``
+    row-major to ``(E, k_tiles, n_tiles, block_n, block_k)`` contiguous
+    so each per-K-tile B-load in the down GEMM collapses to one wide
+    ``buffer_load_dwordx<N>`` per warp. Standalone batched-GEMM
+    measurements show 1.5-2.1x speedup; integrating into the
+    fused-MoE pipeline benefits the down stage proportionally.
+
+    This is the optimization-runbook §12.1.H lever, finally
+    implemented (was a documented but silently-ignored knob through
+    rounds 1-9 of the case study).
+
+    Constraints:
+    * ``hidden % tile_n == 0`` and ``intermediate % tile_k == 0`` (MoE
+      models with 64- or 128-aligned hidden / intermediate satisfy
+      this trivially).
+    * Adds a one-time host-side preshuffle on first ``forward``; the
+      result is cached against ``W_down.data_ptr()`` so steady-state
+      cost is zero.
+    """
+    preshuffle_w_gate_up_packed: bool = False
+    """Pre-shuffle the packed gate+up weights and use a
+    ``preshuffle_b=True`` BatchedGemm for the gate-up stage when the
+    packed (non-interleaved) path is selected.
+
+    Only takes effect when ``use_experimental_interleaved_gate_up_silu``
+    is False (i.e. the ``gu_concat`` packed path is active).
+    """
+    preshuffle_w_gate_up_interleaved: bool = False
+    """Pre-shuffle the interleaved gate+up weights and use a
+    ``preshuffle_b=True`` interleaved gate-up GEMM kernel.
+
+    Takes effect when ``use_experimental_interleaved_gate_up_silu``
+    is True (the production-default path). Same layout transform as
+    :attr:`preshuffle_w_down`, applied to the interleaved gate-up
+    weight tensor ``WGateUp[e, 2*i, :] = W_gate[e, i, :];
+    WGateUp[e, 2*i+1, :] = W_up[e, i, :]``.
+    """
+    active_tile_skip_gemms: bool = False
+    """Use ``trait.active_tile_skip=True`` MoE GEMM kernels.
+
+    The kernel takes the existing ``sorted_token_ids_padded`` buffer
+    plus the ``slot_size`` constant, and at CTA entry checks whether
+    the first row of its (expert, m-tile) slot has a valid token id
+    (``>= 0``). Inactive tiles (``-1`` sentinel) skip all MFMAs,
+    LDS reads, and HBM stores via a single ``scf.if`` predicate. This
+    is the runbook §17.6 active-tile dispatch lever; it is the
+    largest measured win for sparse-routing decode shapes (E >>
+    topk*tokens), where the canonical kernel runs full GEMM work
+    for inactive expert slots that contribute nothing.
+
+    Applied to the interleaved gate-up GEMM and the down BatchedGemm
+    when those launchers are active. Composes with the preshuffle
+    knobs (each preshuffle_b launcher gets its own active-tile
+    variant). The flag is a strict no-op for fully-active calls
+    (every expert receives at least one token); standalone tests
+    show 0 % overhead in that case.
+    """
 
     @property
     def total_pairs(self) -> int:
@@ -335,6 +396,23 @@ class FusedMoeForwardSpec:
         trait = TraitSpec(pad_m=True)
         return GroupedGemmSpec(
             name=f"{self.name}_{name_suffix}",
+            tile=self.gemm_tile,
+            trait=trait,
+        )
+
+    def to_batched_gemm_spec_preshuffle_b(self) -> BatchedGemmSpec:
+        """Variant of :meth:`to_batched_gemm_spec` with
+        ``trait.preshuffle_b=True``.
+
+        The orchestrator builds a parallel launcher for the down (and
+        optionally gate-up packed) stage when ``preshuffle_w_down``
+        / ``preshuffle_w_gate_up_packed`` are enabled, so the
+        non-preshuffle launcher remains intact for any stage that
+        does not have host-shuffled weights.
+        """
+        trait = TraitSpec(pad_m=True, pad_n=True, preshuffle_b=True)
+        return BatchedGemmSpec(
+            name=f"{self.name}_batched_gemm",
             tile=self.gemm_tile,
             trait=trait,
         )
@@ -412,6 +490,22 @@ class FusedMoeForward:
         self._topk_launcher: Optional[KernelLauncher] = None
         self._gemm_launcher: Optional[GroupedGemmLauncher] = None
         self._batched_gemm_launcher: Optional[KernelLauncher] = None
+        self._batched_gemm_preshuffle_b_launcher: Optional[KernelLauncher] = None
+        self._w_down_preshuffled: Optional[Any] = None
+        self._w_down_preshuffled_key: Optional[Tuple[int, int, int]] = None
+        self._gu_concat_preshuffled: Optional[Any] = None
+        self._gu_concat_preshuffled_key: Optional[Tuple[int, int, int]] = None
+        self._gu_interleaved_preshuffled: Optional[Any] = None
+        self._gu_interleaved_preshuffled_key: Optional[Tuple[int, int, int]] = None
+        self._interleaved_gate_up_silu_preshuffle_launcher: Optional[KernelLauncher] = (
+            None
+        )
+        # Parameterized launcher cache for the active-tile-skip variants
+        # (and combinations with preshuffle_b). Keyed on
+        # ``(kind, preshuffle_b, active_tile_skip)`` so each unique
+        # MoE-GEMM-trait combo lives in its own HSACO slot. ``kind``
+        # is one of ``"batched"`` or ``"interleaved_gate_up_silu"``.
+        self._moe_gemm_launcher_cache: dict = {}
         # Optional HIP graph capture for the static-mode forward.
         # When enabled, the first forward call warms up + captures a
         # graph; subsequent calls replay it, eliminating per-launch
@@ -518,6 +612,165 @@ class FusedMoeForward:
             )
         return self._batched_gemm_launcher
 
+    def _moe_batched_gemm_launcher(
+        self, *, preshuffle_b: bool, active_tile_skip: bool
+    ) -> KernelLauncher:
+        """Return a cached BatchedGemm launcher for any combination of
+        ``preshuffle_b`` and ``active_tile_skip`` traits.
+
+        Builds the spec on first use, compiles to HSACO, and caches the
+        :class:`KernelLauncher` keyed on the trait combination so each
+        unique kernel binary lives in exactly one slot for the lifetime
+        of this :class:`FusedMoeForward`.
+        """
+        key = ("batched", bool(preshuffle_b), bool(active_tile_skip))
+        cached = self._moe_gemm_launcher_cache.get(key)
+        if cached is not None:
+            return cached
+        trait = TraitSpec(
+            pad_m=True,
+            pad_n=True,
+            preshuffle_b=preshuffle_b,
+            active_tile_skip=active_tile_skip,
+        )
+        spec = BatchedGemmSpec(
+            name=f"{self.spec.name}_batched_gemm",
+            tile=self.spec.gemm_tile,
+            trait=trait,
+        )
+        artifact = compile_kernel(build_batched_gemm(spec), capture_ir_text=False)
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=batched_gemm_signature(spec),
+            cache_key=("batched_gemm_moe", spec.kernel_name()),
+        )
+        self._moe_gemm_launcher_cache[key] = launcher
+        return launcher
+
+    def _moe_interleaved_gate_up_silu_launcher(
+        self, *, preshuffle_b: bool, active_tile_skip: bool
+    ) -> KernelLauncher:
+        """Return a cached interleaved-gate+up+silu launcher for any
+        combination of ``preshuffle_b`` and ``active_tile_skip`` traits.
+
+        Same caching contract as
+        :meth:`_moe_batched_gemm_launcher` but for the
+        :func:`build_moe_interleaved_gate_up_silu_gemm` body.
+        """
+        key = (
+            "interleaved_gate_up_silu",
+            bool(preshuffle_b),
+            bool(active_tile_skip),
+        )
+        cached = self._moe_gemm_launcher_cache.get(key)
+        if cached is not None:
+            return cached
+        trait = TraitSpec(
+            pad_m=True,
+            pad_n=True,
+            epilogue="default",
+            preshuffle_b=preshuffle_b,
+            active_tile_skip=active_tile_skip,
+        )
+        spec = FusedInterleavedGateUpSiluGemmSpec(
+            name=f"{self.spec.name}_interleaved_gate_up_silu",
+            tile=self.spec.gemm_tile,
+            trait=trait,
+        )
+        artifact = compile_kernel(
+            build_moe_interleaved_gate_up_silu_gemm(spec), capture_ir_text=False
+        )
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=moe_interleaved_gate_up_silu_gemm_signature(spec),
+            cache_key=("moe_interleaved_gate_up_silu_moe", spec.kernel_name()),
+        )
+        self._moe_gemm_launcher_cache[key] = launcher
+        return launcher
+
+    def _ensure_batched_gemm_preshuffle_b_launcher(self) -> KernelLauncher:
+        """Compile + cache the ``preshuffle_b=True`` batched GEMM kernel.
+
+        Used by stages whose B operand has been pre-shuffled on the
+        host (``preshuffle_w_down`` and ``preshuffle_w_gate_up_packed``).
+        Kernel name carries the ``preb`` flag so this binary lives in
+        a separate cache slot from the canonical kernel.
+        """
+        if self._batched_gemm_preshuffle_b_launcher is None:
+            spec = self.spec.to_batched_gemm_spec_preshuffle_b()
+            artifact = compile_kernel(build_batched_gemm(spec), capture_ir_text=False)
+            self._batched_gemm_preshuffle_b_launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=batched_gemm_signature(spec),
+                cache_key=("batched_gemm_preshuffle_b", spec.kernel_name()),
+            )
+        return self._batched_gemm_preshuffle_b_launcher
+
+    @staticmethod
+    def _host_preshuffle_b(W: Any, block_n: int, block_k: int) -> Any:
+        """Re-arrange ``(E, N, K)`` row-major B  ->  ``(E, k_tiles, n_tiles,
+        block_n, block_k)`` contiguous, the layout the
+        ``preshuffle_b=True`` BatchedGemm expects.
+
+        The returned tensor has the same total element count and
+        per-batch byte size as the input -- only the in-tile element
+        order changes.
+        """
+        E, N, K = W.shape
+        if N % block_n or K % block_k:
+            raise ValueError(
+                f"preshuffle_b requires N({N}) % block_n({block_n}) == 0 and "
+                f"K({K}) % block_k({block_k}) == 0"
+            )
+        n_tiles = N // block_n
+        k_tiles = K // block_k
+        return (
+            W.view(E, n_tiles, block_n, k_tiles, block_k)
+            .permute(0, 3, 1, 2, 4)
+            .contiguous()
+        )
+
+    def _ensure_w_down_preshuffled(self, W_down: Any) -> Any:
+        """Cache + return the host-preshuffled W_down for the down stage.
+
+        Keyed on ``(data_ptr, block_n, block_k)`` so reusing the same
+        weights across calls (the production-inference pattern) reuses
+        the cached preshuffle; passing different weights or changing
+        the GEMM tile triggers a re-shuffle.
+        """
+        block_n = self.spec.gemm_tile.tile_n
+        block_k = self.spec.gemm_tile.tile_k
+        key = (int(W_down.data_ptr()), block_n, block_k)
+        if self._w_down_preshuffled is not None and self._w_down_preshuffled_key == key:
+            return self._w_down_preshuffled
+        self._w_down_preshuffled = self._host_preshuffle_b(W_down, block_n, block_k)
+        self._w_down_preshuffled_key = key
+        return self._w_down_preshuffled
+
+    def _ensure_gu_concat_preshuffled(self, W_gate: Any, W_up: Any) -> Any:
+        """Cache + return host-preshuffled gate-up packed weights.
+
+        Builds ``torch.cat([W_gate, W_up], dim=1)`` and preshuffles in
+        one step (no intermediate canonical-layout cache).
+        """
+        import torch
+
+        block_n = self.spec.gemm_tile.tile_n
+        block_k = self.spec.gemm_tile.tile_k
+        key = (int(W_gate.data_ptr()), int(W_up.data_ptr()), block_n)
+        if (
+            self._gu_concat_preshuffled is not None
+            and self._gu_concat_preshuffled_key == key
+        ):
+            return self._gu_concat_preshuffled
+        gu = torch.cat([W_gate, W_up], dim=1).contiguous()
+        self._gu_concat_preshuffled = self._host_preshuffle_b(gu, block_n, block_k)
+        self._gu_concat_preshuffled_key = key
+        return self._gu_concat_preshuffled
+
     def _ensure_silu_mul_packed_launcher(self) -> KernelLauncher:
         """Compile + cache the packed silu_mul kernel.
 
@@ -581,6 +834,71 @@ class FusedMoeForward:
                 cache_key=("moe_interleaved_gate_up_silu", spec.kernel_name()),
             )
         return self._interleaved_gate_up_silu_launcher
+
+    def _ensure_interleaved_gate_up_silu_preshuffle_launcher(
+        self,
+    ) -> KernelLauncher:
+        """Compile + cache the ``preshuffle_b=True`` variant of the
+        interleaved gate/up GEMM kernel.
+
+        Same kernel body as :meth:`_ensure_interleaved_gate_up_silu_launcher`
+        but emits the wide contiguous B-load path (``b_global_load_vN`` on
+        a host-preshuffled tile buffer) instead of the strided per-row
+        path.
+        """
+        if self._interleaved_gate_up_silu_preshuffle_launcher is None:
+            spec = FusedInterleavedGateUpSiluGemmSpec(
+                name=f"{self.spec.name}_interleaved_gate_up_silu",
+                tile=self.spec.gemm_tile,
+                trait=TraitSpec(
+                    pad_m=True,
+                    pad_n=True,
+                    epilogue="default",
+                    preshuffle_b=True,
+                ),
+            )
+            artifact = compile_kernel(
+                build_moe_interleaved_gate_up_silu_gemm(spec),
+                capture_ir_text=False,
+            )
+            self._interleaved_gate_up_silu_preshuffle_launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=moe_interleaved_gate_up_silu_gemm_signature(spec),
+                cache_key=(
+                    "moe_interleaved_gate_up_silu_preshuffle_b",
+                    spec.kernel_name(),
+                ),
+            )
+        return self._interleaved_gate_up_silu_preshuffle_launcher
+
+    def _ensure_gu_interleaved_preshuffled(self, W_gate: Any, W_up: Any) -> Any:
+        """Cache + return the host-preshuffled interleaved gate-up
+        weights for the ``preshuffle_b=True`` interleaved kernel.
+
+        Builds the canonical interleaved layout
+        (``out[:, 2*i, :] = W_gate[:, i, :], out[:, 2*i+1, :] = W_up[:, i, :]``)
+        and applies the
+        ``(E, k_tiles, n_tiles, block_n, block_k)`` shuffle.
+        """
+        import torch
+
+        block_n = self.spec.gemm_tile.tile_n
+        block_k = self.spec.gemm_tile.tile_k
+        key = (int(W_gate.data_ptr()), int(W_up.data_ptr()), block_n)
+        if (
+            self._gu_interleaved_preshuffled is not None
+            and self._gu_interleaved_preshuffled_key == key
+        ):
+            return self._gu_interleaved_preshuffled
+        gu = (
+            torch.stack((W_gate, W_up), dim=2)
+            .reshape(W_gate.shape[0], 2 * W_gate.shape[1], W_gate.shape[2])
+            .contiguous()
+        )
+        self._gu_interleaved_preshuffled = self._host_preshuffle_b(gu, block_n, block_k)
+        self._gu_interleaved_preshuffled_key = key
+        return self._gu_interleaved_preshuffled
 
     def _ensure_down_reduce_launcher(self) -> KernelLauncher:
         """Compile + cache fused down GEMM with weighted atomic epilogue."""
@@ -669,6 +987,10 @@ class FusedMoeForward:
         self._sort_launcher._ensure_launchers()
         self._fused_moe_launcher._ensure_launchers()
         self._ensure_batched_gemm_launcher()
+        if self.spec.preshuffle_w_down or self.spec.preshuffle_w_gate_up_packed:
+            self._ensure_batched_gemm_preshuffle_b_launcher()
+        if self.spec.preshuffle_w_gate_up_interleaved:
+            self._ensure_interleaved_gate_up_silu_preshuffle_launcher()
         self._ensure_silu_mul_packed_launcher()
         self._ensure_gate_up_silu_launcher()
         self._ensure_interleaved_gate_up_silu_launcher()
@@ -1072,35 +1394,40 @@ class FusedMoeForward:
             (max_padded_m + tile_m - 1) // tile_m,
             s.experts,
         )
-        gate_callable = make_kernel(
-            batched_gemm_launcher,
-            {
+        if s.active_tile_skip_gemms:
+            gate_up_dyn_launcher = self._moe_batched_gemm_launcher(
+                preshuffle_b=False,
+                active_tile_skip=True,
+            )
+        else:
+            gate_up_dyn_launcher = batched_gemm_launcher
+
+        def _gate_up_args(B_tensor, C_tensor):
+            args = {
                 "A": grouped_input_padded,
-                "B": W_gate,
-                "C": gate_out_padded,
+                "B": B_tensor,
+                "C": C_tensor,
                 "M": max_padded_m,
                 "N": s.intermediate,
                 "K": s.hidden,
                 "stride_a": max_padded_m * s.hidden,
                 "stride_b": s.intermediate * s.hidden,
                 "stride_c": max_padded_m * s.intermediate,
-            },
+            }
+            if s.active_tile_skip_gemms:
+                args["SortedTokenIds"] = sorted_token_ids_padded
+                args["slot_size"] = max_padded_m
+            return args
+
+        gate_callable = make_kernel(
+            gate_up_dyn_launcher,
+            _gate_up_args(W_gate, gate_out_padded),
             gate_grid,
             gemm_block,
         )
         up_callable = make_kernel(
-            batched_gemm_launcher,
-            {
-                "A": grouped_input_padded,
-                "B": W_up,
-                "C": up_out_padded,
-                "M": max_padded_m,
-                "N": s.intermediate,
-                "K": s.hidden,
-                "stride_a": max_padded_m * s.hidden,
-                "stride_b": s.intermediate * s.hidden,
-                "stride_c": max_padded_m * s.intermediate,
-            },
+            gate_up_dyn_launcher,
+            _gate_up_args(W_up, up_out_padded),
             gate_grid,
             gemm_block,
         )
@@ -1121,19 +1448,39 @@ class FusedMoeForward:
             (max_padded_m + tile_m - 1) // tile_m,
             s.experts,
         )
+        if s.active_tile_skip_gemms:
+            down_b_launcher = self._moe_batched_gemm_launcher(
+                preshuffle_b=s.preshuffle_w_down,
+                active_tile_skip=True,
+            )
+            down_b_tensor = (
+                self._ensure_w_down_preshuffled(W_down)
+                if s.preshuffle_w_down
+                else W_down
+            )
+        elif s.preshuffle_w_down:
+            down_b_launcher = self._ensure_batched_gemm_preshuffle_b_launcher()
+            down_b_tensor = self._ensure_w_down_preshuffled(W_down)
+        else:
+            down_b_launcher = batched_gemm_launcher
+            down_b_tensor = W_down
+        down_args = {
+            "A": hidden_padded,
+            "B": down_b_tensor,
+            "C": down_out_padded,
+            "M": max_padded_m,
+            "N": s.hidden,
+            "K": s.intermediate,
+            "stride_a": max_padded_m * s.intermediate,
+            "stride_b": s.hidden * s.intermediate,
+            "stride_c": max_padded_m * s.hidden,
+        }
+        if s.active_tile_skip_gemms:
+            down_args["SortedTokenIds"] = sorted_token_ids_padded
+            down_args["slot_size"] = max_padded_m
         down_callable = make_kernel(
-            batched_gemm_launcher,
-            {
-                "A": hidden_padded,
-                "B": W_down,
-                "C": down_out_padded,
-                "M": max_padded_m,
-                "N": s.hidden,
-                "K": s.intermediate,
-                "stride_a": max_padded_m * s.intermediate,
-                "stride_b": s.hidden * s.intermediate,
-                "stride_c": max_padded_m * s.hidden,
-            },
+            down_b_launcher,
+            down_args,
             down_grid,
             gemm_block,
         )
@@ -1218,9 +1565,17 @@ class FusedMoeForward:
         if self.spec.use_experimental_fused_gate_up_silu:
             pass
         elif self.spec.use_experimental_interleaved_gate_up_silu:
-            self._ensure_gu_interleaved(W_gate, W_up)
+            if self.spec.preshuffle_w_gate_up_interleaved:
+                self._ensure_gu_interleaved_preshuffled(W_gate, W_up)
+            else:
+                self._ensure_gu_interleaved(W_gate, W_up)
         else:
-            self._ensure_gu_concat(W_gate, W_up)
+            if self.spec.preshuffle_w_gate_up_packed:
+                self._ensure_gu_concat_preshuffled(W_gate, W_up)
+            else:
+                self._ensure_gu_concat(W_gate, W_up)
+        if self.spec.preshuffle_w_down:
+            self._ensure_w_down_preshuffled(W_down)
 
         # Warmup on a side stream. The first warmup populates the
         # pool (allocations); subsequent warmups run on the same
@@ -1411,11 +1766,24 @@ class FusedMoeForward:
         gate_up_silu_launcher = (
             self._ensure_gate_up_silu_launcher() if use_experimental_fused else None
         )
-        interleaved_gate_up_silu_launcher = (
-            self._ensure_interleaved_gate_up_silu_launcher()
-            if use_experimental_interleaved
-            else None
-        )
+        if use_experimental_interleaved:
+            if s.active_tile_skip_gemms:
+                interleaved_gate_up_silu_launcher = (
+                    self._moe_interleaved_gate_up_silu_launcher(
+                        preshuffle_b=s.preshuffle_w_gate_up_interleaved,
+                        active_tile_skip=True,
+                    )
+                )
+            elif s.preshuffle_w_gate_up_interleaved:
+                interleaved_gate_up_silu_launcher = (
+                    self._ensure_interleaved_gate_up_silu_preshuffle_launcher()
+                )
+            else:
+                interleaved_gate_up_silu_launcher = (
+                    self._ensure_interleaved_gate_up_silu_launcher()
+                )
+        else:
+            interleaved_gate_up_silu_launcher = None
         down_reduce_launcher = (
             self._ensure_down_reduce_launcher()
             if use_experimental_down_reduce
@@ -1436,11 +1804,13 @@ class FusedMoeForward:
             if (use_experimental_fused or use_experimental_interleaved)
             else self._ensure_gu_concat(W_gate, W_up)
         )
-        gu_interleaved = (
-            self._ensure_gu_interleaved(W_gate, W_up)
-            if use_experimental_interleaved
-            else None
-        )
+        if use_experimental_interleaved:
+            if s.preshuffle_w_gate_up_interleaved:
+                gu_interleaved = self._ensure_gu_interleaved_preshuffled(W_gate, W_up)
+            else:
+                gu_interleaved = self._ensure_gu_interleaved(W_gate, W_up)
+        else:
+            gu_interleaved = None
 
         # ---- Build callables ----
         router_grid = topk_softmax_grid(s.tokens, s.to_topk_softmax_spec())
@@ -1560,22 +1930,31 @@ class FusedMoeForward:
             inter_spec = FusedInterleavedGateUpSiluGemmSpec(
                 name=f"{self.spec.name}_interleaved_gate_up_silu",
                 tile=self.spec.gemm_tile,
-                trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                trait=TraitSpec(
+                    pad_m=True,
+                    pad_n=True,
+                    epilogue="default",
+                    active_tile_skip=s.active_tile_skip_gemms,
+                ),
             )
+            gate_up_args = {
+                "A": grouped_input_padded,
+                "WGateUp": gu_interleaved,
+                "Hidden": hidden_padded,
+                "M": slot_size,
+                "N": s.intermediate,
+                "K": s.hidden,
+                "stride_a": slot_size * s.hidden,
+                "stride_b": (2 * s.intermediate) * s.hidden,
+                "stride_c": slot_size * s.intermediate,
+            }
+            if s.active_tile_skip_gemms:
+                gate_up_args["SortedTokenIds"] = sorted_token_ids_padded
+                gate_up_args["slot_size"] = slot_size
             gate_stage_callables = [
                 make_kernel(
                     interleaved_gate_up_silu_launcher,
-                    {
-                        "A": grouped_input_padded,
-                        "WGateUp": gu_interleaved,
-                        "Hidden": hidden_padded,
-                        "M": slot_size,
-                        "N": s.intermediate,
-                        "K": s.hidden,
-                        "stride_a": slot_size * s.hidden,
-                        "stride_b": (2 * s.intermediate) * s.hidden,
-                        "stride_c": slot_size * s.intermediate,
-                    },
+                    gate_up_args,
                     moe_interleaved_gate_up_silu_gemm_grid(
                         s.experts, slot_size, s.intermediate, inter_spec
                     ),
@@ -1594,19 +1973,39 @@ class FusedMoeForward:
                 (slot_size + tile_m - 1) // tile_m,
                 s.experts,
             )
+            if s.active_tile_skip_gemms:
+                gate_up_b_launcher = self._moe_batched_gemm_launcher(
+                    preshuffle_b=s.preshuffle_w_gate_up_packed,
+                    active_tile_skip=True,
+                )
+                gate_up_b_tensor = (
+                    self._ensure_gu_concat_preshuffled(W_gate, W_up)
+                    if s.preshuffle_w_gate_up_packed
+                    else gu_concat
+                )
+            elif s.preshuffle_w_gate_up_packed:
+                gate_up_b_launcher = self._ensure_batched_gemm_preshuffle_b_launcher()
+                gate_up_b_tensor = self._ensure_gu_concat_preshuffled(W_gate, W_up)
+            else:
+                gate_up_b_launcher = batched_gemm_launcher
+                gate_up_b_tensor = gu_concat
+            gate_up_args = {
+                "A": grouped_input_padded,
+                "B": gate_up_b_tensor,
+                "C": gate_up_packed,
+                "M": slot_size,
+                "N": gate_up_n,
+                "K": s.hidden,
+                "stride_a": slot_size * s.hidden,
+                "stride_b": gate_up_n * s.hidden,
+                "stride_c": slot_size * gate_up_n,
+            }
+            if s.active_tile_skip_gemms:
+                gate_up_args["SortedTokenIds"] = sorted_token_ids_padded
+                gate_up_args["slot_size"] = slot_size
             gate_up_callable = make_kernel(
-                batched_gemm_launcher,
-                {
-                    "A": grouped_input_padded,
-                    "B": gu_concat,
-                    "C": gate_up_packed,
-                    "M": slot_size,
-                    "N": gate_up_n,
-                    "K": s.hidden,
-                    "stride_a": slot_size * s.hidden,
-                    "stride_b": gate_up_n * s.hidden,
-                    "stride_c": slot_size * gate_up_n,
-                },
+                gate_up_b_launcher,
+                gate_up_args,
                 gate_up_grid,
                 gemm_block,
             )
@@ -1657,19 +2056,39 @@ class FusedMoeForward:
                 )
             ]
         else:
+            if s.active_tile_skip_gemms:
+                down_b_launcher = self._moe_batched_gemm_launcher(
+                    preshuffle_b=s.preshuffle_w_down,
+                    active_tile_skip=True,
+                )
+                down_b_tensor = (
+                    self._ensure_w_down_preshuffled(W_down)
+                    if s.preshuffle_w_down
+                    else W_down
+                )
+            elif s.preshuffle_w_down:
+                down_b_launcher = self._ensure_batched_gemm_preshuffle_b_launcher()
+                down_b_tensor = self._ensure_w_down_preshuffled(W_down)
+            else:
+                down_b_launcher = batched_gemm_launcher
+                down_b_tensor = W_down
+            down_args = {
+                "A": hidden_padded,
+                "B": down_b_tensor,
+                "C": down_out_padded,
+                "M": slot_size,
+                "N": s.hidden,
+                "K": s.intermediate,
+                "stride_a": slot_size * s.intermediate,
+                "stride_b": s.hidden * s.intermediate,
+                "stride_c": slot_size * s.hidden,
+            }
+            if s.active_tile_skip_gemms:
+                down_args["SortedTokenIds"] = sorted_token_ids_padded
+                down_args["slot_size"] = slot_size
             down_callable = make_kernel(
-                batched_gemm_launcher,
-                {
-                    "A": hidden_padded,
-                    "B": W_down,
-                    "C": down_out_padded,
-                    "M": slot_size,
-                    "N": s.hidden,
-                    "K": s.intermediate,
-                    "stride_a": slot_size * s.intermediate,
-                    "stride_b": s.hidden * s.intermediate,
-                    "stride_c": slot_size * s.hidden,
-                },
+                down_b_launcher,
+                down_args,
                 down_grid,
                 gemm_block,
             )
