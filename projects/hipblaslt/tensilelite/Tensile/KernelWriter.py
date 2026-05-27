@@ -3668,8 +3668,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # initialize SubTileIdx
     self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
-    label_unrolledLoop_iter1 = Label("unrolledLoop_iter1", "", alignment=16)
-
     # not generate openLoop for firstIter
     if not firstIter and not initCIter:
       module.addComment2("Unrolled Loop %u/%u - Begin" % (lc+1, loopCopies))
@@ -3911,9 +3909,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if initCIter and uIdx==0:
         module.addComment2("Init C with wmma(mfma) - Begin")
 
-      if (lc==0 and (uIdx==1)) and not initCIter:
-        module.add(label_unrolledLoop_iter1)
-
       if kernel["UseCustomMainLoopSchedule"]:
         LRCodeAAllIters.append(Module())
         LRCodeBAllIters.append(Module())
@@ -3975,7 +3970,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if kernel["ForceUnrollSubIter"]:
         module.addComment1("subiter %u"%(u))
-      elif not initCIter or uIdx==0:
+      else:
         module.addComment1("iter %u%s"%(u,extraComment))
 
       plrIdx = (u+pflr) % self.states.numVgprBuffer
@@ -4352,7 +4347,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
       if kernel["EnableMatrixInstruction"]:
-        mfmaIter = self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollLoopIdx=lc, unrollIdx = u, initCIterWmma=initCIter)
+        mfmaIter = self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollLoopIdx=lc, unrollIdx = u, initCIterWmma=(initCIter and uIdx == 0))
         if kernel["UseCustomMainLoopSchedule"]:
           MfmaCodeAllIters.add(mfmaIter)
         else:
@@ -4384,9 +4379,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not kernel["UseCustomMainLoopSchedule"]:
         subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
-        # In initCIter, all iterations must be traversed to handle packPre state updates, but only the first iteration needs to generate actual instructions.
-        if not initCIter or uIdx == 0:
-          module.add(subIterCode) # add scheduled "other", local reads, local writes
+        module.add(subIterCode) # add scheduled "other", local reads, local writes
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       # reset pack/packPre code
@@ -4413,13 +4406,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if initCIter:
       module.addComment2("Init C with wmma(mfma) - End")
-      if kernel["LoopIters"] > 1:
-        module.add(SBranch(label_unrolledLoop_iter1.getLabelName()))
-    oddLabel = (lc == 0 and loopCopies == 2) 
+    oddLabel = (lc == 0 and loopCopies == 2)
     if not skipClose and not kernel["UseCustomMainLoopSchedule"]:
         if not initCIter:
           module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel))
-        elif kernel["LoopIters"] <= 1:
+        else:
+          # initC consumed one K iteration: dec counter and fall through to origin loop's begin label
           module.add(self.decCounter(kernel))
 
     return module
