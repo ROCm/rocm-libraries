@@ -4550,7 +4550,7 @@ class KernelWriterAssembly(KernelWriter):
     tileInfoA       = self.states.a.tileInfo
     subtileKElems   = int(tileInfoA.subtileShape[1]) * int(tileInfoA.mmaTileShape[1])
     def _isPow2(n): return n > 0 and (n & (n - 1)) == 0
-    assert _isPow2(subtileKElems) and _isPow2(depthU)
+    assert _isPow2(subtileKElems)
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkipAB"), "")
 
@@ -4657,11 +4657,44 @@ class KernelWriterAssembly(KernelWriter):
                              comment="offsetM_floor * strideF (elements)"))
           module.add(scalarMultiplyBpe(stmp+7, stmp+7, float(bpe),
                                        comment="offsetM_glb_bytes = * bpe"))
-          # offsetM_lds_bytes = offsetM_floor * DepthU * bpe
-          module.add(SLShiftLeftB32(dst=sgpr(stmp+8),
-                                    shiftHex=log2(depthU * bpe),
-                                    src=sgpr(stmp+9),
-                                    comment="offsetM_lds_bytes"))
+          # LDS layout (matches emitSingleBufferLoad):
+          #   m0_subtile_base = (sId0 + sId1*globalSubtileGrid[0]) * subtileSize
+          # where sId0 = offsetM_floor/mEPSR, sId1 = K_floor/subtileKElems,
+          # and subtileSize = mEPSR * subtileKElems * bpe.
+          # Therefore:
+          #   M-row part : offsetM_floor * subtileKElems * bpe
+          #   K-band part: kSubtileIdx  * globalSubtileGrid[0] * subtileSizeBytes
+          mRowStrideBytes  = subtileKElems * bpe
+          kBandStrideBytes = int(tileInfo.globalSubtileGrid[0]) * subtileSizeBytes
+          # offsetM_lds_bytes (M-row part) = offsetM_floor * subtileKElems * bpe
+          if _isPow2(mRowStrideBytes):
+            module.add(SLShiftLeftB32(dst=sgpr(stmp+8),
+                                      shiftHex=log2(mRowStrideBytes),
+                                      src=sgpr(stmp+9),
+                                      comment="offsetM_lds (M-row) = offsetM_floor * subtileKElems*bpe"))
+          else:
+            module.add(SMulI32(dst=sgpr(stmp+8), src0=sgpr(stmp+9),
+                               src1=hex(mRowStrideBytes),
+                               comment="offsetM_lds (M-row) = offsetM_floor * subtileKElems*bpe"))
+          # Add K-band contribution: kSubtileIdx * globalSubtileGrid[0] * subtileSize.
+          # kSubtileIdx = sOffK / (subtileKElems*bpe); stmp+9 is free here
+          # (chunkSel overwrites it below).
+          if kBandStrideBytes != 0:
+            module.add(SLShiftRightB32(dst=sgpr(stmp+9),
+                                       shiftHex=log2(subtileKElems * bpe),
+                                       src=sgpr(sOffK),
+                                       comment="kSubtileIdx = offsetK_bytes >> log2(subtileKElems*bpe)"))
+            if _isPow2(kBandStrideBytes):
+              module.add(SLShiftLeftB32(dst=sgpr(stmp+9),
+                                        shiftHex=log2(kBandStrideBytes),
+                                        src=sgpr(stmp+9),
+                                        comment="kBand_bytes = kSubtileIdx * GSG[0] * subtileSize"))
+            else:
+              module.add(SMulI32(dst=sgpr(stmp+9), src0=sgpr(stmp+9),
+                                 src1=hex(kBandStrideBytes),
+                                 comment="kBand_bytes = kSubtileIdx * GSG[0] * subtileSize"))
+            module.add(SAddU32(dst=sgpr(stmp+8), src0=sgpr(stmp+8), src1=sgpr(stmp+9),
+                               comment="offsetM_lds_bytes += kBand_bytes"))
 
           # numLine_within_subtile = numLine & (mEPSR - 1)
           module.add(SAndB32(dst=sgpr(stmp+2), src0=sgpr(stmp+2),
@@ -4695,10 +4728,12 @@ class KernelWriterAssembly(KernelWriter):
           # offsetM_glb_bytes folds into sVaddrBase in place).
           sM0Base    = stmp + 1
           sVaddrBase = stmp + 7
-          module.add(SAddU32(dst=sgpr(sM0Base), src0=sgpr(sIntra), src1=sgpr(sOffK),
-                             comment="sM0Base = intra + offsetK"))
-          module.add(SAddU32(dst=sgpr(sM0Base), src0=sgpr(sM0Base), src1=sgpr(stmp+8),
-                             comment="           + offsetM_lds_bytes"))
+          # sM0Base = intra + offsetM_lds_bytes
+          # (offsetM_lds_bytes already includes the K-band term;
+          # sOffK belongs only in sVaddrBase — m0 encodes K-bands via the
+          # GSG[0]*subtileSize stride, not via sId1*subtileKElems*bpe.)
+          module.add(SAddU32(dst=sgpr(sM0Base), src0=sgpr(sIntra), src1=sgpr(stmp+8),
+                             comment="sM0Base = intra + offsetM_lds_bytes"))
           module.add(SAddU32(dst=sgpr(sVaddrBase), src0=sgpr(sVaddrBase), src1=sgpr(sIntra),
                              comment="sVaddrBase = offsetM_glb + intra"))
           module.add(SAddU32(dst=sgpr(sVaddrBase), src0=sgpr(sVaddrBase), src1=sgpr(sOffK),
