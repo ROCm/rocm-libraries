@@ -180,7 +180,6 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
     static constexpr auto is_b_load_tr_v = bool_constant<PipelineImplBase::is_b_load_tr>{};
 
     static_assert(DoubleSmemBuffer == true, "pipeline requires double smem buffer");
-
     [[nodiscard]] CK_TILE_HOST static const std::string GetPipelineName()
     {
         // clang-format off
@@ -374,11 +373,11 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
                 },
                 number<AsLayout::size()>{});
 
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             auto elementwise_As_res = load_tile_with_elementwise(a_tile_windows, a_element_func);
 
-            // Move each A — the enhanced function move_tile_window is executed, which takes a tuple
+            // Move each A - the enhanced function move_tile_window is executed, which takes a tuple
             // as input.
             move_tile_window(a_tile_windows, a_dram_tile_window_step);
 
@@ -393,11 +392,11 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
                 },
                 number<AsLayout::size()>{});
 
-            // Load tile — during value loading, an elementwise function is executed for each B0,
-            // B1, … BN. The values B0, B1, … BN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each B0,
+            // B1, ... BN. The values B0, B1, ... BN are read by the same thread.
             auto elementwise_Bs_res = load_tile_with_elementwise(b_tile_windows, b_element_func);
 
-            // Move each B — the enhanced function move_tile_window is executed, which takes a tuple
+            // Move each B - the enhanced function move_tile_window is executed, which takes a tuple
             // as input.
             move_tile_window(b_tile_windows, b_dram_tile_window_step);
 
@@ -503,8 +502,8 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
                 Base::LocalPrefill(b_copy_lds_window1, elementwise_Bs_res);
             }
 
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             elementwise_As_res = load_tile_with_elementwise(a_tile_windows, a_element_func);
             move_tile_window(a_tile_windows, a_dram_tile_window_step);
 

@@ -31,10 +31,15 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Version.h"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/pipeline/Backend.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
@@ -75,7 +80,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
             StinkyIRConverter::populateFunctionFromString(irText, func, passCtx, arch);
         if (result != StinkyErrorCode::SUCCESS) {
             if (result == StinkyErrorCode::PASSCTX_EMPTY) {
-                std::cerr << "No PassContext available. Call convertToIRList first." << "\n";
+                std::cerr << "No PassContext available. Call convertToIRList first.\n";
             } else {
                 std::cerr << "Error: Failed to populate IRList from string. Error code: "
                           << static_cast<int>(result) << "\n";
@@ -117,18 +122,30 @@ std::unique_ptr<Pass> createPassByName(const std::string& passName) {
     return nullptr;
 }
 
+int extractOptLevel(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "-O0") return 0;
+        if (a == "-O1") return 1;
+        if (a == "-O2") return 2;
+        if (a == "-O3") return 3;
+    }
+    return -1;
+}
+
 // Function to parse command-line arguments for passes
 std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
     std::vector<std::string> passNames;
     for (int i = startIdx; i < argc; ++i) {
         std::string arg = argv[i];
+        if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
             static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-            if (arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0 ||
+            if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
                 arg == "--print-output" || arg == "--emit-asm" ||
-                arg.rfind("--ds-read-order=", 0) == 0 || arg == "--from-label" ||
-                arg == "--to-label")
+                arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
+                arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
                 continue;
             if (arg == "-o") {
                 ++i;  // skip the filename argument
@@ -144,7 +161,7 @@ std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
     static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind(kPrefix, 0) == 0) return a.substr(std::strlen(kPrefix));
+        if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
     }
     return {};
 }
@@ -159,7 +176,7 @@ static void trimWhitespace(std::string& s) {
 }
 
 static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
-    if (a.rfind(prefix, 0) != 0) return {};
+    if (!a.starts_with(prefix)) return {};
     std::string rest = a.substr(std::strlen(prefix));
     std::vector<std::string> out;
     size_t start = 0;
@@ -191,15 +208,21 @@ std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** ar
 }  // namespace
 
 int main(int argc, char** argv) {
+    BackendRegistry::registerAllBackends();
+
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture. Supported:";
+        for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
+        std::cerr << "\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
+        std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -213,11 +236,21 @@ int main(int argc, char** argv) {
         std::cerr << "  --to-label <label>    End of region to optimize (label name, inclusive)\n";
         std::cerr << "                        Required for .s input when passes are specified.\n";
         std::cerr
-            << "                        Labels can be any identifier added to the asm file.\n\n";
+            << "                        Labels can be any identifier added to the asm file.\n";
+        std::cerr << "  --preserve-symbolic-regs  Preserve and re-emit symbolic register names\n";
+        std::cerr << "                            (e.g. v[vgprSerialPersist-768]) instead of the\n";
+        std::cerr << "                            resolved numeric form (v255). Best used with\n";
+        std::cerr << "                            no passes, since passes operate on numeric\n";
+        std::cerr << "                            indices and can leave symbolic names stale.\n";
+        std::cerr << "  --preserve-comments       Preserve and re-emit trailing source comments\n";
+        std::cerr << "                            (// ... or ;) attached to each instruction,\n";
+        std::cerr << "                            label, or .set directive. Best used with no\n";
+        std::cerr << "                            passes; passes that rewrite or insert\n";
+        std::cerr << "                            instructions may leave comments stale.\n\n";
         std::cerr << "Example:\n";
-        std::cerr << "  " << argv[0] << " --arch gfx1250 input.stir --StinkyDAGSchedulerPass\n";
+        std::cerr << "  " << argv[0] << " --arch <arch> input.stir --StinkyDAGSchedulerPass\n";
         std::cerr << "  " << argv[0]
-                  << " --arch gfx1250 input.s   --StinkyDAGSchedulerPass --emit-asm\n";
+                  << " --arch <arch> input.s   --StinkyDAGSchedulerPass --emit-asm\n";
         return 1;
     }
 
@@ -227,16 +260,28 @@ int main(int argc, char** argv) {
         printAvailablePasses();
         return 0;
     }
+    if (firstArg == "--version") {
+        std::cout << "stinkytofu-opt " << STINKYTOFU_VERSION_MAJOR << "."
+                  << STINKYTOFU_VERSION_MINOR << "." << STINKYTOFU_VERSION_PATCH;
+        constexpr char tweak[] = STINKYTOFU_VERSION_TWEAK;
+        if (tweak[0] != '\0') std::cout << "-" << tweak;
+        std::cout << "\n";
+        return 0;
+    }
     if (firstArg == "--help") {
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture. Supported:";
+        for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
+        std::cerr << "\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
+        std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -250,7 +295,17 @@ int main(int argc, char** argv) {
         std::cerr << "  --to-label <label>    End of region to optimize (label name, inclusive)\n";
         std::cerr << "                        Required for .s input when passes are specified.\n";
         std::cerr
-            << "                        Labels can be any identifier added to the asm file.\n\n";
+            << "                        Labels can be any identifier added to the asm file.\n";
+        std::cerr << "  --preserve-symbolic-regs  Preserve and re-emit symbolic register names\n";
+        std::cerr << "                            (e.g. v[vgprSerialPersist-768]) instead of the\n";
+        std::cerr << "                            resolved numeric form (v255). Best used with\n";
+        std::cerr << "                            no passes, since passes operate on numeric\n";
+        std::cerr << "                            indices and can leave symbolic names stale.\n";
+        std::cerr << "  --preserve-comments       Preserve and re-emit trailing source comments\n";
+        std::cerr << "                            (// ... or ;) attached to each instruction,\n";
+        std::cerr << "                            label, or .set directive. Best used with no\n";
+        std::cerr << "                            passes; passes that rewrite or insert\n";
+        std::cerr << "                            instructions may leave comments stale.\n\n";
         printAvailablePasses();
         return 0;
     }
@@ -262,17 +317,26 @@ int main(int argc, char** argv) {
 
     if (firstArg == "--arch") {
         if (argc < 4) {
-            std::cerr << "Error: --arch requires an architecture argument\n";
-            std::cerr << "Supported architectures: gfx1250\n";
+            std::cerr << "Error: --arch requires an architecture argument. Supported:";
+            for (const auto& key : BackendRegistry::getRegisteredArchKeys())
+                std::cerr << " " << key;
+            std::cerr << "\n";
             return 1;
         }
 
         std::string archStr = argv[2];
-        if (archStr == "gfx1250") {
-            arch = {12, 5, 0};
-        } else {
+        if (!BackendRegistry::parseArchKey(archStr, arch)) {
+            std::cerr << "Error: Invalid architecture format '" << archStr
+                      << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
+            return 1;
+        }
+
+        if (!BackendRegistry::getArchPipeline(arch)) {
             std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
-            std::cerr << "Supported architectures: gfx1250\n";
+            std::cerr << "Supported architectures:";
+            for (const auto& key : BackendRegistry::getRegisteredArchKeys())
+                std::cerr << " " << key;
+            std::cerr << "\n";
             return 1;
         }
 
@@ -291,7 +355,7 @@ int main(int argc, char** argv) {
     // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind("--ds-read-order=", 0) == 0) {
+        if (a.starts_with("--ds-read-order=")) {
             std::string val = a.substr(16);
             if (val == "ProgramOrder")
                 passFeatureConfig.dagFeatures.dsReadOrder =
@@ -307,6 +371,13 @@ int main(int argc, char** argv) {
 
     // Parse and validate user-specified passes from command line
     std::vector<std::string> requestedPasses = parsePassNames(argc, argv, passStartIdx);
+    int optLevel = extractOptLevel(argc, argv);
+
+    if (optLevel >= 0 && !requestedPasses.empty()) {
+        std::cerr << "Error: -O<N> (pipeline mode) and individual --<Pass> flags are mutually "
+                     "exclusive\n";
+        return 1;
+    }
 
     if (!requestedPasses.empty()) {
         std::cerr << "\n=== Adding Passes ===\n";
@@ -325,15 +396,23 @@ int main(int argc, char** argv) {
         std::cerr << "Use --list-passes to see available passes.\n\n";
     }
 
-    // Check for --print-output, --emit-asm, -o, --from-label, --to-label flags
+    // Check for --print-output, --emit-asm, -o, --from-label, --to-label,
+    // --preserve-symbolic-regs, --preserve-comments flags
     bool printOutput = false;
     bool emitAsm = false;
+    bool preserveSymbolicRegs = false;
+    bool preserveComments = false;
     std::string outputFile;
     std::string fromLabel;
     std::string toLabel;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--print-output") printOutput = true;
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
+        if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
+        if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
+        if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
+        }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
         if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
         if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];
@@ -373,7 +452,10 @@ int main(int argc, char** argv) {
 
     if (isAsmInput) {
         // Parse raw GPU assembly via RawAsmParser → ParsedFunction
-        auto asmResult = stinkytofu::parseRawAsmString(fileContent, archID);
+        stinkytofu::RawAsmParserOptions parserOpts;
+        parserOpts.preserveSymbolicNames = preserveSymbolicRegs;
+        parserOpts.preserveComments = preserveComments;
+        auto asmResult = stinkytofu::parseRawAsmString(fileContent, archID, parserOpts);
         if (asmResult.hasErrors()) {
             std::cerr << "Error: Failed to parse assembly input file\n";
             for (const auto& diag : asmResult.diagnostics)
@@ -485,20 +567,26 @@ int main(int argc, char** argv) {
     }
     std::ostream& out = outputFile.empty() ? std::cout : outputFileStream;
 
+    // Helper: emit a Function to the output stream.
+    auto emitFunction = [&](stinkytofu::Function& func) {
+        if (emitAsm) {
+            stinkytofu::AsmEmitterOptions opts;
+            opts.emitComments = preserveComments;
+            opts.indent = 0;
+            opts.useSymbolicNames = preserveSymbolicRegs;
+            stinkytofu::StinkyAsmEmitter emitter(opts);
+            emitter.emit(out, func);
+        } else if (printOutput) {
+            func.dump(out);
+        }
+    };
+
     // Helper: emit a ParsedFunction verbatim (no passes) to the output stream.
     auto emitVerbatim = [&](stinkytofu::MultiParseResult& mr) {
         for (auto& pf : mr.functions) {
             stinkytofu::Function func(pf->funcName);
             stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*pf, func, archID);
-            if (emitAsm) {
-                stinkytofu::AsmEmitterOptions opts;
-                opts.emitComments = false;
-                opts.indent = 0;
-                stinkytofu::StinkyAsmEmitter emitter(opts);
-                emitter.emit(out, func);
-            } else if (printOutput) {
-                func.dump(out);
-            }
+            emitFunction(func);
         }
     };
 
@@ -511,46 +599,61 @@ int main(int argc, char** argv) {
 
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
-        stinkytofu::PassManager passManager;
-        stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
+        if (optLevel >= 0) {
+            // Pipeline mode: create a StinkyAsmModule and run the registered pipeline
+            stinkytofu::StinkyAsmModule::ModuleOptions moduleOpts{};
+            moduleOpts.OptLevel = optLevel;
+            stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
-        passManager.addInstrumentation(createDebugPrintInstrumentation());
-        if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {
-            auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
-                passFeatureConfig.passOrderSnapshot.jsonPath, parsedFunc->funcName);
-            passManager.addInstrumentation(
-                std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(
-                    std::move(collector)));
-        }
-        passManager.setPassFeatureConfig(passFeatureConfig);
-        setKernelConfig(passManager, arch);
+            stinkytofu::Function& func = module.getFunction();
+            auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
+                                                                                    func, archID);
+            if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
+                std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
+                          << "'\n";
+                continue;
+            }
 
-        // Add user-specified passes
-        for (const auto& passName : requestedPasses) {
-            auto pass = createPassByName(passName);
-            if (pass) passManager.addPass(std::move(pass));
-        }
+            stinkytofu::Backend backend(module);
+            backend.runOptimization();
 
-        stinkytofu::Function func(parsedFunc->funcName);
-        func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
+            emitFunction(func);
+        } else {
+            // Individual pass mode
+            stinkytofu::PassManager passManager;
+            stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
-        auto result =
-            stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc, func, archID);
-        if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
-            std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName << "'\n";
-            continue;
-        }
+            passManager.addInstrumentation(createDebugPrintInstrumentation());
+            if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {
+                auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
+                    passFeatureConfig.passOrderSnapshot.jsonPath, parsedFunc->funcName);
+                passManager.addInstrumentation(
+                    std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(
+                        std::move(collector)));
+            }
+            passManager.setPassFeatureConfig(passFeatureConfig);
+            setKernelConfig(passManager, arch);
+            passManager.setAsmCapsConfig(stinkytofu::ToolchainCaps::probe(archID));
 
-        passManager.run(func);
+            for (const auto& passName : requestedPasses) {
+                auto pass = createPassByName(passName);
+                if (pass) passManager.addPass(std::move(pass));
+            }
 
-        if (emitAsm) {
-            stinkytofu::AsmEmitterOptions opts;
-            opts.emitComments = false;
-            opts.indent = 0;
-            stinkytofu::StinkyAsmEmitter emitter(opts);
-            emitter.emit(out, func);
-        } else if (printOutput) {
-            func.dump(out);
+            stinkytofu::Function func(parsedFunc->funcName);
+            func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
+
+            auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
+                                                                                    func, archID);
+            if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
+                std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
+                          << "'\n";
+                continue;
+            }
+
+            passManager.run(func);
+
+            emitFunction(func);
         }
     }
 

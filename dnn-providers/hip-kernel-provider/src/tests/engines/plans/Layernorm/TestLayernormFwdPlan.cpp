@@ -12,8 +12,8 @@ TEST(TestLayernormFwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid layernorm graph
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the layernorm node and attributes
     const auto& node = graph.getNode(0);

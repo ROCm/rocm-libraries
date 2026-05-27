@@ -89,7 +89,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->pointwise(biasOutAttr, activationAttributes);
     yAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
