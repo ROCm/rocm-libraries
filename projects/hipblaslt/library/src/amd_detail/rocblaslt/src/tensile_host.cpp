@@ -994,7 +994,7 @@ namespace
             problem.useBias() ? "--bias_source" : "",
             problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "",
 			problem.useBias() ? "--bias_stride" : "",
-			problem.useBias() ? (problem.bias().strides())[2] : "",
+			problem.useBias() ? std::to_string((problem.bias().strides())[2]) : "",
             "--a_type",
             hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
             "--b_type",
