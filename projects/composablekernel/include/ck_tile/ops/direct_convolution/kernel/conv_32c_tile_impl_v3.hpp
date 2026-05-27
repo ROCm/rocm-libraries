@@ -280,76 +280,42 @@ template <DataType DT = DataType::fp16>
 struct KernelConfigurations
 {
 static constexpr Config<DT> configs[] = {
-    // --- SwizzleType::None (indices 0-7) ---
-    // 16x16x32 configs (channels_per_group=32, block_k_size=16, block_q=16)
+    // --- SwizzleType::None (indices 0-3) ---
     {.waves_per_wg = 4, .direction = Direction::Dgrad},   // 0
     {.waves_per_wg = 2, .direction = Direction::Dgrad},   // 1
     {.waves_per_wg = 4},                                  // 2
     {.waves_per_wg = 2},                                  // 3
-    // 32x32x16 configs (channels_per_group=16, block_k_size=32, block_q=32)
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad}, // 4
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad}, // 5
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4},                                // 6
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2},                                // 7
 
-    // --- SwizzleType::CyclicShift (indices 8-15) ---
-    // 16x16x32
-    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 8
-    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 9
-    {.waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift},                                  // 10
-    {.waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift},                                  // 11
-    // 32x32x16
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift}, // 12
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift}, // 13
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift},                                // 14
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift},                                // 15
+    // --- SwizzleType::CyclicShift (indices 4-7) ---
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 4
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 5
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift},                                  // 6
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift},                                  // 7
 
-    // --- SwizzleType::XOR (indices 16-23) ---
-    // 16x16x32
-    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 16
-    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 17
-    {.waves_per_wg = 4, .swizzle_type = SwizzleType::XOR},                                  // 18
-    {.waves_per_wg = 2, .swizzle_type = SwizzleType::XOR},                                  // 19
-    // 32x32x16
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 20
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 21
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::XOR},                                // 22
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::XOR},                                // 23
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR}, // 24
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .swizzle_type = SwizzleType::XOR},                                // 25
+    // --- SwizzleType::XOR (indices 8-11) ---
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 8
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 9
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::XOR},                                  // 10
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::XOR},                                  // 11
 
-    // --- SwizzleType::CyclicShift + LDS-staged epilogue (indices 26-33) ---
-    // 16x16x32
-    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 26
-    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 27
-    {.waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 28
-    {.waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 29
-    // 32x32x16
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 30
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 31
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 32
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 33
+    // --- SwizzleType::CyclicShift + LDS-staged epilogue (indices 12-15) ---
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 12
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 13
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 14
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 15
 
-    // --- SwizzleType::XOR + LDS-staged epilogue (indices 34-43) ---
-    // 16x16x32
-    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 34
-    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 35
-    {.waves_per_wg = 4, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 36
-    {.waves_per_wg = 2, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 37
-    // 32x32x16
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 38
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 39
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 4, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 40
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 2, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 41
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}, // 42
-    {.mfma_shape = MfmaShape::M32N32K16, .waves_per_wg = 8, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                // 43
+    // --- SwizzleType::XOR + LDS-staged epilogue (indices 16-19) ---
+    {.waves_per_wg = 4, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 16
+    {.waves_per_wg = 2, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 17
+    {.waves_per_wg = 4, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 18
+    {.waves_per_wg = 2, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 19
 
-    // --- CyclicShift 8-wave 3x3 (indices 44-47) ---
-    // 16x16x32, block_c=256, block_size=512
-    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                 // 44
-    {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift},                                                                // 45
-    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 46
-    {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 47
+    // --- CyclicShift 8-wave 3x3 (indices 20-23) ---
+    // block_c=256, block_size=512
+    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},                                                           // 20
+    {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift},                                                                                          // 21
+    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 22
+    {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 23
 
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
