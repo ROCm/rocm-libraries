@@ -144,7 +144,7 @@ public:
     inline bool alloc_host_bytes(const size_t bytes)
     {
         size_t free_host = get_free_host_bytes();
-        bool   success   = bytes <= static_cast<size_t>(free_host * (1.0f - padding_factor));
+        bool success = bytes <= static_cast<size_t>(free_host * (1.0f - padding_factor));
 
         if(logging_enabled)
         {
@@ -164,7 +164,7 @@ public:
     inline bool alloc_device_bytes(const size_t bytes)
     {
         size_t free_dev = get_free_device_bytes();
-        bool   success  = bytes <= static_cast<size_t>(free_dev * (1.0f - padding_factor));
+        bool success = bytes <= static_cast<size_t>(free_dev * (1.0f - padding_factor));
 
         if(logging_enabled)
         {
