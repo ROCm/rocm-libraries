@@ -1,6 +1,0 @@
-# Intentionally malformed YAML. Used to exercise load_yaml's error path:
-# bad indentation breaks PyYAML parsing.
-test_categories:
-  quick:
-  description: "broken
-    test_patterns: ["x"

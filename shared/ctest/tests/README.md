@@ -21,8 +21,7 @@ tests/
 │   ├── catch2_minimal.yaml              # smallest valid Catch2 YAML
 │   ├── catch2_full.yaml                 # includes + excludes + [] sentinel + env
 │   ├── catch2_invalid_tag.yaml          # validator failure: malformed tag
-│   ├── catch2_invalid_identifier.yaml   # validator failure: unsafe category name
-│   └── malformed.yaml                   # broken YAML syntax (load_yaml error path)
+│   └── catch2_invalid_identifier.yaml   # validator failure: unsafe category name
 ├── test_parse_test_categories.py        # GTest parser tests
 └── test_parse_catch2_categories.py      # Catch2 parser tests
 ```

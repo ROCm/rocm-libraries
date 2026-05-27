@@ -226,9 +226,18 @@ def test_load_yaml_missing_file_exits(tmp_path):
     assert excinfo.value.code == 1
 
 
-def test_load_yaml_malformed_file_exits(fixtures_dir):
+def test_load_yaml_malformed_file_exits(tmp_path):
+    # Written inline (rather than as a fixture) so the repo's check-yaml
+    # pre-commit hook doesn't try to parse a deliberately-broken file.
+    malformed = tmp_path / "malformed.yaml"
+    malformed.write_text(
+        "test_categories:\n"
+        "  quick:\n"
+        '  description: "broken\n'
+        '    test_patterns: ["x"\n'
+    )
     with pytest.raises(SystemExit) as excinfo:
-        ptc.load_yaml(fixtures_dir / "malformed.yaml")
+        ptc.load_yaml(malformed)
     assert excinfo.value.code == 1
 
 
