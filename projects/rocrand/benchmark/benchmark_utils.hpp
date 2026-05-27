@@ -78,6 +78,38 @@ using direction_vectors32_t        = curandDirectionVectors32_t;
 using direction_vectors64_t        = curandDirectionVectors64_t;
 #endif
 
+#ifdef __HIP__
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = ROCRAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = ROCRAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = ROCRAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = ROCRAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = ROCRAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = ROCRAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+#elif defined(__CUDACC__)
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = CURAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = CURAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = CURAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = CURAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = CURAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = CURAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+#endif
+
+#ifdef __HIP__
+constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = hipMemcpyHostToDevice;
+#elif defined(__CUDACC__)
+constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = cudaMemcpyHostToDevice;
+#endif
+
+#ifdef __HIP__
+constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = hipMemcpyDeviceToHost;
+#elif defined(__CUDACC__)
+constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = cudaMemcpyDeviceToHost;
+#endif
+
 inline std::string engine_name(const rng_type_t rng_type)
 {
     // The returned names have to be able to reproduce the rocrand_rng_type by prepending

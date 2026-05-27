@@ -34,38 +34,6 @@
 #define RAND_DEFAULT_MAX_BLOCK_SIZE 256
 
 #ifdef __HIP__
-constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = hipMemcpyHostToDevice;
-#elif defined(__CUDACC__)
-constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = cudaMemcpyHostToDevice;
-#endif
-
-#ifdef __HIP__
-constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = hipMemcpyDeviceToHost;
-#elif defined(__CUDACC__)
-constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = cudaMemcpyDeviceToHost;
-#endif
-
-#ifdef __HIP__
-constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = ROCRAND_RNG_PSEUDO_MRG32K3A;
-constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = ROCRAND_RNG_PSEUDO_XORWOW;
-constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = ROCRAND_RNG_PSEUDO_PHILOX4_32_10;
-constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = ROCRAND_RNG_PSEUDO_MTGP32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = ROCRAND_RNG_QUASI_SOBOL32;
-constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = ROCRAND_RNG_QUASI_SOBOL64;
-constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
-#elif defined(__CUDACC__)
-constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = CURAND_RNG_PSEUDO_MRG32K3A;
-constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = CURAND_RNG_PSEUDO_XORWOW;
-constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = CURAND_RNG_PSEUDO_PHILOX4_32_10;
-constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = CURAND_RNG_PSEUDO_MTGP32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = CURAND_RNG_QUASI_SOBOL32;
-constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = CURAND_RNG_QUASI_SOBOL64;
-constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
-#endif
-
-#ifdef __HIP__
 using rand_state_mrg32k3a_t          = rocrand_state_mrg32k3a;
 using rand_state_philox4x32_10_t     = rocrand_state_philox4x32_10;
 using rand_state_xorwow_t            = rocrand_state_xorwow;
