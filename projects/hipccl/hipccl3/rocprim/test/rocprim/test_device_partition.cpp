@@ -1204,6 +1204,9 @@ INSTANTIATE_TEST_SUITE_P(RocprimDevicePartitionLargeInputTest,
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     static constexpr bool        debug_synchronous = false;
     auto param = GetParam();
     const size_t modulo = std::get<0>(param);
@@ -1285,6 +1288,9 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     static constexpr bool        debug_synchronous = false;
     auto param = GetParam();
     const size_t modulo = std::get<0>(param);
@@ -1380,6 +1386,9 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     static constexpr bool        debug_synchronous = false;
     auto param = GetParam();
     const bool use_graphs = std::get<1>(param);

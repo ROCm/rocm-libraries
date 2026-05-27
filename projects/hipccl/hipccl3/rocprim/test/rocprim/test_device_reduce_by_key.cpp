@@ -462,42 +462,33 @@ void large_indices_reduce_by_key()
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeySmallValueType)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
     large_indices_reduce_by_key<unsigned int>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueType)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     large_indices_reduce_by_key<common::custom_type<size_t, size_t, true>>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueTypeWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     large_indices_reduce_by_key<common::custom_type<size_t, size_t, true>, true>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyDeterministic)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     large_indices_reduce_by_key<double, false, true>();
 }
 
@@ -594,42 +585,33 @@ void large_segment_count_reduce_by_key()
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeySmallValueType)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
     large_segment_count_reduce_by_key<unsigned int>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyLargeValueType)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     large_segment_count_reduce_by_key<common::custom_type<size_t, size_t, true>>();
 }
 
 TEST(RocprimDeviceReduceByKey, GraphReduceByKey)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     large_segment_count_reduce_by_key<unsigned int, true>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyDeterministic)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     large_segment_count_reduce_by_key<float, false, true>();
 }
 
