@@ -483,8 +483,8 @@ static TimingResult time_kernel(hipFunction_t fn,
                                 std::vector<uint8_t>& kernarg,
                                 uint32_t workgroup_size,
                                 uint32_t global_threads) {
-    constexpr int COLD_ITERS = 2;
-    constexpr int HOT_ITERS  = 10;
+    constexpr int COLD_ITERS = 500;
+    constexpr int HOT_ITERS  = 500;
 
     size_t ksize = kernarg.size();
     void*  launch_params[] = {
