@@ -37,6 +37,8 @@ enum class GpuTarget
     gfx1102, // RDNA 3
     gfx1150, // RDNA 3.5
     gfx1151, // RDNA 3.5
+    gfx1200, // RDNA 4
+    gfx1201, // RDNA 4
 };
 
 } // namespace rocm_ck

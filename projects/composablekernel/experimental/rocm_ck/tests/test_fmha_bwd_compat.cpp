@@ -42,6 +42,7 @@ using ::rocm_ck::FmhaBwdDQDKDVConfig;
 using ::rocm_ck::FmhaBwdOGradDotOConfig;
 using ::rocm_ck::FmhaMaskType;
 using ::rocm_ck::FmhaMode;
+using ::rocm_ck::GpuTarget;
 using ::rocm_ck::makeSpec;
 
 // ============================================================================
@@ -1338,9 +1339,17 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16EBiasDBias)
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
 {
-    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
-        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
-        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    // d64 fp16 batch is a registered variant, but only for the default gfx942
+    // target -- the example registry ships no gfx11 build. findVariant() now
+    // matches on target too (P4-1), so an otherwise-identical query for an
+    // unregistered target must miss and return null.
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                      .hdim_q = 64,
+                                                      .hdim_v = 64,
+                                                      .mode   = FmhaMode::BATCH,
+                                                      .target = GpuTarget::gfx1100},
+                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     EXPECT_EQ(v, nullptr);
 }
 

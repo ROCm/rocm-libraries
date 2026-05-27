@@ -64,6 +64,10 @@ inline std::optional<GpuTarget> detectGpuTarget(int device_id = 0)
         return GpuTarget::gfx1150;
     if(std::strstr(arch, "gfx1151") != nullptr)
         return GpuTarget::gfx1151;
+    if(std::strstr(arch, "gfx1200") != nullptr)
+        return GpuTarget::gfx1200;
+    if(std::strstr(arch, "gfx1201") != nullptr)
+        return GpuTarget::gfx1201;
 
     return std::nullopt;
 }

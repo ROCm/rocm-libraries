@@ -67,7 +67,7 @@ struct FmhaBwdDQDKDVTileConfig
 // ---------------------------------------------------------------------------
 
 /// Base tile geometry — the ONLY parameters that are empirically tuned
-/// per (arch, dtype, head-dimension tier). All other tile fields are derived
+/// per (target, dtype, head-dimension tier). All other tile fields are derived
 /// from these via invariant rules documented below.
 struct FmhaBwdBaseTile
 {
@@ -139,6 +139,162 @@ static_assert(
     "GFX9_FP16_DQDKDV_BASE_TILES: every entry must have occupancy >= 1"
     " (the table stores concrete tuned occupancies; -1/auto is resolved from"
     " algorithm.block_per_cu in makeSpec, not stored here)");
+
+/// Convert one row from fmha_bwd.py FmhaBwdDQDKDVTileSize order into the local
+/// tile config structure. The argument order mirrors CK Tile's
+/// FmhaBwdDQDKDVTileSize exactly: the trailing positional value is `occupancy`
+/// (25th argument), and `max_seq_q` (26th) defaults to 0 (unlimited). Keep this
+/// alignment so a row copied verbatim from fmha_bwd.py maps field-for-field.
+constexpr FmhaBwdDQDKDVTileConfig makeDqDkDvTile(int bm0,
+                                                 int bn0,
+                                                 int bk0,
+                                                 int bk1,
+                                                 int bk2,
+                                                 int bk3,
+                                                 int bk4,
+                                                 int hdim_q,
+                                                 int hdim_v,
+                                                 int rm0,
+                                                 int rn0,
+                                                 int rk0,
+                                                 int rm1,
+                                                 int rn1,
+                                                 int rk1,
+                                                 int rm2,
+                                                 int rn2,
+                                                 int rk2,
+                                                 int wm0,
+                                                 int wn0,
+                                                 int wk0,
+                                                 int wm1,
+                                                 int wn1,
+                                                 int wk1,
+                                                 int occupancy,
+                                                 int max_seq_q = 0)
+{
+    return FmhaBwdDQDKDVTileConfig{
+        .hdim_q    = hdim_q,
+        .hdim_v    = hdim_v,
+        .bm0       = bm0,
+        .bn0       = bn0,
+        .bk0       = bk0,
+        .bk1       = bk1,
+        .bk2       = bk2,
+        .bk3       = bk3,
+        .bk4       = bk4,
+        .rm0       = rm0,
+        .rn0       = rn0,
+        .rk0       = rk0,
+        .wm0       = wm0,
+        .wn0       = wn0,
+        .wk0       = wk0,
+        .rm1       = rm1,
+        .rn1       = rn1,
+        .rk1       = rk1,
+        .wm1       = wm1,
+        .wn1       = wn1,
+        .wk1       = wk1,
+        .rm2       = rm2,
+        .rn2       = rn2,
+        .rk2       = rk2,
+        .occupancy = occupancy,
+        .max_seq_q = max_seq_q,
+    };
+}
+
+/// GFX11 (RDNA3, WMMA, wave32) fp16/bf16 non-trload tiles, ported verbatim from
+/// CK Tile fmha_bwd.py KernelComponentFactoryGfx11.get_dq_dk_dv_tiles(). Unlike
+/// the GFX9 base-tile table these are full explicit configs (RDNA WMMA fixes the
+/// 16x16x16 warp tile, so there is nothing to derive). The trailing -1 is the
+/// occupancy field (= no occupancy hint, see FmhaBwdDQDKDVAlgorithm::block_per_cu);
+/// max_seq_q defaults to 0 (unlimited) for these non-trload rows.
+// clang-format off
+inline constexpr FmhaBwdDQDKDVTileConfig GFX11_FP16_DQDKDV_TILES[] = {
+    makeDqDkDvTile(32, 64,  32, 32,  32, 32, 64,  32,  32, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 16, 16, 16, 16, -1),
+    makeDqDkDvTile(32, 64,  64, 32,  64, 32, 32,  64,  64, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 16, 16, 16, 16, -1),
+    makeDqDkDvTile(16, 64, 128, 16, 128, 16, 32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 16, 16, 16, 16, -1),
+    makeDqDkDvTile(16, 64, 256, 16, 256, 16, 32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 16, 16, 16, 16, -1),
+};
+
+/// GFX12 (RDNA4, WMMA, wave32) fp16/bf16 non-trload tiles, ported verbatim from
+/// CK Tile fmha_bwd.py KernelComponentFactoryGfx12.get_dq_dk_dv_tiles(). Same
+/// convention as GFX11: trailing -1 is occupancy (no hint); max_seq_q = 0.
+inline constexpr FmhaBwdDQDKDVTileConfig GFX12_FP16_DQDKDV_TILES[] = {
+    makeDqDkDvTile(32, 64,  32, 32,  32, 32, 64,  32,  32, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 16, 16, 16, 16, -1),
+    makeDqDkDvTile(32, 64,  64, 32,  64, 32, 32,  64,  64, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 16, 16, 16, 16, -1),
+    makeDqDkDvTile(16, 64, 128, 16, 128, 16, 32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 16, 16, 16, 16, -1),
+    makeDqDkDvTile(16, 64, 256, 16, 256, 16, 32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 16, 16, 16, 16, -1),
+};
+// clang-format on
+
+inline constexpr int GFX11_FP16_DQDKDV_TILES_COUNT =
+    static_cast<int>(std::size(GFX11_FP16_DQDKDV_TILES));
+inline constexpr int GFX12_FP16_DQDKDV_TILES_COUNT =
+    static_cast<int>(std::size(GFX12_FP16_DQDKDV_TILES));
+
+/// Build-time invariant check for the explicit GFX11/GFX12 tile tables.
+/// Each row is a verbatim port of CK Tile fmha_bwd.py's non-trload codegen, so
+/// enforce its structural invariants here: a bad new row fails the build with a
+/// pointed message instead of surfacing later as an unrelated tile-derivation
+/// error (the same intent as the GFX9 base-tile static_asserts above).
+/// `rep_target` is any member of the table's family -- wavefront size and WMMA
+/// wave-tile shapes are uniform within a family.
+consteval bool
+isValidDqDkDvTileTable(const FmhaBwdDQDKDVTileConfig* tbl, int count, GpuTarget rep_target)
+{
+    for(int i = 0; i < count; ++i)
+    {
+        const auto& t = tbl[i];
+
+        // Symmetric head dims only: CK Tile defines tuned dQ/dK/dV tiles for
+        // hdim_q == hdim_v, and getTileConfig looks rows up by the exact pair.
+        if(t.hdim_q != t.hdim_v)
+            return false;
+
+        // bk4 must divide bn0 so GEMM4's K-loop tiles bn0 evenly.
+        if(t.bk4 <= 0 || t.bn0 % t.bk4 != 0)
+            return false;
+
+        // occupancy == -1 (auto): non-trload rows carry no occupancy hint, so
+        // block_per_cu stays -1 and flows to CK Tile kBlockPerCu (no override).
+        if(t.occupancy != -1)
+            return false;
+
+        // max_seq_q == 0 (unlimited): non-trload rows are not seqlen-gated.
+        if(t.max_seq_q != 0)
+            return false;
+
+        // All five GEMMs must share one block (identical warp count) so the
+        // kernel has a single, well-defined block_size.
+        const int nw0 = t.rm0 * t.rn0 * t.rk0;
+        const int nw1 = t.rm1 * t.rn1 * t.rk1;
+        const int nw2 = t.rm2 * t.rn2 * t.rk2;
+        if(nw0 <= 0 || nw0 != nw1 || nw0 != nw2)
+            return false;
+
+        // Every GEMM warp tile must map to a real WMMA instruction shape for
+        // this family (GEMM4 k = min(wk0, bk4)). fp16/bf16 share the shape set.
+        const int wk4 = (t.wk0 < t.bk4) ? t.wk0 : t.bk4;
+        if(!isValidWaveTile(DataType::FP16, t.wm0, t.wn0, t.wk0, rep_target) ||
+           !isValidWaveTile(DataType::FP16, t.wm1, t.wn1, t.wk1, rep_target) ||
+           !isValidWaveTile(DataType::FP16, t.wm0, t.wn0, wk4, rep_target))
+            return false;
+    }
+    return true;
+}
+
+static_assert(isValidDqDkDvTileTable(GFX11_FP16_DQDKDV_TILES,
+                                     GFX11_FP16_DQDKDV_TILES_COUNT,
+                                     GpuTarget::gfx1100),
+              "GFX11_FP16_DQDKDV_TILES: every row must be symmetric (hdim_q == hdim_v),"
+              " satisfy bn0 % bk4 == 0, carry occupancy == -1 and max_seq_q == 0, share one"
+              " warp count across all GEMMs, and use valid WMMA wave-tile shapes");
+static_assert(isValidDqDkDvTileTable(GFX12_FP16_DQDKDV_TILES,
+                                     GFX12_FP16_DQDKDV_TILES_COUNT,
+                                     GpuTarget::gfx1200),
+              "GFX12_FP16_DQDKDV_TILES: every row must be symmetric (hdim_q == hdim_v),"
+              " satisfy bn0 % bk4 == 0, carry occupancy == -1 and max_seq_q == 0, share one"
+              " warp count across all GEMMs, and use valid WMMA wave-tile shapes");
 
 // ---------------------------------------------------------------------------
 // Tile config generation (consteval derivation)
@@ -237,6 +393,14 @@ consteval FmhaBwdDQDKDVTileConfig generateTileConfig(int hdim, const FmhaBwdBase
 }
 
 /// Look up base tile for a given (symmetric) head dimension.
+///
+/// The GFX9 family (gfx90a, gfx942, gfx950) shares one base-tile table: for the
+/// current non-trload scope CK Tile's fmha_bwd.py KernelComponentFactoryGfx950
+/// reuses the gfx9 get_dq_dk_dv_tiles() rows verbatim and only *adds* tr_load
+/// entries on top. The device bridge pins kUseTrLoad = false, so routing gfx950
+/// through this table is correct today. Follow-up (out of scope here, flagged in
+/// PR #7823 review): when trload is enabled, gfx950 needs either its own table
+/// or a (target, tr_load)-keyed lookup for those extra entries.
 consteval FmhaBwdBaseTile getBaseTile(int hdim, DataType dtype, GpuTarget target)
 {
     // Narrow the failure mode before scanning the table so the compile-time
@@ -245,10 +409,9 @@ consteval FmhaBwdBaseTile getBaseTile(int hdim, DataType dtype, GpuTarget target
         throw "getBaseTile: dtype must be FP16 or BF16"
               " (the only dtypes with populated base-tile entries)";
 
-    constexpr auto gfx9_targets = TargetSet::only(GpuTarget::gfx90a, GpuTarget::gfx942);
-    if(!gfx9_targets.contains(target))
+    if(!TargetSet::family_gfx9().contains(target))
         throw "getBaseTile: target arch has no base-tile table"
-              " (only gfx90a and gfx942 are currently populated)";
+              " (only the gfx9 family -- gfx90a, gfx942, gfx950 -- is populated)";
 
     for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
     {
@@ -281,25 +444,71 @@ consteval void validateWaveTiles(const FmhaBwdDQDKDVTileConfig& t, DataType dtyp
               " valid MFMA/WMMA shape for this dtype/target";
 }
 
-/// Look up tile geometry for dQ/dK/dV given problem shape and target arch.
+/// Look up tile geometry for dQ/dK/dV given problem shape and target.
 /// Returns the matching tile config. Throws at compile time if no config exists.
 ///
 /// Only symmetric head dimensions (hdim_q == hdim_v) are supported: CK Tile's
 /// fmha_bwd.py get_dq_dk_dv_tiles() defines tuned configs exclusively for
 /// symmetric head dims, so asymmetric combinations have no validated tile and
 /// are rejected here rather than synthesized from an unvalidated extrapolation.
+///
+/// Dispatch by GPU family (single source of truth, mirrors fmha_bwd.py's
+/// per-arch KernelComponentFactory): GFX9 (gfx90a/gfx942/gfx950) derives the
+/// full config from a compact base-tile table; GFX11 (RDNA3) and GFX12 (RDNA4)
+/// look up the exact CK Tile codegen rows. Every selected config is run through
+/// validateWaveTiles() so an invalid MFMA/WMMA shape fails the build.
 consteval FmhaBwdDQDKDVTileConfig
 getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target)
 {
+    if(dtype != DataType::FP16 && dtype != DataType::BF16)
+        throw "getTileConfig: dtype must be FP16 or BF16"
+              " (the only dtypes with tuned dQ/dK/dV tile configs)";
+
     if(hdim_q != hdim_v)
         throw "FmhaBwdDQDKDV requires hdim_q == hdim_v"
               " (asymmetric head dimensions are unsupported: CK Tile defines"
               " tuned dQ/dK/dV tile configs only for symmetric head dims)";
 
-    auto base = getBaseTile(hdim_q, dtype, target);
-    auto cfg  = generateTileConfig(hdim_q, base);
-    validateWaveTiles(cfg, dtype, target);
-    return cfg;
+    if(TargetSet::family_gfx9().contains(target))
+    {
+        auto base = getBaseTile(hdim_q, dtype, target);
+        auto cfg  = generateTileConfig(hdim_q, base);
+        validateWaveTiles(cfg, dtype, target);
+        return cfg;
+    }
+
+    if(TargetSet::family_gfx11().contains(target))
+    {
+        for(int i = 0; i < GFX11_FP16_DQDKDV_TILES_COUNT; ++i)
+        {
+            if(GFX11_FP16_DQDKDV_TILES[i].hdim_q == hdim_q &&
+               GFX11_FP16_DQDKDV_TILES[i].hdim_v == hdim_v)
+            {
+                validateWaveTiles(GFX11_FP16_DQDKDV_TILES[i], dtype, target);
+                return GFX11_FP16_DQDKDV_TILES[i];
+            }
+        }
+        throw "getTileConfig: no GFX11 FP16/BF16 tile config for this head dimension"
+              " (gfx11 supports hdim in {32, 64, 128, 256})";
+    }
+
+    if(TargetSet::family_gfx12().contains(target))
+    {
+        for(int i = 0; i < GFX12_FP16_DQDKDV_TILES_COUNT; ++i)
+        {
+            if(GFX12_FP16_DQDKDV_TILES[i].hdim_q == hdim_q &&
+               GFX12_FP16_DQDKDV_TILES[i].hdim_v == hdim_v)
+            {
+                validateWaveTiles(GFX12_FP16_DQDKDV_TILES[i], dtype, target);
+                return GFX12_FP16_DQDKDV_TILES[i];
+            }
+        }
+        throw "getTileConfig: no GFX12 FP16/BF16 tile config for this head dimension"
+              " (gfx12 supports hdim in {32, 64, 128, 256})";
+    }
+
+    throw "getTileConfig: unsupported GPU target"
+          " (no tile table for this arch family)";
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +523,7 @@ struct FmhaBwdDQDKDVSignature
     int hdim_q;     // Q/K head dimension: 32, 64, 96, 128, 256
     int hdim_v;     // V head dimension: 32, 64, 96, 128, 256
     FmhaMode mode;  // batch or group
+    GpuTarget target = GpuTarget::gfx942;
 };
 
 /// Algorithm: describes HOW the kernel executes (feature flags + tuning).
@@ -329,7 +539,7 @@ struct FmhaBwdDQDKDVAlgorithm
     // Tuning -- padding and occupancy
     int pad_hdim_q   = 0;  // 0 (no pad), 1 (small pad), or 8 (full vec pad)
     int pad_hdim_v   = 0;  // 0, 1, or 8
-    int block_per_cu = -1; // occupancy hint (-1 = auto, resolved in makeSpec)
+    int block_per_cu = -1; // occupancy hint (-1 = auto, may stay -1 for CK Tile)
 };
 
 /// Config: user-facing Signature + Algorithm pair.
@@ -348,6 +558,7 @@ struct FmhaBwdDQDKDVSpec
     int hdim_q;
     int hdim_v;
     FmhaMode mode;
+    GpuTarget target;
 
     // From Algorithm -- feature flags
     FmhaBiasType bias_type;
@@ -543,18 +754,24 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
 
     // --- tile geometry (from consteval lookup table) ---
     // getTileConfig() returns the architecture-specific tile geometry for
-    // the given (hdim_q, hdim_v, dtype, target). Currently only GFX9 fp16/bf16
-    // configs are populated.
-    constexpr GpuTarget target = GpuTarget::gfx942;
-    auto tile                  = getTileConfig(sig.hdim_q, sig.hdim_v, sig.dtype, target);
+    // the given (hdim_q, hdim_v, dtype, target).
+    auto tile = getTileConfig(sig.hdim_q, sig.hdim_v, sig.dtype, sig.target);
 
     // --- block_per_cu default ---
+    // -1 means "auto": fall back to the tile's tuned occupancy. For GFX9 that
+    // resolves to a concrete value >= 1 (the base-tile table stores tuned
+    // occupancies). For GFX11/GFX12 the codegen rows carry occupancy == -1, so
+    // block_per_cu stays -1 and flows through to CK Tile's kBlockPerCu template
+    // parameter, which is documented as "-1 = do not override occupancy"
+    // (see ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp). Hence -1 is a valid
+    // resolved value; only 0 and values < -1 are rejected.
     int resolved_block_per_cu = algo.block_per_cu;
     if(resolved_block_per_cu == -1)
         resolved_block_per_cu = tile.occupancy;
 
-    if(resolved_block_per_cu <= 0)
-        throw "block_per_cu must be positive (or -1 for auto)";
+    if(resolved_block_per_cu == 0 || resolved_block_per_cu < -1)
+        throw "block_per_cu must be positive, or -1 for auto/no-override"
+              " (CK Tile kBlockPerCu == -1 leaves occupancy to the pipeline)";
 
     // --- build the kernel descriptor ---
     FmhaBwdDQDKDVSpec k{
@@ -562,6 +779,7 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .hdim_q           = sig.hdim_q,
         .hdim_v           = sig.hdim_v,
         .mode             = sig.mode,
+        .target           = sig.target,
         .bias_type        = algo.bias_type,
         .has_bias_grad    = algo.has_bias_grad,
         .mask_type        = algo.mask_type,
@@ -570,7 +788,7 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .pad_hdim_q       = algo.pad_hdim_q,
         .pad_hdim_v       = algo.pad_hdim_v,
         .block_per_cu     = resolved_block_per_cu,
-        .block_size       = tile.block_size(target),
+        .block_size       = tile.block_size(sig.target),
         .block_n0         = tile.bn0,
     };
 

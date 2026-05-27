@@ -100,19 +100,16 @@ struct FmhaBwdDQDKDVTypes
                                               K.has_bias_grad, // kHasBiasGrad
                                               K.block_per_cu>; // kBlockPerCu
 
-    // Guard: wave64 (gfx9) only. The tile configs currently populated in
-    // getTileConfig() assume wavefrontSize=64. On wave32 targets (gfx10/11/12)
-    // the block_size arithmetic and warp-level intrinsics would be wrong.
-    static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
-                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
+    // Guard: the selected GPU target must match the compiler wavefront mode.
+    static_assert(wavefrontSize(K.target) == __AMDGCN_WAVEFRONT_SIZE,
+                  "FmhaBwdDQDKDV bridge wavefront size must match GpuTarget.");
 
     // --- Tile shape (from consteval lookup table) ---
     //
     // getTileConfig() returns the architecture-specific tile geometry for
-    // the given (hdim_q, hdim_v, dtype). The device bridge reads plain
+    // the given (hdim_q, hdim_v, dtype, target). The device bridge reads plain
     // integer fields and converts them to CK Tile sequence<> types.
-    static constexpr auto kTile = getTileConfig(K.hdim_q, K.hdim_v, K.dtype, GpuTarget::gfx942);
+    static constexpr auto kTile = getTileConfig(K.hdim_q, K.hdim_v, K.dtype, K.target);
 
     // BlockTile: sequence<bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv>
     using BlockTile = ck_tile::sequence<kTile.bm0,

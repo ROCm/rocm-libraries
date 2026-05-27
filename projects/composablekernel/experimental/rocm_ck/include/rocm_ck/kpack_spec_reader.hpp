@@ -156,6 +156,10 @@ inline GpuTarget parseGpuTarget(const std::string& s)
         return GpuTarget::gfx1150;
     if(s == "gfx1151")
         return GpuTarget::gfx1151;
+    if(s == "gfx1200")
+        return GpuTarget::gfx1200;
+    if(s == "gfx1201")
+        return GpuTarget::gfx1201;
     return GpuTarget::gfx90a; // fallback
 }
 

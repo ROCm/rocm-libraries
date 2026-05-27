@@ -58,6 +58,8 @@ constexpr TargetProperties properties(GpuTarget target)
     case GpuTarget::gfx1102: return {32, ArchFamily::RDNA};
     case GpuTarget::gfx1150: return {32, ArchFamily::RDNA};
     case GpuTarget::gfx1151: return {32, ArchFamily::RDNA};
+    case GpuTarget::gfx1200: return {32, ArchFamily::RDNA};
+    case GpuTarget::gfx1201: return {32, ArchFamily::RDNA};
     default: throw "invalid GpuTarget in properties";
     }
 }
@@ -87,7 +89,8 @@ constexpr int wavefrontSize(GpuTarget target) { return properties(target).wavefr
 ///
 /// Named constructors express CK Tile's 3-level hierarchy:
 ///   Architecture: TargetSet::cdna(), TargetSet::rdna(), TargetSet::all()
-///   Family:       TargetSet::family_gfx9(), family_gfx94(), family_gfx11(), family_gfx115()
+///   Family:       TargetSet::family_gfx9(), family_gfx94(), family_gfx11(), family_gfx115(),
+///                 family_gfx12()
 ///   Specific:     TargetSet::only(GpuTarget::gfx942)
 ///
 /// CK Tile mapping:
@@ -96,6 +99,7 @@ constexpr int wavefrontSize(GpuTarget target) { return properties(target).wavefr
 ///   TargetSet::family_gfx9()                   → enable_if_target_family_gfx9_t
 ///   TargetSet::family_gfx11()                  → __gfx11__ preprocessor grouping
 ///   TargetSet::family_gfx115()                 → __gfx115__ preprocessor grouping
+///   TargetSet::family_gfx12()                  → __gfx12__ preprocessor grouping
 ///   TargetSet::only(gfx942, gfx950)            → enable_if_target_id_t<T, GFX942, GFX950>
 ///   TargetSet::cdna().excluding(gfx90a)        → is_any_value_of(T::TARGET_ID, GFX942, GFX950)
 struct TargetSet
@@ -110,7 +114,7 @@ struct TargetSet
     //   4. Bump kNumTargets
 
     /// Number of real targets (update when adding targets).
-    static constexpr int kNumTargets = 8;
+    static constexpr int kNumTargets = 10;
 
     /// Map a real GpuTarget to its bit index.
     static constexpr int bitIndex(GpuTarget target)
@@ -125,6 +129,8 @@ struct TargetSet
         case GpuTarget::gfx1101: return 5;
         case GpuTarget::gfx1102: return 6;
         case GpuTarget::gfx1150: return 7;
+        case GpuTarget::gfx1200: return 8;
+        case GpuTarget::gfx1201: return 9;
         default: throw "invalid GpuTarget in bitIndex";
         }
     }
@@ -142,6 +148,8 @@ struct TargetSet
         case 5: return GpuTarget::gfx1101;
         case 6: return GpuTarget::gfx1102;
         case 7: return GpuTarget::gfx1150;
+        case 8: return GpuTarget::gfx1200;
+        case 9: return GpuTarget::gfx1201;
         default: throw "invalid bit index in targetAt";
         }
     }
@@ -165,15 +173,16 @@ struct TargetSet
         return only(GpuTarget::gfx90a, GpuTarget::gfx942, GpuTarget::gfx950);
     }
 
-    /// All RDNA targets (WMMA, wave32): gfx1100, gfx1101, gfx1102, gfx1150, gfx1151.
+    /// All RDNA targets (WMMA, wave32): gfx11, gfx115, gfx12.
     static constexpr TargetSet rdna()
     {
         return only(GpuTarget::gfx1100, GpuTarget::gfx1101, GpuTarget::gfx1102)
-            .union_with(only(GpuTarget::gfx1150, GpuTarget::gfx1151));
+            .union_with(only(GpuTarget::gfx1150, GpuTarget::gfx1151))
+            .union_with(only(GpuTarget::gfx1200, GpuTarget::gfx1201));
     }
 
     // ---- Named constructors: family level ---------------------------------
-    // Matches CK Tile's __gfx9__, __gfx94__, __gfx11__ groupings.
+    // Matches CK Tile's __gfx9__, __gfx94__, __gfx11__, __gfx115__, __gfx12__ groupings.
 
     /// GFX9 family (CDNA): gfx90a, gfx942, gfx950.
     static constexpr TargetSet family_gfx9()
@@ -186,13 +195,24 @@ struct TargetSet
 
     /// GFX11 family (RDNA 3/3.5): gfx1100, gfx1101, gfx1102, gfx1150, gfx1151.
     /// Matches CK Tile's __gfx11__ preprocessor grouping.
-    static constexpr TargetSet family_gfx11() { return rdna(); }
+    static constexpr TargetSet family_gfx11()
+    {
+        return only(GpuTarget::gfx1100, GpuTarget::gfx1101, GpuTarget::gfx1102)
+            .union_with(only(GpuTarget::gfx1150, GpuTarget::gfx1151));
+    }
 
     /// GFX115 subfamily (RDNA 3.5): gfx1150, gfx1151.
     /// Matches CK Tile's __gfx115__ preprocessor grouping.
     static constexpr TargetSet family_gfx115()
     {
         return only(GpuTarget::gfx1150, GpuTarget::gfx1151);
+    }
+
+    /// GFX12 family (RDNA 4): gfx1200, gfx1201.
+    /// Matches CK Tile's __gfx12__ preprocessor grouping.
+    static constexpr TargetSet family_gfx12()
+    {
+        return only(GpuTarget::gfx1200, GpuTarget::gfx1201);
     }
 
     // ---- Named constructors: specific targets -----------------------------
