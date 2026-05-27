@@ -2310,7 +2310,7 @@ auto rocsolver_latrd_forsytrd_getWorkItems(rocblas_handle handle,
     std::size_t buffer = 3 * n * n;
     size_work = std::max(size_work, size_A + size_W + buffer);
 
-    // Global workspace for z1[k], z2[k] per batch in the naive kernel path (v and w point into pA and pW).
+    // Global workspace for z1[k], z2[k] per batch in the fused kernel path (v and w point into pA and pW).
     // Pad k to a 128-byte boundary to match the alignment used inside the kernel.
     const rocblas_int z_align = 128 / sizeof(T);
     const rocblas_int k_padded = ((k + z_align - 1) / z_align) * z_align;
@@ -2324,7 +2324,7 @@ auto rocsolver_latrd_forsytrd_getWorkItems(rocblas_handle handle,
 }
 
 // ---------------------------------------------------------------------------
-// DPP helpers — AMDGCN GFX8+ only (register-to-register, no crossbar)
+// DPP helpers -- AMDGCN GFX8+ only (register-to-register, no crossbar)
 // ---------------------------------------------------------------------------
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
     && !defined(__GFX7__)
@@ -2357,7 +2357,7 @@ __device__ inline T ds_swizzle_T(T v)
     return out;
 }
 
-// Word-wise __shfl broadcast — works for any T whose size is a multiple of 4 bytes.
+// Word-wise __shfl broadcast -- works for any T whose size is a multiple of 4 bytes.
 template <typename T>
 __device__ inline T shfl_bcast_T(T v, int src_lane)
 {
@@ -2389,7 +2389,7 @@ __device__ inline void reduce_wave_sum(S& val)
     constexpr bool bndCtrl = true;
 #endif
 
-    // Steps 1–4: cover the first 16 lanes (present on all supported wavefront sizes).
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
     val += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
     val += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
     val += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
@@ -2831,12 +2831,12 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
     // Shared memory: tau_j[1] | pSmem[MAX_THDS] | pSz1[nb] | pSz2[nb].  z1/z2 live in global work.
     // pSz1 stages row-j W scalars (Part A) and z1 (Part D). pSz2 stages row-j A scalars (Part A)
     // and z2 (Part D). Parts B/C/E read v directly from global memory (coalesced, L2-cached).
-    // LDS is O(1) in n — eliminates the occupancy cliff at large n.
+    // LDS is O(1) in n -- eliminates the occupancy cliff at large n.
     extern __shared__ double lmem[];
     T* tau_j = reinterpret_cast<T*>(lmem);
     T* pSmem = tau_j + 1;
-    T* pSz1 = pSmem + MAX_THDS; // [nb] — row-j W scalars (Part A), z1 (Part D)
-    T* pSz2 = pSz1 + nb;        // [nb] — row-j A scalars (Part A), z2 (Part D)
+    T* pSz1 = pSmem + MAX_THDS; // [nb] -- row-j W scalars (Part A), z1 (Part D)
+    T* pSz2 = pSz1 + nb; // [nb] -- row-j A scalars (Part A), z2 (Part D)
 
     // Global workspace per batch: z1[nb], z2[nb].  v and w point into pA and pW.
     // Pad nb to a 128-byte boundary so both z1 and z2 are aligned
@@ -2958,7 +2958,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
 
         // Part C:
         //
-        // v/w/z1/z2 are in global memory — all blocks participate.
+        // v/w/z1/z2 are in global memory -- all blocks participate.
         //
 
         // Step 4: w(j+1:n-1) = A(j+1:n-1, j+1:n-1) * v(0:nj-1)
@@ -2983,11 +2983,11 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
         // Step 7: z2(0:j-1) = A(j+1:n-1, 0:j-1)^H * v(0:nj-1)
         //
         // Block bid handles columns jj = bid, bid+gridDim.x, ...
-        // When gridDim.x == 1: Steps 5 & 7 are fused — thread tid owns column jj=tid and
+        // When gridDim.x == 1: Steps 5 & 7 are fused -- thread tid owns column jj=tid and
         //   accumulates both dot products in one pass, no reduction needed.
         // When gridDim.x > 1: Steps 5 & 7 run separately; all threads in a block reduce
         //   over rows for each assigned column via an intra-block reduction.
-        // No atomics — deterministic.
+        // No atomics -- deterministic.
         Wtmp = pW + (j + 1);
         Atmp = pA + (j + 1);
         if(gridDim.x == 1)
@@ -3032,7 +3032,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
 
         // Part D:
         //
-        // v/w/z1/z2 are in global memory — all blocks participate.
+        // v/w/z1/z2 are in global memory -- all blocks participate.
         //
         // Step 6: w(j+1:n-1) = -A(j+1:n-1, 0:j-1) * z1(0:j-1) + w(j+1:n-1)
         // Step 8: w(j+1:n-1) = -W(j+1:n-1, 0:j-1) * z2(0:j-1) + w(j+1:n-1)
@@ -3181,12 +3181,16 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             && (lmemsize_small <= props->sharedMemPerBlock);
 
         // Shared memory: tau_j[1] | pSmem[256] | pSz1[k] | pSz2[k]. z1/z2 live in global work.
-        // LDS is O(1) in n (k=nb, default 64) — eliminates the occupancy cliff at large n.
+        // LDS is O(1) in n (k=nb, default 64) -- eliminates the occupancy cliff at large n.
         // Parts B/C/E read v directly from global memory; only Parts A/D need LDS (j<=k-1 elems).
         constexpr rocblas_int FUSED_THDS = 256;
         const size_t lmemsize_fused = (1 + FUSED_THDS + 2 * k) * sizeof(T);
         const bool is_batched = batch_count > 1;
-        bool use_fused_kernel = select_coop_launch && !is_batched
+        static const rocblas_int latrd_switch_size = []() {
+            const char* v = std::getenv("LATRD_COOP_SWITCH_SIZE");
+            return v ? std::atoi(v) : 1280;
+        }();
+        bool use_fused_kernel = select_coop_launch && (n < latrd_switch_size) && !is_batched
             && !rocblas_is_complex<T> && (lmemsize_fused <= props->sharedMemPerBlock);
 
         if(!latrd_forsytrd_multi_kernel && use_small_kernel)
@@ -3250,14 +3254,19 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             // LATRD_COOP_GRID_X allows GPU-specific tuning of grid width.
             static const rocblas_int env_grid_x = []() {
                 const char* v = std::getenv("LATRD_COOP_GRID_X");
-                return v ? std::atoi(v) : FUSED_THDS;
+                return v ? std::atoi(v) : -1;
             }();
-            rocblas_int want_grid_x = std::max(1, env_grid_x);
+            rocblas_int want_grid_x = env_grid_x;
+            if(want_grid_x < 1)
+            {
+                // Pick default block size (needs tunning)
+                want_grid_x = std::min(std::max(1, n / 2), 512);
+            }
             rocblas_int grid_x = std::min(want_grid_x, max_grid_x);
 
             if(print_debug_messages_latrd_forsytrd)
                 std::fprintf(stderr,
-                             "[latrd_naive] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d\n", n,
+                             "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d\n", n,
                              max_blocks_per_sm, max_total_blocks, grid_x);
 
             HIP_TRACE(hipLaunchCooperativeKernel(kernel_fn, dim3(grid_x, 1, batch_count),
