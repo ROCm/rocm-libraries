@@ -81,7 +81,9 @@ def extract_add_test_blocks(cmake_text: str) -> dict[str, dict]:
         name = m.group("name")
         if name not in tests:
             tests[name] = {}
-        tests[name]["labels"] = m.group("labels").split(";") if m.group("labels") else []
+        tests[name]["labels"] = (
+            m.group("labels").split(";") if m.group("labels") else []
+        )
         tests[name]["timeout"] = int(m.group("timeout"))
         tests[name]["environment"] = m.group("env")
 
@@ -118,7 +120,9 @@ def parse_install_file(install_path: Path) -> dict[str, dict]:
         name = m.group("name")
         if name not in tests:
             tests[name] = {}
-        tests[name]["labels"] = m.group("labels").split(";") if m.group("labels") else []
+        tests[name]["labels"] = (
+            m.group("labels").split(";") if m.group("labels") else []
+        )
         tests[name]["timeout"] = int(m.group("timeout"))
         tests[name]["environment"] = m.group("env")
 

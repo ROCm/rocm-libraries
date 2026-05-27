@@ -237,18 +237,29 @@ def test_load_yaml_malformed_file_exits(fixtures_dir):
 # ---------------------------------------------------------------------------
 
 
-def _run_parser(parser_dir: Path, yaml_path: Path, target: str, workdir: Path,
-                install_file: Path | None = None) -> subprocess.CompletedProcess:
-    cmd = [sys.executable, str(parser_dir / "parse_test_categories.py"),
-           str(yaml_path), target, str(workdir)]
+def _run_parser(
+    parser_dir: Path,
+    yaml_path: Path,
+    target: str,
+    workdir: Path,
+    install_file: Path | None = None,
+) -> subprocess.CompletedProcess:
+    cmd = [
+        sys.executable,
+        str(parser_dir / "parse_test_categories.py"),
+        str(yaml_path),
+        target,
+        str(workdir),
+    ]
     if install_file is not None:
         cmd.append(str(install_file))
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
 def test_cli_minimal_yaml_generates_expected_test(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_minimal.yaml",
-                      "my_target", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "gtest_minimal.yaml", "my_target", tmp_path
+    )
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     assert "my_target_quick_suite" in tests
@@ -264,8 +275,7 @@ def test_cli_minimal_yaml_generates_expected_test(parser_dir, fixtures_dir, tmp_
 def test_cli_full_yaml_generates_all_categories_and_gpu_excludes(
     parser_dir, fixtures_dir, tmp_path
 ):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml",
-                      "target", tmp_path)
+    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml", "target", tmp_path)
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
 
@@ -288,8 +298,7 @@ def test_cli_full_yaml_generates_all_categories_and_gpu_excludes(
 
 def test_cli_full_yaml_applies_timeout_multiplier(parser_dir, fixtures_dir, tmp_path):
     # gtest_full.yaml: multiplier=2, category_timeouts: quick=300, standard=1800.
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml",
-                      "target", tmp_path)
+    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml", "target", tmp_path)
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     assert tests["target_quick_suite"]["timeout"] == 600
@@ -297,8 +306,7 @@ def test_cli_full_yaml_applies_timeout_multiplier(parser_dir, fixtures_dir, tmp_
 
 
 def test_cli_full_yaml_propagates_environment(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml",
-                      "target", tmp_path)
+    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml", "target", tmp_path)
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     env = tests["target_quick_suite"]["environment"]
@@ -309,8 +317,7 @@ def test_cli_full_yaml_propagates_environment(parser_dir, fixtures_dir, tmp_path
 
 
 def test_cli_full_yaml_emits_os_specific_excludes(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml",
-                      "target", tmp_path)
+    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml", "target", tmp_path)
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     cmd = tests["target_quick_suite"]["command"]
@@ -335,8 +342,7 @@ def test_cli_full_yaml_gpu_exclude_combines_with_category_exclude(
     excludes, the resulting --gtest_filter must contain BOTH sets of excludes
     after the '-' separator.
     """
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml",
-                      "target", tmp_path)
+    res = _run_parser(parser_dir, fixtures_dir / "gtest_full.yaml", "target", tmp_path)
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     cmd = tests["target_quick_gfx1150_suite"]["command"]
@@ -353,8 +359,9 @@ def test_cli_full_yaml_gpu_exclude_combines_with_category_exclude(
 
 
 def test_cli_no_gpu_yaml_emits_no_gpu_suites(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_no_gpu.yaml",
-                      "target", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "gtest_no_gpu.yaml", "target", tmp_path
+    )
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     assert {"target_quick_suite", "target_standard_suite"} <= set(tests)
@@ -364,8 +371,9 @@ def test_cli_no_gpu_yaml_emits_no_gpu_suites(parser_dir, fixtures_dir, tmp_path)
 def test_cli_empty_patterns_emits_warning_and_skips_category(
     parser_dir, fixtures_dir, tmp_path
 ):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_empty_patterns.yaml",
-                      "target", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "gtest_empty_patterns.yaml", "target", tmp_path
+    )
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     assert "target_quick_suite" in tests
@@ -376,8 +384,9 @@ def test_cli_empty_patterns_emits_warning_and_skips_category(
 def test_cli_invalid_gtest_pattern_yaml_fails_with_clear_error(
     parser_dir, fixtures_dir, tmp_path
 ):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_invalid_pattern.yaml",
-                      "target", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "gtest_invalid_pattern.yaml", "target", tmp_path
+    )
     assert res.returncode == 1
     assert "Invalid gtest pattern" in res.stderr
     assert "Bad Pattern With Spaces" in res.stderr
@@ -388,8 +397,9 @@ def test_cli_invalid_gtest_pattern_yaml_fails_with_clear_error(
 def test_cli_invalid_identifier_yaml_fails_with_clear_error(
     parser_dir, fixtures_dir, tmp_path
 ):
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_invalid_identifier.yaml",
-                      "target", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "gtest_invalid_identifier.yaml", "target", tmp_path
+    )
     assert res.returncode == 1
     assert "unsafe characters" in res.stderr or "Identifier" in res.stderr
     assert "bad label" in res.stderr
@@ -406,8 +416,13 @@ def test_cli_install_file_argument_writes_relative_path_tests(
     parser_dir, fixtures_dir, tmp_path
 ):
     install_file = tmp_path / "install_CTestTestfile.cmake"
-    res = _run_parser(parser_dir, fixtures_dir / "gtest_minimal.yaml",
-                      "my_target", tmp_path, install_file=install_file)
+    res = _run_parser(
+        parser_dir,
+        fixtures_dir / "gtest_minimal.yaml",
+        "my_target",
+        tmp_path,
+        install_file=install_file,
+    )
     assert res.returncode == 0, res.stderr
     assert install_file.exists()
 
@@ -431,8 +446,13 @@ def test_cli_install_file_appends_on_repeat_invocation(
     """
     install_file = tmp_path / "install_CTestTestfile.cmake"
     for target in ("target_a", "target_b"):
-        res = _run_parser(parser_dir, fixtures_dir / "gtest_minimal.yaml",
-                          target, tmp_path, install_file=install_file)
+        res = _run_parser(
+            parser_dir,
+            fixtures_dir / "gtest_minimal.yaml",
+            target,
+            tmp_path,
+            install_file=install_file,
+        )
         assert res.returncode == 0, res.stderr
 
     install_tests = parse_install_file(install_file)

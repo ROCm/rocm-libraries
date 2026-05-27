@@ -50,15 +50,15 @@ def test_validate_tag_accepts_valid_tags(tag):
 @pytest.mark.parametrize(
     "tag",
     [
-        "smoke",       # no brackets
-        "[smoke",      # unclosed bracket
-        "smoke]",      # unopened bracket
+        "smoke",  # no brackets
+        "[smoke",  # unclosed bracket
+        "smoke]",  # unopened bracket
         "[smoke][unit]",  # two tags concatenated -- must be in a list, not a string
-        "[smoke ]",    # space inside brackets
+        "[smoke ]",  # space inside brackets
         "[smoke;]",
         "[smoke|]",
         "",
-        "~smoke",      # negation without brackets
+        "~smoke",  # negation without brackets
     ],
 )
 def test_validate_tag_rejects_invalid_tags(tag):
@@ -160,12 +160,16 @@ def test_validate_categories_collects_multiple_errors():
 
 
 def test_build_expression_only_includes():
-    assert pcc.build_catch2_tag_expression(["[smoke]", "[unit]"], []) == "[smoke],[unit]"
+    assert (
+        pcc.build_catch2_tag_expression(["[smoke]", "[unit]"], []) == "[smoke],[unit]"
+    )
 
 
 def test_build_expression_only_excludes():
     # Excludes without includes => single AND-joined exclude clause.
-    assert pcc.build_catch2_tag_expression([], ["[slow]", "[flaky]"]) == "~[slow] ~[flaky]"
+    assert (
+        pcc.build_catch2_tag_expression([], ["[slow]", "[flaky]"]) == "~[slow] ~[flaky]"
+    )
 
 
 def test_build_expression_include_and_exclude_distributes_excludes():
@@ -220,18 +224,29 @@ def test_load_yaml_missing_file_exits(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _run_parser(parser_dir: Path, yaml_path: Path, target: str, workdir: Path,
-                install_file: Path | None = None) -> subprocess.CompletedProcess:
-    cmd = [sys.executable, str(parser_dir / "parse_catch2_categories.py"),
-           str(yaml_path), target, str(workdir)]
+def _run_parser(
+    parser_dir: Path,
+    yaml_path: Path,
+    target: str,
+    workdir: Path,
+    install_file: Path | None = None,
+) -> subprocess.CompletedProcess:
+    cmd = [
+        sys.executable,
+        str(parser_dir / "parse_catch2_categories.py"),
+        str(yaml_path),
+        target,
+        str(workdir),
+    ]
     if install_file is not None:
         cmd.append(str(install_file))
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
 def test_cli_minimal_yaml_generates_expected_test(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_minimal.yaml",
-                      "rr_tests", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "catch2_minimal.yaml", "rr_tests", tmp_path
+    )
     assert res.returncode == 0, res.stderr
     tests = extract_add_test_blocks(res.stdout)
     assert "rr_tests_quick_suite" in tests
@@ -311,16 +326,18 @@ def test_cli_full_yaml_propagates_environment(parser_dir, fixtures_dir, tmp_path
 
 
 def test_cli_invalid_tag_yaml_fails(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_invalid_tag.yaml",
-                      "t", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "catch2_invalid_tag.yaml", "t", tmp_path
+    )
     assert res.returncode == 1
     assert "Invalid tag syntax" in res.stderr
     assert "add_test(" not in res.stdout
 
 
 def test_cli_invalid_identifier_yaml_fails(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_invalid_identifier.yaml",
-                      "t", tmp_path)
+    res = _run_parser(
+        parser_dir, fixtures_dir / "catch2_invalid_identifier.yaml", "t", tmp_path
+    )
     assert res.returncode == 1
     assert "bad/name" in res.stderr or "unsafe characters" in res.stderr
 
@@ -329,8 +346,13 @@ def test_cli_install_file_writes_relative_path_tests(
     parser_dir, fixtures_dir, tmp_path
 ):
     install_file = tmp_path / "install_CTestTestfile.cmake"
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_minimal.yaml",
-                      "rr_tests", tmp_path, install_file=install_file)
+    res = _run_parser(
+        parser_dir,
+        fixtures_dir / "catch2_minimal.yaml",
+        "rr_tests",
+        tmp_path,
+        install_file=install_file,
+    )
     assert res.returncode == 0, res.stderr
     assert install_file.exists()
 
@@ -351,8 +373,13 @@ def test_cli_install_file_for_all_tests_category_has_no_tag_arg(
     install file must mirror that and emit just ``"../<target>"``.
     """
     install_file = tmp_path / "install_CTestTestfile.cmake"
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml",
-                      "t", tmp_path, install_file=install_file)
+    res = _run_parser(
+        parser_dir,
+        fixtures_dir / "catch2_full.yaml",
+        "t",
+        tmp_path,
+        install_file=install_file,
+    )
     assert res.returncode == 0, res.stderr
 
     install_tests = parse_install_file(install_file)
