@@ -1529,3 +1529,326 @@ Forcing each failure mode by editing a known-good conf:
   are in this .co" because (a) the user already knows the one they want
   (`kernel_symbol`) and (b) hot-introspection at runtime is cheap to defer to
   the explicit `llvm-readobj` recipe in the error message.
+
+
+## 9. Kernel argument / data feeding interface
+
+Part 1 (§8) handled `hipModuleLoad` → `hipFunction_t`. This section covers the
+other half: turning that function plus a problem spec into a launchable
+kernarg buffer with allocated tensors behind every pointer slot. Pre-this-pass
+the C++ runner had a hand-rolled 104-byte packer with hardcoded offsets for
+the legacy bf16 TN ABI; this section replaces it with a metadata-driven slot
+list emitted by `okl.py` from the kernel's own ELF.
+
+### 9.1 Inventory: what `.args` actually contains across shipped kernels
+
+Single source of truth, on disk, per shard: the `NT_AMDGPU_METADATA` note's
+`amdhsa.kernels[*].args` list (see §3.3 and §6.3 for the legacy bf16 TN
+example). Tensile emits it from
+`tensilelite/Tensile/Components/Signature.py:118-237` — every `signature.addArg(...)`
+call there becomes one entry. The host-side packer in
+`tensilelite/src/ContractionSolution.cpp:540-1568` is the matching encoder.
+For the standalone runner, the kernel-side metadata is what we trust: the
+host packer code is conditional on a dozen problem-type flags we'd otherwise
+have to mirror.
+
+I unpacked five kernels from `/opt/rocm-6.4.3/lib/hipblaslt/library/` (all
+gfx942 bf16 in/out, fp32 compute) to see the variations actually in the
+wild:
+
+| Solution flavor | shard | `.kernarg_segment_size` | extra args beyond core |
+|---|---|---|---|
+| Legacy GEMM (canonical) | `BB_BB_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_..._gfx942.co` | **104** | — |
+| GEMM + bias (gradient-capable) | `BB_BB_Bias_UA_Type_BB_HPA_Contraction_l_Ailk_Bljk_..._gfx942.co` | **144** | `bias`, `biasType`, `StrideBias`, `dstD`, `Synchronizer`, `GSUSync` |
+| GEMM + bias + aux + activation + scaleAlphaVec | `BB_BB_HA_Bias_Aux_SAV_UA_Type_BB_HPA_Contraction_l_Ailk_Bljk_..._gfx942.co` | **160** | `AddressScaleAlphaVec`, `bias`, `biasType`, `StrideBias`, `E`, `StrideE0..1`, `activationAlpha/Beta/Type` |
+| GEMM + bias + grouped-gemm-supporting (GG) | `BB_BB_HA_Bias_GG_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_..._gfx942.co` | **144** | `AddressScaleAlphaVec`, `bias`, `biasType`, `StrideBias`, `activationAlpha/Beta/Type` |
+| Stream-K (CU80) | `BB_BB_UA_Type_BB_HPA_ExperimentalStreamK_..._CU80_gfx942.co` | varies | `AddressWS`, `AddressFlags` injected between B and strideD0 (strides shifted to offset 80+) |
+
+What's invariant across **every** Tensile kernel I looked at (and matches
+`Signature.py:128-211`):
+
+```
+offset 0:  Gemm info       (u32, by_value)   = gemm_count|(argType<<30)
+offset 4:  kernel info0    (u32, by_value)   = packed internalArgs (GSU+StaggerU+...)
+offset 8:  kernel info1    (u32, by_value)   = packed internalArgs1 (WGM+WGMXCC+...)
+offset 12: numWG           (u32, by_value)   = total workgroups (collapsed 1D)
+offset 16: SizesFree0..N   (u32, by_value)   = free-index sizes; usually [M, N, batch]
+offset _:  SizesSum0..M    (u32, by_value)   = sum-index sizes; usually [K]
+offset _:  D, C, A, B      (8 bytes, global_buffer, address_space=generic)
+offset _:  strideD0..k1    (u32 each)        = leading + batch strides
+offset _:  alpha           (size depends on compute type; here f32)
+offset _:  beta            (only if useBeta; same rules)
+[everything beyond here is feature-gated]
+```
+
+After that, in order: `AddressScaleA/B/C/D`, `scaleAlphaVec`, `bias` +
+`biasType` + `StrideBias`, `e` + `strideE0/1`, `activationAlpha/Beta/Type`.
+For Stream-K: `AddressWS` + `AddressFlags` insert immediately after the
+A/B pointers (before strides), so the stride offsets shift forward. For
+GSU-multi-buffer / SK atomics: `Synchronizer` + `GSUSync` get appended after
+activation. For `useGradient`: `dstD` appears as a separate output pointer.
+
+**Value types** observed: `u32` (sizes, strides, biasType, activationType,
+internal args), `f32` (alpha, beta, activationAlpha/Beta when compute is
+fp32), `bf16`/`void` recorded on global_buffer slots (informational —
+pointer width is always 8). No `u64`/`i32` by-value slots in the kernels I
+inspected, though they're legal in the metadata. No `hidden_*` value_kinds
+appear in any shipped Tensile kernel (Tensile doesn't request them).
+
+**Sizes of `alpha`/`beta` are compute-type dependent.** For fp32 compute
+both are 4 bytes; for fp64 compute they're 8 bytes; for fp16 compute
+Tensile uses `pkf16` (packed half) which is still 4 bytes but written as a
+duplicated half pair. The kernel's `value_type` field reflects this directly
+(`f32` / `f64` / `pkf16`).
+
+### 9.2 `numWG` is data, not derived
+
+The pre-existing C++ computed `numWG = ceildiv(M,MT0) * ceildiv(N,MT1) * batch`,
+which is correct only for the simplest case. For Stream-K, GSU>1, packed
+batch dims, or `transposeC`-swapped axes, Tensile's `calculateGrid`
+(`tensilelite/src/ContractionSolution.cpp:1405-1442`) does more work, then
+`generateSingleCall` collapses `.y/.z` into `.x`
+(`ContractionSolution.cpp:1481-1487`). Re-deriving this in the standalone
+runner means mirroring every solution flag. Instead: we capture the value
+Tensile actually launched with, from the `TENSILE_DB=0xF0` dump
+(`[12..15] numWorkGroups: ...`), and emit it as a const into the slot list.
+The runner reads it back out by name. This is v1's purpose — faithful
+replay, not re-derivation. Bonus: when the captured grid disagrees with
+ceildiv-of-MT, the conf documents the difference instead of silently
+mis-launching.
+
+There's no path where collapsed numWG exceeds `UINT32_MAX` in practice
+(would need >4G workgroups; current hardware is single-digit M tiles), and
+the kernarg field is itself u32, so the kernel cannot accept more.
+
+### 9.3 Design: explicit slot list in conf (option β)
+
+I considered two shapes:
+
+- **α — runtime metadata.** C++ parses `amdhsa.kernels[*].args` itself
+  (libelf or hand-rolled note parser) on every load, builds an internal slot
+  table, asks the conf for typed values by name.
+- **β — Python-emitted slot list.** `okl.py` parses the metadata once at
+  packaging time, writes the slot table inline in the conf as `slot = ...`
+  lines. C++ just iterates and writes each slot at its declared offset.
+
+I picked **β**. Reasons:
+
+1. The C++ runner stays small and dependency-free. Parsing AMDGPU notes in
+   pure C++ means either adding libelf or hand-rolling YAML (the metadata
+   is YAML inside the note). Either way it's hundreds of lines of code for
+   no functional gain over doing the parse in Python where we already have
+   `llvm-readobj` shelled out.
+2. The conf becomes self-describing. Reading `slot = offset=104 size=8
+   kind=buffer buffer=bias name=bias` tells you exactly what byte goes
+   where. No reverse-engineering from a kernel symbol name.
+3. Unknown slots fail loud at packaging time (where the user can do
+   something about it), not at runtime where the error context is gone.
+4. The packager and runner each do one thing. okl.py understands kernels;
+   okl_run.cpp understands buffers + launching. Adding a new feature
+   (e.g. MX block scales) means adding a buffer role to
+   `KNOWN_BUFFER_ROLES` in okl.py and possibly a sizing rule — the C++
+   runner is untouched.
+
+Tradeoff: the conf is wordier. For our example legacy kernel it goes from
+~20 lines to ~30 (22 slot lines + 4 buffer lines). That's fine — it's
+human-readable and only re-read once per invocation.
+
+### 9.4 Conf shape (before / after)
+
+Before (104-byte kernel, layout hardcoded in C++):
+
+```
+co_file       = kernel.co
+kernel_symbol = Cijk_..._WG32_8_1
+target_arch   = gfx942
+xnack         = any
+bundle_target = hipv4-amdgcn-amd-amdhsa--gfx942
+internal_args  = 0x20080001
+internal_args1 = 0x4c010000
+macro_tile_0   = 32
+macro_tile_1   = 32
+workgroup_size_threads = 256
+kernarg_size   = 104
+m = 512; n = 512; k = 512; batch = 1
+size_a_bytes = 524288; ... size_d_bytes = 524288
+stride_d_0 = 512; stride_d_1 = 0; ... stride_b_1 = 0
+alpha = 1.0; beta = 0.0
+```
+
+After (same kernel, layout from `.args`):
+
+```
+co_file       = kernel.co
+kernel_symbol = Cijk_..._WG32_8_1
+target_arch   = gfx942
+xnack         = any
+bundle_target = hipv4-amdgcn-amd-amdhsa--gfx942
+kernarg_size           = 104
+workgroup_size_threads = 256
+m = 512; n = 512; k = 512; batch = 1
+
+buffer = name=D bytes=524288 init=poison
+buffer = name=C bytes=524288 init=zero
+buffer = name=A bytes=524288 init=zero
+buffer = name=B bytes=524288 init=zero
+
+slot = offset=0   size=4 kind=value ctype=u32 value=0x1        name=Gemm_info
+slot = offset=4   size=4 kind=value ctype=u32 value=0x20080001 name=kernel_info0
+slot = offset=8   size=4 kind=value ctype=u32 value=0x4c010000 name=kernel_info1
+slot = offset=12  size=4 kind=value ctype=u32 value=0x100      name=numWG
+slot = offset=16  size=4 kind=value ctype=u32 value=0x200      name=SizesFree0
+slot = offset=20  size=4 kind=value ctype=u32 value=0x200      name=SizesFree1
+slot = offset=24  size=4 kind=value ctype=u32 value=0x1        name=SizesFree2
+slot = offset=28  size=4 kind=value ctype=u32 value=0x200      name=SizesSum0
+slot = offset=32  size=8 kind=buffer buffer=D                  name=D
+slot = offset=40  size=8 kind=buffer buffer=C                  name=C
+slot = offset=48  size=8 kind=buffer buffer=A                  name=A
+slot = offset=56  size=8 kind=buffer buffer=B                  name=B
+slot = offset=64  size=4 kind=value ctype=u32 value=0x200      name=strideD0
+... [strideD1..strideB1] ...
+slot = offset=96  size=4 kind=value ctype=u32 value=0x3f800000 name=alpha
+slot = offset=100 size=4 kind=value ctype=u32 value=0x0        name=beta
+```
+
+For the bias-bearing kernel (`BB_BB_HA_Bias_SAV_UA_..._gfx942.co`) the same
+process emits 32 slot lines and 8 buffer declarations covering D, C, A, B,
+plus `bias` (M-row), `dstD` (alt D output for gradient path),
+`scaleAlphaVec`, and `Synchronizer` (GSU multi-buffer). No C++ changes —
+the runner just allocates more buffers and writes more slots.
+
+Note alpha/beta encoding: the dump value for `alpha=1.0` is the raw u32
+`0x3F800000` (the IEEE bit pattern). When a slot's value came from the dump
+we emit it with `ctype=u32` so the C++ runner does a bit-exact 4-byte copy.
+This avoids the trap of re-encoding e.g. `0x7F800000` (+inf as float bits)
+as the integer 2139095040 then parsing it through `strtof` (which would
+give 2.14e9, garbage).
+
+### 9.5 C++ packing loop (sketch)
+
+The full runner is in `okl_run.cpp` (~470 LOC including loader from §8 +
+verify). The new packing loop is roughly:
+
+```cpp
+// 1. Allocate buffers declared in the conf.
+std::unordered_map<std::string, void*> bufs;
+for (auto& b : c.buffers) {
+    void* p; HIP_CHECK(hipMalloc(&p, b.bytes));
+    HIP_CHECK(hipMemset(p, b.init == "poison" ? 0xee : 0, b.bytes));
+    bufs[b.role] = p;
+}
+
+// 2. Walk slots, encoding into the kernarg byte buffer.
+std::vector<uint8_t> kernarg(c.kernarg_size, 0);
+for (auto& s : c.slots) {
+    if (s.kind == "buffer") {
+        void* p = bufs.at(s.buffer);
+        std::memcpy(kernarg.data() + s.offset, &p, 8);
+    } else {
+        std::memcpy(kernarg.data() + s.offset,
+                    s.value_bytes.data(), s.size);
+    }
+}
+
+// 3. Look up numWG from the slot named "numWG" (captured from dump, not
+//    re-derived). Launch with this as the 1D grid.
+uint32_t numWG = numwg_from_slots(c.slots);
+hipExtModuleLaunchKernel(kernel, numWG * c.workgroup_size, 1, 1,
+                         c.workgroup_size, 1, 1, /*shared=*/0, stream,
+                         nullptr, launch_params, nullptr, nullptr);
+```
+
+There are no field-name lookups in the packing path other than `numWG`
+(which is the only field the C++ needs by name, for the grid math). Adding
+a new kernarg field type (e.g. wider int) is one new branch in the conf
+loader's `encode_value`, no other changes.
+
+### 9.6 Code shape
+
+`okl.py`:
+
+- `find_readobj()` — locate llvm-readobj like we already did for
+  clang-offload-bundler.
+- `unbundle_co(co_path, full_target)` — shell out to bundler with
+  `--unbundle` to get the gfxNNN ELF slice into `/tmp/okl-unbundle-*.elf`.
+- `parse_kernel_args(elf_path, kernel_symbol)` — hand-rolled note parser
+  that walks `llvm-readobj --notes` output, recognizes the small YAML
+  subset Tensile emits, and returns
+  `(args_list[{name, offset, size, value_kind, value_type, address_space}],
+  kernarg_segment_size)` for the requested kernel.
+- `KNOWN_BUFFER_ROLES` — dict mapping ELF arg name → logical buffer role.
+  Covers D/C/A/B, MXSA/MXSB, MetaData, AddressWS/Flags, bias, e, scaleA..D,
+  scaleAlphaVec, Synchronizer, AmaxSync, dstD. Anything else with
+  `value_kind=global_buffer` fails at packaging time with a clear message.
+- `BY_VALUE_FROM_PROBLEM` — map ELF arg name → source for the value
+  (currently `SizesFree0..2` ← M/N/batch, `SizesSum0` ← K, `alpha`/`beta`
+  ← CLI). All other by_value slots are sourced from the TENSILE_DB dump
+  by offset.
+- `buffer_alloc_size(role, ...)` — sizing per role from the captured strides
+  + problem dims.
+- `build_slots(...)` — the actual driver: iterate ELF args, emit one slot
+  per arg, accumulate buffer declarations.
+- `format_slot_line(s)` — emit one `slot = ...` line. Includes the
+  `raw_u32` escape hatch described in §9.4.
+- `parse_dump()` — extended to also capture 8-byte slots (pointer fields)
+  in `kernarg_u64`, not used by the slot encoder but visible for sanity.
+
+`okl_run.cpp`:
+
+- `Slot`, `BufferDecl` structs replace the flat `Config` field list.
+- `parse_kv_list(body)` — tokenize `slot = k1=v1 k2=v2 ...`.
+- `encode_value(ctype, vstr, size, out)` — typed scalar → little-endian
+  bytes. Handles `u8/16/32/64`, `i8/16/32/64`, `f32`, `f64`, `pkf16`.
+- `load_config` — extended to handle `slot = ...` and `buffer = ...` line
+  types in addition to scalar `key = value`.
+- `numwg_from_slots(slots)` — look up the `numWG` slot's value at launch
+  time, used as the grid size for `hipExtModuleLaunchKernel`.
+- Packing loop replaced with the two for-loops shown in §9.5. The legacy
+  `put_u32` / `put_ptr` / `put_f32` helpers and hardcoded offsets are
+  deleted.
+
+The loading interface from §8 (`load_kernel`, `check_arch_compatible`,
+`ArchTuple`, `LoadedKernel`) is unchanged.
+
+### 9.7 Validation
+
+| test | kernel | result | gflops |
+|---|---|---|---|
+| 512^3 bf16 TN | legacy 104-byte ABI | verify OK | ~54000 |
+| 2048^3 bf16 TN | legacy 104-byte ABI (different MT) | verify OK | ~462000 |
+| 512^3 bf16 TN + bias_vector | 160-byte ABI w/ bias+activation+scaleAlphaVec+dstD+Synchronizer | verify OK | ~44000 |
+
+Both legacy tests reproduce part-1 performance exactly. The bias kernel
+launches cleanly (verify OK = D was poisoned, became all-zero post-launch
+which is correct for A=B=bias=0) and clocks ~44 TFLOPS for the smaller
+kernel. The packager noticed and emitted 8 buffer declarations and 32 slot
+lines without manual intervention.
+
+### 9.8 Things deliberately not done
+
+- **No DeviceUserArguments path.** Single-GEMM (non-grouped) takes the
+  legacy in-kernarg path (see §6.2). Grouped-gemm support would need an
+  alternative conf shape — the kernarg buffer collapses to 24 bytes plus a
+  device pointer, and the args go in a device-resident struct. Out of
+  scope for v1.
+- **No data initialization variety.** Buffers fill with 0 (or 0xee for
+  poison). For correctness checks against a reference we'd want
+  `init=random` with a seed and CPU reference computation. Defer to v2.
+- **No host-side reference / correctness check.** v1's verify is only
+  "D was overwritten and equals zero" which works because A=B=C=0. v2
+  could compute D on the host and compare bit-exactly (would also test
+  alpha / beta / activation paths).
+- **No numWG re-derivation.** We use the captured dump value verbatim.
+  This makes the runner faithful-replay-only — it cannot launch the same
+  kernel at a different problem size without re-running okl.py to capture
+  a new dump. That's intentional for v1 (one package = one captured
+  launch).
+- **No StreamK / GSU testing.** I unbundled a CU80 Stream-K kernel and
+  confirmed its `.args` parses (AddressWS at offset 64, AddressFlags at
+  72, strides shifted to 80+); the buffer roles are in
+  `KNOWN_BUFFER_ROLES` and the C++ would allocate them. But I didn't run
+  one end-to-end. The Stream-K workspace sizing in `buffer_alloc_size`
+  (64 MiB fixed) is a guess; for real Stream-K runs we'd want to read the
+  per-solution workspace requirement out of the YAML.
+- **No MX block scales / sparsity testing.** Same as above — the buffer
+  roles exist, sizing is a guess, but nothing was launched.
