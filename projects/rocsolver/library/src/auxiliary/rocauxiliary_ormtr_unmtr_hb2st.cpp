@@ -42,7 +42,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
                                                 T* C,
                                                 const I ldc)
 {
-    const char* name = (!rocblas_is_complex<T> ? "ormtr_hb2st" : "unmtr_hb2st");
+    const char* name = (!rocblas_is_complex<T> ? "ormtr_sb2st" : "unmtr_hb2st");
     ROCSOLVER_ENTER_TOP(name, "--side", side, "--trans", trans, "-m", m, "-n", n, "--kd", kd,
                         "--ldv", ldv, "--ldc", ldc);
 
@@ -50,8 +50,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_ormtr_hb2st_argCheck<COMPLEX, T*, T*, I>(handle, side, trans, m, n,
-                                                                           kd, V, ldv, tau, C, ldc);
+    rocblas_status st = rocsolver_ormtr_unmtr_hb2st_argCheck<COMPLEX, T*, T*, I>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
     if(st != rocblas_status_continue)
         return st;
 
@@ -114,7 +114,7 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-rocblas_status rocsolver_sormtr_hb2st(rocblas_handle handle,
+rocblas_status rocsolver_sormtr_sb2st(rocblas_handle handle,
                                       const rocblas_side side,
                                       const rocblas_operation trans,
                                       const rocblas_int m,
@@ -130,7 +130,7 @@ rocblas_status rocsolver_sormtr_hb2st(rocblas_handle handle,
                                                                            kd, V, ldv, tau, C, ldc);
 }
 
-rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
+rocblas_status rocsolver_dormtr_sb2st(rocblas_handle handle,
                                       const rocblas_side side,
                                       const rocblas_operation trans,
                                       const rocblas_int m,
@@ -178,7 +178,7 @@ rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
-rocblas_status rocsolver_sormtr_hb2st_64(rocblas_handle handle,
+rocblas_status rocsolver_sormtr_sb2st_64(rocblas_handle handle,
                                          const rocblas_side side,
                                          const rocblas_operation trans,
                                          const int64_t m,
@@ -198,7 +198,7 @@ rocblas_status rocsolver_sormtr_hb2st_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_dormtr_hb2st_64(rocblas_handle handle,
+rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
                                          const rocblas_side side,
                                          const rocblas_operation trans,
                                          const int64_t m,

@@ -28,6 +28,7 @@
 #pragma once
 
 #include "clients_utility.hpp"
+#include "rocsolver_test.hpp"
 
 // Implements BLAS-like routines on CPU needed for rocSolver testers.
 

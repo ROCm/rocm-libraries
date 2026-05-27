@@ -402,7 +402,8 @@ class rocsolver_dispatcher
             {"ormlq", testing_ormlx_unmlx<T, 1>},
             {"ormbr", testing_ormbr_unmbr<T>},
             {"ormtr", testing_ormtr_unmtr<T>},
-            {"ormtr_hb2st", testing_ormtr_unmtr_hb2st<T>},
+            {"ormtr_sb2st", testing_ormtr_unmtr_hb2st<T, rocblas_int>},
+            {"ormtr_sb2st_64", testing_ormtr_unmtr_hb2st<T, int64_t>},
             // sytrd
             {"sytd2", testing_sytxx_hetxx<false, false, 0, T>},
             {"sytd2_batched", testing_sytxx_hetxx<true, true, 0, T>},
@@ -515,7 +516,8 @@ class rocsolver_dispatcher
             {"unmlq", testing_ormlx_unmlx<T, 1>},
             {"unmbr", testing_ormbr_unmbr<T>},
             {"unmtr", testing_ormtr_unmtr<T>},
-            {"unmtr_hb2st", testing_ormtr_unmtr_hb2st<T>},
+            {"unmtr_hb2st", testing_ormtr_unmtr_hb2st<T, rocblas_int>},
+            {"unmtr_hb2st_64", testing_ormtr_unmtr_hb2st<T, int64_t>},
             // hetrd
             {"hetd2", testing_sytxx_hetxx<false, false, 0, T>},
             {"hetd2_batched", testing_sytxx_hetxx<true, true, 0, T>},

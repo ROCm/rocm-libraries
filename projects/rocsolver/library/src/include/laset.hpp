@@ -177,7 +177,7 @@ rocblas_status laset(rocblas_handle handle,
                                                               A_, shiftA, lda, strideA,
 
                                                               batch_count);
-    return rocblas_success;
+    return rocblas_status_success;
 }
 
 ROCSOLVER_END_NAMESPACE

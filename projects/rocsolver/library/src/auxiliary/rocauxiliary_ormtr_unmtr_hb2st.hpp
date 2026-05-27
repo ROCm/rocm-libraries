@@ -97,17 +97,17 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
 
 //------------------------------------------------------------------------------
 template <bool COMPLEX, typename T, typename U, typename I = rocblas_int>
-rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
-                                              const rocblas_side side,
-                                              const rocblas_operation trans,
-                                              const I m,
-                                              const I n,
-                                              const I kd,
-                                              T V,
-                                              const I ldv,
-                                              U tau,
-                                              T C,
-                                              const I ldc)
+rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
+                                                    const rocblas_side side,
+                                                    const rocblas_operation trans,
+                                                    const I m,
+                                                    const I n,
+                                                    const I kd,
+                                                    T V,
+                                                    const I ldv,
+                                                    U tau,
+                                                    T C,
+                                                    const I ldc)
 {
     // order is important for unit tests:
 

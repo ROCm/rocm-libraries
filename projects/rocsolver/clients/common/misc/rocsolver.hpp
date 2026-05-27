@@ -3495,7 +3495,7 @@ inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
                                                   float* C,
                                                   rocblas_int ldc)
 {
-    return rocsolver_sormtr_hb2st(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+    return rocsolver_sormtr_sb2st(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
 inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
@@ -3510,7 +3510,7 @@ inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
                                                   double* C,
                                                   rocblas_int ldc)
 {
-    return rocsolver_dormtr_hb2st(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+    return rocsolver_dormtr_sb2st(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
 inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
@@ -3555,7 +3555,7 @@ inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
                                                   float* C,
                                                   int64_t ldc)
 {
-    return rocsolver_sormtr_hb2st_64(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+    return rocsolver_sormtr_sb2st_64(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
 inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
@@ -3570,7 +3570,7 @@ inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
                                                   double* C,
                                                   int64_t ldc)
 {
-    return rocsolver_dormtr_hb2st_64(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+    return rocsolver_dormtr_sb2st_64(handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
 inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,

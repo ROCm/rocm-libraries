@@ -77,13 +77,13 @@ void ormtr_unmtr_hb2st_checkBadArgs(const rocblas_handle handle,
         rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, 0, n, kd, (T) nullptr,
+    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, I(0), n, kd, (T) nullptr,
                                                       ldv, (T) nullptr, (T) nullptr, ldc),
                           rocblas_status_success);
-    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, 0, kd, (T) nullptr,
+    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, I(0), kd, (T) nullptr,
                                                       ldv, (T) nullptr, (T) nullptr, ldc),
                           rocblas_status_success);
-    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, 0, (T) nullptr,
+    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, I(0), (T) nullptr,
                                                       ldv, (T) nullptr, (T) nullptr, ldc),
                           rocblas_status_success);
 }
@@ -147,7 +147,7 @@ void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
         I nq = (side == rocblas_side_left ? m : n);
 
         gerand(m, n, hC[0], ldc);
-        hbrand(nq, kd, hAband[0], ldab);
+        hbrand(nq, kd, kd - 1, hAband[0], ldab);
 
         // Call hb2st on GPU to compute dV and dTau.
         CHECK_HIP_ERROR(dAband.transfer_from(hAband));

@@ -34,7 +34,7 @@ using ::testing::ValuesIn;
 using namespace std;
 
 template <typename I>
-using ormtr_hb2st_tuple = std::tuple<vector<I>, vector<int>>;
+using ormtr_unmtr_hb2st_tuple = std::tuple<vector<I>, vector<int>>;
 
 // each size_range vector is a {M, N, KD}
 
@@ -114,7 +114,7 @@ const vector<vector<int64_t>> large_size_range_64 = {
 };
 
 template <typename I>
-Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple<I> tup)
+Arguments ormtr_unmtr_hb2st_setup_arguments(ormtr_unmtr_hb2st_tuple<I> tup)
 {
     vector<I> size = std::get<0>(tup);
     vector<int> store = std::get<1>(tup);
@@ -140,7 +140,7 @@ Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple<I> tup)
 }
 
 template <typename I>
-class ORMTR_UNMTR_HB2ST_BASE : public ::TestWithParam<ormtr_hb2st_tuple<I>>
+class ORMTR_UNMTR_HB2ST_BASE : public ::TestWithParam<ormtr_unmtr_hb2st_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -151,7 +151,7 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = ormtr_hb2st_setup_arguments(this->GetParam());
+        Arguments arg = ormtr_unmtr_hb2st_setup_arguments(this->GetParam());
 
         if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 1 && arg.peek<I>("kd") == 0
            && arg.peek<char>("side") == 'L' && arg.peek<char>("trans") == 'N')
@@ -163,7 +163,7 @@ protected:
     }
 };
 
-class ORMTR_HB2ST : public ORMTR_UNMTR_HB2ST_BASE<rocblas_int>
+class ORMTR_SB2ST : public ORMTR_UNMTR_HB2ST_BASE<rocblas_int>
 {
 };
 
@@ -171,7 +171,7 @@ class UNMTR_HB2ST : public ORMTR_UNMTR_HB2ST_BASE<rocblas_int>
 {
 };
 
-class ORMTR_HB2ST_64 : public ORMTR_UNMTR_HB2ST_BASE<int64_t>
+class ORMTR_SB2ST_64 : public ORMTR_UNMTR_HB2ST_BASE<int64_t>
 {
 };
 
@@ -181,12 +181,12 @@ class UNMTR_HB2ST_64 : public ORMTR_UNMTR_HB2ST_BASE<int64_t>
 
 // non-batch tests
 
-TEST_P(ORMTR_HB2ST, __float)
+TEST_P(ORMTR_SB2ST, __float)
 {
     run_tests<float>();
 }
 
-TEST_P(ORMTR_HB2ST, __double)
+TEST_P(ORMTR_SB2ST, __double)
 {
     run_tests<double>();
 }
@@ -201,12 +201,12 @@ TEST_P(UNMTR_HB2ST, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
-TEST_P(ORMTR_HB2ST_64, __float)
+TEST_P(ORMTR_SB2ST_64, __float)
 {
     run_tests<float>();
 }
 
-TEST_P(ORMTR_HB2ST_64, __double)
+TEST_P(ORMTR_SB2ST_64, __double)
 {
     run_tests<double>();
 }
@@ -222,11 +222,11 @@ TEST_P(UNMTR_HB2ST_64, __double_complex)
 }
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                         ORMTR_HB2ST,
+                         ORMTR_SB2ST,
                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         ORMTR_HB2ST,
+                         ORMTR_SB2ST,
                          Combine(ValuesIn(size_range), ValuesIn(store_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
@@ -238,11 +238,11 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          Combine(ValuesIn(size_range), ValuesIn(store_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                         ORMTR_HB2ST_64,
+                         ORMTR_SB2ST_64,
                          Combine(ValuesIn(large_size_range_64), ValuesIn(store_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         ORMTR_HB2ST_64,
+                         ORMTR_SB2ST_64,
                          Combine(ValuesIn(size_range_64), ValuesIn(store_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
