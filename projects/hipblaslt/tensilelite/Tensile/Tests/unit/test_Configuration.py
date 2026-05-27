@@ -640,15 +640,16 @@ class TestCallableParameter:
         assert val2 == 2
         assert val3 == 3
 
-    def test_value_write_ignored(self):
-        """Test that writing to value is ignored"""
+    def test_value_write_raises_exception(self):
+        """Test that writing to value raises an exception"""
         def func(self):
             return 42
 
         p = CallableParameter("test", func)
 
-        # Try to write to value (should be ignored)
-        p['value'] = 999
+        # Try to write to value (should raise exception)
+        with pytest.raises(AttributeError, match="Cannot write to 'value' attribute of CallableParameter"):
+            p['value'] = 999
 
         # Reading should still call the function
         assert p['value'] == 42
