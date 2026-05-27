@@ -1920,7 +1920,7 @@ Tests:
 - name: matmul_bias_stride
   category: pre_checkin
   function:
-    matmul: *real_precision
+    matmul: *real_precisions
   matrix_size:
     - {M: 128, N: 128, K: 128, bias_stride: 128}
     - {M: 129, N: 129, K: 129, bias_stride: 129}
