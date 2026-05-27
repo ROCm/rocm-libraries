@@ -4597,7 +4597,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # StreamK Constants In VGPRs
   ##############################################################################
   def isStreamKConstantsToVgprEnabled(self, kernel):
-    return kernel["ISA"] == IsaVersion(12,5,0)
+    # SK4 uses a different runtime-argument set and still references those
+    # constants directly in the dynamic queue path.
+    return kernel["ISA"] == IsaVersion(12,5,0) and kernel["StreamK"] != 4
 
   def acquireStreamKConstSgpr(self, kernel, name):
     if self.isStreamKConstantsToVgprEnabled(kernel):

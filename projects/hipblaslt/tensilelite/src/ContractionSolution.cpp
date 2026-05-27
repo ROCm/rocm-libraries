@@ -760,7 +760,7 @@ namespace TensileLite
                 int overrideTiles = pAMDGPU->skTiles;
                 int overrideSplit = pAMDGPU->skSplit;
 
-                auto itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                auto itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
                 auto tiles = problem.getNumTiles(sizeMapping, 1);
                 // Determine number of stream-k tiles and splitting factor
                 uint32_t skTiles = 0;
@@ -821,21 +821,6 @@ namespace TensileLite
                         gsu = 1;
                     }
 
-                    auto tiles = problem.getNumTiles(sizeMapping, 1);
-
-                    // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
-                    // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-                    auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
-                    auto     totalIters   = tiles * itersPerTile;
-                    uint32_t magicNumberItersPerTile;
-                    uint32_t magicShiftItersPerTile;
-                    magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
-
-                    args.template append<uint32_t>("itersPerTile", itersPerTile);
-                    args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
-                    args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-                    args.template append<uint32_t>("totalIters", totalIters);
-
                     if(sk.reduction == origami::reduction_t::parallel)
                     {
                         uint32_t skSplit
@@ -866,7 +851,7 @@ namespace TensileLite
                             // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
                             skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
                             // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                            skTiles = min(skTiles, tiles);
+                            skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                         }
 
                         uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;

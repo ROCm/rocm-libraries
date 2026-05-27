@@ -418,6 +418,7 @@ namespace rocisa
         SMemAtomicIncInstruction(const SMemAtomicIncInstruction& other)
             : AtomicReadWriteInstruction(other)
             , base(other.base ? other.base->clone() : nullptr)
+            , soffset(copyInstructionInput(other.soffset))
             , smem(other.smem)
         {
         }
