@@ -1943,7 +1943,8 @@ ROCSOLVER_KERNEL void
 {
     rocblas_int n = half_blocks - 1;
 
-    auto cycle = [n = n](auto i) -> auto {
+    auto cycle = [n = n](auto i) -> auto
+    {
         using I = decltype(i);
         i = (i - 1) % (2 * n + 1) + 1;
         I j{};
