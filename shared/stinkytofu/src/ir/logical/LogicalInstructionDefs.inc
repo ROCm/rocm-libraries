@@ -2221,6 +2221,16 @@
              false,
              "IF_FLATAtomic"},
 
+                                    {"GlobalAtomicIncU32",
+             "GlobalAtomicIncU32",
+             3,
+             true,
+             "Memory Arithmetic",
+             false,
+             false,
+             false,
+             "IF_GLOBALAtomic"},
+
                                     {"SAbsI32",
              "SAbsI32",
              1,

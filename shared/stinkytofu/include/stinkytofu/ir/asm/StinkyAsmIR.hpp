@@ -361,6 +361,10 @@ inline bool isGLOBALStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStore);
 }
 
+inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALAtomic);
+}
+
 inline bool isSMemLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemLoad);
 }
@@ -395,7 +399,8 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst) ||
+           isGLOBALAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
