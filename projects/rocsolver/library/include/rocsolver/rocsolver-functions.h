@@ -26946,7 +26946,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
     where the blocks \f$E_i\f$ and \f$F_i\f$ are general blocks of size ``nb``. The \f$k\f$-th
     diagonal block \f$E_k\f$ stores the LU factorization without pivoting of the corresponding
     diagonal block and is encoded as \f$E_k=L_k+U_k\f$, where \f$L_k\f$ is strictly lower triangular
-    and \f$U_k\f$ is upper triangular, so that \f$E_k=(L_k+I)U_k\f$.
+    and \f$U_k\f$ is upper triangular; the factorization is \f$(L_k+I)U_k\f$.
 
     @param[in]
     handle      rocblas_handle.
@@ -27063,8 +27063,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
     where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
     \f$k\f$-th diagonal block \f$E_{lk}\f$ stores the LU factorization without pivoting of the
     corresponding diagonal block and is encoded as \f$E_{lk}=L_{lk}+U_{lk}\f$, where \f$L_{lk}\f$
-    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular, so that
-    \f$E_{lk}=(L_{lk}+I)U_{lk}\f$.
+    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular; the factorization is
+    \f$(L_{lk}+I)U_{lk}\f$.
 
 
     @param[in]
@@ -27192,8 +27192,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
     where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
     \f$k\f$-th diagonal block \f$E_{lk}\f$ stores the LU factorization without pivoting of the
     corresponding diagonal block and is encoded as \f$E_{lk}=L_{lk}+U_{lk}\f$, where \f$L_{lk}\f$
-    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular, so that
-    \f$E_{lk}=(L_{lk}+I)U_{lk}\f$.
+    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular; the factorization is
+    \f$(L_{lk}+I)U_{lk}\f$.
 
     @param[in]
     handle      rocblas_handle.
@@ -27351,8 +27351,8 @@ ROCSOLVER_EXPORT rocblas_status
     where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
     \f$k\f$-th diagonal block \f$E_{lk}\f$ stores the LU factorization without pivoting of the
     corresponding diagonal block and is encoded as \f$E_{lk}=L_{lk}+U_{lk}\f$, where \f$L_{lk}\f$
-    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular, so that
-    \f$E_{lk}=(L_{lk}+I)U_{lk}\f$.
+    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular; the factorization is
+    \f$(L_{lk}+I)U_{lk}\f$.
 
     @param[in]
     handle      rocblas_handle.
