@@ -318,6 +318,46 @@ static constexpr Config<DT> configs[] = {
     {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 22
     {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 23
 
+    // --- CyclicShift DRAM, waves_per_wg = 3 (indices 24-25) ---
+    {.waves_per_wg = 3, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 24
+    {.waves_per_wg = 3, .swizzle_type = SwizzleType::CyclicShift},                                  // 25
+
+    // --- CyclicShift + LDS epilogue, waves_per_wg = 3 (indices 26-27) ---
+    {.waves_per_wg = 3, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 26
+    {.waves_per_wg = 3, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 27
+
+    // --- CyclicShift DRAM, waves_per_wg = 5 (indices 28-29) ---
+    {.waves_per_wg = 5, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 28
+    {.waves_per_wg = 5, .swizzle_type = SwizzleType::CyclicShift},                                  // 29
+
+    // --- CyclicShift + LDS epilogue, waves_per_wg = 5 (indices 30-31) ---
+    {.waves_per_wg = 5, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 30
+    {.waves_per_wg = 5, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 31
+
+    // --- CyclicShift DRAM, waves_per_wg = 6 (indices 32-33) ---
+    {.waves_per_wg = 6, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 32
+    {.waves_per_wg = 6, .swizzle_type = SwizzleType::CyclicShift},                                  // 33
+
+    // --- CyclicShift + LDS epilogue, waves_per_wg = 6 (indices 34-35) ---
+    {.waves_per_wg = 6, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 34
+    {.waves_per_wg = 6, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 35
+
+    // --- CyclicShift DRAM, waves_per_wg = 7 (indices 36-37) ---
+    {.waves_per_wg = 7, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift},   // 36
+    {.waves_per_wg = 7, .swizzle_type = SwizzleType::CyclicShift},                                  // 37
+
+    // --- CyclicShift + LDS epilogue, waves_per_wg = 7 (indices 38-39) ---
+    {.waves_per_wg = 7, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 38
+    {.waves_per_wg = 7, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 39
+
+    // --- XOR DRAM, waves_per_wg = 8 (indices 40-41) ---
+    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR},   // 40
+    {.waves_per_wg = 8, .swizzle_type = SwizzleType::XOR},                                  // 41
+
+    // --- XOR + LDS epilogue, waves_per_wg = 8 (indices 42-43) ---
+    {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 42
+    {.waves_per_wg = 8, .swizzle_type = SwizzleType::XOR, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 43
+
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -1103,6 +1143,11 @@ __global__ void ck_tile_conv2d_32c_nhwc_v3(const ToType<cfg.data_type>* __restri
                                              int py,
                                              int px)
 {
+    // XOR swizzle bank-conflict avoidance relies on bitwise XOR of the wave index,
+    // which only produces a valid permutation when waves_per_wg is a power of 2.
+    static_assert(cfg.swizzle_type != SwizzleType::XOR ||
+                      (cfg.waves_per_wg > 0 && (cfg.waves_per_wg & (cfg.waves_per_wg - 1)) == 0),
+                  "XOR swizzle requires waves_per_wg to be a power of 2");
     ck_tile_conv2d_32c_nhwc_v3_impl<cfg>(in, wei, alpha, beta, out,
                                           N, C, K, hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
 }

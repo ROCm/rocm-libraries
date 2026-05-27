@@ -88,4 +88,24 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<17, dir
 // CyclicShift 8-wave
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<20, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<22, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift DRAM, 3-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<24, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift+LDS, 3-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<26, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift DRAM, 5-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<28, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift+LDS, 5-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<30, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift DRAM, 6-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<32, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift+LDS, 6-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<34, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift DRAM, 7-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<36, direct_conv::Version::v3>, SIGNATURE>);
+// CyclicShift+LDS, 7-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<38, direct_conv::Version::v3>, SIGNATURE>);
+// XOR DRAM, 8-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<40, direct_conv::Version::v3>, SIGNATURE>);
+// XOR+LDS, 8-wave
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<42, direct_conv::Version::v3>, SIGNATURE>);
 
