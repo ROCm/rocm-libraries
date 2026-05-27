@@ -40,7 +40,7 @@
 
 using namespace stinkytofu;
 
-void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name) {
+static void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name) {
     std::cout << "\n=== Intrinsic: " << name << " ===\n";
 
     const Pattern* pattern = lib.lookup(name);
