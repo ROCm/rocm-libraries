@@ -136,7 +136,9 @@ BenchmarkProblems:
           - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
 
   ########################################
-  # FP8 TN — PGR=2, multi-DU: data DU=128, scale K=256, MT 256x256
+  # FP8 TN — PGR=1, multi-DU (auto-detected), MT 256x256
+  # HostPreSwizzle + MXFP8: data SRD advances at dataDU=128
+  # while scales iterate at DepthU=256.
   ########################################
   -
     - # ProblemType
@@ -159,10 +161,9 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - DepthU: [128]                 # data DU = MI_K = 128
-        - DepthUMX: [256]              # scale K = 2*MI_K = 256
+        - DepthU: [256]                 # loop DU; dataDU=128 auto-detected
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [3]
@@ -171,5 +172,5 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 256]   # K = 1*effective_DU
-          - Exact: [256, 256, 1, 512]   # K = 2*effective_DU
+          - Exact: [256, 256, 1, 256]   # K = 1*DepthU
+          - Exact: [256, 256, 1, 512]   # K = 2*DepthU
