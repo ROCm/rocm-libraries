@@ -4,12 +4,14 @@
 # SPDX-License-Identifier: MIT
 
 # Run install codeql script if zip not found
+CODEQL_INSTALL_DIR=/opt/codeql
 if [[ ! -f /opt/codeql/codeql-cli.zip ]]; then
-  ./codeql/install_codeql
+  CODEQL_INSTALL_DIR=$PWD/codeql/install
+  ./codeql/install_codeql "${CODEQL_INSTALL_DIR}"
 fi
 
 # Sets up a QLPack with dependencies for our check(s).
 mkdir -p codeql/build
 cd codeql/build
-unzip -q /opt/codeql/codeql-cli.zip
+unzip -q ${CODEQL_INSTALL_DIR}/codeql-cli.zip
 mv codeql-codeql-cli-* codeql-cli
