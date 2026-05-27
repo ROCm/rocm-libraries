@@ -68,7 +68,7 @@ void printarraylimit(const std::vector<Tvalue>& vals,
     }
 }
 
-// Make the output of a 2D c2c transform linear.  USeful for visualization purposes.
+// Make the output of a 2D c2c transform linear.  Useful for visualization purposes.
 template <typename Tfloat>
 inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
                       const int                          Nx,
@@ -76,8 +76,8 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
                       const int                          direction)
 {
     // Implemented only for single and double precision.
-    static_assert(std::is_same_v<Tfloat, float> || std::is_same_v<Tfloat, double>, "Tfloat must be a float or double.");
-
+    static_assert(std::is_same_v<Tfloat, float> || std::is_same_v<Tfloat, double>,
+                  "Tfloat must be a float or double.");
     
     hipError_t hip_rt;
     using fftctype
@@ -88,8 +88,6 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
     using ValueType      = typename std::remove_extent<ArrayType>::type;
     size_t complex_bytes = sizeof(ValueType) * cinput.size();
 
-    //size_t complex_bytes = sizeof(std::remove_extent<decltype(std::remove_reference<cinput>)::value_type>) * cinput.size();
-
     hip_rt = hipMalloc(&x, complex_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
@@ -98,15 +96,21 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
         throw std::runtime_error("hipMemcpy failed");
     hipfftHandle plan{};
     auto         hipfft_rt = HIPFFT_SUCCESS;
-    hipfft_rt              = hipfftPlan2d(&plan, // plan handle
-                             Nx, // transform length
-                             Ny, // transform length
-                             HIPFFT_Z2Z); // transform type (HIPFFT_C2C for single-precision)
+    hipfft_rt              = hipfftPlan2d(&plan,
+                                          Nx,
+                                          Ny,
+                                          std::is_same_v<Tfloat, float> ? HIPFFT_C2C : HIPFFT_Z2Z);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan2d failed");
-    hipfft_rt = hipfftExecZ2Z(plan, x, x, -direction);
+    if constexpr(std::is_same_v<Tfloat, float>)
+        hipfft_rt = hipfftExecC2C(plan, x, x, -direction);
+    else if constexpr(std::is_same_v<Tfloat, double>)
+        hipfft_rt = hipfftExecZ2Z(plan, x, x, -direction);
+    else
+        throw std::runtime_error("Unsupported precision");
+    
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftExecZ2Z failed");
+        throw std::runtime_error("hipfftExec failed");
     hip_rt = hipMemcpy(cinput.data(), x, complex_bytes, hipMemcpyDeviceToHost);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
