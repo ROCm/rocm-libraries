@@ -1483,6 +1483,8 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] != 2 and state["_ScheduleIterAlg"] != 3:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
+        if state["StreamK"] == 4:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
         if not state["BufferStore"]:

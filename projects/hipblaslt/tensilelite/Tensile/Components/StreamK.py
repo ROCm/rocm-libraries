@@ -2981,7 +2981,7 @@ class StreamKDynamic(StreamK):
         # Fetch next work item
         module.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2), soffset=0, smem=SMEMModifiers(glc=True), comment="Fetch next work item index"))
         # module.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("WorkGroup0")))
-        module.add(SWaitCnt(dscnt=0, comment="Wait for scalar memory op"))
+        module.add(SWaitCnt(kmcnt=0, comment="Wait for scalar memory op"))
         writer.sgprPool.checkIn(sAddress)
 
         # Convert to global work item index
