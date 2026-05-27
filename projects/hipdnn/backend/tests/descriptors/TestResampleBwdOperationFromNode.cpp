@@ -327,12 +327,14 @@ TEST_F(TestResampleBwdOperationFromNode, FromNodePreservesGenerateIndex)
 
     auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
-    EXPECT_EQ(desc->getData().generate_index, true);
+    EXPECT_TRUE(desc->getData().generate_index.has_value());
+    EXPECT_EQ(desc->getData().generate_index.value(), true);
 
     const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsResampleBwdAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
-    EXPECT_EQ(rebuiltAttrs->generate_index, true);
+    ASSERT_TRUE(rebuiltAttrs->generate_index.has_value());
+    EXPECT_EQ(rebuiltAttrs->generate_index.value(), true);
 }
 
 TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)

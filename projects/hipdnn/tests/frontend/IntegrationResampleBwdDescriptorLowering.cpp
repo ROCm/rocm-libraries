@@ -55,6 +55,7 @@ protected:
 
         auto dx = graph->resample_bwd(dy, attrs);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
+        dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
         return lowerAndDeserialize(*graph, _handle);
     }
@@ -161,6 +162,7 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, AutoAssignedUidsPreservedInRoun
 
     auto dx = graph->resample_bwd(dy, attrs);
     dx->set_output(true);
+    dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;

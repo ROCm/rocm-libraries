@@ -15,6 +15,7 @@
 #include "TensorAttributes.hpp"
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -55,7 +56,7 @@ public:
     std::vector<int64_t> window; ///< Window
     ResampleMode resample_mode = ResampleMode::MAXPOOL; ///< Resample Mode
     PaddingMode padding_mode = PaddingMode::ZERO_PAD; ///< Padding Mode
-    bool generate_index = false; ///< Generate Index
+    std::optional<bool> generate_index = std::nullopt; ///< Generate Index
     // NOLINTEND(readability-identifier-naming)
 
     /// @brief Get the dy input tensor
@@ -264,7 +265,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    bool get_generate_index() const
+    std::optional<bool> get_generate_index() const
     {
         return generate_index;
     }

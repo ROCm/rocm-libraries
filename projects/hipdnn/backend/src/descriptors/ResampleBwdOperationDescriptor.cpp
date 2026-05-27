@@ -133,12 +133,11 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                        "ResampleBwdOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT:
-        setScalar(_data.generate_index,
-                  HIPDNN_TYPE_BOOLEAN,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "ResampleBwdOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_index,
+                                               attributeType,
+                                               elementCount,
+                                               arrayOfElements,
+                                               "ResampleBwdOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_COMP_TYPE:
         setDataType(_computeDataType,
@@ -254,13 +253,12 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                        "ResampleBwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT:
-        getScalar(_data.generate_index,
-                  HIPDNN_TYPE_BOOLEAN,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "ResampleBwdOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_index,
+                                               attributeType,
+                                               requestedElementCount,
+                                               elementCount,
+                                               arrayOfElements,
+                                               "ResampleBwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_COMP_TYPE:
         getDataType(_computeDataType,
@@ -342,7 +340,9 @@ std::string ResampleBwdOperationDescriptor::toString() const
     str += ", padding_mode="
            + std::string(
                hipdnn_flatbuffers_sdk::data_objects::EnumNamePaddingMode(_data.padding_mode));
-    str += ", generate_index=" + std::string(_data.generate_index ? "true" : "false");
+    str += ", generate_index="
+           + (_data.generate_index ? std::to_string(static_cast<int>(*_data.generate_index))
+                                   : "nullopt");
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";

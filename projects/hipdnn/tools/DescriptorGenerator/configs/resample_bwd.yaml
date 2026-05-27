@@ -191,6 +191,7 @@ operation:
       default_value: "false"
       required: false
       shared: true
+      fbs_optional: true
       frontend_getter: "get_generate_index()"
       backend_type_name: "HIPDNN_TYPE_BOOLEAN"
       test_value: false
