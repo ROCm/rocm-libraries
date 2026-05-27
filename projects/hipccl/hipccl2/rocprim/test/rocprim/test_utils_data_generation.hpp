@@ -543,13 +543,10 @@ template<class T>
 std::vector<size_t> get_sizes(T seed_value)
 {
 // clang-format off
-#if HAS_VALGRIND_H
-    std::vector<size_t> sizes;
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND){
-        sizes = {1024, 2048, 1, 10, 53, 211, 500};
-    }
-    else{
+#if HAS_VALGRIND_H || USES_ASAN
+    std::vector<size_t> sizes = {1024, 2048, 1, 10, 53, 211, 500};
+    #if HAS_VALGRIND_H
+    if (!RUNNING_ON_VALGRIND){
         sizes = {
                 1024, 2048, 4096, 1792,
                 1, 10, 53, 211, 500, 2345,
@@ -558,6 +555,7 @@ std::vector<size_t> get_sizes(T seed_value)
                 (1 << 20) + 123
             };
     }
+    #endif
 
 #else
     std::vector<size_t> sizes = {
@@ -570,7 +568,6 @@ std::vector<size_t> get_sizes(T seed_value)
 
 #endif // HAS_VALGRIND_H
 // clang-format on
-
 
     if(!common::use_hmm())
     {

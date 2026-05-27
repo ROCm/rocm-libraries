@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -570,21 +570,17 @@ void testLargeIndices()
 
 TEST(RocprimDeviceReduceTests, LargeIndices)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndices<>();
 }
 
 TEST(RocprimDeviceReduceTests, LargeIndicesWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndices<true>();
 }
 
