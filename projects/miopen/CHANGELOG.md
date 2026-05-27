@@ -345,10 +345,10 @@ INI8x4 support and fix minor issues and bugs.
 - typo in components dependency variable in CMakeLists.txt
 - issues with COMgr backed online compilation for HIP kernels
 ### Known issues
-- This release may show warnings for "obsolete configs" in the performance database. This can be fixed by rerunning tuning on a specfic network; [see tuning documentation](https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/docs/conceptual/perfdb.rst#using-miopen_find_enforce-or-miopensettuningpolicy-to-control-auto-tuning)
+- This release may show warnings for "obsolete configs" in the performance database. This can be fixed by rerunning tuning on a specfic network; [see tuning documentation](https://rocm.docs.amd.com/projects/MIOpen/en/latest/conceptual/perfdb.html#using-miopen-find-enforce-or-miopensettuningpolicy-to-control-auto-tuning)
 
 ## MIOpen 2.7.0 for ROCm 3.8.0
-- This release contains a new reduction API; see [API documentation](https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/docs/conceptual/porting-guide.rst) for more information. Additional features for embedded builds have been added, and further support for 3D convolutional networks.
+- This release contains a new reduction API; see [API documentation](https://rocm.docs.amd.com/projects/MIOpen/en/latest/reference/index.html) for more information. Additional features for embedded builds have been added, and further support for 3D convolutional networks.
 ### Added
 - additional tunings into performance database
 - general reduction API
@@ -362,7 +362,7 @@ INI8x4 support and fix minor issues and bugs.
 ### Notes
 - This release contains convolution performance improvements, improved multi-threading behavior, and improved stability for half precision convolutions. Initial iteration time has been reduced with the introduction of hybrid find mode. Builds for a static library have been refined for this release.
 ### Added
-- MIOPEN_FIND_MODE=3 as the new default convolution Find mode; see documentation [here](https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/docs/conceptual/finddb.rst) for details
+- MIOPEN_FIND_MODE=3 as the new default convolution Find mode; see documentation [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/how-to/find-and-immediate.html#find-modes) for details
 - a more runtime-parameterized version of pooling to reduce the number of online compilations
 - Improved the performance of backwards spatial batch normalization for small images
 ### Fixed
@@ -433,7 +433,7 @@ INI8x4 support and fix minor issues and bugs.
 ### Notes
 - This release contains bug fixes, performance improvements, and expanded applicability for specific convolutional algorithms.
 - MIOpen has posted a citable paper on ArXiv [here](https://arxiv.org/abs/1910.00078).
-- An SQLite database has been added to replace the text-based performance database. While the text file still exists, by default SQLite is used over the text-based performance database; see [documentation](https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/docs/conceptual/perfdb.rst) from more details.
+- An SQLite database has been added to replace the text-based performance database. While the text file still exists, by default SQLite is used over the text-based performance database.
 ### Added
 - per solution algorithm filtering environmental variable for debugging
 - SQLite3 database and build dependency. The text-based performance database support is deprecated and will be removed in the next release.
@@ -661,7 +661,7 @@ INI8x4 support and fix minor issues and bugs.
 ### Known issues
 - RNNs do not support fp16
 - Training with CNNs does not support fp16
-- Users may encounter a warning that their performance database is out of date. The performance database can be updated by setting the environment variable for just the initial run of an application: `MIOPEN_FIND_ENFORCE=search`. For more information on the performance database, see: https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/docs/conceptual/perfdb.rst#
+- Users may encounter a warning that their performance database is out of date. The performance database can be updated by setting the environment variable for just the initial run of an application: `MIOPEN_FIND_ENFORCE=search`. For more information on the performance database, see: https://rocm.docs.amd.com/projects/MIOpen/en/latest/conceptual/perfdb.html
 
 ## MIOpen 1.4.1 for ROCm 1.0.0
 ### Added:
@@ -670,7 +670,7 @@ INI8x4 support and fix minor issues and bugs.
 ### Known issues
 - RNNs do not support fp16
 - Training with CNNs does not support fp16
-- Users may encounter a warning that their performance database is out of date. The performance database can be updated by setting the environment variable for just the initial run of an application: `MIOPEN_FIND_ENFORCE=search`. For more information on the performance database, see: https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/docs/conceptual/perfdb.rst
+- Users may encounter a warning that their performance database is out of date. The performance database can be updated by setting the environment variable for just the initial run of an application: `MIOPEN_FIND_ENFORCE=search`. For more information on the performance database, see: https://rocm.docs.amd.com/projects/MIOpen/en/latest/conceptual/perfdb.html
 
 ## MIOpen 1.4.0 for ROCm 1.0.0
 ### Notes:
