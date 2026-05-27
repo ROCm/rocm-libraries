@@ -70,6 +70,9 @@ struct is_floating_point<bfloat16_t> : true_type
 {};
 
 template<>
+constexpr bool is_floating_point_v<bfloat16_t> = true;
+
+template<>
 class numeric_limits<bfloat16_t>
 {
 public:
