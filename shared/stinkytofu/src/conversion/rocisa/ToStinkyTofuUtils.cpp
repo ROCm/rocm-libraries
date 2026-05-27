@@ -618,6 +618,20 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitDscnt, handleSWaitDscntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitLoadcnt, handleSWaitLoadcntModifiers(stinkyInst, typedInst, asmCaps))
+
+            // global_wb / global_inv: device-scope memory fences with no
+            // register operands. The only encoded modifier is the cache
+            // scope, which we attach as a dedicated CacheScopeModifiers so
+            // MUBUFModifiers can evolve independently without affecting
+            // fence emission.
+            else HANDLE_INST_TYPE(rocisa::GlobalWb,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
+            else HANDLE_INST_TYPE(rocisa::GlobalInv,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
         }
     // clang-format on
 
@@ -822,24 +836,15 @@ void traverseModule(const rocisa::Module& module,
 }  // anonymous namespace
 
 namespace stinkytofu {
-std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
+static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
     // Get GfxArchID from architecture array
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-    // Populate assembler-capability-derived module options from rocisa asmCaps.
-    // This is done here (in the rocisa conversion layer, which is the only
-    // stinkytofu TU allowed to depend on rocisa headers) so that the
-    // stinkytofu library itself stays decoupled from rocisa.
-    StinkyAsmModule::ModuleOptions finalModuleOptions = moduleOptions;
-    {
-        auto probedCaps = rocisa::rocIsa::getInstance().getAsmCaps();
-        finalModuleOptions.HasVgprMSB16 =
-            probedCaps.count("HasVgprMSB16") && probedCaps.at("HasVgprMSB16");
-    }
-
-    StinkyAsmModule stinkyAsmModule(moduleName, arch, finalModuleOptions);
+    // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
+    // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
+    StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
 
     // Add instruction groups registered by the target backend.
     if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
@@ -999,6 +1004,7 @@ std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
     // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
     auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
+        // NOLINTNEXTLINE(misc-redundant-expression)
         return dynamic_cast<const rocisa::MUBUFReadInstruction*>(inst) ||
                dynamic_cast<const rocisa::GLOBALLoadInstruction*>(inst) ||
                dynamic_cast<const rocisa::FLATReadInstruction*>(inst) ||
@@ -1088,7 +1094,7 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 /// Python code to convert rocisa to StinkyTofu IR.
 ///
 /// \param m The nanobind module to add bindings to
-void init_stinkytofu(nb::module_ m) {
+void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",

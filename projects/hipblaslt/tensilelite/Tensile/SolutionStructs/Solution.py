@@ -50,6 +50,115 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
 
+
+def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
+  """Resolve the ``MXLoadInst`` / ``MXScaleFormat`` / ``TDMInst`` triple.
+
+  Lifted out of ``Solution.assignDerivedParameters`` so it can be exercised
+  by unit tests without standing up an entire solution-derivation pipeline.
+
+  The function:
+    * Resolves the ``"Auto"`` sentinels on ``MXLoadInst`` / ``MXScaleFormat``
+      against the current ISA's caps and the problem's MX block presence.
+    * Promotes ``TDMInst`` to ``3`` (A + B) when ``MXLoadInst="TDM"`` is
+      paired with the default ``TDMInst=0``, honoring the "both-or-none"
+      TDMInst invariant.
+    * Enforces every reject the original PR added: ``GlobalLoad`` not yet
+      implemented, ``TDM`` requires ``HasTDM``, non-TDM transport with a
+      non-zero ``TDMInst`` is incompatible, any swizzled format requires
+      ``HasMXScaleSwizzle``, the format/transport pairing rules, and the
+      gfx1250 "MX needs TDMInst unless StreamK" guard.
+
+  Args:
+      state: Solution state dict; mutated in place.  Must contain
+          ``MXLoadInst``, ``MXScaleFormat``, ``TDMInst``, ``ISA``,
+          ``StreamK``, and ``ProblemType[MXBlockA|MXBlockB]``.
+      asmCaps: Mapping with at least ``"HasTDM"`` (bool).
+      archCaps: Mapping that may contain ``"HasMXScaleSwizzle"`` (bool).
+      printRejectionReason: Forwarded to :func:`reject`.
+
+  Returns:
+      ``True`` if the state is valid (no reject fired); ``False`` if a
+      reject was emitted, in which case ``state["Valid"]`` is also ``False``
+      and the caller should propagate the early return upstream.
+  """
+  hasMXBlock   = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+  hasMxSwizCap = bool(archCaps.get("HasMXScaleSwizzle", False))
+  isGfx950     = state["ISA"] == (9, 5, 0)
+
+  # MXLoadInst default: TDM iff TDMInst != 0; otherwise BufferLoad.
+  if state["MXLoadInst"] == "Auto":
+    state["MXLoadInst"] = "TDM" if state["TDMInst"] != 0 else "BufferLoad"
+
+  # GlobalLoad is reserved for a future flat/global_load MX path.
+  if state["MXLoadInst"] == "GlobalLoad":
+    reject(state, printRejectionReason, "MXLoadInst=GlobalLoad not implemented yet")
+    return False
+
+  # Transport-vs-cap.
+  if state["MXLoadInst"] == "TDM" and not asmCaps["HasTDM"]:
+    reject(state, printRejectionReason, "MXLoadInst=TDM requires asmCaps.HasTDM")
+    return False
+
+  # TDMInst must agree with MXLoadInst so downstream enableTDMA/B is consistent.
+  # When MXLoadInst=TDM and TDMInst=0, promote TDMInst to 3 (A and B), which
+  # honors the "both-or-none" invariant on TDMInst. Disagreements are rejected.
+  if state["MXLoadInst"] == "TDM" and state["TDMInst"] == 0:
+    state["TDMInst"] = 3
+  elif state["MXLoadInst"] != "TDM" and state["TDMInst"] != 0:
+    reject(state, printRejectionReason,
+           "MXLoadInst=%s is incompatible with TDMInst=%d" % (state["MXLoadInst"], state["TDMInst"]))
+    return False
+
+  # MXScaleFormat default:
+  #   MXLoadInst=TDM            -> InMemorySwizzle
+  #   MX on gfx950 + BufferLoad -> HostPreSwizzle (gfx950's only swizzling mode)
+  #   otherwise                 -> NoSwizzle (canonical)
+  if state["MXScaleFormat"] == "Auto":
+    if state["MXLoadInst"] == "TDM":
+      state["MXScaleFormat"] = "InMemorySwizzle"
+    elif hasMXBlock and isGfx950:
+      state["MXScaleFormat"] = "HostPreSwizzle"
+    else:
+      state["MXScaleFormat"] = "NoSwizzle"
+
+  # Cap guard: any swizzled format requires HasMXScaleSwizzle.
+  if state["MXScaleFormat"] in ("InMemorySwizzle", "HostPreSwizzle") and not hasMxSwizCap:
+    reject(state, printRejectionReason,
+           "MXScaleFormat=%s requires archCaps.HasMXScaleSwizzle" % state["MXScaleFormat"])
+    return False
+
+  # Format-vs-transport. These compatibility rules apply only when MX scales
+  # are present; without MX scales MXScaleFormat is a don't-care.
+  if hasMXBlock:
+    if state["MXScaleFormat"] == "InMemorySwizzle" and state["MXLoadInst"] != "TDM":
+      reject(state, printRejectionReason,
+             "MXScaleFormat=InMemorySwizzle requires MXLoadInst=TDM "
+             "(in-memory MX scale swizzling is not supported with %s)" % state["MXLoadInst"])
+      return False
+    if state["MXScaleFormat"] == "HostPreSwizzle" and state["MXLoadInst"] != "BufferLoad":
+      reject(state, printRejectionReason,
+             "MXScaleFormat=HostPreSwizzle requires MXLoadInst=BufferLoad")
+      return False
+    if state["MXScaleFormat"] == "HostPreSwizzle" and not isGfx950:
+      reject(state, printRejectionReason,
+             "MXScaleFormat=HostPreSwizzle is only implemented on the gfx950 host pipeline")
+      return False
+    if state["MXLoadInst"] == "TDM" and state["MXScaleFormat"] != "InMemorySwizzle":
+      reject(state, printRejectionReason,
+             "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
+             "(got %s)" % state["MXScaleFormat"])
+      return False
+    # gfx1250 MX scales require a swizzled format (InMemorySwizzle via TDM).
+    # NoSwizzle is not supported on this arch.
+    if state["ISA"] == (12, 5, 0) and state["MXScaleFormat"] == "NoSwizzle":
+      reject(state, printRejectionReason,
+             "MXScaleFormat=NoSwizzle is not supported on gfx1250")
+      return False
+
+  return True
+
+
 def _getExpectedTypes(validParams):
   """Build a map from parameter name to the set of allowed Python types.
 
@@ -77,7 +186,16 @@ _expectedParamTypes = _getExpectedTypes(validParameters)
 # Parameters to skip during type validation because YAML serialization
 # inherently produces a different type (e.g. [9, 0, 10] -> list) and the
 # conversion to the canonical type happens downstream in the pipeline.
-_skipTypeCheck = {"ISA"}
+# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
 
 
 # Module-level collector that accumulates type mismatches across all Solution
@@ -165,7 +283,7 @@ def validateParameterTypes(state, srcFile=""):
 
 
 def printTypeMismatchSummary(numFiles=0):
-  """Print a summary of all collected type mismatches.
+  """Print a summary of all collected type mismatches to stdout.
 
   If no mismatches have been collected, prints a confirmation message
   showing how many files were checked cleanly, and returns 0.  Otherwise
@@ -475,9 +593,10 @@ class Solution(collections.abc.Mapping):
                f"ScheduleIterAlg=4 is not supported for {state['ISA']}: no StinkyTofu backend for this architecture. "
                f"Supported: {supported}")
         return
-      state["ScheduleIterAlg"] = 0
+      state["_ScheduleIterAlg"] = 0
       state["_StinkyTofuOptLevel"] = 3
     else:
+      state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
@@ -591,6 +710,7 @@ class Solution(collections.abc.Mapping):
     # Use nonDTL loads in DTL tail loop
     state["NonDTLTailLoopA"] = False
     state["NonDTLTailLoopB"] = False
+    state["NonDTLTailLoopMetadata"] = False
     if state["ProblemType"]["MXBlockA"]:
       state["NonDTLTailLoopMXSA"] = False
     if state["ProblemType"]["MXBlockB"]:
@@ -626,6 +746,8 @@ class Solution(collections.abc.Mapping):
         if state["ProblemType"]["MXBlockB"]:
           state["NonDTLTailLoopMXSB"] = True
           state["tailLoopOptMXSB"] = False
+    if state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]:
+      state["NonDTLTailLoopMetadata"] = True
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
@@ -654,7 +776,7 @@ class Solution(collections.abc.Mapping):
       state["tailLoopOptMXSB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
-    if state["ScheduleIterAlg"] == 3:
+    if state["_ScheduleIterAlg"] == 3:
       state["reorderGRInstForDTVA"] = True if state["ProblemType"]["TransposeA"] and \
                                               state["DirectToVgprA"] and \
                                               not state["ProblemType"]["SwizzleTensorA"] else False
@@ -743,21 +865,29 @@ class Solution(collections.abc.Mapping):
           for field in ("LSC", "LSP", "NumLoadsCoalesced", "NumLoadsPerpendicular", "NumTotalPackedLoads"):
             state["%s%s" % (field, tc)] = 0
 
-      if state["PrefetchGlobalRead"] not in [0, 2]:
+      if state["PrefetchGlobalRead"] not in [0, 1, 2]:
         reject(state, printRejectionReason,
-               "UseSubtileImpl=1 requires PrefetchGlobalRead 0 or 2, got %d" % state["PrefetchGlobalRead"])
+               "UseSubtileImpl=1 requires PrefetchGlobalRead 0, 1 or 2, got %d" % state["PrefetchGlobalRead"])
       if not (state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16):
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
-      if state["ScheduleIterAlg"] == 1 or state["ScheduleIterAlg"] == 2:
+      if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+      if state["DebugStreamK"] != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
 
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
       if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
         reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
         return
+
+    state["Multicast"] = False
+    if state["ClusterDim"] != [1, 1]:
+      state["Multicast"] = True
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1067,7 +1197,7 @@ class Solution(collections.abc.Mapping):
       return False
 
     # Does not work with SIA<3
-    if state["ScheduleIterAlg"] < 3:
+    if state["_ScheduleIterAlg"] < 3:
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports ScheduleIterAlg < 3"%(tc))
       return False
 
@@ -1364,7 +1494,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      if state["ScheduleIterAlg"] != 2 and state["ScheduleIterAlg"] != 3:
+      if state["_ScheduleIterAlg"] != 2 and state["_ScheduleIterAlg"] != 3:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
         if not state["ProblemType"]["DataType"].isSingle():
@@ -1471,15 +1601,15 @@ class Solution(collections.abc.Mapping):
             return
       if state["ProblemType"]["ComputeDataType"].isDouble():
         # See [4,4,4,4] snop for more info
-        if state["MatrixInstruction"] == [4,4,4,4] and (not state['ISA'] == IsaVersion(9,0,10)) and state["ScheduleIterAlg"] == 3:
+        if state["MatrixInstruction"] == [4,4,4,4] and (not state['ISA'] == IsaVersion(9,0,10)) and state["_ScheduleIterAlg"] == 3:
           reject(state, printRejectionReason, "Currently Matrix instructions [4,4,4,4] is disabled.")
           return
       if state["UseF32XEmulation"]:
         if not isaInfoMap[isa].archCaps["HasF32XEmulation"]:
           reject(state, printRejectionReason, "Missing emulation for F32X")
           return
-        if state["ScheduleIterAlg"] not in (1, 3):
-          reject(state, printRejectionReason, "F32X Emulation only supported with Schedule Iter Alg == (1 or 3)")
+        if state["_ScheduleIterAlg"] not in (0, 1, 3):
+          reject(state, printRejectionReason, "F32X emulation requires ScheduleIterAlg to be one of {0, 1, 3}")
           return
         if tuple(state["MatrixInstruction"])[:3] in ((16, 16, 8), (16, 16, 16), (32, 32, 4)):
           reject(state, printRejectionReason, "tf32 emulation currently only supports mfma MI 16x16x32 and 32x32x16")
@@ -1500,7 +1630,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Invalid value for ThreadTile")
         return
 
-      if state["ScheduleIterAlg"] == 2 or state["ScheduleIterAlg"] == 3:
+      if state["_ScheduleIterAlg"] == 2 or state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "SIA2 and SIA3 only support MatrixInstruction")
         return
 
@@ -1538,24 +1668,27 @@ class Solution(collections.abc.Mapping):
           state["SubGroupMetadata"] = state["SubGroupB"]
           state["MacroTileMetadata"] = state["MacroTileB"]
           state["WaveSeparateGlobalReadMetadata"] = state["WaveSeparateGlobalReadB"]
-          state["DirectToLdsMetadata"] = False
           state["ProblemType"]["MirrorDimsMetadata"]  = list(state["ProblemType"]["MirrorDimsB"])
           state["VectorWidthMetadata"] = state["VectorWidthB"]
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileB"]
+        if state["DirectToLdsMetadata"] and not state["DirectToLdsB"]:
+          state["DirectToLdsMetadata"] = False
       else:
         if not state["DirectToVgprSparseMetadata"]:
           state["ThreadTileMetadata"] = state["ThreadTileA"]
           state["SubGroupMetadata"] = state["SubGroupA"]
           state["MacroTileMetadata"] = state["MacroTileA"]
           state["WaveSeparateGlobalReadMetadata"] = state["WaveSeparateGlobalReadA"]
-          state["DirectToLdsMetadata"] = False
           state["ProblemType"]["MirrorDimsMetadata"]  = list(state["ProblemType"]["MirrorDimsA"])
           state["VectorWidthMetadata"] = state["VectorWidthA"]
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileA"]
+        if state["DirectToLdsMetadata"] and not state["DirectToLdsA"]:
+          state["DirectToLdsMetadata"] = False
     elif not state["ProblemType"]["Sparse"]:
       state["DirectToVgprSparseMetadata"] = False
+      state["DirectToLdsMetadata"] = False
       state["MIWaveTileMetadata"] = 0
 
     if state["NonTemporal"] != -1:
@@ -1570,12 +1703,14 @@ class Solution(collections.abc.Mapping):
     # set True for DTL
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
     state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
+    state["UseGeneralizedNLCOneMetadata"] = state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]
 
     state["UseGeneralizedNLCOneMXSA"] = False
     state["UseGeneralizedNLCOneMXSB"] = False
 
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
+    state["LocalWriteUseSgprMetadata"] = False
     state["StoreSwapAddr"] = False
 
     if state["WorkGroupMappingXCC"] == -1:
@@ -1808,7 +1943,7 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
-    if state["ScheduleIterAlg"] == 2:
+    if state["_ScheduleIterAlg"] == 2:
       state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
 
@@ -2009,101 +2144,19 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
 
-    # --- MX scale layout & transport derivation -------------------------------
-    # MXLoadInst selects the load transport for A/MXSA + B/MXSB:
-    #   "TDM"        -> tensor_load_to_lds (requires HasTDM cap)
-    #   "BufferLoad" -> buffer_load_*
-    #   "GlobalLoad" -> reserved; rejected here for now
-    # MXScaleFormat selects the in-device MX scale layout:
-    #   "NoSwizzle"       -> plain row/column layout (buffer_load consumable)
-    #   "InMemorySwizzle" -> swizzled in device memory (TDM-populated)
-    #   "HostPreSwizzle"  -> pre-swizzled by the host (gfx950 subtile)
-    # Both parameters accept the sentinel "Auto" (the default) which triggers
-    # conditional defaulting below. The two are linked by a small set of
-    # compatibility rules enforced below.
-    hasMXBlock     = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
-    hasMxSwizCap   = bool(isaInfoMap[isa].archCaps.get("HasMXScaleSwizzle", False))
-    isGfx950       = state["ISA"] == (9, 5, 0)
-
-    # MXLoadInst default: TDM iff TDMInst != 0; otherwise BufferLoad.
-    if state["MXLoadInst"] == "Auto":
-      state["MXLoadInst"] = "TDM" if state["TDMInst"] != 0 else "BufferLoad"
-
-    # GlobalLoad is reserved for a future flat/global_load MX path.
-    if state["MXLoadInst"] == "GlobalLoad":
-      reject(state, printRejectionReason, "MXLoadInst=GlobalLoad not implemented yet")
+    # MX scale layout + transport derivation and validation. See
+    # _deriveAndValidateMXScaleLayoutAndTransport for the full set of rules.
+    if not _deriveAndValidateMXScaleLayoutAndTransport(
+        state,
+        isaInfoMap[isa].asmCaps,
+        isaInfoMap[isa].archCaps,
+        printRejectionReason):
       return
-
-    # Transport-vs-cap.
-    if state["MXLoadInst"] == "TDM" and not isaInfoMap[isa].asmCaps["HasTDM"]:
-      reject(state, printRejectionReason, "MXLoadInst=TDM requires asmCaps.HasTDM")
-      return
-
-    # TDMInst must agree with MXLoadInst so downstream enableTDMA/B is consistent.
-    # When MXLoadInst=TDM and TDMInst=0, promote TDMInst to 3 (A and B), which
-    # honors the "both-or-none" invariant on TDMInst. Disagreements are rejected.
-    if state["MXLoadInst"] == "TDM" and state["TDMInst"] == 0:
-      state["TDMInst"] = 3
-    elif state["MXLoadInst"] != "TDM" and state["TDMInst"] != 0:
-      reject(state, printRejectionReason,
-             "MXLoadInst=%s is incompatible with TDMInst=%d" % (state["MXLoadInst"], state["TDMInst"]))
-      return
-
-    # MXScaleFormat default:
-    #   MXLoadInst=TDM            -> InMemorySwizzle
-    #   MX on gfx950 + BufferLoad -> HostPreSwizzle (gfx950's only swizzling mode)
-    #   otherwise                 -> NoSwizzle (canonical)
-    if state["MXScaleFormat"] == "Auto":
-      if state["MXLoadInst"] == "TDM":
-        state["MXScaleFormat"] = "InMemorySwizzle"
-      elif hasMXBlock and isGfx950:
-        state["MXScaleFormat"] = "HostPreSwizzle"
-      else:
-        state["MXScaleFormat"] = "NoSwizzle"
-
-    # Cap guard: any swizzled format requires HasMXScaleSwizzle.
-    if state["MXScaleFormat"] in ("InMemorySwizzle", "HostPreSwizzle") and not hasMxSwizCap:
-      reject(state, printRejectionReason,
-             "MXScaleFormat=%s requires archCaps.HasMXScaleSwizzle" % state["MXScaleFormat"])
-      return
-
-    # Format-vs-transport. These compatibility rules apply only when MX scales
-    # are present; without MX scales MXScaleFormat is a don't-care.
-    if hasMXBlock:
-      if state["MXScaleFormat"] == "InMemorySwizzle" and state["MXLoadInst"] != "TDM":
-        reject(state, printRejectionReason,
-               "MXScaleFormat=InMemorySwizzle requires MXLoadInst=TDM "
-               "(in-memory MX scale swizzling is not supported with %s)" % state["MXLoadInst"])
-        return
-      if state["MXScaleFormat"] == "HostPreSwizzle" and state["MXLoadInst"] != "BufferLoad":
-        reject(state, printRejectionReason,
-               "MXScaleFormat=HostPreSwizzle requires MXLoadInst=BufferLoad")
-        return
-      if state["MXScaleFormat"] == "HostPreSwizzle" and not isGfx950:
-        reject(state, printRejectionReason,
-               "MXScaleFormat=HostPreSwizzle is only implemented on the gfx950 host pipeline")
-        return
-      if state["MXLoadInst"] == "TDM" and state["MXScaleFormat"] != "InMemorySwizzle":
-        reject(state, printRejectionReason,
-               "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
-               "(got %s)" % state["MXScaleFormat"])
-        return
-      # gfx1250 MX layout requires TDMInst, except for the StreamK-only
-      # BufferLoad + NoSwizzle path which has been validated end-to-end.
-      # StreamK!=0 also implies GSU is forced to 0 (see line ~1378), so this
-      # also excludes the unvalidated GSU-only NoSwizzle path. This reject
-      # subsumes the prior standalone "NoSwizzle requires StreamK" check.
-      if state["ISA"] == (12, 5, 0) and not state["TDMInst"] and state["StreamK"] == 0:
-        reject(state, printRejectionReason,
-               "MX layout requires TDMInst on gfx1250 (TDMInst=0 is only "
-               "permitted with StreamK; the non-StreamK NoSwizzle path is "
-               "not yet supported)")
-        return
-    # --------------------------------------------------------------------------
 
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
+    state["enableTDMMetadata"] = bool(state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"] and tdmInst > 0)
 
     if tdmInst not in (0, 3):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
@@ -2146,6 +2199,48 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+      
+    halfPLR: int = state["HalfPLR"]
+    state["HalfPLRA"] = bool(halfPLR & 0x01)
+    state["HalfPLRB"] = bool(halfPLR & 0x02)
+    if state["HalfPLR"]:
+      state["ClusterLocalRead"] = 0
+      state["SuppressNoLoadLoop"] = True
+      if state["PrefetchLocalRead"] != 1:
+        reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
+        return
+      if state["PrefetchGlobalRead"] == 0:
+        reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
+        return
+      if state["LoopIters"] == 1:
+        reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
+        return
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
+        return
+      if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
+        (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
+        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
+        return
+      if not state["EnableMatrixInstruction"]:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
+        return
+      if state["_ScheduleIterAlg"] != 0:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0")
+        return
+      if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
+        (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
+        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
+        return
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
+        return
+      if state["ConvertAfterDS"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
+        return
+      if state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
+        return
 
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
@@ -2194,7 +2289,7 @@ class Solution(collections.abc.Mapping):
         if not state["UseF32XEmulation"]:
           state["UsePLRPack"] = 0
         # SIA3 only
-        if state["ScheduleIterAlg"] != 3:
+        if state["_ScheduleIterAlg"] != 3:
           state["UsePLRPack"] = 0
         # enable UsePLRPack for SubIter only
         if not state["ForceUnrollSubIter"]:
@@ -2235,7 +2330,7 @@ class Solution(collections.abc.Mapping):
       # parameters not tested yet:
       supportedParameters = {
         "EnableMatrixInstruction": state["EnableMatrixInstruction"],
-        "ScheduleIterAlg": state["ScheduleIterAlg"] == 3,
+        "_ScheduleIterAlg": state["_ScheduleIterAlg"] == 3,
         "WavefrontSize": state["WavefrontSize"] == 32,
         "UnrollLoopSwapGlobalReadOrder": not state["UnrollLoopSwapGlobalReadOrder"],
         "SuppressNoLoadLoop": not state["SuppressNoLoadLoop"],
@@ -2272,6 +2367,7 @@ class Solution(collections.abc.Mapping):
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
 
+    state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
@@ -2394,6 +2490,9 @@ class Solution(collections.abc.Mapping):
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
+        # SubtileImpl does not need LDS padding.
+        if state["UseSubtileImpl"]:
+          return 0, 0, 0, 0, 0
         isMX = state["ProblemType"].get("MXBlockA", 0) != 0 or state["ProblemType"].get("MXBlockB", 0) != 0
         numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
         numBytesB = state["ProblemType"]["MacDataTypeB"].numBytes()
@@ -2416,9 +2515,6 @@ class Solution(collections.abc.Mapping):
         if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 6 or readRegsB > 6):
           reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b192, reject")
           return ldsPadA, ldsPadB, ldsPadM, 0, 0
-        # SubtileImpl does not need LDS padding.
-        if state["UseSubtileImpl"]:
-          return 0, 0, 0, 0, 0
         if state["EnableMatrixInstruction"]:
           # for readRegs = 1 or 4, we need to double pad for MI16x16xNx1 to avoid bank conflict.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
@@ -2659,12 +2755,12 @@ class Solution(collections.abc.Mapping):
 
       if state["LocalReadVectorWidthA"] == -1:
         state["LocalReadVectorWidthA"] = state["LocalReadVectorWidth"]
-        if (not state["enableLDSTrA"]) and (state["ProblemType"]["Sparse"] == 1) and (state["LocalReadVectorWidthA"] != -1):
-          state["LocalReadVectorWidthA"] //= 2
+        if (not state["enableLDSTrA"]) and (state["ProblemType"]["Sparse"] == 1):
+          state["LocalReadVectorWidthA"] = min(state["LocalReadVectorWidthA"], state["MIInputPerThreadA"])
       if state["LocalReadVectorWidthB"] == -1:
         state["LocalReadVectorWidthB"] = state["LocalReadVectorWidth"]
-        if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2) and (state["LocalReadVectorWidthB"] != -1):
-          state["LocalReadVectorWidthB"] //= 2
+        if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
+          state["LocalReadVectorWidthB"] = min(state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
       def calLRVW():
         # Default LocalReadVectorWidth
@@ -2672,8 +2768,6 @@ class Solution(collections.abc.Mapping):
           # Default LocalReadVectorWidth
           autoLRVWA = False
           maxNumDsLoadBytesA = Solution.MAX_NUM_DS_LOAD_BYTES
-          if (not state["enableLDSTrA"]) and (state["ProblemType"]["Sparse"] == 1):
-            maxNumDsLoadBytesA //= 2
           maxLRVWA = int(maxNumDsLoadBytesA // state["ProblemType"]["MacDataTypeA"].numBytes())
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeA"].numBytes() == 0.75:
@@ -2709,8 +2803,6 @@ class Solution(collections.abc.Mapping):
           # Default LocalReadVectorWidth
           autoLRVWB = False
           maxNumDsLoadBytesB = Solution.MAX_NUM_DS_LOAD_BYTES
-          if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
-            maxNumDsLoadBytesB //= 2
           maxLRVWB = int(maxNumDsLoadBytesB // state["ProblemType"]["MacDataTypeB"].numBytes())
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeB"].numBytes() == 0.75:
@@ -2772,12 +2864,8 @@ class Solution(collections.abc.Mapping):
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"], 1)
             if wlrA > wlrB:
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
-              if state["ProblemType"]["Sparse"] == 1:
-                state["LocalReadVectorWidthA"] //= 2
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
-              if state["ProblemType"]["Sparse"] == 2:
-                state["LocalReadVectorWidthB"] //= 2
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
@@ -2870,12 +2958,8 @@ class Solution(collections.abc.Mapping):
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"], 1)
             if wlrA > wlrB:
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
-              if state["ProblemType"]["Sparse"] == 1:
-                state["LocalReadVectorWidthA"] //= 2
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
-              if state["ProblemType"]["Sparse"] == 2:
-                state["LocalReadVectorWidthB"] //= 2
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
@@ -3355,7 +3439,7 @@ class Solution(collections.abc.Mapping):
       return
     assert(state["DepthU"]> 0)
 
-    if state["ScheduleIterAlg"] == 2:
+    if state["_ScheduleIterAlg"] == 2:
       state["InnerUnroll"] = state["DepthU"] // state["MatrixInstK"]
       state["PrefetchLocalRead"] = 1
       #state["ExpandPointerSwap"] = 1 # EPS is adjusted in advance
@@ -3697,6 +3781,17 @@ class Solution(collections.abc.Mapping):
           if not isDtlDoable:
             if state["UseGeneralizedNLCOne%s"%tc]:
               reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
+    if state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]:
+      sparseTc = 'B' if state["ProblemType"]["Sparse"] == 2 else 'A'
+      # DirectToLdsMetadata requires GRVWMetadata ∈ {4, 16} (dword/dwordx4), similar to isDirectToLdsDoable
+      grvwm = state["GlobalReadVectorWidthMetadata"]
+      grvwmCheck = (grvwm == 4) or (grvwm == 16 and isaInfoMap[state["ISA"]].asmCaps["HasDirectToLdsx4"])
+      if state["DirectToLds%s"%sparseTc] and (not state["DirectToVgprSparseMetadata"]) and grvwmCheck:
+        state["DirectToLdsMetadata"] = True
+        state["LocalWriteUseSgprMetadata"] = True
+      else:
+        state["DirectToLdsMetadata"] = False
+        state["LocalWriteUseSgprMetadata"] = False
 
     # Update parent variable so kernel display is accurate
     if state["DirectToLdsA"] and state["DirectToLdsB"]:
@@ -3864,7 +3959,12 @@ class Solution(collections.abc.Mapping):
             blockWidth = bw
             break
         if blockWidth == 0:
-          reject(state, printRejectionReason, "invalid local write block width")
+          reject(state, printRejectionReason,
+                 "invalid local write block width "
+                 "(nwcv=%s, bpe=%s, bpr=%s, localWriteWidth=%s). "
+                 "This typically means TransposeLDS=0 is incompatible with the selected "
+                 "DataType and MatrixInstruction (e.g. FP4 + [16,16,128] requires TransposeLDS=1)."
+                 % (nwcv, bpe, bpr, localWriteWidth))
 
         return blockWidth
 
@@ -3886,6 +3986,10 @@ class Solution(collections.abc.Mapping):
           nwpv = vw
 
         blockWidth = findValidWriteBlockWidth(nwcv, bpe, bpr)
+        if blockWidth == 0:
+          # Solution already rejected in findValidWriteBlockWidth; bail out to
+          # avoid ZeroDivisionError at "vw // nwcvpi" below.
+          return False
         nwcvpi = int(blockWidth * bpr / bpe)
 
         serials = []
@@ -3934,7 +4038,8 @@ class Solution(collections.abc.Mapping):
 
     # set NoLdsWriteCode if (DirectToVgpr or DirectToLds)A+B is enabled
     state["NoLdsWriteCode"] = False
-    if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]):
+    if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]) \
+      and (not state["ProblemType"]["Sparse"] or state["DirectToLdsMetadata"] or state["DirectToVgprSparseMetadata"]):
       state["NoLdsWriteCode"] = True
       # MX case
       if state["ProblemType"]["MXBlockA"]:
@@ -4020,6 +4125,12 @@ class Solution(collections.abc.Mapping):
       if state["LdsPad%s"%tc] == 0:
         state["LdsBlockSizePerPad%s"%tc] = 0
 
+    if state["TDMInst"]:
+      for tc in ['A', 'B']:
+        if state["LdsPad%s"%tc] > 0 and state["LdsBlockSizePerPad%s"%tc] == 0:
+          reject(state, printRejectionReason, f"TDM requires LdsBlockSizePerPad{tc} != 0 when LdsPad{tc} != 0")
+          return
+
     # Normalize lds block-size-per-pad fields to native Python int.
     assert(int(state["LdsBlockSizePerPadA"]) == state["LdsBlockSizePerPadA"])
     assert(int(state["LdsBlockSizePerPadB"]) == state["LdsBlockSizePerPadB"])
@@ -4065,7 +4176,7 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchGlobalRead"] < 2:
         state["DtlPlusLdsBuf"] = 0
       # SIA==3 only
-      if state["ScheduleIterAlg"] != 3:
+      if state["_ScheduleIterAlg"] != 3:
         state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
@@ -4120,7 +4231,7 @@ class Solution(collections.abc.Mapping):
         state["StoreSwapAddr"] = offsetBlk > 0 and (state["1LDSBuffer"] != 1) and \
           (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
 
-      if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
+      if offsetBlk > 0 and not state["StoreSwapAddr"] and not state["UseSubtileImpl"] and numLdsBlk == 2:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
         # skip ceiling to nearest power of two for numLdsBlk>=3
         offsetBlk = roundupOffsetBlk
@@ -4180,7 +4291,7 @@ class Solution(collections.abc.Mapping):
       if not state["PrefetchGlobalRead"]:
         reject(state, printRejectionReason, "PGR=0 already use 1 LDS buffer only")
       # Should be able to support as long as NO scheduleLocalWrite
-      if (not state["ScheduleIterAlg"] == 2) and (not state["ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
+      if (not state["_ScheduleIterAlg"] == 2) and (not state["_ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
         reject(state, printRejectionReason, "1LDSBuffer only support SIA2 or SIA3, or SIA1 without SLW")
       state["LdsOffsetA"] = 0
       state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
@@ -4270,6 +4381,14 @@ class Solution(collections.abc.Mapping):
 
     # Sparse problem
     if state["ProblemType"]["Sparse"]:
+      if state["DirectToLdsA"] or state["DirectToLdsB"] or state["DirectToLdsMetadata"]:
+        if state["ExpandPointerSwap"]:
+          reject(state, printRejectionReason, "Sparse + DirectToLds + ExpandPointerSwap=1 currently unsupported")
+          return False
+        if state["PrefetchGlobalRead"] == 1:
+          reject(state, printRejectionReason, "Sparse + DirectToLds + PrefetchGlobalRead=1 currently unsupported")
+          return False
+      
       # if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
       #   reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
       #   return
@@ -4372,7 +4491,7 @@ class Solution(collections.abc.Mapping):
 
       # if LDS is bound by RemapC (SRVW), then 1LDSBuffer actually doesn't help in SIA3
       # since LDS usage couldn't be reduced
-      if state["1LDSBuffer"] and (state["ScheduleIterAlg"] == 3) and (ldsNumBytes < ldsNumBytesRemapC):
+      if state["1LDSBuffer"] and (state["_ScheduleIterAlg"] == 3) and (ldsNumBytes < ldsNumBytesRemapC):
         # TODO- Remove this DataType test condition,
         # Currently we do this test is just because we don't want to affect existing logic in rocBLAS
         if state["ProblemType"]["DataType"].isInt8():
@@ -4508,7 +4627,7 @@ class Solution(collections.abc.Mapping):
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
-    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
+    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
       # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
       if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
         reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
@@ -4577,7 +4696,7 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchLocalRead"] == 0:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only PrefetchLocalRead >= 1")
       # support SIA==3 only
-      if state["ScheduleIterAlg"] != 3:
+      if state["_ScheduleIterAlg"] != 3:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only ScheduleIterAlg == 3")
       # TODO: enable PGR>=3 for Sparse
       if state["ProblemType"]["Sparse"]:

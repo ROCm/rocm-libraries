@@ -64,6 +64,9 @@ enum class ABC_dims
     C
 };
 
+void set_host_side_fill_kernel_state(bool enable);
+bool host_side_fill_kernel();
+
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipblaslt_initialization init,
                            bool                     is_nan,
@@ -73,7 +76,8 @@ void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            size_t                   lda,
                            hipDataType              type,
                            size_t                   stride,
-                           size_t                   batch_count);
+                           size_t                   batch_count,
+                           int norm_dist_one_special_type = -1);
 
 /* ============================================================================================ */
 /*! \brief  matrix/vector initialization: */
