@@ -295,6 +295,12 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesInvalidDeviceIdThrows)
 {
     constexpr int INVALID_DEVICE_ID = 99999;
     EXPECT_THROW(queryDeviceProperties(INVALID_DEVICE_ID), hipdnn_backend::HipdnnException);
+
+    // hipGetDeviceProperties leaves the invalid-device-ordinal error sticky in
+    // HIP's per-thread state. HipErrorHandler::OnTestEnd will otherwise flag it
+    // as a leak and fail this test. Drain both error channels here.
+    (void)hipGetLastError();
+    (void)hipExtGetLastError();
 }
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesExplicitDeviceIdMatchesCurrent)
