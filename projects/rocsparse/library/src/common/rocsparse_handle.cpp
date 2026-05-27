@@ -31,7 +31,7 @@
 #include <hip/hip_runtime.h>
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
-
+static hipStream_t main_stream{};
 /*******************************************************************************
  * constructor
  *
@@ -53,7 +53,11 @@ _rocsparse_handle::_rocsparse_handle()
 
         // Shared memory per block opt-in
         shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
-
+        if(main_stream == nullptr)
+        {
+            std::ignore = hipStreamCreate(&main_stream);
+        }
+        stream = main_stream;
 #if HIP_VERSION >= 307
         // ASIC revision
         asic_rev = properties.asicRevision;

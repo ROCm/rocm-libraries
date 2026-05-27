@@ -27,7 +27,7 @@
 #include "common.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0x_driver.hpp"
-#include "rocsparse_memory.hpp"
+#include "rocsparse_hip.hpp"
 #include <iomanip>
 
 namespace rocsparse

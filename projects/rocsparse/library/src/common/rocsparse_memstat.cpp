@@ -24,6 +24,7 @@
 #ifdef ROCSPARSE_WITH_MEMSTAT
 
 #include "rocsparse_memstat.hpp"
+#include "rocsparse-auxiliary.h"
 #include "rocsparse-types.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_envariables.hpp"
@@ -117,9 +118,9 @@ struct memstat_mode
         }
     };
 
-    static inline hipError_t get_rocsparse_hipMemcpyKind(rocsparse_hipMemcpyKind& kind,
-                                                         memstat_mode::value_t    TARGET,
-                                                         memstat_mode::value_t    SOURCE)
+    static inline hipError_t get_hipMemcpyKind(hipMemcpyKind&        kind,
+                                               memstat_mode::value_t TARGET,
+                                               memstat_mode::value_t SOURCE)
     {
         switch(TARGET)
         {
@@ -332,9 +333,9 @@ hipError_t memstat_allocator<MODE>::install_guards(void* d_, size_t size, void**
         {
             char guard[PAD];
             init_guards(guard, PAD);
-            rocsparse_hipMemcpyKind kind_transfer;
-            hipError_t              err = memstat_mode::get_rocsparse_hipMemcpyKind(
-                kind_transfer, MODE, memstat_mode::host);
+            hipMemcpyKind kind_transfer;
+            hipError_t    err
+                = memstat_mode::get_hipMemcpyKind(kind_transfer, MODE, memstat_mode::host);
             if(err != hipSuccess)
             {
                 return err;
@@ -381,9 +382,9 @@ hipError_t memstat_allocator<MODE>::install_guards_async(void*       d_,
         {
             char guard[PAD];
             init_guards(guard, PAD);
-            rocsparse_hipMemcpyKind kind_transfer;
-            hipError_t              err = memstat_mode::get_rocsparse_hipMemcpyKind(
-                kind_transfer, MODE, memstat_mode::host);
+            hipMemcpyKind kind_transfer;
+            hipError_t    err
+                = memstat_mode::get_hipMemcpyKind(kind_transfer, MODE, memstat_mode::host);
             if(err != hipSuccess)
             {
                 return err;
@@ -579,9 +580,9 @@ hipError_t memstat_allocator<MODE>::check_guards(char* d, size_t size)
     {
         if(PAD > 0)
         {
-            rocsparse_hipMemcpyKind kind_transfer;
-            hipError_t              err = memstat_mode::get_rocsparse_hipMemcpyKind(
-                kind_transfer, memstat_mode::host, MODE);
+            hipMemcpyKind kind_transfer;
+            hipError_t    err
+                = memstat_mode::get_hipMemcpyKind(kind_transfer, memstat_mode::host, MODE);
             if(err != hipSuccess)
             {
                 return err;

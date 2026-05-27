@@ -45,10 +45,11 @@ rocsparse::sorted_coo2csr_info_t::sorted_coo2csr_info_t(int64_t             num_
 
 hipError_t rocsparse::sorted_coo2csr_info_t::free_memory(hipStream_t stream)
 {
-    auto e = rocsparse_hipFreeAsync(this->m_row_ptr, stream);
+
+    auto e          = rocsparse_hipFreeAsync(this->m_row_ptr, stream);
+    this->m_row_ptr = nullptr;
     if(e == hipSuccess)
     {
-        this->m_row_ptr = nullptr;
         return hipSuccess;
     }
     else
@@ -59,8 +60,7 @@ hipError_t rocsparse::sorted_coo2csr_info_t::free_memory(hipStream_t stream)
 
 rocsparse::sorted_coo2csr_info_t::~sorted_coo2csr_info_t()
 {
-    hipStream_t default_stream = 0;
-    std::ignore                = this->free_memory(default_stream);
+    WARNING_IF_HIP_ERROR(this->free_memory(nullptr));
 }
 
 rocsparse_status

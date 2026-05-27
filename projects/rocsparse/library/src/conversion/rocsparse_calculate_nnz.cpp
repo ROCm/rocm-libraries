@@ -24,7 +24,6 @@
 #include "rocsparse_calculate_nnz.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_indextype_utils.hpp"
-#include "rocsparse_memory.hpp"
 
 rocsparse_status rocsparse::calculate_nnz(
     int64_t m, rocsparse_indextype indextype, const void* ptr, int64_t* nnz, hipStream_t stream)
