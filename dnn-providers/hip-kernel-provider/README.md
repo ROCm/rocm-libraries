@@ -50,7 +50,7 @@ Either approach works as long as the installed SDK version is compatible with th
 
 1. Navigate to the `dnn-providers/hip-kernel-provider` directory.
 2. Make a build directory using `mkdir build && cd build`.
-3. Configure the build using `cmake -GNinja -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`. Ensure `ROCM_PATH` is either set in your environment or provided as a CMake variable (`-DROCM_PATH=<path to ROCm>`) as it is required to set include paths for hiprtc.
+3. Configure the build using `cmake -GNinja -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`.
 4. Finally, run `ninja` to build the plugin.
 
 ### Build Requirements

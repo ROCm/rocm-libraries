@@ -186,7 +186,16 @@ _expectedParamTypes = _getExpectedTypes(validParameters)
 # Parameters to skip during type validation because YAML serialization
 # inherently produces a different type (e.g. [9, 0, 10] -> list) and the
 # conversion to the canonical type happens downstream in the pipeline.
-_skipTypeCheck = {"ISA"}
+# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
 
 
 # Module-level collector that accumulates type mismatches across all Solution
@@ -274,7 +283,7 @@ def validateParameterTypes(state, srcFile=""):
 
 
 def printTypeMismatchSummary(numFiles=0):
-  """Print a summary of all collected type mismatches.
+  """Print a summary of all collected type mismatches to stdout.
 
   If no mismatches have been collected, prints a confirmation message
   showing how many files were checked cleanly, and returns 0.  Otherwise
@@ -865,6 +874,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+      if state["DebugStreamK"] != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
 
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
@@ -3946,7 +3959,12 @@ class Solution(collections.abc.Mapping):
             blockWidth = bw
             break
         if blockWidth == 0:
-          reject(state, printRejectionReason, "invalid local write block width")
+          reject(state, printRejectionReason,
+                 "invalid local write block width "
+                 "(nwcv=%s, bpe=%s, bpr=%s, localWriteWidth=%s). "
+                 "This typically means TransposeLDS=0 is incompatible with the selected "
+                 "DataType and MatrixInstruction (e.g. FP4 + [16,16,128] requires TransposeLDS=1)."
+                 % (nwcv, bpe, bpr, localWriteWidth))
 
         return blockWidth
 
@@ -3968,6 +3986,10 @@ class Solution(collections.abc.Mapping):
           nwpv = vw
 
         blockWidth = findValidWriteBlockWidth(nwcv, bpe, bpr)
+        if blockWidth == 0:
+          # Solution already rejected in findValidWriteBlockWidth; bail out to
+          # avoid ZeroDivisionError at "vw // nwcvpi" below.
+          return False
         nwcvpi = int(blockWidth * bpr / bpe)
 
         serials = []
