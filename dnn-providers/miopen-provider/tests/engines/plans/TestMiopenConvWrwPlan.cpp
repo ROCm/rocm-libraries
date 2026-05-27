@@ -227,6 +227,7 @@ TEST(TestConvWrwParams, ThrowsOnInvalidDilationVectorSize)
 
 TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -247,6 +248,7 @@ TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
 
 TEST_F(TestGpuConvWrwPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -267,6 +269,7 @@ TEST_F(TestGpuConvWrwPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
 
 TEST_F(TestGpuConvWrwPlan, PlanUsesKnobLimitOverDefault)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());

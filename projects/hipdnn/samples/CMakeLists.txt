@@ -141,6 +141,25 @@ add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 # Register serialization samples as tests
 add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 
+# Disable convolution samples under ASAN — known driver-level failures in MIOpen/CK and Tensile
+# that are unrelated to hipDNN. Re-enable when underlying issues are resolved.
+if(BUILD_ADDRESS_SANITIZER)
+    set_tests_properties(
+        hipdnn_sample_conv_fprop
+        hipdnn_sample_conv_dgrad
+        hipdnn_sample_serialization_roundtrip
+        PROPERTIES DISABLED TRUE
+    )
+    if(NOT WIN32)
+        set_tests_properties(
+            hipdnn_sample_fused_conv_fprop_activ
+            hipdnn_sample_fused_conv_fprop_bias_activ
+            hipdnn_sample_conv_fprop_deterministic
+            PROPERTIES DISABLED TRUE
+        )
+    endif()
+endif()
+
 # Register knobs sample
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

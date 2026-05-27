@@ -146,6 +146,7 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN (WRW block fails)
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -216,6 +217,7 @@ TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForUnsupportedGraph
 
 TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeReturnsValueForSupportedGraph)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN (WRW block fails)
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -286,6 +288,7 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeT
 
 TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN (WRW block fails)
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -358,6 +361,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
 
 TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -434,6 +438,7 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableWrw)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
@@ -871,6 +876,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
 
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorkspaceSizeWrw)
 {
+    SKIP_IF_ASAN(); // CK WRW "invalid device function" on gfx942 ASAN
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
