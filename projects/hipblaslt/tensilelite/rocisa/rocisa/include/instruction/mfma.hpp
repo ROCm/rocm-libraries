@@ -115,6 +115,8 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& b,
                         int                                       acc2_imm,
                         bool                                      neg     = false,
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false,
                         const std::string&                        comment = "")
             : Instruction(instType, comment)
             , accType(accType)
@@ -594,6 +596,8 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false,
                           const std::string&                        comment      = "")
             : Instruction(instType, comment)
             , accType(accType)

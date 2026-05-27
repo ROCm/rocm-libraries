@@ -4865,7 +4865,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # InitCIterWmma is resolved to 0/1 in SolutionStructs/Solution.py (-1 auto path).
     initCIterWmma = bool(kernel["InitCIterWmma"])
 
-    waitForPGRLabel = Label("waitForPGR", "")
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
         module.add(self.openShadowInit())
@@ -4874,12 +4873,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.removeSgprVarFromPool("SrdC")
         module.add(self.globalWriteWorkGroupInit(kernel))
         if self.states.doShadowInit == 2:
-          module.add(self.initC(kernel, initCIterWmma, waitForPGRLabel)) # initC while waiting for global reads
+          module.add(self.initC(kernel, initCIterWmma)) # initC while waiting for global reads
           if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
             module.add(self.initSumUnroll(kernel))
         module.add(self.closeShadowInit(kernel))
-        if initCIterWmma and self.states.doShadowInit == 2:
-          module.add(waitForPGRLabel)
 
       # Wait for PGR code in setupNewTile
       module.add(self.getWaitcntCodeForPGR(kernel, tensorParametersA, tensorParametersB, "wait for global read"))

@@ -5371,18 +5371,20 @@ class KernelWriterAssembly(KernelWriter):
   def initC(self, kernel, initCIterWmma=False, waitForPGRLabel=None):
     module = Module("initC")
 
-    if initCIterWmma and waitForPGRLabel is not None and not kernel["LdsInitCVgprs"]:
+    skipInitCVmovLabel = None
+    if initCIterWmma and not kernel["LdsInitCVgprs"]:
       loopIdx = 0
       EndCounter = kernel["PrefetchGlobalRead"] if not kernel["SuppressNoLoadLoop"] else kernel["PrefetchGlobalRead"]-1
       loopCounter = self.loopCounter(kernel, loopIdx)
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][loopIdx]]
+      skipInitCVmovLabel = Label(self.labels.getNameInc("skipInitCVmov"), "")
       module.add(SCmpLeU32(
               src0=loopCounter, \
               src1=hex(EndCounter), \
               comment="LoopCounter%s < EndCounter"%(loopChar) ))
-      module.add(SCBranchSCC0(labelName=waitForPGRLabel.getLabelName(), \
-          comment="skip v_mov initC"))
+      module.add(SCBranchSCC0(labelName=skipInitCVmovLabel.getLabelName(), \
+          comment="skip v_mov initC (WMMA initC will run in main loop)"))
 
     if self.states.lastValuMXSAB:
       self.vgprPool.remove(0 , self.states.lastValuMXSAB, "ValuMXSAB")
@@ -5437,6 +5439,9 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["LdsInitCVgprs"]:
         self.vgprPool.checkIn(tmpAddr)
+
+    if skipInitCVmovLabel is not None:
+      module.add(skipInitCVmovLabel)
 
     return module
 
@@ -6859,10 +6864,23 @@ class KernelWriterAssembly(KernelWriter):
             jumpLabel = Label("LoopEnd%s_evenexit"%(loopChar), "" )
 
         if kernel["ClusterBarrier"]:
-          module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
-          module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-          module.add(SBranch(labelName=jumpLabel.getLabelName(), \
-                    comment="do not enter Loop%s"%loopChar ))
+          # jump to label_skipClusterWaitInitC not label_LoopBeginL
+          # label_skipClusterWaitInitC:
+          # /* initC wmma section */
+          # label_LoopBeginL:
+          # /* unrolled loop section */
+          if beforeInitCIter:
+            skipClusterWaitLabel = Label(self.labels.getNameInc("skipClusterWaitInitC"), "")
+            module.add(SCBranchSCC0(skipClusterWaitLabel.getLabelName(), "skip cluster wait if LoopCounterL > endCounter"))
+            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
+            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
+                      comment="do not enter Loop%s"%loopChar ))
+            module.add(skipClusterWaitLabel)
+          else:
+            module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
+            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
+            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
+                      comment="do not enter Loop%s"%loopChar ))
         else:
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
