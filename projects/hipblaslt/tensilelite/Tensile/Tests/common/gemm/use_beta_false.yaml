@@ -1,0 +1,95 @@
+# Test for UseBeta=False functionality
+# Verifies that kernels correctly handle the case where beta=0 and tensor C is not used
+
+TestParameters:
+  marks: [skip-gfx1250]
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 128
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  SleepPercent: 0
+  NumBenchmarks: 1
+  PrintSolutionRejectionReason: True
+  LibraryFormat: yaml
+  BoundsCheck: True
+
+BenchmarkProblems:
+  ########################################
+  # UseBeta=False with batched GEMM
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: False
+      Batched: True
+
+    - # Configuration
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+        - DepthU: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - GlobalSplitU: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [137, 129, 1, 64]
+
+  ########################################
+  # UseBeta=False with UseScaleCD and batched GEMM
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: False
+      Batched: True
+      UseScaleCD: True
+
+    - # Configuration
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+        - DepthU: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - GlobalSplitU: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [137, 129, 1, 64]

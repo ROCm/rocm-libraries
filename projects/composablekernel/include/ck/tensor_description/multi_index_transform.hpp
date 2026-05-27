@@ -6,10 +6,10 @@
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/multi_index.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 template <typename LowLength>
@@ -137,8 +137,10 @@ struct Pad
     {
         static_assert(LowIdx::Size() == 1 && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
-
         idx_low(Number<0>{}) = idx_up[Number<0>{}] - left_pad_length_;
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        idx_low(Number<0>{}) = max(idx_low(Number<0>{}), 0);
+#endif
     }
 
     template <typename LowIdxDiff,
@@ -146,21 +148,29 @@ struct Pad
               typename LowIdx,
               typename UpIdx,
               index_t Hack>
-    __host__ __device__ static void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
-                                                     const UpIdxDiff& idx_diff_up,
-                                                     LowIdx& idx_low,
-                                                     const UpIdx&,
-                                                     Number<Hack>)
+    __host__ __device__ void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
+                                              [[maybe_unused]] const UpIdxDiff& idx_diff_up,
+                                              LowIdx& idx_low,
+                                              [[maybe_unused]] const UpIdx& idx_up,
+                                              Number<Hack>) const
     {
         static_assert(LowIdxDiff::Size() == 1 && UpIdxDiff::Size() == 1 && LowIdx::Size() == 1 &&
                           UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        const auto idx_low_old = idx_low;
+
+        CalculateLowerIndex(idx_low, idx_up);
+
+        idx_diff_low = idx_low - idx_low_old;
+#else
 
         constexpr auto I0 = Number<0>{};
 
         idx_diff_low(I0) = idx_diff_up[I0];
 
         idx_low += idx_diff_low;
+#endif
     }
 
     __host__ __device__ static constexpr bool IsLinearTransform() { return true; }
@@ -229,8 +239,10 @@ struct LeftPad
     {
         static_assert(LowIdx::Size() == 1 && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
-
         idx_low(Number<0>{}) = idx_up[Number<0>{}] - left_pad_length_;
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        idx_low(Number<0>{}) = max(idx_low(Number<0>{}), 0);
+#endif
     }
 
     template <typename LowIdxDiff,
@@ -238,21 +250,29 @@ struct LeftPad
               typename LowIdx,
               typename UpIdx,
               index_t Hack>
-    __host__ __device__ static void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
-                                                     const UpIdxDiff& idx_diff_up,
-                                                     LowIdx& idx_low,
-                                                     const UpIdx&,
-                                                     Number<Hack>)
+    __host__ __device__ void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
+                                              [[maybe_unused]] const UpIdxDiff& idx_diff_up,
+                                              LowIdx& idx_low,
+                                              [[maybe_unused]] const UpIdx& idx_up,
+                                              Number<Hack>) const
     {
         static_assert(LowIdxDiff::Size() == 1 && UpIdxDiff::Size() == 1 && LowIdx::Size() == 1 &&
                           UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        const auto idx_low_old = idx_low;
+
+        CalculateLowerIndex(idx_low, idx_up);
+
+        idx_diff_low = idx_low - idx_low_old;
+#else
         constexpr auto I0 = Number<0>{};
 
         idx_diff_low(I0) = idx_diff_up[I0];
 
         idx_low += idx_diff_low;
+#endif
     }
 
     __host__ __device__ static constexpr bool IsLinearTransform() { return true; }
@@ -531,7 +551,7 @@ struct Merge_v1_carry_check
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        auto tmp = idx_up[Number<0>{}];
 
         // normal division
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
@@ -576,7 +596,7 @@ struct Merge_v1_carry_check
         LowerIndex idx_low_length_plus_idx_diff_low_const;
 
 #if !CK_HACK_MERGE_CALCULATE_IDX_DIFF_LOW_CONST_USE_AMD_GCN_READ_FIRST_LANE
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = tmp / low_lengths_scan_[i];
@@ -592,7 +612,7 @@ struct Merge_v1_carry_check
         });
 #else
         // Hack: this force result into SGPR. Need to make sure the result is thread invariant
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = __builtin_amdgcn_readfirstlane(tmp / low_lengths_scan_[i]);
@@ -614,10 +634,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
 
@@ -637,10 +657,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t borrow = 0;
+            auto borrow = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] - borrow;
+                auto idx_low_tmp = idx_low[i] - borrow;
 
                 bool do_borrow = idx_low_tmp < -idx_diff_low_const[i];
 
@@ -660,10 +680,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry  = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
                 bool do_borrow = idx_low_tmp < -idx_diff_low_const[i];
@@ -719,7 +739,7 @@ struct Merge_v1_carry_check
         LowerIndex idx_low_length_plus_idx_diff_low_const;
 
 #if !CK_HACK_MERGE_CALCULATE_IDX_DIFF_LOW_CONST_USE_AMD_GCN_READ_FIRST_LANE
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = tmp / low_lengths_scan_[i];
@@ -735,7 +755,7 @@ struct Merge_v1_carry_check
         });
 #else
         // Hack: this force result into SGPR. Need to make sure the result is thread invariant
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = __builtin_amdgcn_readfirstlane(tmp / low_lengths_scan_[i]);
@@ -756,10 +776,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
 
@@ -779,10 +799,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t borrow = 0;
+            auto borrow = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t negative_idx_low_tmp = borrow - idx_low[i];
+                auto negative_idx_low_tmp = borrow - idx_low[i];
 
                 bool do_borrow = negative_idx_low_tmp > idx_diff_low_const[i];
 
@@ -802,10 +822,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry  = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
                 bool do_borrow = idx_low_tmp < -idx_diff_low_const[i];
@@ -859,7 +879,7 @@ struct Merge_v1_carry_check
         LowerIndex idx_diff_low_const;
 
 #if !CK_HACK_MERGE_CALCULATE_IDX_DIFF_LOW_CONST_USE_AMD_GCN_READ_FIRST_LANE
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = tmp / low_lengths_scan_[i];
@@ -869,7 +889,7 @@ struct Merge_v1_carry_check
         idx_diff_low_const(Number<NDimLow - 1>{}) = tmp;
 #else
         // Hack: this force result into SGPR. Need to make sure the result is thread invariant
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = __builtin_amdgcn_readfirstlane(tmp / low_lengths_scan_[i]);
@@ -888,7 +908,7 @@ struct Merge_v1_carry_check
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
                 idx_diff_low(i) = idx_diff_low_const[i] + do_carry;
 
-                index_t idx_low_tmp = idx_low[i] + idx_diff_low[i];
+                auto idx_low_tmp = idx_low[i] + idx_diff_low[i];
 
                 do_carry = idx_low_tmp >= low_lengths_[i];
 
@@ -903,8 +923,8 @@ struct Merge_v1_carry_check
                 idx_diff_low(i) = do_carry ? idx_diff_low[i] - low_lengths_[i] : idx_diff_low[i];
 #elif 1
                 // this use 2 VALU
-                index_t idx_diff_low_tmp = idx_diff_low[i] - low_lengths_[i];
-                idx_diff_low(i)          = do_carry ? idx_diff_low_tmp : idx_diff_low[i];
+                auto idx_diff_low_tmp = idx_diff_low[i] - low_lengths_[i];
+                idx_diff_low(i)       = do_carry ? idx_diff_low_tmp : idx_diff_low[i];
 #endif
 
                 idx_low(i) += idx_diff_low[i];
@@ -925,7 +945,7 @@ struct Merge_v1_carry_check
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
                 idx_diff_low(i) = idx_diff_low_const[i] - do_borrow;
 
-                index_t idx_low_tmp = idx_low[i] + idx_diff_low[i];
+                auto idx_low_tmp = idx_low[i] + idx_diff_low[i];
 
                 do_borrow = idx_low_tmp < 0;
 
@@ -938,8 +958,8 @@ struct Merge_v1_carry_check
 #elif 1
                 idx_diff_low(i) = do_borrow ? idx_diff_low[i] + low_lengths_[i] : idx_diff_low[i];
 #elif 1
-                index_t idx_diff_low_tmp = idx_diff_low[i] + low_lengths_[i];
-                idx_diff_low(i)          = do_borrow ? idx_diff_low_tmp : idx_diff_low[i];
+                auto idx_diff_low_tmp = idx_diff_low[i] + low_lengths_[i];
+                idx_diff_low(i)       = do_borrow ? idx_diff_low_tmp : idx_diff_low[i];
 #endif
 
                 idx_low(i) += idx_diff_low[i];
@@ -1257,7 +1277,7 @@ struct Merge_v2r2_magic_division
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        auto tmp = idx_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&, this](auto i) {
             idx_low(i) =
@@ -1286,10 +1306,10 @@ struct Merge_v2r2_magic_division
                           LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up_new[Number<0>{}];
+        auto tmp = idx_up_new[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&, this](auto i) {
-            index_t idx_low_old = idx_low[i];
+            auto idx_low_old = idx_low[i];
 
             idx_low(i) =
                 MagicDivision::DoMagicDivision(tmp,
@@ -1394,7 +1414,7 @@ struct Merge_v3_division_mod
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        auto tmp = idx_up[Number<0>{}];
 
         // division and mod
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
@@ -1423,16 +1443,16 @@ struct Merge_v3_division_mod
         constexpr auto I0   = Number<0>{};
         constexpr auto INm1 = Number<NDimLow - 1>{};
 
-        index_t tmp = idx_up_new[I0];
+        auto tmp = idx_up_new[I0];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
-            const index_t tmp2 = idx_low[i];
-            idx_low(i)         = tmp / this->low_lengths_scan_[i];
-            idx_diff_low(i)    = idx_low[i] - tmp2;
+            const auto tmp2 = idx_low[i];
+            idx_low(i)      = tmp / this->low_lengths_scan_[i];
+            idx_diff_low(i) = idx_low[i] - tmp2;
             tmp %= this->low_lengths_scan_[i];
         });
 
-        const index_t tmp2 = idx_low[INm1];
+        const auto tmp2    = idx_low[INm1];
         idx_low(INm1)      = tmp;
         idx_diff_low(INm1) = idx_low[INm1] - tmp2;
     }
@@ -2261,4 +2281,6 @@ struct Xor
     }
 };
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

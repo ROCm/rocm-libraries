@@ -87,16 +87,16 @@ void LayernormValidator::validateNormalizedDim(const std::vector<int64_t>& ioTen
     const auto& ioAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioAttr.dims()->begin(), ioAttr.dims()->end());
 
-    size_t affineNormalizedDimMin
+    const size_t affineNormalizedDimMin
         = getMinNormalizedDimFromAffine(ioTensorIds[0], affineTensorIds[0], _tensorMap);
-    size_t affineNormalizedDimMax
+    const size_t affineNormalizedDimMax
         = getMaxNormalizedDimFromAffine(ioTensorIds[0], affineTensorIds[0], _tensorMap);
 
-    size_t statNormalizedDimMin
+    const size_t statNormalizedDimMin
         = statTensorIds.empty()
               ? 0
               : getMinNormalizedDimFromStat(ioTensorIds[0], statTensorIds[0], _tensorMap);
-    size_t statNormalizedDimMax
+    const size_t statNormalizedDimMax
         = statTensorIds.empty()
               ? ioDims.size()
               : getMaxNormalizedDimFromStat(ioTensorIds[0], statTensorIds[0], _tensorMap);
@@ -254,7 +254,8 @@ void LayernormValidator::checkTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& lnAttr)
 {
     std::vector<int64_t> ioTensorIds = {lnAttr.x_tensor_uid(), lnAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {lnAttr.scale_tensor_uid(), lnAttr.bias_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {lnAttr.scale_tensor_uid(), lnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(lnAttr.mean_tensor_uid().has_value())
     {
@@ -264,7 +265,7 @@ void LayernormValidator::checkTensorConfigSupported(
     {
         statTensorIds.push_back(lnAttr.inv_variance_tensor_uid().value());
     }
-    std::vector<int64_t> epsilonTensorIds = {lnAttr.epsilon_tensor_uid()};
+    const std::vector<int64_t> epsilonTensorIds = {lnAttr.epsilon_tensor_uid()};
 
     std::vector<int64_t> ioAndStatTensorIds
         = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
