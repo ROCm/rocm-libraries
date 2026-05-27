@@ -3766,7 +3766,6 @@ class Solution(collections.abc.Mapping):
         if state["ProblemType"]["Sparse"] == 2:
           GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM, glvwMlimit) #sum all need read
           tvm = totalElementsM // GlobalReadVectorWidth
-          
           if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, _printRejectionReason):
             #fallback
             tvm = totalElementsM // bGlobalReadVectorWidthMetadata
