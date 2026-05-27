@@ -45,7 +45,14 @@ struct conv3d_test : public conv3d_test_base<T, TestCase>
 
 using MIOPEN_TESTSUITE_NAME(GPU_Conv3d_Test_) = conv3d_test<MIOPEN_GTEST_DATA_TYPE>;
 
-TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv3d_Test_), MIOPEN_TEST_INFO(Test)) { run(); }
+TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv3d_Test_), MIOPEN_TEST_INFO(Test))
+{
+#if MIOPEN_GTEST_DATA_TYPE == float
+    run();
+#else
+    GTEST_SKIP() << "Test not supported for the current data type. Only 'float' is supported.";
+#endif
+}
 
 INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0),
                               MIOPEN_TESTSUITE_NAME(GPU_Conv3d_Test_),
