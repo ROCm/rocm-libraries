@@ -149,6 +149,7 @@ TEST(TestSdpaFwdPlanBuilder, ExecutePlanWithAsymmetricWindow)
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle,
                                         DataType::FLOAT,
                                         /*causalMask=*/false,
+                                        /*causalMaskBottomRight=*/false,
                                         /*leftBound=*/LEFT_BOUND,
                                         /*rightBound=*/RIGHT_BOUND,
                                         hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
@@ -250,4 +251,184 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     tensorMapCopy.erase(nodeAttributes->k_tensor_uid());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapper.getNode(0), tensorMapCopy));
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsAlibiMask)
+{
+    // SdpaFwdPlanBuilder does not implement ALiBi positional encoding, so it must
+    // refuse to claim nodes that have alibi_mask=true. Otherwise a graph with ALiBi
+    // would silently fall through to a CPU plan that ignores the ALiBi attribute
+    // and produces wrong results.
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+    SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims, /*seed=*/1);
+
+    auto graphTuple = buildSdpaFwdGraph(tensorBundle,
+                                        DataType::FLOAT,
+                                        /*causalMask=*/false,
+                                        /*causalMaskBottomRight=*/false,
+                                        /*leftBound=*/std::nullopt,
+                                        /*rightBound=*/std::nullopt,
+                                        hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
+                                        /*alibiMask=*/true);
+    auto& graph = std::get<0>(graphTuple);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+        << "SdpaFwdPlanBuilder must reject nodes with alibi_mask=true";
+}
+
+TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
+{
+    // The dispatcher in SdpaFwdPlanBuilder maps the deprecated causal_mask=true flag
+    // to (leftBound=-1, rightBound=0, TOP_LEFT). This test verifies that mapping by
+    // running two graphs that should produce bit-for-bit identical output:
+    //   (a) causal_mask=true                         (deprecated path)
+    //   (b) leftBound=-1, rightBound=0, TOP_LEFT     (modern path)
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> deprecatedBundle(qDims, kDims, vDims, seed);
+    SdpaFwdTensorBundle<float> explicitBundle(qDims, kDims, vDims, seed);
+
+    // (a) Deprecated causal_mask=true
+    auto deprecatedGraphTuple = buildSdpaFwdGraph(deprecatedBundle,
+                                                  DataType::FLOAT,
+                                                  /*causalMask=*/true);
+    auto& deprecatedGraph = std::get<0>(deprecatedGraphTuple);
+    auto [depBin, depErr] = deprecatedGraph->to_binary();
+    ASSERT_TRUE(depErr.is_good()) << depErr.get_message();
+    const GraphWrapper depWrapper(depBin.data(), depBin.size());
+
+    // (b) Explicit (leftBound=-1, rightBound=0, TOP_LEFT)
+    auto explicitGraphTuple = buildSdpaFwdGraph(explicitBundle,
+                                                DataType::FLOAT,
+                                                /*causalMask=*/false,
+                                                /*causalMaskBottomRight=*/false,
+                                                /*leftBound=*/-1,
+                                                /*rightBound=*/0,
+                                                hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+    auto& explicitGraph = std::get<0>(explicitGraphTuple);
+    auto [expBin, expErr] = explicitGraph->to_binary();
+    ASSERT_TRUE(expErr.is_good()) << expErr.get_message();
+    const GraphWrapper expWrapper(expBin.data(), expBin.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    // Execute deprecated-path plan
+    {
+        auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
+        const auto* attrs = depWrapper.getNode(0).attributes_as_SdpaAttributes();
+        std::unordered_map<int64_t, void*> vp;
+        vp[attrs->q_tensor_uid()] = deprecatedBundle.qTensor.memory().hostData();
+        vp[attrs->k_tensor_uid()] = deprecatedBundle.kTensor.memory().hostData();
+        vp[attrs->v_tensor_uid()] = deprecatedBundle.vTensor.memory().hostData();
+        vp[attrs->o_tensor_uid()] = deprecatedBundle.oTensor.memory().hostData();
+        plan->execute(vp);
+    }
+
+    // Execute explicit-bounds plan
+    {
+        auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
+        const auto* attrs = expWrapper.getNode(0).attributes_as_SdpaAttributes();
+        std::unordered_map<int64_t, void*> vp;
+        vp[attrs->q_tensor_uid()] = explicitBundle.qTensor.memory().hostData();
+        vp[attrs->k_tensor_uid()] = explicitBundle.kTensor.memory().hostData();
+        vp[attrs->v_tensor_uid()] = explicitBundle.vTensor.memory().hostData();
+        vp[attrs->o_tensor_uid()] = explicitBundle.oTensor.memory().hostData();
+        plan->execute(vp);
+    }
+
+    // Both code paths feed the same arguments into CpuFpReferenceSdpa::forward, so
+    // results must match to within bit-for-bit tolerance.
+    const float tolerance = 0.0f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(deprecatedBundle.oTensor, explicitBundle.oTensor))
+        << "Deprecated causal_mask=true should produce identical output to "
+           "leftBound=-1, rightBound=0, TOP_LEFT alignment.";
+}
+
+TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBottomRightBounds)
+{
+    // The dispatcher maps the deprecated causal_mask_bottom_right=true flag to
+    // (leftBound=-1, rightBound=0, BOTTOM_RIGHT). Verify by comparing against an
+    // explicit bottom-right window configuration. Use Sq != Skv so that TOP_LEFT
+    // and BOTTOM_RIGHT alignments produce different output, catching any bug
+    // where the dispatcher forgets to set the alignment to BOTTOM_RIGHT.
+    const std::vector<int64_t> qDims = {1, 2, 2, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> deprecatedBundle(qDims, kDims, vDims, seed);
+    SdpaFwdTensorBundle<float> explicitBundle(qDims, kDims, vDims, seed);
+
+    // (a) Deprecated causal_mask_bottom_right=true
+    auto deprecatedGraphTuple = buildSdpaFwdGraph(deprecatedBundle,
+                                                  DataType::FLOAT,
+                                                  /*causalMask=*/false,
+                                                  /*causalMaskBottomRight=*/true,
+                                                  /*leftBound=*/std::nullopt,
+                                                  /*rightBound=*/std::nullopt,
+                                                  hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+    auto& deprecatedGraph = std::get<0>(deprecatedGraphTuple);
+    auto [depBin, depErr] = deprecatedGraph->to_binary();
+    ASSERT_TRUE(depErr.is_good()) << depErr.get_message();
+    const GraphWrapper depWrapper(depBin.data(), depBin.size());
+
+    // (b) Explicit (leftBound=-1, rightBound=0, BOTTOM_RIGHT)
+    auto explicitGraphTuple = buildSdpaFwdGraph(explicitBundle,
+                                                DataType::FLOAT,
+                                                /*causalMask=*/false,
+                                                /*causalMaskBottomRight=*/false,
+                                                /*leftBound=*/-1,
+                                                /*rightBound=*/0,
+                                                hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT);
+    auto& explicitGraph = std::get<0>(explicitGraphTuple);
+    auto [expBin, expErr] = explicitGraph->to_binary();
+    ASSERT_TRUE(expErr.is_good()) << expErr.get_message();
+    const GraphWrapper expWrapper(expBin.data(), expBin.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    // Execute deprecated-path plan
+    {
+        auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
+        const auto* attrs = depWrapper.getNode(0).attributes_as_SdpaAttributes();
+        std::unordered_map<int64_t, void*> vp;
+        vp[attrs->q_tensor_uid()] = deprecatedBundle.qTensor.memory().hostData();
+        vp[attrs->k_tensor_uid()] = deprecatedBundle.kTensor.memory().hostData();
+        vp[attrs->v_tensor_uid()] = deprecatedBundle.vTensor.memory().hostData();
+        vp[attrs->o_tensor_uid()] = deprecatedBundle.oTensor.memory().hostData();
+        plan->execute(vp);
+    }
+
+    // Execute explicit-bounds plan
+    {
+        auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
+        const auto* attrs = expWrapper.getNode(0).attributes_as_SdpaAttributes();
+        std::unordered_map<int64_t, void*> vp;
+        vp[attrs->q_tensor_uid()] = explicitBundle.qTensor.memory().hostData();
+        vp[attrs->k_tensor_uid()] = explicitBundle.kTensor.memory().hostData();
+        vp[attrs->v_tensor_uid()] = explicitBundle.vTensor.memory().hostData();
+        vp[attrs->o_tensor_uid()] = explicitBundle.oTensor.memory().hostData();
+        plan->execute(vp);
+    }
+
+    const float tolerance = 0.0f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(deprecatedBundle.oTensor, explicitBundle.oTensor))
+        << "Deprecated causal_mask_bottom_right=true should produce identical output to "
+           "leftBound=-1, rightBound=0, BOTTOM_RIGHT alignment.";
 }

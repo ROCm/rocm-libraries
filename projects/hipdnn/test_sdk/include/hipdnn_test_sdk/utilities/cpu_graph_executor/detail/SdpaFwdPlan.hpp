@@ -228,6 +228,14 @@ public:
                                  ? nodeAttributes->right_bound().value()
                                  : -1;
 
+        if(leftBound < -1 || rightBound < -1)
+        {
+            throw std::invalid_argument("SdpaFwdPlan: left_bound and right_bound must be >= -1 "
+                                        "(got left_bound="
+                                        + std::to_string(leftBound)
+                                        + ", right_bound=" + std::to_string(rightBound) + ")");
+        }
+
         bool isTopLeft = nodeAttributes->diagonal_alignment()
                          == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
 
