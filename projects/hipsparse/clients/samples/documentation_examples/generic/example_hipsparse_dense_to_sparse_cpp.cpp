@@ -135,8 +135,8 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMemcpy(hcsrValB.data(), dcsrValB, sizeof(float) * nnz, hipMemcpyDeviceToHost));
 
     // Clear hipSPARSE
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(matA));
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(matB));
+    HIPSPARSE_CHECK(hipsparseDestroyDnMat(matA));
+    HIPSPARSE_CHECK(hipsparseDestroySpMat(matB));
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
     // Clear device memory

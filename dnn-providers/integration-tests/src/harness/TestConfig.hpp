@@ -3,40 +3,42 @@
 
 #pragma once
 
-#include <cstdlib>
-#include <cstring>
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
-#include <fstream>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <map>
-#include <nlohmann/json.hpp>
-#include <set>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+
+#include "common/PlatformUtils.hpp"
+#include "harness/DeviceArch.hpp"
+#include "harness/TestSettings.hpp"
 
 namespace hipdnn_integration_tests
 {
 
 // Methods for determining acceptable tolerance when comparing reference
 // implementation output to the selected engine's output.
-//
-// Example:
-//   [plugins.miopen]
-//   name = "miopen_provider_plugin"
-//   engines = ["MIOPEN_PLUGIN"]
-//
-//   [engines.MIOPEN_PLUGIN]
-//   tolerance = "gh_12678_tolerance_workaround"
-//
-// The example config would map to ToleranceMode::GH_12678_TOLERANCE_WORKAROUND
-// which uses default tolerance for all graphs besides batch norm backwards
-// operating on bfloat16 where it returns a wider tolerance.
 enum class ToleranceMode
 {
     DEFAULT,
 };
 
-// Singleton class for reading test configuration from JSON file.
+// Selects the reference executor used for graph validation.
+enum class ReferenceExecutorType
+{
+    CPU,
+    GPU,
+};
+
+// Singleton class for storing CLI-based test configuration.
+// All arguments are independently optional:
+//   - articlePath: omit to use hipDNN's default plugin discovery
+//   - engineName: omit to let hipDNN select the engine
+//   - failOnUnsupported: when true, FAIL instead of SKIP for unsupported graphs
 class TestConfig
 {
 public:
@@ -52,111 +54,206 @@ public:
     TestConfig(TestConfig&&) = delete;
     TestConfig& operator=(TestConfig&&) = delete;
 
-    // Get tolerance mode for a given engine ID.
-    ToleranceMode getToleranceMode(int64_t engineId) const
+    // Initialize with CLI arguments. Must be called before any get() access.
+    static void initialize(std::optional<std::filesystem::path> articlePath,
+                           std::optional<std::string> engineName,
+                           bool failOnUnsupported = false,
+                           bool skipGraphValidation = false,
+                           std::optional<std::filesystem::path> configPath = std::nullopt,
+                           std::optional<ReferenceExecutorType> referenceExecutorType
+                           = std::nullopt)
     {
-        std::string engineName;
-        try
+        TestConfig& instance = get();
+        if(instance._initialized)
         {
-            engineName = std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
+            throw std::runtime_error("TestConfig::initialize() called more than once");
         }
-        catch(const std::out_of_range&)
+        instance._articlePath = std::move(articlePath);
+        instance._engineName = std::move(engineName);
+        instance._failOnUnsupported = failOnUnsupported;
+        instance._skipGraphValidation = skipGraphValidation;
+        instance._referenceExecutorType = referenceExecutorType;
+
+        // If CLI didn't provide a value, check env var once at init
+        if(!instance._referenceExecutorType.has_value())
         {
-            engineName = "Engine" + std::to_string(engineId);
+            auto val = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_REFERENCE_EXECUTOR");
+            if(!val.empty())
+            {
+                std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if(val == "gpu")
+                {
+                    instance._referenceExecutorType = ReferenceExecutorType::GPU;
+                }
+                else if(val == "cpu")
+                {
+                    instance._referenceExecutorType = ReferenceExecutorType::CPU;
+                }
+                else
+                {
+                    throw std::runtime_error("Invalid HIPDNN_TEST_REFERENCE_EXECUTOR value '" + val
+                                             + "'; expected 'cpu' or 'gpu'");
+                }
+            }
         }
 
-        if(auto it = _engineTolerances.find(engineName); it != _engineTolerances.end())
+        if(configPath.has_value())
         {
-            return it->second;
+            instance._testSettings.emplace(*configPath);
         }
+
+        // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
+        // todo: In future allow the test runner to use any specified device.
+        instance._currentArch = currentDeviceArchRaw();
+
+        // Detect platform once at startup (always succeeds; PlatformUtils.hpp
+        // refuses to compile on unsupported OSes).
+        instance._currentPlatform = currentPlatform();
+
+        instance._initialized = true;
+    }
+
+    bool hasArticlePath() const
+    {
+        throwIfNotInitialized();
+        return _articlePath.has_value();
+    }
+
+    bool hasEngineName() const
+    {
+        throwIfNotInitialized();
+        return _engineName.has_value();
+    }
+
+    bool failOnUnsupported() const
+    {
+        throwIfNotInitialized();
+        return _failOnUnsupported;
+    }
+
+    bool skipGraphValidation() const
+    {
+        throwIfNotInitialized();
+        return _skipGraphValidation;
+    }
+
+    // Get the article (plugin .so) path. Throws if not provided.
+    const std::filesystem::path& getArticlePath() const
+    {
+        throwIfNotInitialized();
+        if(!_articlePath.has_value())
+        {
+            throw std::runtime_error("getArticlePath() called but --test-article was not provided");
+        }
+        return _articlePath.value();
+    }
+
+    // Get the engine name string. Throws if not provided.
+    std::string_view getEngineName() const
+    {
+        throwIfNotInitialized();
+        if(!_engineName.has_value())
+        {
+            throw std::runtime_error("getEngineName() called but --test-engine was not provided");
+        }
+        return _engineName.value();
+    }
+
+    // Get the engine ID from the engine name. Throws if engine not provided.
+    int64_t getEngineId() const
+    {
+        throwIfNotInitialized();
+        if(!_engineName.has_value())
+        {
+            throw std::runtime_error("getEngineId() called but --test-engine was not provided");
+        }
+        return hipdnn_data_sdk::utilities::engineNameToId(_engineName.value());
+    }
+
+    // Get tolerance mode (always DEFAULT since only one mode exists)
+    ToleranceMode getToleranceMode() const
+    {
+        throwIfNotInitialized();
         return ToleranceMode::DEFAULT;
     }
 
-    // Check if a full GTest test name is in the expected failures list.
-    // Test name format: "TestSuite/Prefix.TestName/ParamName"
-    bool isExpectedFailure(const std::string& testName)
+    // Check if a test settings file was provided
+    bool hasTestSettings() const
     {
-        return _expectedFailures.contains(testName);
+        throwIfNotInitialized();
+        return _testSettings.has_value();
     }
 
-    // Get expected plugin names from config (e.g., {"fusilli_plugin",
-    // "miopen_provider_plugin"})
-    const std::set<std::string>& getExpectedPluginNames() const
+    // Find a tolerance override matching the given test name.
+    // Returns std::nullopt if no config loaded or no filter matches.
+    std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
     {
-        return _expectedPluginNames;
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findToleranceOverride(testName);
+    }
+
+    // Raw gcnArchName for device 0 detected at init time (e.g.
+    // "gfx942:sramecc+:xnack-"). Empty if detection failed.
+    const std::string& getCurrentArch() const
+    {
+        throwIfNotInitialized();
+        return _currentArch;
+    }
+
+    // Lowercase platform name detected at init time ("windows" or "linux").
+    const std::string& getCurrentPlatform() const
+    {
+        throwIfNotInitialized();
+        return _currentPlatform;
+    }
+
+    // Find a [[test_skips]] entry matching the given test name on the current
+    // device arch and platform. Returns the entry's reason, or std::nullopt
+    // if no config is loaded or no entry matches.
+    std::optional<std::string> findSkipForTest(std::string_view testName) const
+    {
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findSkip(testName, _currentArch, _currentPlatform);
+    }
+
+    // Get the reference executor type. Value is resolved once at init time:
+    // CLI flag > HIPDNN_TEST_REFERENCE_EXECUTOR env var > CPU default.
+    ReferenceExecutorType getReferenceExecutorType() const
+    {
+        throwIfNotInitialized();
+        return _referenceExecutorType.value_or(ReferenceExecutorType::CPU);
     }
 
 private:
-    TestConfig()
+    TestConfig() = default;
+
+    void throwIfNotInitialized() const
     {
-        // Get config path
-        const char* configPathEnv = std::getenv("HIPDNN_TEST_CONFIG_PATH");
-        if(configPathEnv == nullptr || std::strlen(configPathEnv) == 0)
+        if(!_initialized)
         {
-            throw std::runtime_error("HIPDNN_TEST_CONFIG_PATH environment variable not set");
-        }
-
-        // Parse config
-        const std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
-        std::ifstream configFile(configPath);
-        if(!configFile.is_open())
-        {
-            throw std::runtime_error("Failed to open config file: " + configPath.string());
-        }
-        try
-        {
-            auto config = nlohmann::json::parse(configFile);
-
-            // Populate expected failures set from flattened list
-            if(config.contains("expected_failures"))
-            {
-                for(const auto& name : config["expected_failures"])
-                {
-                    _expectedFailures.insert(name.get<std::string>());
-                }
-            }
-
-            // Populate expected plugin names from plugin definitions
-            if(config.contains("plugins"))
-            {
-                for(const auto& [name, info] : config["plugins"].items())
-                {
-                    if(info.contains("name"))
-                    {
-                        _expectedPluginNames.insert(info["name"].get<std::string>());
-                    }
-                }
-            }
-
-            // Populate engine tolerance modes
-            if(config.contains("engines"))
-            {
-                for(const auto& [engineName, engineConfig] : config["engines"].items())
-                {
-                    if(engineConfig.contains("tolerance"))
-                    {
-                        auto val = engineConfig["tolerance"].get<std::string>();
-                        if(val == "default")
-                        {
-                            _engineTolerances[engineName] = ToleranceMode::DEFAULT;
-                        }
-                        else
-                        {
-                            throw std::runtime_error("Unknown tolerance mode: " + val);
-                        }
-                    }
-                }
-            }
-        }
-        catch(const nlohmann::json::parse_error& e)
-        {
-            throw std::runtime_error("Failed to parse config JSON: " + std::string(e.what()));
+            throw std::runtime_error("TestConfig not initialized");
         }
     }
 
-    std::set<std::string> _expectedFailures;
-    std::set<std::string> _expectedPluginNames;
-    std::map<std::string, ToleranceMode> _engineTolerances;
+    std::optional<std::filesystem::path> _articlePath;
+    std::optional<std::string> _engineName;
+    std::optional<TestSettings> _testSettings;
+    std::optional<ReferenceExecutorType> _referenceExecutorType;
+    std::string _currentArch;
+    std::string _currentPlatform;
+    bool _failOnUnsupported = false;
+    bool _skipGraphValidation = false;
+    bool _initialized = false;
 };
 
 } // namespace hipdnn_integration_tests

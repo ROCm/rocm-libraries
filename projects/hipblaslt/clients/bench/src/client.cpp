@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -383,10 +383,16 @@ try
          "Specific stride of strided_batched matrix E, second dimension * leading dimension.")
 
         ("alpha",
-          value<float>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
+          value<double>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
+
+        ("alphai",
+          value<double>(&arg.alphai)->default_value(0.0), "specifies the scalar alphai")
 
         ("beta",
-         value<float>(&arg.beta)->default_value(0.0), "specifies the scalar beta")
+         value<double>(&arg.beta)->default_value(0.0), "specifies the scalar beta")
+
+        ("betai",
+          value<double>(&arg.betai)->default_value(0.0), "specifies the scalar betai")
 
         ("function,f",
          value<std::string>(&function)->default_value("matmul"), "BLASLt function to test. "
@@ -394,23 +400,23 @@ try
 
         ("precision,r",
          value<std::string>(&precision)->default_value("f16_r"), "Precision of matrix A,B,C,D  "
-         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r")
+         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("a_type",
          value<std::string>(&a_type), "Precision of matrix A. "
-        "Options: f32_r,f16_r,bf16_r,i8_r")
+        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("b_type",
          value<std::string>(&b_type), "Precision of matrix B. "
-        "Options: f32_r,f16_r,bf16_r,i8_r")
+        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("c_type",
          value<std::string>(&c_type), "Precision of matrix C. "
-         "Options: f32_r,f16_r,bf16_r,i8_r")
+         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("d_type",
          value<std::string>(&d_type), "Precision of matrix D. "
-        "Options: f32_r,f16_r,bf16_r,i8_r")
+        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("compute_type",
          value<std::string>(&compute_type)->default_value("f32_r"), "Precision of computation. "
@@ -426,20 +432,21 @@ try
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
-        "Options: f16_r,bf16_r")
+        "Options: f16_r,bf16_r,f32_c,f64_c")
 
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
-         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01")
+         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
+         "fp16_accumulator_probe")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
-         "N = no transpose, T = transpose")
+         "N = no transpose, T = transpose, C = conjugate transpose")
 
         ("transB",
          value<char>(&arg.transB)->default_value('N'),
-         "N = no transpose, T = transpose")
+         "N = no transpose, T = transpose, C = conjugate transpose")
 
         ("swizzleA",
          value<bool>(&arg.swizzle_a)->default_value(false),
@@ -452,6 +459,10 @@ try
         ("batch_count",
          value<int32_t>(&arg.batch_count)->default_value(1),
          "Number of matrices. Only applicable to batched and strided_batched routines")
+
+        ("batch_mode",
+         value<int32_t>(&arg.batch_mode)->default_value(0),
+         "Strided Batched GEMM or General Batched GEMM. 0 = Strided Batched GEMM, 1 = General Batched GEMM")         
 
         ("HMM",
          value<bool>(&arg.HMM)->default_value(false),
@@ -507,11 +518,11 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -839,7 +850,7 @@ try
             + " is not equal to --d_type " + std::string(hip_datatype_to_string(arg.d_type)));
 
     bool is_f16 = arg.a_type == HIP_R_16F || arg.a_type == HIP_R_16BF;
-    bool is_f32 = arg.a_type == HIP_R_32F;
+    bool is_f32 = arg.a_type == HIP_R_32F || arg.a_type == HIP_C_32F;
     arg.compute_type
         = compute_type == "" ? (HIPBLAS_COMPUTE_32F) : string_to_hipblas_computetype(compute_type);
     if(arg.compute_type == HIPBLASLT_COMPUTE_TYPE_INVALID)
@@ -869,6 +880,15 @@ try
     arg.initialization = string2hipblaslt_initialization(initialization);
     if(arg.initialization == static_cast<hipblaslt_initialization>(0))
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
+
+    if(vm["initialization"].defaulted()
+       && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
+    {
+        arg.initialization = hipblaslt_initialization::uniform_low_precision;
+        hipblaslt_cerr << "Note: 'hpl' init produces ~50% zero rate for FP4. "
+                       << "Using 'uniform_low_precision' for FP4 by default. "
+                       << "Use '--initialization hpl' to override." << std::endl;
+    }
 
     arg.activation_type = string_to_hipblaslt_activation_type(activation_type);
     if(arg.activation_type == static_cast<hipblaslt_activation_type>(-1))
@@ -917,6 +937,16 @@ try
             return hipblaslt_scaling_format::Vector;
         if(s == 3)
             return hipblaslt_scaling_format::Block_32_UE8M0;
+        if(s == 4)
+            return hipblaslt_scaling_format::Block_16_UE8M0;
+        if(s == 5)
+            return hipblaslt_scaling_format::Block_32_UE4M3;
+        if(s == 6)
+            return hipblaslt_scaling_format::Block_16_UE4M3;
+        if(s == 7)
+            return hipblaslt_scaling_format::Block_32_UE5M3;
+        if(s == 8)
+            return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         return hipblaslt_scaling_format::none;
@@ -925,35 +955,45 @@ try
     arg.scaleB = scaleInt2Enum(scaleBFormat);
     arg.scaleC = scaleCFormat;
     arg.scaleD = scaleDFormat;
-
-    // Validation for F4 and F6
-    if(arg.a_type == HIP_R_4F_E2M1_EXT || arg.a_type == HIP_R_6F_E2M3_EXT
-       || arg.a_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleA))
-            throw std::invalid_argument("scaleA must be block format for F4 and F6 types");
-    }
-    if(arg.b_type == HIP_R_4F_E2M1_EXT || arg.b_type == HIP_R_6F_E2M3_EXT
-       || arg.b_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleB))
-            throw std::invalid_argument("scaleB must be block format for F4 and F6 types");
-    }
+    if(arg.batch_mode < 0 || arg.batch_mode > 1)
+        throw std::invalid_argument("Invalid value for --batch_mode " + std::to_string(arg.batch_mode));
+    /** Introduced this check to stay consistent with cublaslt behavior as documented at
+     *  https://docs.nvidia.com/cuda/cublas/#narrow-precision-data-types-usage under the 
+     *  Notes Section.
+     */
+    if(arg.batch_mode == 1 && (arg.scaleA == hipblaslt_scaling_format::Vector
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+        throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
+    if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+        throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4
     if(isBlockScaling(arg.scaleA))
     {
         if(arg.a_type != HIP_R_8F_E4M3 && arg.a_type != HIP_R_8F_E5M2
-           && arg.a_type != HIP_R_4F_E2M1_EXT && arg.a_type != HIP_R_6F_E2M3_EXT
-           && arg.a_type != HIP_R_6F_E3M2_EXT)
+           && arg.a_type != HIP_R_4F_E2M1 && arg.a_type != HIP_R_6F_E2M3
+           && arg.a_type != HIP_R_6F_E3M2)
             throw std::invalid_argument("Invalid a_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.a_type));
     }
     if(isBlockScaling(arg.scaleB))
     {
         if(arg.b_type != HIP_R_8F_E4M3 && arg.b_type != HIP_R_8F_E5M2
-           && arg.b_type != HIP_R_4F_E2M1_EXT && arg.b_type != HIP_R_6F_E2M3_EXT
-           && arg.b_type != HIP_R_6F_E3M2_EXT)
+           && arg.b_type != HIP_R_4F_E2M1 && arg.b_type != HIP_R_6F_E2M3
+           && arg.b_type != HIP_R_6F_E3M2)
             throw std::invalid_argument("Invalid b_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.b_type));
     }

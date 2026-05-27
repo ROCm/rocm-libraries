@@ -44,7 +44,16 @@ enum class ErrorCode
     OK, ///< Operation completed successfully
     INVALID_VALUE, ///< An invalid value was provided
     HIPDNN_BACKEND_ERROR, ///< An error occurred in the hipDNN backend
-    ATTRIBUTE_NOT_SET ///< A required attribute was not set
+    ATTRIBUTE_NOT_SET, ///< A required attribute was not set
+    /**
+     * @brief No engine accepted this graph
+     *
+     * No engine has an applicable solution on the current device, likely
+     * because the requested dtype/shape/operation pattern is not supported by
+     * any engine. Distinct from validation errors -- the graph is well-formed,
+     * just not runnable by the available engines.
+     */
+    GRAPH_NOT_SUPPORTED ///< No engine accepted this graph (graph well-formed but unrunnable on available engines)
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -60,6 +69,8 @@ inline std::string to_string(ErrorCode code)
         return "HIPDNN_BACKEND_ERROR";
     case ErrorCode::ATTRIBUTE_NOT_SET:
         return "ATTRIBUTE_NOT_SET";
+    case ErrorCode::GRAPH_NOT_SUPPORTED:
+        return "GRAPH_NOT_SUPPORTED";
     default:
         return "UNKNOWN_ERROR";
     }
@@ -248,5 +259,20 @@ typedef Error error_t; ///< @brief Type alias for Error
         {                                                \
             return {error_status, message};              \
         }                                                \
+    } while(0)
+
+/// Evaluate an expression that returns Error and early-return
+/// \c {err, {}} when the error is bad. Works with any function whose
+/// return type is \c std::pair<Error, T> because \c {} value-initialises
+/// the second element (std::nullopt for optionals, default-constructed
+/// pairs, etc.).
+#define HIPDNN_FE_TRY(expr)           \
+    do                                \
+    {                                 \
+        auto _fe_try_err = (expr);    \
+        if(_fe_try_err.is_bad())      \
+        {                             \
+            return {_fe_try_err, {}}; \
+        }                             \
     } while(0)
 }

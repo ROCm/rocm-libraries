@@ -30,6 +30,7 @@ public:
     explicit Plugin(plugin::SharedLibrary&& lib)
         : PluginBase(std::move(lib))
     {
+        _funcGetLogLevel = _lib.getSymbol<hipdnnSeverity_t (*)()>("testPluginGetLogLevel");
     }
 
     static hipdnnPluginType_t getPluginType()
@@ -37,11 +38,22 @@ public:
         return HIPDNN_PLUGIN_TYPE_UNSPECIFIED;
     }
 
+    hipdnnSeverity_t getLogLevel() const
+    {
+        if(_funcGetLogLevel != nullptr)
+        {
+            return _funcGetLogLevel();
+        }
+        return HIPDNN_SEV_OFF;
+    }
+
     using PluginBase::_lib;
     using PluginBase::getLastErrorString;
+    using PluginBase::setLogLevel;
 
 private:
     friend class plugin::PluginManagerBase<Plugin>;
+    hipdnnSeverity_t (*_funcGetLogLevel)() = nullptr;
 };
 
 class TestPluginManager : public plugin::PluginManagerBase<Plugin>
@@ -418,5 +430,22 @@ TEST(TestPluginCore, GetApiVersionUndefinedFunction)
 {
     const Plugin plugin(plugin::SharedLibrary{NO_API_VERSION_PLUGIN_PATH});
 
-    EXPECT_EQ(plugin.apiVersion(), "0.0.0");
+    EXPECT_EQ(plugin.apiVersion(), "1.0.0");
+}
+
+TEST(TestPluginCore, SetLogLevelPluginReceivesNewLevel)
+{
+    const Plugin plugin{plugin::SharedLibrary{PLUGIN_PATH1}};
+
+    EXPECT_EQ(plugin.setLogLevel(HIPDNN_SEV_INFO), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(plugin.getLogLevel(), HIPDNN_SEV_INFO);
+
+    EXPECT_EQ(plugin.setLogLevel(HIPDNN_SEV_WARN), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(plugin.getLogLevel(), HIPDNN_SEV_WARN);
+
+    EXPECT_EQ(plugin.setLogLevel(HIPDNN_SEV_ERROR), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(plugin.getLogLevel(), HIPDNN_SEV_ERROR);
+
+    EXPECT_EQ(plugin.setLogLevel(HIPDNN_SEV_OFF), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(plugin.getLogLevel(), HIPDNN_SEV_OFF);
 }

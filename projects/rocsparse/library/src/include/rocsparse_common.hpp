@@ -59,6 +59,17 @@
 
 namespace rocsparse
 {
+    // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
+    template <uint32_t N>
+    struct log2_pow2
+    {
+        static constexpr int value = 1 + log2_pow2<N / 2>::value;
+    };
+    template <>
+    struct log2_pow2<1u>
+    {
+        static constexpr int value = 0;
+    };
 
     template <typename T>
     __device__ inline T* batched_pointer(uint32_t index, T* p, int64_t dist)

@@ -1,6 +1,9 @@
 #!/bin/bash
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
 # Validate Smart Build vs Legacy Method for a PR
-# 
+#
 # This script compares smart build and legacy dependency analysis
 # to ensure both methods produce the same test selection results.
 

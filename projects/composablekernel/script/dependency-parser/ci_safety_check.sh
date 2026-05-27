@@ -19,7 +19,7 @@
 #
 # Note: CHANGE_ID may not be set even for PR builds if Jenkins job is not
 # configured as Multibranch Pipeline. Script uses three-dot git diff syntax
-# to correctly detect PR changes regardless of CHANGE_ID availability.
+# to detect only PR-specific changes (excluding merged commits from base branch).
 #
 # Manual override (set by developer/admin if needed):
 #   DISABLE_SMART_BUILD - Set to "true" to force full build
@@ -48,19 +48,25 @@ fi
 
 # 3. Force full build if CMakeLists.txt or cmake/ configuration changed
 # Always compare against base branch (not consecutive commits) to avoid false positives from merge commits
-# Three-dot syntax (...) only shows changes actually made in the PR, not changes from merged develop branch
-if [ -n "$CHANGE_ID" ]; then
-    # This is a PR build (CHANGE_ID set by Jenkins Multibranch Pipeline)
-    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
-else
-    # Fallback: Works for both branch builds and PRs without CHANGE_ID
-    # Use three-dot syntax to avoid including merge commit changes from develop
-    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
-fi
+# Three-dot syntax (...) shows only changes unique to the current branch (excludes merged commits from base)
+# This prevents false positives when the PR branch has merged in commits from develop
+CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
 
-if echo "$CHANGED_FILES" | grep -qE "(CMakeLists\.txt|cmake/.*\.cmake)"; then
+# Comprehensive pattern for build/infrastructure files that require full build:
+# Scoped to composablekernel-specific paths only to avoid false positives from other projects
+# - CMake: CMakeLists.txt, *.cmake, *.cmake.in within projects/composablekernel/
+# - Scripts: Only build-critical scripts (dependency-parser, cmake utilities)
+# - Compiler: .clang-format, .clang-tidy within projects/composablekernel/
+# - Python: setup.py, pyproject.toml within projects/composablekernel/
+BUILD_INFRA_PATTERN="(projects/composablekernel/.*CMakeLists\.txt"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/.*\.cmake$|projects/composablekernel/.*\.cmake\.in$"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/script/dependency-parser/"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/script/cmake/"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/setup\.py|projects/composablekernel/pyproject\.toml)"
+
+if echo "$CHANGED_FILES" | grep -qE "${BUILD_INFRA_PATTERN}"; then
     FORCE_FULL_BUILD=true
-    REASON="build system configuration changed (CMakeLists.txt or cmake/*.cmake)"
+    REASON="build system configuration changed"
 fi
 
 # 4. Force full build if dependency cache is older than 7 days

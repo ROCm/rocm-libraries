@@ -294,6 +294,11 @@ protected:
 
             VerifyResults(handle);
         }
+
+        for(auto& solution : solutions)
+        {
+            ASSERT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
+        }
     }
 
     virtual void VerifyResults(const Handle& handle)

@@ -9,10 +9,13 @@ from pathlib import Path
 import yaml
 
 from .models import (
+    MODE_SENTINEL_VALUES,
     DataField,
+    DataFieldsHelper,
     DescriptorTypeConfig,
     EnumDef,
     EnumValue,
+    ExtraDataTypeField,
     FrontendConfig,
     FrontendTensorConfig,
     GraphMethodParam,
@@ -46,6 +49,12 @@ def load_config(path: Path) -> OperationConfig:
         if required not in op:
             raise ConfigError(f"Missing required field 'operation.{required}'")
 
+    # Reject deprecated YAML keys before parsing. Detection is on key
+    # presence, not truthy value, so e.g. ``frontend_getter_returns_optional:
+    # false`` still raises — the contract is that the key must not appear at
+    # all.
+    _reject_deprecated_keys(op)
+
     # Descriptor type
     dt_raw = op.get("descriptor_type", {})
     descriptor_type = DescriptorTypeConfig(enum_name=dt_raw.get("enum_name", ""))
@@ -57,20 +66,41 @@ def load_config(path: Path) -> OperationConfig:
     # Tensor fields
     tensor_fields = []
     for tf in op.get("tensor_fields", []):
+        # ``frontend_getter`` is a verbatim accessor expression (e.g.,
+        # ``"get_x()"``) overriding the default name-match resolution. Strip
+        # the trailing ``()`` so it flows through ``effective_getter_name``
+        # which the templates re-paren. Tolerant of bare names too.
+        raw_fg = tf.get("frontend_getter", "") or ""
+        stripped_fg = raw_fg.removesuffix("()")
+        if "(" in stripped_fg or ")" in stripped_fg:
+            raise ConfigError(
+                f"Operation '{op['name']}', tensor field '{tf['name']}': "
+                f"frontend_getter must be a simple accessor name with an "
+                f"optional trailing '()', got {raw_fg!r}."
+            )
         tensor_fields.append(
             TensorField(
                 name=tf["name"],
                 fbs_field=tf["fbs_field"],
                 attr_suffix=tf["attr_suffix"],
                 required=tf.get("required", True),
-                frontend_getter=tf.get("frontend_getter", ""),
+                frontend_getter=stripped_fg,
             )
         )
 
     # Data fields
     data_fields = []
+    op_name = op["name"]
     for df in op.get("data_fields", []):
         enum_def = _parse_enum_def(df.get("enum_def"))
+        mode_sentinel = df.get("mode_sentinel")
+        if mode_sentinel is not None and mode_sentinel not in MODE_SENTINEL_VALUES:
+            raise ConfigError(
+                f"Operation '{op_name}', data field '{df['name']}': "
+                f"mode_sentinel must be one of "
+                f"{', '.join(repr(v) for v in MODE_SENTINEL_VALUES)} "
+                f"(got {mode_sentinel!r})."
+            )
         data_fields.append(
             DataField(
                 name=df["name"],
@@ -90,6 +120,7 @@ def load_config(path: Path) -> OperationConfig:
                 test_enum_value=df.get("test_enum_value", ""),
                 test_constant_name=df.get("test_constant_name", ""),
                 test_backend_value=df.get("test_backend_value", ""),
+                fbs_optional=df.get("fbs_optional", False),
                 backend_setter=df.get("backend_setter", ""),
                 backend_getter=df.get("backend_getter", ""),
                 backend_converter=df.get("backend_converter", ""),
@@ -99,6 +130,7 @@ def load_config(path: Path) -> OperationConfig:
                 test_alt_enum_value=df.get("test_alt_enum_value", ""),
                 frontend_inverse_converter=df.get("frontend_inverse_converter", ""),
                 enum_def=enum_def,
+                mode_sentinel=mode_sentinel,
             )
         )
 
@@ -117,6 +149,19 @@ def load_config(path: Path) -> OperationConfig:
             )
         )
 
+    # Extra DataType-typed fields (beyond the primary compute_data_type)
+    extra_data_type_fields = []
+    for edt in op.get("extra_data_type_fields", []):
+        extra_data_type_fields.append(
+            ExtraDataTypeField(
+                name=edt["name"],
+                attr_name=edt["attr_name"],
+                frontend_getter=edt.get("frontend_getter", ""),
+                sentinel=edt.get("sentinel", ""),
+                error_label=edt.get("error_label", ""),
+            )
+        )
+
     # Test data
     td_raw = op.get("test_data", {})
     test_data = TestData()
@@ -130,6 +175,10 @@ def load_config(path: Path) -> OperationConfig:
             )
         test_data.field_values = td_raw.get("field_values", {})
         test_data.constants_include = td_raw.get("constants_include", "")
+        test_data.tensor_const_prefix = td_raw.get("tensor_const_prefix", None)
+
+    # Data fields helper (shared pack/unpack functions)
+    data_fields_helper = _parse_data_fields_helper(op.get("data_fields_helper"))
 
     # Infer properties config
     infer_properties = _parse_infer_properties(op.get("infer_properties"))
@@ -148,6 +197,8 @@ def load_config(path: Path) -> OperationConfig:
         tensor_fields=tensor_fields,
         data_fields=data_fields,
         tensor_array_fields=tensor_array_fields,
+        extra_data_type_fields=extra_data_type_fields,
+        data_fields_helper=data_fields_helper,
         has_compute_data_type=op.get("has_compute_data_type", True),
         compute_data_type_attr=op.get("compute_data_type_attr", ""),
         compute_data_type_shared=op.get("compute_data_type_shared", False),
@@ -199,6 +250,7 @@ def _parse_frontend_config(fe_raw: dict, operation_name: str) -> FrontendConfig:
         node_class=fe_raw.get("node_class", ""),
         attributes_class=fe_raw.get("attributes_class", ""),
         attributes_include=fe_raw.get("attributes_include", ""),
+        attributes_filename=fe_raw.get("attributes_filename"),
         unpacker_function=fe_raw.get("unpacker_function", ""),
         unpacker_include=fe_raw.get("unpacker_include", ""),
         inputs=inputs,
@@ -284,6 +336,19 @@ def _parse_enum_def(raw: dict | None) -> EnumDef | None:
     return enum_def
 
 
+def _parse_data_fields_helper(raw: dict | None) -> DataFieldsHelper | None:
+    """Parse the data_fields_helper section of the YAML config."""
+    if raw is None:
+        return None
+
+    return DataFieldsHelper(
+        pack_function=raw.get("pack_function", ""),
+        unpack_function=raw.get("unpack_function", ""),
+        include=raw.get("include", ""),
+        label=raw.get("label", ""),
+    )
+
+
 def _parse_infer_properties(raw: dict | None) -> InferPropertiesConfig | None:
     """Parse the infer_properties section of the YAML config."""
     if raw is None:
@@ -304,7 +369,6 @@ def _parse_validation(raw: dict | None) -> ValidationConfig | None:
     return ValidationConfig(
         required_input_tensors=raw.get("required_input_tensors", []),
         required_input_dims=raw.get("required_input_dims", []),
-        dim_consistency_checks=raw.get("dim_consistency_checks", []),
         custom_checks=raw.get("custom_checks", []),
     )
 
@@ -366,6 +430,51 @@ def validate_for_mode(config: OperationConfig, mode: str) -> None:
             )
 
 
+def _reject_deprecated_dict_key(
+    raw_items: list,
+    key: str,
+    op_name: str,
+    key_label: str,
+    replacement_msg: str,
+) -> None:
+    """Raise ConfigError if any raw item dict contains the deprecated ``key``.
+
+    Detection is key-presence, not value-truthy: setting the key to
+    ``False`` or ``""`` still raises. The contract is that the key must
+    not appear at all once its compatibility window closes.
+    """
+    rejected = [item.get("name", "<unnamed>") for item in raw_items if key in item]
+    if not rejected:
+        return
+    names = ", ".join(rejected)
+    raise ConfigError(
+        f"Operation '{op_name}': {key_label} is no longer supported. "
+        f"{replacement_msg} "
+        f"Affected entries: {names}."
+    )
+
+
+def _reject_deprecated_keys(op: dict) -> None:
+    """Walk the raw operation dict and raise ConfigError for any deprecated YAML key."""
+    op_name = op.get("name", "<unknown>")
+    _reject_deprecated_dict_key(
+        op.get("data_fields", []),
+        "frontend_getter_returns_optional",
+        op_name,
+        "data_fields[].frontend_getter_returns_optional",
+        "Use data_fields[].fbs_optional to control optional-return shape " "instead.",
+    )
+    validation = op.get("validation")
+    if validation is not None and "dim_consistency_checks" in validation:
+        raise ConfigError(
+            f"Operation '{op_name}': validation.dim_consistency_checks "
+            "is no longer supported. The field never produced runtime "
+            "validation — only a `// TODO` comment. Move the intended "
+            "check to validation.custom_checks or hand-write it in "
+            "pre_validate_node()."
+        )
+
+
 def _validate_config(config: OperationConfig) -> None:
     """Validate the loaded config for common errors (backend-mode safe)."""
     # Validate compute_data_type_attr is set when has_compute_data_type is true
@@ -392,7 +501,7 @@ def _validate_config(config: OperationConfig) -> None:
                 raise ConfigError(
                     f"Operation '{config.name}', data field '{df.name}': "
                     f"mode fields must have 'test_backend_value' set "
-                    f"(e.g., 'HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION')."
+                    f"(e.g., 'HIPDNN_CROSS_CORRELATION')."
                 )
             if not df.backend_setter or not df.backend_getter:
                 raise ConfigError(
@@ -431,3 +540,45 @@ def _validate_config(config: OperationConfig) -> None:
                 f"Tensor field '{tf.name}' missing from test_data.tensor_uids "
                 f"in operation '{config.name}'. All tensor fields must have explicit UIDs."
             )
+
+    # Hard-reject (was Risk R4 soft-warn) when a tensor_field cannot be
+    # resolved to a frontend input/output. The unresolved case would render
+    # invalid C++ (``attributes.()``) in the packer; reject at config-load
+    # time so regressions never reach the build. Skip backend-only configs
+    # entirely: no frontend wiring is intentional.
+    if config.frontend.inputs or config.frontend.outputs:
+        resolved = config.tensor_field_frontend_map
+        unresolved = [tf.name for tf in config.tensor_fields if tf.name not in resolved]
+        if unresolved:
+            available = sorted(
+                ft.name for ft in (config.frontend.inputs + config.frontend.outputs)
+            )
+            raise ConfigError(
+                f"Operation '{config.name}' has tensor_fields with no "
+                f"matching frontend input/output: {unresolved}. "
+                f"Available frontend tensors: {available}. "
+                f"Add a tensor_fields[].frontend_getter override on each "
+                f"unresolved entry, or add a matching entry in "
+                f"frontend.inputs[]/frontend.outputs[]."
+            )
+
+    # Auto-detect mode_sentinel for mode fields where it's unset and the enum
+    # has no sentinel. Emit one warning per affected field so authors can set
+    # mode_sentinel: none explicitly to silence the warning. The DataField
+    # property effective_mode_sentinel performs the same auto-detection at
+    # template time; this loop only emits the warning.
+    for df in config.data_fields:
+        if df.type != "mode":
+            continue
+        if df.mode_sentinel is not None:
+            continue
+        if not df.has_enum_def:
+            continue
+        if df.has_sentinel_in_enum_def:
+            continue
+        print(
+            f"Warning: Field '{df.name}' in operation '{config.name}' "
+            f"auto-defaulted to mode_sentinel: none — no sentinel found in "
+            f"enum_def. Set mode_sentinel explicitly to silence this warning.",
+            file=sys.stderr,
+        )

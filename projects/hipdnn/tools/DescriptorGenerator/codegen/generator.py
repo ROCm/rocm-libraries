@@ -10,6 +10,25 @@ from jinja2 import Environment, FileSystemLoader
 from .models import DataField, OperationConfig
 
 
+_BACKEND_FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (
+    ("fragments/attribute_enum_block.j2", "attribute_enum_block.txt"),
+    ("fragments/descriptor_type_enum.j2", "descriptor_type_enum.txt"),
+    ("fragments/string_utils_block.j2", "string_utils_block.txt"),
+    ("fragments/factory_case.j2", "factory_case.txt"),
+    ("fragments/cmake_entries.j2", "cmake_entries.txt"),
+    ("fragments/node_factory_case.j2", "node_factory_case.txt"),
+    ("fragments/operation_unpacker_case.j2", "operation_unpacker_case.txt"),
+    ("fragments/operation_unpacker_test.j2", "operation_unpacker_test.txt"),
+    ("fragments/operation_type_enum.j2", "operation_type_enum.txt"),
+    ("fragments/node_unpack_override.j2", "node_unpack_override.txt"),
+    ("fragments/packer_name_addition.j2", "packer_name_addition.txt"),
+)
+
+BACKEND_FRAGMENT_FILENAMES: tuple[str, ...] = tuple(
+    fname for _, fname in _BACKEND_FRAGMENT_TEMPLATES
+) + ("descriptor_lifting_additions.txt",)
+
+
 class DescriptorGenerator:
     """Renders all templates for a given OperationConfig."""
 
@@ -20,54 +39,6 @@ class DescriptorGenerator:
             trim_blocks=True,
             lstrip_blocks=True,
         )
-
-    def render_lift_only(self, config: OperationConfig, output_dir: Path) -> list[str]:
-        """Render only lifting-related templates. Returns list of written files."""
-        written = []
-
-        # Lifting file templates
-        lift_templates = {
-            "unpacker.hpp.j2": Path("frontend/include/hipdnn_frontend/detail")
-            / config.unpacker_filename,
-            "test_from_node.cpp.j2": Path("backend/tests/descriptors")
-            / config.test_from_node_filename,
-            "test_integration_lifting.cpp.j2": Path("tests/frontend")
-            / config.test_integration_lifting_filename,
-        }
-
-        for template_name, rel_path in lift_templates.items():
-            out_path = output_dir / rel_path
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            content = self._render_template(template_name, config)
-            out_path.write_text(content)
-            written.append(str(rel_path))
-
-        # Lifting fragment templates
-        lift_fragments = {
-            "fragments/node_factory_case.j2": "node_factory_case.txt",
-            "fragments/operation_unpacker_case.j2": "operation_unpacker_case.txt",
-            "fragments/operation_unpacker_test.j2": "operation_unpacker_test.txt",
-            "fragments/operation_type_enum.j2": "operation_type_enum.txt",
-            "fragments/node_unpack_override.j2": "node_unpack_override.txt",
-            "fragments/packer_name_addition.j2": "packer_name_addition.txt",
-        }
-
-        fragments_dir = output_dir / "fragments"
-        fragments_dir.mkdir(parents=True, exist_ok=True)
-
-        for template_name, filename in lift_fragments.items():
-            out_path = fragments_dir / filename
-            content = self._render_template(template_name, config)
-            out_path.write_text(content)
-            written.append(f"fragments/{filename}")
-
-        # Generate descriptor lifting additions (manual insertion guide)
-        additions = self._render_descriptor_lifting_additions(config)
-        additions_path = fragments_dir / "descriptor_lifting_additions.txt"
-        additions_path.write_text(additions)
-        written.append("fragments/descriptor_lifting_additions.txt")
-
-        return written
 
     def _render_descriptor_lifting_additions(self, config: OperationConfig) -> str:
         """Generate a text file showing what to add to existing descriptor files."""
@@ -176,21 +147,19 @@ class DescriptorGenerator:
         )
         lines.append("")
         lines.append("=" * 72)
-        lines.append("# IMPORTANT: Graph Descriptor Test Update Required")
+        lines.append("# NOTE: Graph Descriptor Name Tests (Auto-Generated)")
         lines.append("=" * 72)
         lines.append("")
-        lines.append("# The existing graph descriptor test must be updated to verify")
         lines.append(
-            "# operation name round-trips through graph serialization and lifting."
+            "# The graph descriptor test template now auto-generates name tests:"
         )
+        lines.append("#   - OperationNamePreservedInSerialization")
+        lines.append("#   - OperationNameRoundTripThroughLifting")
+        lines.append("# These are generated unconditionally — no manual work needed.")
         lines.append(
-            "# Add a name parameter to the createFinalized*Op helper, and add:"
+            "# If the graph test file was generated fresh (backend or full mode),"
         )
-        lines.append("#   - OperationNamePreservedInSerialization test")
-        lines.append("#   - OperationNameRoundTripThroughLifting test")
-        lines.append(
-            f"# See the pointwise or batchnorm graph tests as reference patterns."
-        )
+        lines.append("# the name tests are already included.")
 
         return "\n".join(lines) + "\n"
 
@@ -202,7 +171,7 @@ class DescriptorGenerator:
         Args:
             config: The operation configuration.
             output_dir: Root directory for generated output.
-            mode: One of 'backend', 'frontend', 'full', or 'lift-only'.
+            mode: One of 'backend', 'frontend', or 'full'.
 
         Returns:
             List of relative paths for all written files.
@@ -211,7 +180,6 @@ class DescriptorGenerator:
             "backend": self.render_backend,
             "frontend": self.render_frontend,
             "full": self.render_full,
-            "lift-only": self.render_lift_only,
         }
         renderer = dispatch.get(mode)
         if renderer is None:
@@ -254,32 +222,28 @@ class DescriptorGenerator:
             out_path.write_text(content)
             written.append(str(rel_path))
 
-        # Fragment templates
-        fragment_templates = {
-            "fragments/attribute_enum_block.j2": "attribute_enum_block.txt",
-            "fragments/descriptor_type_enum.j2": "descriptor_type_enum.txt",
-            "fragments/string_utils_block.j2": "string_utils_block.txt",
-            "fragments/factory_case.j2": "factory_case.txt",
-            "fragments/cmake_entries.j2": "cmake_entries.txt",
-            "fragments/node_factory_case.j2": "node_factory_case.txt",
-            "fragments/operation_unpacker_case.j2": "operation_unpacker_case.txt",
-            "fragments/operation_unpacker_test.j2": "operation_unpacker_test.txt",
-            "fragments/operation_type_enum.j2": "operation_type_enum.txt",
-            "fragments/node_unpack_override.j2": "node_unpack_override.txt",
-        }
-
         fragments_dir = output_dir / "fragments"
         fragments_dir.mkdir(parents=True, exist_ok=True)
 
-        for template_name, filename in fragment_templates.items():
+        for template_name, filename in _BACKEND_FRAGMENT_TEMPLATES:
             out_path = fragments_dir / filename
             content = self._render_template(template_name, config)
             out_path.write_text(content)
             written.append(f"fragments/{filename}")
 
+        # Generate descriptor lifting additions (manual insertion guide)
+        additions = self._render_descriptor_lifting_additions(config)
+        additions_path = fragments_dir / "descriptor_lifting_additions.txt"
+        additions_path.write_text(additions)
+        written.append("fragments/descriptor_lifting_additions.txt")
+
         # Mode enum plumbing (only for fields with enum_def)
         if config.generatable_mode_fields:
             written += self.render_mode_enums(config, output_dir)
+
+        # Generate constants file (when constants_include is not set — no pre-existing header)
+        if not config.test_data.constants_include:
+            written += self._render_constants(config, output_dir)
 
         return written
 
@@ -322,7 +286,6 @@ class DescriptorGenerator:
         fragment_templates = {
             "fragments/graph_method.j2": "graph_method.txt",
             "fragments/graph_includes.j2": "graph_includes.txt",
-            "fragments/deserialize_case.j2": "deserialize_case.txt",
             "fragments/frontend_cmake_entries.j2": "frontend_cmake_entries.txt",
             "fragments/node_type_enum.j2": "node_type_enum.txt",
         }
@@ -386,6 +349,18 @@ class DescriptorGenerator:
             written.append(f"fragments/mode_frontend_tests_{df.name}.txt")
 
         return written
+
+    def _render_constants(self, config: OperationConfig, output_dir: Path) -> list[str]:
+        """Render the shared constants header. Returns list of written files."""
+        rel_path = (
+            Path("test_sdk/include/hipdnn_test_sdk/constants")
+            / f"{config.effective_constants_include}.hpp"
+        )
+        out_path = output_dir / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        content = self._render_template("constants.hpp.j2", config)
+        out_path.write_text(content)
+        return [str(rel_path)]
 
     def _render_template(self, template_name: str, config: OperationConfig) -> str:
         try:

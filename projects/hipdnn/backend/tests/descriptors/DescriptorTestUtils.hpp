@@ -50,16 +50,16 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        1,
                        static_cast<const void*>(&yDesc));
 
-    auto padding = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_PADDING);
-    auto stride = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_STRIDE);
-    auto dilation = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_DILATION);
+    auto padding = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_CONV_PADDING);
+    auto stride = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_CONV_STRIDE);
+    auto dilation = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_CONV_DILATION);
 
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, 2, padding.data());
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, 2, padding.data());
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, 2, stride.data());
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, 2, dilation.data());
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     desc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
 

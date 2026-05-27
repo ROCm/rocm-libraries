@@ -83,7 +83,7 @@ TEST_F(CommandTest, ConvertOp)
     EXPECT_EQ(execute.getOutputs(), std::unordered_set<Operations::OperationTag>({tagConvert}));
 
     constexpr auto result = R"(
-        Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
+        Tensor.Float.d1 0, (base=&0, sizes={&8 }, strides={&16 })
         T_LOAD_LINEAR 1 Source 0
         T_EXECUTE 1
         E_Cvt 2, 1
@@ -110,13 +110,13 @@ TEST_F(CommandTest, VectorAdd)
     command->addOperation(Operations::T_Store_Linear(tagResult, tagTensorResult));
 
     std::string result = R"(
-        Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
+        Tensor.Float.d1 0, (base=&0, sizes={&8 }, strides={&16 })
         T_LOAD_LINEAR 1 Source 0
-        Tensor.Float.d1 2, (base=&32, lim=&40, sizes={&48 }, strides={&56 })
+        Tensor.Float.d1 2, (base=&24, sizes={&32 }, strides={&40 })
         T_LOAD_LINEAR 3 Source 2
         T_EXECUTE 1 3
         E_Add 4, 1, 3
-        Tensor.Float.d1 6, (base=&64, lim=&72, sizes={&80 }, strides={&88 })
+        Tensor.Float.d1 6, (base=&48, sizes={&56 }, strides={&64 })
         T_STORE_LINEAR 7 Source 4 Dest 6
         )";
     EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
@@ -124,17 +124,14 @@ TEST_F(CommandTest, VectorAdd)
     {
         std::string expected = R"([
             Tensor_0_pointer: PointerGlobal: Float(offset: 0, size: 8, read_write),
-            Tensor_0_extent: Value: Int64(offset: 8, size: 8, read_only),
-            Tensor_0_size_0: Value: Int64(offset: 16, size: 8, read_only),
-            Tensor_0_stride_0: Value: Int64(offset: 24, size: 8, read_only),
-            Tensor_2_pointer: PointerGlobal: Float(offset: 32, size: 8, read_write),
-            Tensor_2_extent: Value: Int64(offset: 40, size: 8, read_only),
-            Tensor_2_size_0: Value: Int64(offset: 48, size: 8, read_only),
-            Tensor_2_stride_0: Value: Int64(offset: 56, size: 8, read_only),
-            Tensor_6_pointer: PointerGlobal: Float(offset: 64, size: 8, read_write),
-            Tensor_6_extent: Value: Int64(offset: 72, size: 8, read_only),
-            Tensor_6_size_0: Value: Int64(offset: 80, size: 8, read_only),
-            Tensor_6_stride_0: Value: Int64(offset: 88, size: 8, read_only)
+            Tensor_0_size_0: Value: Int64(offset: 8, size: 8, read_only),
+            Tensor_0_stride_0: Value: Int64(offset: 16, size: 8, read_only),
+            Tensor_2_pointer: PointerGlobal: Float(offset: 24, size: 8, read_write),
+            Tensor_2_size_0: Value: Int64(offset: 32, size: 8, read_only),
+            Tensor_2_stride_0: Value: Int64(offset: 40, size: 8, read_only),
+            Tensor_6_pointer: PointerGlobal: Float(offset: 48, size: 8, read_write),
+            Tensor_6_size_0: Value: Int64(offset: 56, size: 8, read_only),
+            Tensor_6_stride_0: Value: Int64(offset: 64, size: 8, read_only)
         ])";
 
         std::ostringstream msg;
@@ -237,14 +234,12 @@ TEST_F(CommandTest, SetCommandArguments)
 
     CommandArguments commandArgs = command->createArguments();
 
-    commandArgs.setArgument(tagTensorA, ArgumentType::Limit, 10);
     EXPECT_THROW({ commandArgs.setArgument(tagTensorA, ArgumentType::Size, 10); }, FatalError);
     commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, 10);
     EXPECT_THROW({ commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1); }, FatalError);
     commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, 1);
 
     commandArgs.setArgument(tagScalarB, ArgumentType::Value, 2);
-    EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
 }
 
 TEST_F(CommandTest, FindCommandArguments)
@@ -322,9 +317,9 @@ TEST_F(CommandTest, GetRuntimeArguments)
         CommandArguments commandArgs      = command->createArguments();
         auto             runtimeArguments = commandArgs.runtimeArguments();
 
-        // The total number of bytes required by pointer, extent, size and stride
-        EXPECT_EQ(runtimeArguments.size(), 32);
-        EXPECT_EQ(runtimeArguments.size_bytes(), 32);
+        // The total number of bytes required by pointer, size and stride
+        EXPECT_EQ(runtimeArguments.size(), 24);
+        EXPECT_EQ(runtimeArguments.size_bytes(), 24);
     }
 }
 

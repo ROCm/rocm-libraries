@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -18,14 +17,20 @@ namespace
 {
 namespace
 {
+// Sentinel: PointwiseMode::COUNT is always one past the last valid mode.
+// New modes inserted before COUNT automatically update the iteration range.
+constexpr auto K_POINTWISE_MODE_COUNT = PointwiseMode::COUNT;
+static_assert(static_cast<int>(K_POINTWISE_MODE_COUNT) == 48,
+              "PointwiseMode enum changed — update this assertion");
+
 // Generic helper function to generate vectors of pointwise modes based on a checker function
 template <typename CheckerFunc>
 std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
 {
     std::vector<PointwiseMode> modes;
     // Iterate through all possible PointwiseMode values and check if they match the criteria
-    for(int i = static_cast<int>(hipdnn_data_sdk::data_objects::PointwiseMode::MIN);
-        i <= static_cast<int>(hipdnn_data_sdk::data_objects::PointwiseMode::MAX);
+    for(int i = static_cast<int>(PointwiseMode::NOT_SET);
+        i < static_cast<int>(K_POINTWISE_MODE_COUNT);
         ++i)
     {
         auto mode = static_cast<PointwiseMode>(i);

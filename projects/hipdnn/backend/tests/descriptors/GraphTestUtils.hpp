@@ -6,7 +6,7 @@
 #include "DescriptorTestUtils.hpp"
 #include "TensorDescriptorTestUtils.hpp"
 #include "hipdnn_backend.h"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -30,23 +30,23 @@ struct ConvOpBundle
 inline ConvOpBundle createDefaultConvOp(hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     ConvOpBundle bundle;
-    bundle.xDesc = createFinalizedTensor(hipdnn_tests::constants::K_TENSOR_X_UID);
-    bundle.wDesc
-        = createFinalizedTensor(hipdnn_tests::constants::K_TENSOR_W_UID,
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_W_DIMS),
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_W_STRIDES));
-    bundle.yDesc
-        = createFinalizedTensor(hipdnn_tests::constants::K_TENSOR_Y_UID,
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_Y_DIMS),
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_Y_STRIDES));
+    bundle.xDesc = createFinalizedTensor(hipdnn_tests::constants::K_FPROP_TENSOR_X_UID);
+    bundle.wDesc = createFinalizedTensor(
+        hipdnn_tests::constants::K_FPROP_TENSOR_W_UID,
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_W_DIMS),
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_W_STRIDES));
+    bundle.yDesc = createFinalizedTensor(
+        hipdnn_tests::constants::K_FPROP_TENSOR_Y_UID,
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_Y_DIMS),
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_Y_STRIDES));
     bundle.convOp = createFinalizedConvOp(
         bundle.xDesc.get(), bundle.wDesc.get(), bundle.yDesc.get(), computeType);
     return bundle;
 }
 
 /// Finds a tensor in a GraphT by UID, returns nullptr if not found.
-inline const hipdnn_data_sdk::data_objects::TensorAttributesT*
-    findTensorByUid(const hipdnn_data_sdk::data_objects::GraphT& graphT, int64_t uid)
+inline const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*
+    findTensorByUid(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graphT, int64_t uid)
 {
     for(const auto& tensor : graphT.tensors)
     {

@@ -14,6 +14,7 @@
 #include <unordered_set>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/pk_f6.hpp"
 #include "ck_tile/host/joinable_thread.hpp"
 
 namespace ck_tile {
@@ -82,6 +83,23 @@ struct FillUniformDistribution
                 auto t_fn = [&]() {
                     if constexpr(PackedSize == 2)
                         return type_convert<T_iter>(fp32x2_t{d_(g_), d_(g_)});
+                    else if constexpr(PackedSize == 16)
+                    {
+#if CK_TILE_AVX512F_WA
+                        // Use fp32x8_t[2] workaround when AVX-512 is not supported
+                        fp32x8_t tmp[2];
+                        for(int i = 0; i < 8; ++i)
+                        {
+                            tmp[0][i] = d_(g_);
+                            tmp[1][i] = d_(g_);
+                        }
+#else
+                        fp32x16_t tmp{};
+                        for(int i = 0; i < PackedSize; ++i)
+                            tmp[i] = d_(g_);
+#endif
+                        return type_convert<T_iter>(tmp);
+                    }
                     else
                         return type_convert<T_iter>(d_(g_));
                 };
@@ -158,41 +176,6 @@ struct FillUniformDistribution<ck_tile::pk_int4_t>
             ++first;
         }
     }
-    template <typename ForwardRange>
-    auto operator()(ForwardRange&& range) const
-        -> std::void_t<decltype(std::declval<const FillUniformDistribution&>()(
-            std::begin(std::forward<ForwardRange>(range)),
-            std::end(std::forward<ForwardRange>(range))))>
-    {
-        (*this)(std::begin(std::forward<ForwardRange>(range)),
-                std::end(std::forward<ForwardRange>(range)));
-    }
-};
-
-template <>
-struct FillUniformDistribution<ck_tile::pk_fp6x16_t>
-{
-    float a_{-2.f};
-    float b_{2.f};
-    std::optional<uint32_t> seed_{11939};
-
-    template <typename ForwardIter>
-    void operator()(ForwardIter first, ForwardIter last) const
-    {
-        std::mt19937 gen(seed_.has_value() ? *seed_ : std::random_device{}());
-        std::uniform_real_distribution<float> dis(a_, b_);
-        while(first != last)
-        {
-            ck_tile::pk_fp6x16_t pk{};
-            for(ck_tile::index_t i = 0; i < ck_tile::pk_fp6x16_t::packed_size; ++i)
-            {
-                pk.pack(ck_tile::pk_fp6x16_t::float_to_fp6_e2m3(dis(gen)), i);
-            }
-            *first = pk;
-            ++first;
-        }
-    }
-
     template <typename ForwardRange>
     auto operator()(ForwardRange&& range) const
         -> std::void_t<decltype(std::declval<const FillUniformDistribution&>()(

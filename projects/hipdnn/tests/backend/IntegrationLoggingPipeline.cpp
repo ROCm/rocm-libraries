@@ -8,7 +8,9 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <test_plugins/TestPluginConstants.hpp>
 
 namespace fs = std::filesystem;
 
@@ -173,7 +175,7 @@ TEST_F(IntegrationGpuLoggingPipeline, ErrorStatusLogging)
 
     // Invalid descriptor type
     hipdnnBackendDescriptor_t descriptor = nullptr;
-    status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE, &descriptor);
+    status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE_EXT, &descriptor);
     ASSERT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
@@ -181,6 +183,14 @@ TEST_F(IntegrationGpuLoggingPipeline, ErrorStatusLogging)
 TEST_F(IntegrationGpuLoggingPipeline, FullWorkflowLogging)
 {
     SKIP_IF_NO_DEVICES();
+
+    const std::array<const char*, 1> heuristicPaths
+        = {hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
+    ASSERT_EQ(hipdnnSetHeuristicPluginPaths_ext(
+                  heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyEnv(
+        "HIPDNN_HEUR_POLICY_ORDER", hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
 
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);

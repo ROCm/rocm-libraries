@@ -26,22 +26,17 @@
 string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 
-# Create separate --offload-arch flags for each architecture
-set(arch_flags "")
-foreach(arch IN LISTS archs)
-    list(APPEND arch_flags "--offload-arch=${arch}")
-endforeach()
-
-set(output_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransform.hsaco")
 set(matrix_transform_cpp "${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform.cpp")
 
-add_custom_command(
-    COMMAND ${CMAKE_CXX_COMPILER} -x hip ${matrix_transform_cpp} ${arch_flags} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -o ${output_library}
-    OUTPUT ${output_library}
-    COMMENT "Building hipblasltTransform.hsaco"
-)
-
-add_custom_target(matrix-transform-cp ALL
-    DEPENDS ${output_library}
-    COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library"
-)
+foreach(arch IN LISTS archs)
+    set(output_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransform_${arch}.hsaco")
+    add_custom_command(
+        COMMAND ${CMAKE_CXX_COMPILER} -x hip ${matrix_transform_cpp} --offload-arch=${arch} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -DNDEBUG -o ${output_library}
+        OUTPUT ${output_library}
+        COMMENT "Building hipblasltTransform_${arch}.hsaco"
+    )
+    add_custom_target(matrix-transform-cp-${arch} ALL
+        DEPENDS ${output_library}
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/hipblasltTransform_${arch}.hsaco"
+    )
+endforeach()

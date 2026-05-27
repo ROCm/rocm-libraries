@@ -3,11 +3,11 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/BatchnormInferencePacker.hpp>
+#include <hipdnn_frontend/detail/BatchnormInferenceUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -155,22 +155,21 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-            attributes.pack_attributes(builder).Union());
-    }
-
     Error create_operation(
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
         return detail::createBatchnormInferenceOperation(attributes, tensorDescs, operations);
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormInferenceAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackBatchnormInferenceOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 };
 }
