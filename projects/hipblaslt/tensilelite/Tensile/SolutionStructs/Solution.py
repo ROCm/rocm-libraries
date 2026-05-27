@@ -2435,6 +2435,29 @@ class Solution(collections.abc.Mapping):
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
 
+    # rocm-libraries-y391: snapshot the pre-CMS-derivation state so
+    # build_non_cms_reference (Approach A's Build #2) can re-derive
+    # from a guaranteed-clean source without needing a centrally-
+    # maintained list of "CMS-only flags to scrub". The snapshot is
+    # Solution-internal — only consumed by
+    # Tensile.Components.CustomSchedule.approach_a.build_non_cms_reference.
+    #
+    # Placement: AFTER all non-CMS-conditional derivation has run (so
+    # the snapshot represents the dict as it would be if no schedule
+    # matched), and BEFORE the first line that mutates state because
+    # of CMS resolution (the `UseCustomMainLoopSchedule in [-1, 1]`
+    # block immediately below, plus the F32X-emulation block at line
+    # 2030 which is gated on `UseCustomMainLoopSchedule == 0` but
+    # would still propagate CMS-bound side effects into the snapshot
+    # if taken later).
+    #
+    # Note: AssignedDerivedParameters is False at this point (reset at
+    # the top of this function), so re-feeding the snapshot through
+    # Solution does NOT short-circuit derivation. The snapshot key
+    # itself is not copied recursively (dict(state) is a shallow copy
+    # taken before the key is assigned).
+    state["_pre_cms_derived_state"] = dict(state)
+
     # CMS dispatch resolution (rocm-libraries-2bww, strict model).
     #
     # Under the strict model every CMS-relevant kernel flag comes from
