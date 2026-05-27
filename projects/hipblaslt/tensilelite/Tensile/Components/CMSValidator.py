@@ -3612,48 +3612,63 @@ def compare_graphs(
     # emission_ordinal)`. Body sensitivity in identity-set coverage is
     # intentionally absent; the residual cross-body extra-emission risk
     # is caught at the edge layer by Approach E (byte-key edge matching).
-    def _data_flow_ids(graph):
-        return {n.identity for n in graph.nodes.values()
-                if _category(n.rocisa_inst) in _DATA_FLOW_CATEGORIES}
+    #
+    # rocm-libraries-oplb: the prior identity-tuple set-equality gate
+    # over-fired on benign register-naming differences (T0_I0 vs X0_I0
+    # under UsePLRPack's rotating pack-buffer convention) — the rendered
+    # text in `canonical_render` includes register names, so any naming
+    # divergence flips the identity tuple and the set-diff falsely flags
+    # the topology as "missing nodes." The gate is replaced below with a
+    # per-(rocisa-derived-InstructionCategory) count comparison that
+    # answers the pipeline-integrity question (both pipelines emitted N
+    # LR / M MFMA / etc.) without conflating naming differences.
+    #
+    # NOTE — NOT YET FIXED: the edge layer (edge_keys, below) still embeds
+    # `(producer.identity, consumer.identity, ...)` in its edge-key
+    # tuples and will still divergence-detect on T/X register naming.
+    # Closing that requires a complementary follow-up (likely byte-key
+    # matching per the Approach-E reference in the comments above /
+    # `DataflowGraph.edge_keys` docstring).
+    from collections import Counter
 
-    ref_ids = _data_flow_ids(reference)
-    subj_ids = _data_flow_ids(subject)
-    if ref_ids != subj_ids:
-        only_ref = ref_ids - subj_ids
-        only_subj = subj_ids - ref_ids
-        # Categorize the diff by rocisa-derived category to make the error
-        # actionable. The full identity tuple list is too long for a single
-        # error string when 16+ identities differ. Threads the per-graph
-        # `nodes_by_id` dict so the per-identity rocisa lookup goes through
-        # the same registry as the entry-time filter — no class_tag
-        # extraction from the identity tuple.
-        def _summary_by_class(ids, nodes_by_id):
-            counts = {}
-            for ident in ids:
-                node = nodes_by_id.get(ident)
-                if node is None:
-                    counts["?"] = counts.get("?", 0) + 1
-                    continue
-                cat = _category(node.rocisa_inst)
-                key = cat.value if cat is not None else "UNKNOWN"
-                counts[key] = counts.get(key, 0) + 1
-            return counts
-        msg_parts = []
-        if only_ref:
-            counts = _summary_by_class(only_ref, reference.nodes)
-            msg_parts.append(
-                f"in reference but not subject: {len(only_ref)} identities "
-                f"({counts}); first 3: {sorted(only_ref)[:3]}"
-            )
-        if only_subj:
-            counts = _summary_by_class(only_subj, subject.nodes)
-            msg_parts.append(
-                f"in subject but not reference: {len(only_subj)} identities "
-                f"({counts}); first 3: {sorted(only_subj)[:3]}"
-            )
+    def _data_flow_category_counts(graph):
+        """Per-(rocisa-derived-category) count of dataflow nodes.
+
+        Used to guard against capture-pipeline bugs where one side is
+        missing nodes the other has. Cross-side check; CMS-side per-bucket
+        integrity is separately covered by ``assert_idmap_completeness``
+        (ScheduleCapture.py, pinned by test_capture_pipeline_checks.py::
+        TestIdMapCompleteness).
+
+        Counts by ``InstructionCategory`` (universal/rocisa-derived) — NOT
+        by ``TaggedInstruction.category`` (CMS-only scheduler buckets like
+        PackA/PackB/GRA/GRB, which don't exist on the non-CMS side and
+        would make any cross-side count comparison structurally
+        impossible).
+
+        rocm-libraries-oplb: replaces the prior identity-tuple
+        set-equality check, which over-fired on benign register-naming
+        differences (T0_I0 vs X0_I0 under UsePLRPack's rotating
+        pack-buffer convention) while still answering the
+        pipeline-integrity question.
+        """
+        return Counter(_category(n.rocisa_inst).value
+                       for n in graph.nodes.values()
+                       if _category(n.rocisa_inst) in _DATA_FLOW_CATEGORIES)
+
+    ref_counts = _data_flow_category_counts(reference)
+    subj_counts = _data_flow_category_counts(subject)
+    if ref_counts != subj_counts:
+        diff_lines = []
+        all_cats = sorted(set(ref_counts) | set(subj_counts))
+        for cat in all_cats:
+            r, s = ref_counts.get(cat, 0), subj_counts.get(cat, 0)
+            if r != s:
+                diff_lines.append(f"{cat}: ref={r} vs subj={s}")
         raise CaptureConsistencyError(
-            "compare_graphs: data-flow node identity sets differ. "
-            + "; ".join(msg_parts)
+            "compare_graphs: data-flow per-category node counts differ "
+            "(one capture pipeline dropped or added nodes). "
+            + "; ".join(diff_lines)
         )
 
     ref_keys = reference.edge_keys()

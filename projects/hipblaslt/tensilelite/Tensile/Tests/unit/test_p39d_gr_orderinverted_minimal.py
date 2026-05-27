@@ -182,17 +182,32 @@ def test_real_kernel_anchor_gr_ordering_residual_shape(
     """Phase 1: Real-kernel anchor for the p39d GR OrderInverted residual.
 
     The canonical TF32 4x4 TN kernel with Build #1 (CMS) vs. Build #2
-    (non-CMS reference via Approach A) surfaces a ``CaptureConsistencyError``
-    at ``compare_graphs`` entry because the two builds' LR/MFMA identity sets
-    differ (28 identities per side).  This is the nyb5-baseline residual pinned
-    by ``test_non_cms_reference_compare_graphs_surfaces_only_known_residuals``.
+    (non-CMS reference via Approach A).
 
-    This test additionally asserts that the identity-set mismatch is ENTIRELY
-    in the LR/MFMA categories — GRA and GRB do NOT appear in the per-side
-    identity diff.  This matters for p39d: the GR ordering issue (GRA/GRB
-    OrderInverted failures in ML) is hidden behind the LR/MFMA gate,
-    NOT mixed into the identity-mismatch itself.  Phase 2 isolates that ordering
-    issue synthetically, proving it is intrinsic to the GR stream.
+    rocm-libraries-oplb (post-count-based-gate): the entry-level identity-set
+    gate in ``compare_graphs`` was replaced with a per-(rocisa-derived
+    InstructionCategory) count gate. Under the count gate, both pipelines
+    emit the same number of LR/MFMA/GR nodes for this kernel — the gate
+    PASSES (no CaptureConsistencyError at entry). The downstream comparison
+    proceeds to ``edge_keys()`` and then ``diagnose_missing_edge`` for the
+    missing edges.
+
+    The edge layer still embeds ``(producer.identity, consumer.identity,
+    ...)`` in its edge-key tuples, so the T/X register-naming divergence
+    (UsePLRPack double-register-file convention) still propagates here:
+    ref-edge endpoint identities do not resolve in the subject graph, and
+    Phase 0 of ``diagnose_missing_edge`` raises ``CaptureConsistencyError``
+    with the "identity-coverage check at compare_graphs entry was bypassed"
+    message — that is the newly-surfaced shape pinned below.
+
+    The p39d GR OrderInverted residual is now structurally closer to the
+    surface, but is still gated by the edge-layer T/X identity divergence.
+    Resolving p39d in the real kernel requires the follow-up edge-layer
+    fix (byte-key matching per the Approach-E reference in CMSValidator.py)
+    so the LR/MFMA edges classify cleanly and only the genuine GR ordering
+    residual reaches OrderInverted classification.
+
+    NOTE: This assertion was tightened post-oplb's count-based gate.
     """
     from Tensile.Components.CMSValidator import build_dataflow_graph, compare_graphs
     from Tensile.Components.ScheduleCapture import CaptureConsistencyError
@@ -201,35 +216,31 @@ def test_real_kernel_anchor_gr_ordering_residual_shape(
     ref_graph = build_dataflow_graph(ref_cap)
     subj_graph = build_dataflow_graph(cms_cap)
 
-    # The nyb5-baseline surfacing: CaptureConsistencyError before any
-    # OrderInverted classification.
     with pytest.raises(CaptureConsistencyError) as excinfo:
         compare_graphs(ref_graph, subj_graph)
 
     msg = str(excinfo.value)
 
-    # Pin: exactly 28 identities per side (LR+MFMA divergence from the Q2
-    # expected scheduler difference).
-    assert "in reference but not subject: 28 identities" in msg, (
-        f"Expected 28 ref-but-not-subj identities (LR+MFMA divergence); "
-        f"full message:\n{msg}"
+    # Pin: the edge-layer Phase-0 bypass message — the count-based gate
+    # passes and the edge layer hits a missing endpoint identity.
+    assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
+        f"Expected the diagnose_missing_edge Phase-0 'bypass' message "
+        f"(edge-layer T/X register-naming divergence after the new "
+        f"count-based gate passes); full message:\n{msg}"
     )
-    assert "in subject but not reference: 28 identities" in msg, (
-        f"Expected 28 subj-but-not-ref identities (LR+MFMA divergence); "
+    assert "p_id=" in msg and "c_id=" in msg, (
+        f"Expected both p_id= and c_id= in the bypass message; "
         f"full message:\n{msg}"
     )
 
-    # Negative check: GRA and GRB do NOT appear in the identity diff.
-    # The GR ordering residual (p39d subject) is NOT the source of the
-    # CaptureConsistencyError — it would only surface once the identity-set
-    # gate is cleared (which Phase 2 does synthetically).
-    for forbidden_cat in ("'GRA'", "'GRB'", "'GR'"):
-        assert forbidden_cat not in msg, (
-            f"Category {forbidden_cat} appeared in the identity-diff summary, "
-            f"which would mean GR instructions are part of the LR/MFMA "
-            f"identity mismatch — unexpected for p39d. "
-            f"Full message:\n{msg}"
-        )
+    # Pin: the new count-based gate did NOT fire — counts match across
+    # sides for this kernel (which is the whole point of the oplb gate
+    # change).
+    assert "data-flow per-category node counts differ" not in msg, (
+        f"The new count-based gate fired — that would mean the two pipelines "
+        f"actually emitted different numbers of LR/MFMA/GR nodes (a real "
+        f"pipeline-integrity bug). Investigate before re-pinning.\n{msg}"
+    )
 
 
 # ===========================================================================

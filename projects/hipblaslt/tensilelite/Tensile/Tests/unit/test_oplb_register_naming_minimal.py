@@ -189,24 +189,28 @@ def test_real_kernel_anchor_lr_naming_divergence_shape(
     """Phase 1: Real-kernel anchor for the oplb LR/MFMA register-naming divergence.
 
     The _192x256x32_TF32 TN kernel with Build #1 (CMS, UsePLRPack=True) vs.
-    Build #2 (non-CMS reference via Approach A) surfaces a
-    ``CaptureConsistencyError`` at ``compare_graphs`` entry because the two
-    builds' LR/MFMA identity sets differ.
+    Build #2 (non-CMS reference via Approach A).
 
-    Documented divergence (from oplb investigation artifacts):
-      * 52 identities per side: 26 LR + 26 MFMA.
-      * CMS side: alternating vgprValuA_T0_I0+N and vgprValuA_X0_I0+N
-        destinations (the UsePLRPack double-register-file naming).
-      * non-CMS side: only vgprValuA_T0_I0+N with linearly increasing indices.
+    rocm-libraries-oplb (post-count-based-gate): the entry-level identity-set
+    check in ``compare_graphs`` was replaced with a per-(rocisa-derived
+    InstructionCategory) count check. Under the count check the gate now
+    PASSES on this kernel — both sides emit the same number of LR / MFMA /
+    GR nodes; the divergence is purely register-naming, not topology.
 
-    This test additionally asserts that the identity-set mismatch is ENTIRELY
-    in the LR and MFMA categories — GRA and GRB do NOT appear in the per-side
-    identity diff.  This confirms the bug is register-naming (T0 vs X0), not
-    GR ordering (which is the separate rocm-libraries-p39d issue).
+    The T/X register-naming divergence now surfaces at the EDGE layer
+    instead: ``compare_graphs`` reaches its ``edge_keys()`` diff, finds a
+    ref edge whose ``(producer.identity, consumer.identity, ...)`` tuple is
+    absent from the subject (because the consumer or producer identity
+    embeds the diverged register name), and calls ``diagnose_missing_edge``.
+    Phase 0 of that classifier raises ``CaptureConsistencyError`` with the
+    "identity-coverage check at compare_graphs entry was bypassed" message
+    when a node identity is missing from the subject graph — which is the
+    expected next-fail-shape pinned here.
 
-    NOTE: When oplb is fixed (register-name canonicalization in identity_for
-    or WrappedInstruction.canonical_str — bead option D), this test must flip
-    to assert no CaptureConsistencyError is raised.
+    NOTE: This assertion was tightened post-oplb's count-based gate. The
+    follow-up edge-layer fix (byte-key matching per the Approach-E reference
+    in CMSValidator.py) is what would eventually drop this raise and allow
+    p39d's GR-OrderInverted residual to surface directly.
     """
     from Tensile.Components.CMSValidator import build_dataflow_graph, compare_graphs
     from Tensile.Components.ScheduleCapture import CaptureConsistencyError
@@ -220,61 +224,48 @@ def test_real_kernel_anchor_lr_naming_divergence_shape(
 
     msg = str(excinfo.value)
 
-    # Pin: exactly 52 identities per side (LR+MFMA divergence from the
-    # UsePLRPack T0_I0/X0_I0 double-register-file naming).
-    assert "in reference but not subject: 52 identities" in msg, (
-        f"Expected 52 ref-but-not-subj identities (LR+MFMA T0/X0 divergence); "
-        f"full message:\n{msg}"
-    )
-    assert "in subject but not reference: 52 identities" in msg, (
-        f"Expected 52 subj-but-not-ref identities (LR+MFMA T0/X0 divergence); "
-        f"full message:\n{msg}"
+    # Pin: the new failure shape is the edge-layer Phase-0 bypass message
+    # from diagnose_missing_edge — surfaces a missing node-identity in the
+    # subject graph after the count-based gate passes.
+    assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
+        f"Expected the diagnose_missing_edge Phase-0 'bypass' message "
+        f"(edge-layer T/X register-naming divergence after the new "
+        f"count-based gate passes); full message:\n{msg}"
     )
 
-    # Pin: the categories in the diff are LR and MFMA — the register-naming
-    # divergence from UsePLRPack.
-    assert "'LR'" in msg, (
-        f"Expected 'LR' category in the identity-diff summary (LR reads with "
-        f"different vgpr destinations); full message:\n{msg}"
-    )
-    assert "'MFMA'" in msg, (
-        f"Expected 'MFMA' category in the identity-diff summary (MFMAs reading "
-        f"differently-named vgprs); full message:\n{msg}"
+    # Pin: the bypassed-identity message names a producer and a consumer
+    # identity (both endpoints of the missing edge are reported).
+    assert "p_id=" in msg and "c_id=" in msg, (
+        f"Expected both p_id= and c_id= in the bypass message "
+        f"(missing-edge endpoint identities); full message:\n{msg}"
     )
 
-    # Negative check: GRA and GRB must NOT appear in the identity diff.
-    # The register-naming bug is in LR/MFMA — GR instructions use the same
-    # physical addressing on both sides (the T0/X0 split is LR-buffer-side
-    # only, not in the GR-to-LDS path).
-    for forbidden_cat in ("'GRA'", "'GRB'", "'GR'"):
-        assert forbidden_cat not in msg, (
-            f"Category {forbidden_cat} appeared in the identity-diff summary, "
-            f"which would mean GR instructions are part of the LR/MFMA naming "
-            f"divergence — unexpected for oplb. "
-            f"Full message:\n{msg}"
-        )
+    # Pin: the new count-based gate did NOT raise the prior
+    # "data-flow per-category node counts differ" message; if it had, the
+    # message above would be a different shape.
+    assert "data-flow per-category node counts differ" not in msg, (
+        f"The new count-based gate fired — that would mean the two pipelines "
+        f"actually emitted different numbers of LR/MFMA/GR nodes (a real "
+        f"pipeline-integrity bug). Investigate before re-pinning.\n{msg}"
+    )
 
 
 def test_real_kernel_anchor_first3_renders_show_lr_naming_difference(
     oplb_real_kernel_captures,
 ):
-    """Phase 1 (supplementary): The 'first 3' identity renders in the error
-    message expose the ds_read_b128 vgpr-range difference between CMS (X0_I0 /
-    high-index vgprs) and non-CMS (T0_I0-only / low-index linear vgprs).
+    """Phase 1 (supplementary): The endpoint-identity renders embedded in the
+    new edge-layer bypass message expose the register-naming divergence.
 
-    The ``compare_graphs`` error message includes
-    ``first 3: sorted(only_ref)[:3]`` tuples — these are rendered assembly
-    strings.  On the non-CMS side the first 3 identities are from the linear
-    T0_I0 range (low vgpr indices like v[0:3], v[4:7]).  On the CMS side the
-    first 3 identities include the X0_I0 vgpr range (high indices, distinct
-    from any non-CMS render string).
+    rocm-libraries-oplb (post-count-based-gate): the per-side 'first 3:'
+    rendering came from the OLD identity-set gate's diff summary. The new
+    count-based gate doesn't produce that section. The register-naming
+    divergence now surfaces at the edge layer, where ``diagnose_missing_edge``
+    Phase 0 raises with the ``p_id=`` / ``c_id=`` of the missing edge — those
+    identity tuples render the canonical assembly strings (including the
+    diverged register names) that demonstrate the same root cause.
 
-    Because both sides read ds_read_b128 instructions and these dominate the
-    identity diff, all rendered strings in the 'first 3' must start with
-    'ds_read_b128' — confirming the divergence is in LR instructions.
-
-    NOTE: When oplb is fixed, this test must flip to verify that no
-    CaptureConsistencyError is raised (and so 'first 3' strings are absent).
+    NOTE: This assertion was tightened post-oplb's count-based gate. The
+    follow-up edge-layer fix (byte-key matching) would drop this raise.
     """
     from Tensile.Components.CMSValidator import build_dataflow_graph, compare_graphs
     from Tensile.Components.ScheduleCapture import CaptureConsistencyError
@@ -288,23 +279,24 @@ def test_real_kernel_anchor_first3_renders_show_lr_naming_difference(
 
     msg = str(excinfo.value)
 
-    # The first-3 renders in the error message for the ref side (non-CMS,
-    # linear T0 only) and the subj side (CMS, alternating T0/X0) are
-    # sorted identity tuples. Both sides show ds_read_b128 in the first 3
-    # (LR instructions dominate the diff because they appear first in sorted
-    # order vs MFMA).
-    #
-    # We cannot assert specific vgpr numbers because physical register
-    # assignment varies with the kernel config. We CAN assert:
-    #   (a) 'ds_read_b128' appears in the message (LR instructions diverge)
-    #   (b) Both sides list identities — 'first 3:' appears twice
-    assert "ds_read_b128" in msg, (
-        f"Expected 'ds_read_b128' in the error message first-3 sample renders "
-        f"(LR instructions are the primary diverging category).\n{msg}"
+    # The endpoint identity tuples include rendered assembly. At least one
+    # of the two reported identities (p_id/c_id) for this kernel will be a
+    # data-flow node (LR / MFMA / Pack-style cvt) — the canonical render
+    # is the first element of the identity tuple.
+    assert "p_id=" in msg, (
+        f"Expected p_id= in the bypass message (missing-edge producer "
+        f"identity); full message:\n{msg}"
     )
-    assert msg.count("first 3:") == 2, (
-        f"Expected exactly 2 'first 3:' sections (one per side); "
-        f"got {msg.count('first 3:')}.\n{msg}"
+    assert "c_id=" in msg, (
+        f"Expected c_id= in the bypass message (missing-edge consumer "
+        f"identity); full message:\n{msg}"
+    )
+    # At least one endpoint is reported as not-found in the subject graph
+    # (that is exactly what triggers the bypass raise).
+    assert "found=False" in msg, (
+        f"Expected found=False on at least one endpoint (the register-naming "
+        f"divergence makes that identity tuple absent from the subject "
+        f"graph); full message:\n{msg}"
     )
 
 
@@ -659,17 +651,27 @@ class TestOplbRegisterNamingMinimal:
         )
 
     def test_compare_graphs_raises_capture_consistency_error_on_lr_divergence(self):
-        """Phase 2 end-to-end: compare_graphs on the minimal T0/X0 capture pair
-        raises CaptureConsistencyError with exactly 4 LR identities diverging
-        per side (the 4 ds_read_b128 instructions with different vgpr dsts).
+        """Phase 2 end-to-end: compare_graphs on the minimal T0/X0 capture pair.
+
+        rocm-libraries-oplb (post-count-based-gate): the entry-level gate is
+        now per-(rocisa-derived InstructionCategory) counts, and the trimmed
+        capture has 4 LR + 1 Pack on each side — counts MATCH, gate PASSES.
+        The T/X register-naming divergence then surfaces at the edge layer,
+        where the ref-side Pack-consumes-LR edge has endpoint identities
+        (e.g. ``ds_read_b128 v[0:3], v255 ...`` and
+        ``v_cvt_pk_bf16_f32 v50, v0, v8``) that are absent from the subj
+        graph (which uses different vgpr indices for the same logical
+        instructions). ``diagnose_missing_edge`` Phase 0 raises
+        ``CaptureConsistencyError`` with the
+        ``identity-coverage check at compare_graphs entry was bypassed``
+        message — this is the new pinned shape.
 
         Also generates PNG figures for both captures as a side effect (into
-        oplb_artifacts/figures/). Figures are generated BEFORE compare_graphs
-        runs so they exist even when the test passes (and the comparison raises).
+        oplb_artifacts/figures/).
 
-        NOTE: When oplb is fixed, the assertion must flip to verify that
-        compare_graphs does NOT raise — the 4 LR divergences will be collapsed
-        to 0 by register-name canonicalization.
+        NOTE: This assertion was tightened post-oplb's count-based gate. The
+        follow-up edge-layer fix (byte-key matching) would drop this raise
+        and let the trimmed capture pass clean.
         """
         from Tensile.Components.CMSValidator import (
             build_dataflow_graph, compare_graphs,
@@ -703,26 +705,23 @@ class TestOplbRegisterNamingMinimal:
 
         msg = str(excinfo.value)
 
-        # Pin: exactly 4 LR identities diverge on each side (one per
-        # ds_read_b128 instruction with a different vgpr destination).
-        assert "in reference but not subject: 4 identities" in msg, (
-            f"Expected 4 ref-but-not-subj LR identities (the non-CMS T0-only "
-            f"reads, absent from the CMS X0-interleaved capture);\n{msg}"
+        # Pin: edge-layer bypass raise (Phase 0 of diagnose_missing_edge).
+        assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
+            f"Expected the edge-layer bypass message after the count-based "
+            f"gate passes; full message:\n{msg}"
         )
-        assert "in subject but not reference: 4 identities" in msg, (
-            f"Expected 4 subj-but-not-ref LR identities (the CMS X0-range "
-            f"reads, absent from the non-CMS T0-only capture);\n{msg}"
+        # The endpoint identities are rendered into the message; one of them
+        # will be a ds_read_b128 (LR) render — the T/X divergence is in LR.
+        assert "ds_read_b128" in msg, (
+            f"Expected 'ds_read_b128' in the bypass message endpoint identity "
+            f"(the LR side is the source of the T/X register-naming "
+            f"divergence);\n{msg}"
         )
-        # Both sides report category LR
-        assert "'LR'" in msg, (
-            f"Expected 'LR' category in the identity diff (ds_read_b128 "
-            f"instructions are classified as LR);\n{msg}"
-        )
-        # Confirm the divergence count is purely from LR (not MFMA), since
-        # the trimmed capture has no MFMAs in the ML body.
-        assert "'MFMA'" not in msg, (
-            f"Expected no 'MFMA' category in the trimmed capture's identity diff "
-            f"(no ML-body MFMAs in the minimal fixture);\n{msg}"
+        # The count-based gate did NOT itself fire: counts (4 LR + 1 Pack on
+        # each side) match by construction.
+        assert "data-flow per-category node counts differ" not in msg, (
+            f"The new count-based gate fired on a fixture designed to have "
+            f"matching counts — investigate.\n{msg}"
         )
 
     def test_png_figures_are_written(self):

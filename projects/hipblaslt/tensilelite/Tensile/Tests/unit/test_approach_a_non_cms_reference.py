@@ -278,48 +278,43 @@ def test_non_cms_reference_compare_graphs_surfaces_only_known_residuals(
     ref_graph = build_dataflow_graph(ref_cap)
     subj_graph = build_dataflow_graph(cms_cap)
 
-    # The y391+ residual surfaces as a CaptureConsistencyError raised
-    # inside compare_graphs's data-flow node identity-set check (see
-    # CMSValidator.py around the `data-flow node identity sets differ`
-    # branch). Pin the exception class + the per-side breakdown so any
-    # drift in (failure class, identity counts, per-class breakdown)
-    # fails the test.
+    # rocm-libraries-oplb (post-count-based-gate): the entry-level
+    # identity-set gate in ``compare_graphs`` was replaced with a per-
+    # (rocisa-derived InstructionCategory) count gate. Under the count
+    # gate, both pipelines emit the same number of LR/MFMA/GR nodes for
+    # this kernel — the gate PASSES (no CaptureConsistencyError at entry).
+    # The T/X register-naming divergence then propagates to the edge layer,
+    # where ``edge_keys()`` embeds ``(producer.identity, consumer.identity,
+    # ...)`` and ``diagnose_missing_edge`` Phase 0 raises
+    # ``CaptureConsistencyError`` with the
+    # "identity-coverage check at compare_graphs entry was bypassed"
+    # message when an endpoint identity is absent from the subject graph.
+    #
+    # This assertion was tightened post-oplb's count-based gate. Any
+    # change in (a) the failure class or (b) the bypass message shape
+    # should still escalate per the bead's "STOP and surface" rule.
     with pytest.raises(CaptureConsistencyError) as excinfo:
         compare_graphs(ref_graph, subj_graph)
 
     msg = str(excinfo.value)
-    # Per-side identity counts. We pin the literal "28 identities" twice
-    # rather than parse the message because the error string is the
-    # contract — any change to the count silently breaking the principled
-    # baseline shows up here.
-    assert "in reference but not subject: 28 identities" in msg, (
-        f"Expected 28 identities in ref-but-not-subject; full message:\n{msg}"
+    # Pin: the edge-layer Phase-0 bypass message.
+    assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
+        f"Expected the diagnose_missing_edge Phase-0 'bypass' message "
+        f"(edge-layer T/X register-naming divergence after the new "
+        f"count-based gate passes); full message:\n{msg}"
     )
-    assert "in subject but not reference: 28 identities" in msg, (
-        f"Expected 28 identities in subj-but-not-reference; full message:\n{msg}"
+    assert "p_id=" in msg and "c_id=" in msg, (
+        f"Expected both p_id= and c_id= in the bypass message; "
+        f"full message:\n{msg}"
     )
-    # Per-side category breakdown. Both sides should split exactly
-    # {LR: 14, MFMA: 14}. dict.__repr__ key ordering can vary, so we
-    # check both orderings the error formatter could produce.
-    expected_breakdowns = (
-        "{'MFMA': 14, 'LR': 14}",
-        "{'LR': 14, 'MFMA': 14}",
+    # Pin: the new count-based gate did NOT fire — counts match across
+    # sides for this kernel (this is the rocm-libraries-oplb win).
+    assert "data-flow per-category node counts differ" not in msg, (
+        f"The new count-based gate fired — that would mean the two "
+        f"pipelines actually emitted different numbers of LR/MFMA/GR "
+        f"nodes (a real pipeline-integrity bug). Investigate before "
+        f"re-pinning.\n{msg}"
     )
-    for side in ("in reference but not subject", "in subject but not reference"):
-        assert any(brk in msg for brk in expected_breakdowns), (
-            f"Expected {side} breakdown to be one of {expected_breakdowns}; "
-            f"full message:\n{msg}"
-        )
-    # Negative check: no other categories may appear in the breakdown.
-    # Surfacing e.g. {'GRA': X, ...} or {'LR': 14, 'MFMA': 14, 'GW': N}
-    # would be a NEW finding that escalates per the bead's STOP-and-
-    # surface rule.
-    for forbidden in ("'GRA'", "'GRB'", "'GW'", "'LW'", "'WAIT'"):
-        assert forbidden not in msg, (
-            f"Residual surfaced unexpected category {forbidden} beyond "
-            f"the principled-baseline {{LR, MFMA}} set; STOP and surface "
-            f"per the bead's rule. Full message:\n{msg}"
-        )
 
 
 # =============================================================================
