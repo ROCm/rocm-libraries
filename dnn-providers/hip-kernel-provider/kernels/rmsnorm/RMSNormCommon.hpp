@@ -3,6 +3,9 @@
 
 #include "Bfloat16Dev.hpp"
 
+namespace hip_kernel_provider::rmsnorm
+{
+
 template <typename T>
 struct Cast;
 
@@ -56,3 +59,5 @@ __device__ __forceinline__ T from_float32(float value)
 {
     return Cast<T>::from(value);
 }
+
+} // namespace hip_kernel_provider::rmsnorm
