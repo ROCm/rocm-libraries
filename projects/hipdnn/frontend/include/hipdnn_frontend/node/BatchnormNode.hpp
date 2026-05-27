@@ -64,6 +64,14 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing y for pre-validation");
 
+        HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormNode missing scale for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormNode missing bias for pre-validation");
+
         HIPDNN_RETURN_IF_FALSE(attributes.get_epsilon(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing epsilon for pre-validation");
@@ -76,21 +84,9 @@ public:
         auto epsilon = attributes.get_epsilon();
 
         // SECTION 2: Validate Parameter Dimensions
-        // Why:
-        // - Required parameters ( x, y and epsilon) must have valid dimensions.
-        // - Optional parameters (scale and bias) are validated only if provided.
-        // - This ensures correctness of shape-based validation while allowing flexible usage
-        //   of scale and bias tensors.
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        if(scale)
-        {
-            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
-        }
-
-        if(bias)
-        {
-            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
-        }
+        // Required parameters ( x, y, scale, bias and epsilon) must have valid dimensions.
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
 
         // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
