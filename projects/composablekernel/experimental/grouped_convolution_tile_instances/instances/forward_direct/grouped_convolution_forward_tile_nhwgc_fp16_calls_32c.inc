@@ -60,6 +60,14 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<80, direct_c
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CKernel<81, direct_conv::Version::v2>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
+// Non-grouped convolution v3 — no swizzle, baseline + single-buffer
+// Fprop config 2 (16x16x32, 4-wave, LDS double-buffer baseline)
+// Fprop config 48 (16x16x32, 4-wave, single-buffer LDS input)
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<2, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CDenseKernel<48, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
 // Non-grouped convolution v3 — CyclicShift swizzle
 // Fprop configs 10-11 (16x16x32), 14-15 (32x32x16)
 ////////////////////////////////////////////////////////////////////////
