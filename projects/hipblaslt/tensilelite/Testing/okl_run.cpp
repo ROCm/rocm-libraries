@@ -589,6 +589,7 @@ static void cleanup(const BufferSet& bs, hipModule_t module) {
 // ----------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
+    // 1. Parse argv and load the conf file.
     if (argc < 2) {
         fprintf(stderr, "usage: %s path/to/kernel.conf\n", argv[0]);
         return 1;
@@ -596,21 +597,33 @@ int main(int argc, char** argv) {
     std::filesystem::path conf_path(argv[1]);
     Config c = load_config(conf_path.string());
 
+    // 2. Resolve the .co path relative to the conf file's directory.
     std::filesystem::path co_path = c.co_file;
     if (co_path.is_relative()) co_path = conf_path.parent_path() / co_path;
 
-    BufferSet            bs       = allocate_buffers(c);
-    LoadedKernel         lk       = load_kernel(co_path, c.kernel_symbol);
-    std::vector<uint8_t> kernarg  = build_kernarg(c, bs);
+    // 3. Allocate and init every declared device buffer.
+    BufferSet bs = allocate_buffers(c);
 
+    // 4. Load the module and resolve the kernel symbol.
+    LoadedKernel lk = load_kernel(co_path, c.kernel_symbol);
+
+    // 5. Build the kernarg buffer from the slot list.
+    std::vector<uint8_t> kernarg = build_kernarg(c, bs);
+
+    // 6. Compute the launch grid and time the kernel (bench-style 2 cold + 10 hot).
     uint32_t num_workgroups = numwg_from_slots(c.slots);
     uint32_t global_threads = num_workgroups * c.workgroup_size;
     TimingResult timing     = time_kernel(lk.function, kernarg,
                                           c.workgroup_size, global_threads);
 
+    // 7. Print the runner preamble + timing + perf to stdout.
     print_report(conf_path, co_path, c, lk, num_workgroups, global_threads,
                  timing);
+
+    // 8. Sanity-check: D should have been overwritten and end up zero.
     verify_d_buffer(bs);
+
+    // 9. Free every device buffer and unload the module.
     cleanup(bs, lk.module);
     return 0;
 }
