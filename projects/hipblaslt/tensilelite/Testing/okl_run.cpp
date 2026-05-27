@@ -374,36 +374,60 @@ static uint32_t numwg_from_slots(const std::vector<Slot>& slots) {
     std::exit(1);
 }
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s path/to/kernel.conf\n", argv[0]);
-        return 1;
-    }
-    std::filesystem::path conf_path(argv[1]);
-    Config c = load_config(conf_path.string());
+// ----------------------------------------------------------------------------
+// Pieces of main(), broken out for readability.
+// ----------------------------------------------------------------------------
 
-    std::filesystem::path co_path = c.co_file;
-    if (co_path.is_relative()) co_path = conf_path.parent_path() / co_path;
+/// Set of allocated device buffers, indexed by their config-declared `role`
+/// name (typically "A", "B", "C", "D", plus feature-gated ones like "bias").
+struct BufferSet {
+    std::unordered_map<std::string, void*>    ptrs;   ///< role -> device pointer
+    std::unordered_map<std::string, uint64_t> sizes;  ///< role -> bytes
+};
 
-    // 1. Allocate and init every declared buffer.
-    std::unordered_map<std::string, void*> buf_ptrs;
-    std::unordered_map<std::string, uint64_t> buf_sizes;
+/// Result of `time_kernel`: matches hipblaslt-bench's reported timing model
+/// (steady-state mean over a tight loop following untimed warmup).
+struct TimingResult {
+    int    cold_iters;   ///< Number of untimed warmup launches.
+    int    hot_iters;    ///< Number of timed launches in the hot loop.
+    double total_us;     ///< Wall-clock microseconds for the hot window.
+    double us_per_iter;  ///< total_us / hot_iters.
+};
+
+/// Allocate one device buffer per declaration in `c.buffers` and initialize
+/// it per its `init` mode: "poison" fills with 0xee (so we can later detect
+/// regions the kernel didn't write), anything else zero-fills.
+///
+/// Returns a BufferSet mapping each buffer's role -> device pointer and
+/// role -> allocation size, used downstream by `build_kernarg` (to plug
+/// pointers into pointer slots) and `verify_d_buffer` (to read D back).
+///
+/// Aborts via HIP_CHECK if any `hipMalloc` / `hipMemset` fails.
+static BufferSet allocate_buffers(const Config& c) {
+    BufferSet bs;
     for (const auto& b : c.buffers) {
         void* p = nullptr;
         HIP_CHECK(hipMalloc(&p, b.bytes));
-        if (b.init == "poison") {
-            HIP_CHECK(hipMemset(p, 0xee, b.bytes));
-        } else {
-            HIP_CHECK(hipMemset(p, 0, b.bytes));
-        }
-        buf_ptrs[b.role]  = p;
-        buf_sizes[b.role] = b.bytes;
+        HIP_CHECK(hipMemset(p, b.init == "poison" ? 0xee : 0, b.bytes));
+        bs.ptrs[b.role]  = p;
+        bs.sizes[b.role] = b.bytes;
     }
+    return bs;
+}
 
-    // 2. Load module and resolve kernel.
-    LoadedKernel lk = load_kernel(co_path, c.kernel_symbol);
-
-    // 3. Build the kernarg buffer from the slot list.
+/// Build the flat kernarg byte buffer by walking the config's slot list in
+/// order. For each slot:
+///   - `kind=buffer` slots: look up the device pointer for the named buffer
+///     role and memcpy 8 bytes into the slot's offset.
+///   - `kind=value`  slots: memcpy the pre-encoded `value_bytes` (whose
+///     width was set by okl.py from the kernel's HSA `.args` metadata) into
+///     the slot's offset.
+///
+/// Bounds-checks every slot against `c.kernarg_size`; exits with a clean
+/// named-slot error message on overrun, on a buffer reference to a role we
+/// didn't allocate, or on a buffer slot whose size isn't 8 bytes.
+static std::vector<uint8_t>
+build_kernarg(const Config& c, const BufferSet& bs) {
     std::vector<uint8_t> kernarg(c.kernarg_size, 0);
     for (const auto& s : c.slots) {
         if (s.offset + s.size > kernarg.size()) {
@@ -413,45 +437,58 @@ int main(int argc, char** argv) {
             std::exit(1);
         }
         if (s.kind == "buffer") {
-            auto it = buf_ptrs.find(s.buffer);
-            if (it == buf_ptrs.end()) {
+            auto it = bs.ptrs.find(s.buffer);
+            if (it == bs.ptrs.end()) {
                 fprintf(stderr, "okl_run: slot '%s' references unknown buffer "
                                 "role '%s'\n",
                         s.name.c_str(), s.buffer.c_str());
                 std::exit(1);
             }
-            void* p = it->second;
             if (s.size != 8) {
                 fprintf(stderr, "okl_run: buffer slot '%s' has size=%zu "
                                 "(expected 8 for a device pointer)\n",
                         s.name.c_str(), s.size);
                 std::exit(1);
             }
+            void* p = it->second;
             std::memcpy(kernarg.data() + s.offset, &p, 8);
         } else {
             std::memcpy(kernarg.data() + s.offset, s.value_bytes.data(),
                         s.size);
         }
     }
+    return kernarg;
+}
 
-    // 4. Launch (driver-style param buffer).
-    uint32_t numWG = numwg_from_slots(c.slots);
-    size_t   ksize = kernarg.size();
-    void*    launch_params[] = {
+/// Launch `fn` COLD_ITERS times to warm caches (with a single sync after the
+/// warmup), then HOT_ITERS times in a tight loop with one sync at the end,
+/// timing the hot window with `std::chrono::steady_clock`. Matches
+/// hipblaslt-bench's default-mode timing methodology (CPU wall clock with one
+/// sync per timing window; see clients/common/include/argument_model.hpp:80-94
+/// and testing_matmul.hpp:5293-5396).
+///
+/// `kernarg` is passed in by reference but never mutated; we hand the bytes
+/// off to the HIP driver via HIP_LAUNCH_PARAM_BUFFER_POINTER.
+static TimingResult time_kernel(hipFunction_t fn,
+                                std::vector<uint8_t>& kernarg,
+                                uint32_t workgroup_size,
+                                uint32_t global_threads) {
+    constexpr int COLD_ITERS = 2;
+    constexpr int HOT_ITERS  = 10;
+
+    size_t ksize = kernarg.size();
+    void*  launch_params[] = {
         HIP_LAUNCH_PARAM_BUFFER_POINTER, kernarg.data(),
         HIP_LAUNCH_PARAM_BUFFER_SIZE,    &ksize,
         HIP_LAUNCH_PARAM_END};
-    uint32_t globalX = numWG * c.workgroup_size;
 
     auto launch = [&]() {
         HIP_CHECK(hipExtModuleLaunchKernel(
-            lk.function, globalX, 1, 1, c.workgroup_size, 1, 1,
+            fn, global_threads, 1, 1, workgroup_size, 1, 1,
             /*sharedMemBytes=*/0, /*stream=*/nullptr, nullptr, launch_params,
             nullptr, nullptr));
     };
 
-    constexpr int COLD_ITERS = 2;
-    constexpr int HOT_ITERS  = 10;
     for (int i = 0; i < COLD_ITERS; ++i) launch();
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -460,10 +497,27 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipDeviceSynchronize());
     auto t1 = std::chrono::steady_clock::now();
 
-    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
-    double us_per_iter = total_us / HOT_ITERS;
+    TimingResult r;
+    r.cold_iters  = COLD_ITERS;
+    r.hot_iters   = HOT_ITERS;
+    r.total_us    = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    r.us_per_iter = r.total_us / HOT_ITERS;
+    return r;
+}
+
+/// Emit the standard runner preamble + timing + performance lines to stdout.
+/// Lines: conf path, .co path, kernel symbol (truncated to 80 chars),
+/// resource estimate from hipFuncGetAttribute (regs/LDS), problem dims,
+/// kernarg layout summary, grid dims, iter counts, hot-window time, gflops.
+static void print_report(const std::filesystem::path& conf_path,
+                         const std::filesystem::path& co_path,
+                         const Config&        c,
+                         const LoadedKernel&  lk,
+                         uint32_t             num_workgroups,
+                         uint32_t             global_threads,
+                         const TimingResult&  timing) {
     double flops  = 2.0 * double(c.m) * c.n * c.k * c.batch;
-    double gflops = flops / us_per_iter * 1e-3;
+    double gflops = flops / timing.us_per_iter * 1e-3;
 
     printf("conf:      %s\n", conf_path.string().c_str());
     printf("co:        %s\n", co_path.string().c_str());
@@ -476,45 +530,87 @@ int main(int argc, char** argv) {
     printf("kernarg:   %u bytes, %zu slots, %zu buffers\n",
            c.kernarg_size, c.slots.size(), c.buffers.size());
     printf("grid:      %u workgroups x %u threads = %u global threads\n",
-           numWG, c.workgroup_size, globalX);
+           num_workgroups, c.workgroup_size, global_threads);
     printf("iters:     %d hot (after %d cold), single sync, CPU wall clock\n",
-           HOT_ITERS, COLD_ITERS);
+           timing.hot_iters, timing.cold_iters);
     printf("time:      %.3f us / iter   (hot window: %.3f us / %d calls)\n",
-           us_per_iter, total_us, HOT_ITERS);
+           timing.us_per_iter, timing.total_us, timing.hot_iters);
     printf("perf:      %.1f gflops\n", gflops);
+}
 
-    // 5. Verify: the D buffer must have been overwritten by the kernel and
-    //    (since A=B=C=0) must end up all zero. If D was declared with init=
-    //    poison, the bytes start at 0xee; any byte left at 0xee means that
-    //    region was never written.
-    auto dit = buf_ptrs.find("D");
-    if (dit != buf_ptrs.end()) {
-        uint64_t bytes = buf_sizes["D"];
-        std::vector<uint8_t> hostD(bytes);
-        HIP_CHECK(hipMemcpy(hostD.data(), dit->second, bytes,
-                            hipMemcpyDeviceToHost));
-        bool poisoned = std::all_of(hostD.begin(), hostD.end(),
-                                    [](uint8_t b) { return b == 0xee; });
-        bool all_zero = std::all_of(hostD.begin(), hostD.end(),
-                                    [](uint8_t b) { return b == 0; });
-        if (poisoned) {
-            fprintf(stderr, "FAIL: D still poisoned (0xee everywhere) - "
-                            "kernel did not write\n");
-            std::exit(2);
-        }
-        if (!all_zero) {
-            size_t nonzero = std::count_if(hostD.begin(), hostD.end(),
-                                           [](uint8_t b) { return b != 0; });
-            fprintf(stderr, "WARN: D has %zu/%zu non-zero bytes (expected 0 "
-                            "from zero inputs)\n",
-                    nonzero, hostD.size());
-        } else {
-            printf("verify:    OK (D fully overwritten and zero, as expected "
-                   "for A=B=C=0)\n");
-        }
+/// Read the D buffer back to host and check (a) the kernel actually wrote it
+/// (no 0xee poison bytes left from the init) and (b) the result is all zero
+/// (since A, B, C were all zero-initialized and beta=0, alpha*0+beta*0=0
+/// regardless of dtype). Prints "verify: OK" on full pass.
+///
+/// Exits 2 on detection of a never-written D (full poison preserved). Warns
+/// to stderr on partial non-zero results (kernel wrote, but result wasn't
+/// the algebraically expected zero - usually means alpha/beta wasn't honored
+/// or one of the inputs wasn't really zero on the device). Returns silently
+/// if D isn't in the buffer set (some kernels with feature-gated outputs).
+static void verify_d_buffer(const BufferSet& bs) {
+    auto dit = bs.ptrs.find("D");
+    if (dit == bs.ptrs.end()) return;
+
+    uint64_t bytes = bs.sizes.at("D");
+    std::vector<uint8_t> hostD(bytes);
+    HIP_CHECK(hipMemcpy(hostD.data(), dit->second, bytes,
+                        hipMemcpyDeviceToHost));
+
+    bool poisoned = std::all_of(hostD.begin(), hostD.end(),
+                                [](uint8_t b) { return b == 0xee; });
+    bool all_zero = std::all_of(hostD.begin(), hostD.end(),
+                                [](uint8_t b) { return b == 0; });
+    if (poisoned) {
+        fprintf(stderr, "FAIL: D still poisoned (0xee everywhere) - "
+                        "kernel did not write\n");
+        std::exit(2);
     }
+    if (!all_zero) {
+        size_t nonzero = std::count_if(hostD.begin(), hostD.end(),
+                                       [](uint8_t b) { return b != 0; });
+        fprintf(stderr, "WARN: D has %zu/%zu non-zero bytes (expected 0 "
+                        "from zero inputs)\n",
+                nonzero, hostD.size());
+    } else {
+        printf("verify:    OK (D fully overwritten and zero, as expected "
+               "for A=B=C=0)\n");
+    }
+}
 
-    for (auto& kv : buf_ptrs) HIP_CHECK(hipFree(kv.second));
-    HIP_CHECK(hipModuleUnload(lk.module));
+/// Free every device buffer in `bs` and unload the HIP module.
+static void cleanup(const BufferSet& bs, hipModule_t module) {
+    for (const auto& kv : bs.ptrs) HIP_CHECK(hipFree(kv.second));
+    HIP_CHECK(hipModuleUnload(module));
+}
+
+// ----------------------------------------------------------------------------
+// Entry point.
+// ----------------------------------------------------------------------------
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s path/to/kernel.conf\n", argv[0]);
+        return 1;
+    }
+    std::filesystem::path conf_path(argv[1]);
+    Config c = load_config(conf_path.string());
+
+    std::filesystem::path co_path = c.co_file;
+    if (co_path.is_relative()) co_path = conf_path.parent_path() / co_path;
+
+    BufferSet            bs       = allocate_buffers(c);
+    LoadedKernel         lk       = load_kernel(co_path, c.kernel_symbol);
+    std::vector<uint8_t> kernarg  = build_kernarg(c, bs);
+
+    uint32_t num_workgroups = numwg_from_slots(c.slots);
+    uint32_t global_threads = num_workgroups * c.workgroup_size;
+    TimingResult timing     = time_kernel(lk.function, kernarg,
+                                          c.workgroup_size, global_threads);
+
+    print_report(conf_path, co_path, c, lk, num_workgroups, global_threads,
+                 timing);
+    verify_d_buffer(bs);
+    cleanup(bs, lk.module);
     return 0;
 }
