@@ -47,6 +47,7 @@
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -123,6 +124,29 @@ NB_MODULE(_stinkytofu, m) {
         .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
         .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
         .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+
+    // ------------------------------------------------------------------------
+    // Logical-IR -> Asm-IR one-shot lowering helper
+    // ------------------------------------------------------------------------
+    // Left-path entry point for KernelWriter-style Python code: build a
+    // LogicalModule, then call lower_logical_module(...) to get back a
+    // StinkyAsmModule ready for .emitAssembly() / .runOptimizationPipeline().
+    // Mirrors the right path (toStinkyTofuModule for rocisa::Module). The
+    // returned StinkyAsmModule borrows the LogicalInstructions from @p module
+    // for IR-list membership but does NOT own them: keep @p module alive for
+    // as long as the returned asm module is in use.
+    m.def(
+        "lower_logical_module",
+        [](PyLogicalModule& module, std::array<int, 3> arch) {
+            return lowerLogicalModuleToAsm(module, arch, StinkyAsmModule::ModuleOptions{});
+        },
+        nb::arg("module"), nb::arg("arch"),
+        "Run the standard logical-IR lowering pipeline on @p module and "
+        "return the resulting StinkyAsmModule. @p arch is "
+        "[major, minor, stepping] (e.g. [12, 5, 0] for gfx1250) and is used "
+        "to look up the per-arch logical-to-asm mnemonic map. Keep @p module "
+        "alive while using the returned StinkyAsmModule (it borrows "
+        "LogicalInstruction nodes from it for IR-list membership).");
 
     // ========================================================================
     // Register Types

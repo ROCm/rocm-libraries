@@ -28,14 +28,41 @@ What this file is:
     ``extension.cpp``).
 
 What it does (real):
+    - ``Instruction`` / ``CommonInstruction`` — minimal Python base
+      classes mirroring ``rocisa::Instruction`` /
+      ``rocisa::CommonInstruction``. They carry the fields KernelWriter
+      reads / writes after construction (``dst``, ``srcs``, ``comment``,
+      ``sdwa``, ``dpp``, ``vop3``, ``instStr``, ``outputInlineAsm``)
+      and the methods it calls (``getParams`` / ``getDstParams`` /
+      ``getSrcParams``, ``setInlineAsm``, ``setInst``, ``setMemToken``,
+      ``getMemToken``, ``__str__``). ``isinstance(x, CommonInstruction)``
+      checks (e.g. ``Components/SubtileBasedInstructionScheduler.py``)
+      pass via real inheritance, not duck-typing.
+
+    - ``VMovB32`` — first real instruction shim (Step 3 of the
+      vertical-slice plan). Construct it rocisa-style
+      (``VMovB32(dst=..., src=..., comment=...)``), use it in a
+      ``rocisa.code.Module``, and ``Module.to_stinky_asm(arch)`` will
+      ride the logicalIR pipeline because ``VMovB32`` exposes a
+      ``to_stinky_logical()`` that returns a ``_stinkytofu.VMovB32``
+      shared_ptr (bridging via ``RegisterContainer.to_stinky()`` for
+      register operands and ``stinkytofu.Register(int/float/str)`` for
+      immediate operands).
+
     - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — workaround
       ports returning the C++ default-branch tuple
       ``(matrixInstM // divisor, latency)``. ISA-specific overrides in
       ``mfma.hpp`` are not applied; correct for gfx1250.
 
 Not yet done (dummy):
-    - All instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
+    - All other instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
       ``S*``, ``V*``, ``MFMA*`` / ``SMFMA*``, ...).
+    - ``CompositeInstruction``, ``MacroInstruction`` still dummy.
+    - ``setMsb`` (Instruction member) -- gfx1250 ``s_set_vgpr_msb``
+      auto-prepend is intentionally skipped on the rocisa side because
+      the stinkytofu left-path runs ``InsertVgprMsbPass`` instead. The
+      rocisa ``__str__`` output therefore lacks the MSB preamble for
+      now (only matters when the right-path is exercised).
     - Extension functions: ``SLongBranch*``, ``SCLongBranch*``,
       ``SGetPositivePCOffset``, ``SMulInt64to32``, ``ECvtF16toF32``,
       ``ECvtF32toF16``, ``ECvtPkFP8toF32``, ``ECvtPkBF8toF32``,
@@ -50,20 +77,418 @@ logicalIR correspondence (strict name match):
 
 from __future__ import annotations
 
+from copy import deepcopy as _deepcopy
+from typing import Any, List, Optional
+
 from ._dummy import make_dummy_class, make_dummy_func
+from .enum import InstType
 
 _P = "rocisa.instruction"
 
 
-
 # ==========================================================================
 # Base instruction types
-# source: rocisa/rocisa/src/instruction/instruction.cpp
+# source: rocisa/rocisa/src/instruction/instruction.{hpp,cpp}
 # ==========================================================================
-Instruction = make_dummy_class(f"{_P}.Instruction")
+#
+# The full rocisa hierarchy is:
+#
+#   Item -> Instruction -> CommonInstruction (VMovB32, VAddF32, ...)
+#                       -> CompositeInstruction (VMovB64, SLongBranch*, ...)
+#                       -> MacroInstruction
+#
+# Only ``Instruction`` and ``CommonInstruction`` are needed for Step 3's
+# VMovB32 vertical slice. KernelWriter exercises:
+#   - ``isinstance(x, Instruction)`` (KernelWriter.py:1105, 1790, Activation.py)
+#   - ``isinstance(x, CommonInstruction) and ... and x.dst.regType == 'm'``
+#     (Components/SubtileBasedInstructionScheduler.py:151)
+#   - ``inst.getParams()`` (Components/SIA.py, Activation.py)
+#   - ``inst.dst = vgpr(...)`` post-construction rebinding
+#     (Components/GSU.py:1144 etc.)
+#   - ``inst.comment = ...`` post-construction mutation (KernelWriter:3422 etc.)
+#
+# All of which fall out of an `__slots__` ed Python class with the right
+# attribute list. We keep ``CompositeInstruction`` / ``MacroInstruction``
+# as dummies until a concrete subclass needs them.
+
+
+def _format_str(output_inline_asm: bool, inst_str: str, comment: str,
+                no_comment: bool) -> str:
+    """Byte-parity port of ``rocisa::formatStr`` (format.hpp:54-75).
+
+    Reproduces the exact padding-to-50 + ``" // "`` + comment + ``"\\n"``
+    layout so emitted asm diffs byte-for-byte against rocisa native.
+    """
+    formatted = inst_str
+    if output_inline_asm:
+        # Inline-asm path wraps the instruction in quotes + ``\n\t``.
+        formatted = '"' + formatted + '\\n\\t"'
+    if comment and not no_comment:
+        pad = max(0, 50 - len(formatted))
+        return formatted + (" " * pad) + " // " + comment + "\n"
+    return formatted + "\n"
+
+
+def _output_no_comment() -> bool:
+    """Read ``rocIsa.getInstance().getOutputOptions().outputNoComment``.
+
+    Lazy import to keep this module loadable in environments where
+    ``rocIsa`` hasn't been instantiated yet (test isolation).
+    """
+    try:
+        from . import rocIsa  # noqa: WPS433  (avoid import cycle at module load)
+
+        opts = rocIsa.getInstance().getOutputOptions()
+        return bool(getattr(opts, "outputNoComment", False))
+    except Exception:  # noqa: BLE001  (best-effort default)
+        return False
+
+
+class Instruction:
+    """Minimal port of ``rocisa::Instruction`` (instruction.hpp:119-286).
+
+    Carries the per-instance state KernelWriter sets / reads but leaves
+    ``toString`` / ``getParams`` family to subclasses. The MSB workaround
+    (``setMsb``) is intentionally omitted -- the stinkytofu left-path
+    runs ``InsertVgprMsbPass`` to inject ``s_set_vgpr_msb`` instructions
+    closer to the truth source. If a future test diffs rocisa-emitted
+    text against the right-path this gap will need to be revisited.
+    """
+
+    __slots__ = (
+        "name", "parent",
+        "instType", "comment", "instStr", "outputInlineAsm",
+        "m_memToken",
+    )
+
+    def __init__(self, instType: Any, comment: str = ""):
+        self.name: str = ""  # rocisa Item ctor uses "" (not the class name)
+        self.parent: Any = None
+        self.instType: Any = instType
+        self.comment: str = comment
+        self.instStr: str = ""
+        self.outputInlineAsm: bool = False
+        self.m_memToken: Any = None
+
+    # ---------------------------------------------------- memToken / inline
+    def setMemToken(self, token: Any) -> None:
+        self.m_memToken = token
+
+    def getMemToken(self) -> Any:
+        return self.m_memToken
+
+    def setInlineAsm(self, is_true: bool) -> None:
+        self.outputInlineAsm = bool(is_true)
+
+    # ---------------------------------------------------------- inst label
+    def setInst(self, inst_str: str) -> None:
+        self.instStr = inst_str
+
+    def preStr(self) -> str:
+        # rocisa default; CompositeInstruction overrides.
+        return self.instStr
+
+    # ----------------------------------------------------- comment formats
+    def formatOnly(self, inst_str: str, comment: str) -> str:
+        return _format_str(self.outputInlineAsm, inst_str, comment,
+                           _output_no_comment())
+
+    def formatWithComment(self, inst_str: str) -> str:
+        return _format_str(self.outputInlineAsm, inst_str, self.comment,
+                           _output_no_comment())
+
+    def formatWithExtraComment(self, inst_str: str, extra: str) -> str:
+        return _format_str(self.outputInlineAsm, inst_str, self.comment + extra,
+                           _output_no_comment())
+
+    # ----------------------------------------------------- to be overridden
+    def toString(self) -> str:
+        raise NotImplementedError(
+            "Subclass must override toString() (rocisa::Instruction is abstract)."
+        )
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def getParams(self):
+        raise NotImplementedError("Subclass must override getParams()")
+
+    def getDstParams(self):
+        raise NotImplementedError("Subclass must override getDstParams()")
+
+    def getSrcParams(self):
+        raise NotImplementedError("Subclass must override getSrcParams()")
+
+    def getIssueLatency(self) -> int:
+        return 1  # rocisa default; override in subclasses with real values.
+
+    def getIssueCycles(self) -> int:
+        return 1
+
+    # ----------------------------------------------------- copy / pickle
+    def __deepcopy__(self, memo):
+        # rocisa raises std::runtime_error("Deepcopy not supported for
+        # Instruction"); KernelWriter doesn't deepcopy bare Instructions
+        # (it deepcopies concrete subclasses which override this). We
+        # mirror the rocisa intent.
+        raise RuntimeError("Deepcopy not supported for Instruction")
+
+    def __reduce__(self):
+        raise RuntimeError("Pickling not supported for Instruction")
+
+
+def _input_to_str(arg: Any) -> str:
+    """Port of ``rocisa::InstructionInputToString`` (instruction.hpp:41-71).
+
+    Handles the std::variant<Container, int, double, string> by Python
+    duck-typing: anything with ``toString`` (Container, RegisterContainer,
+    Holders) gets ``.toString()``; everything else uses ``str()`` with
+    the C++ ``double`` quirk (append ``.0`` when neither ``.`` nor ``e``
+    is present so a literal ``1.0`` round-trips byte-for-byte).
+    """
+    if hasattr(arg, "toString"):
+        return arg.toString()
+    if isinstance(arg, bool):
+        # bool is an int subclass; rocisa stores it as int -> "0"/"1".
+        return str(int(arg))
+    if isinstance(arg, int):
+        return str(arg)
+    if isinstance(arg, float):
+        # ``%.17g`` matches C++ snprintf; trailing ``.0`` mirrors the
+        # std::visit branch in instruction.hpp:59-62.
+        s = format(arg, ".17g")
+        if "." not in s and "e" not in s and "E" not in s:
+            s += ".0"
+        return s
+    return str(arg)
+
+
+class CommonInstruction(Instruction):
+    """Port of ``rocisa::CommonInstruction`` (instruction.hpp:382-526).
+
+    Holds ``dst`` (+ optional ``dst1``), a list of ``srcs``, and modifier
+    bundles. ``toString`` produces ``"<inst> <dst>, <src0>, <src1> ... //
+    comment\\n"`` to match rocisa's ``getArgStr`` + ``formatWithComment``.
+    """
+
+    __slots__ = ("dst", "dst1", "srcs", "dpp", "sdwa", "vop3")
+
+    def __init__(self, instType: Any, dst: Any, srcs: List[Any],
+                 dpp: Any = None, sdwa: Any = None, vop3: Any = None,
+                 comment: str = ""):
+        super().__init__(instType, comment)
+        self.dst: Any = dst
+        self.dst1: Any = None
+        self.srcs: List[Any] = list(srcs)
+        self.dpp: Any = dpp
+        self.sdwa: Any = sdwa
+        self.vop3: Any = vop3
+
+    # ----------------------------------------------------- accessors
+    def setSrc(self, idx: int, src: Any) -> None:
+        self.srcs[idx] = src
+
+    def getParams(self):
+        l = []
+        if self.dst is not None:
+            l.append(self.dst)
+        if self.dst1 is not None:
+            l.append(self.dst1)
+        l.extend(self.srcs)
+        return l
+
+    def getDstParams(self):
+        dsts = []
+        if self.dst is not None:
+            dsts.append(self.dst)
+        if self.dst1 is not None:
+            dsts.append(self.dst1)
+        return dsts
+
+    def getSrcParams(self):
+        return list(self.srcs)
+
+    # ----------------------------------------------------- rendering
+    def getArgStr(self) -> str:
+        parts = []
+        if self.dst is not None:
+            ds = self.dst.toString() if hasattr(self.dst, "toString") else str(self.dst)
+            if ds:
+                parts.append(ds)
+        if self.dst1 is not None:
+            ds1 = self.dst1.toString() if hasattr(self.dst1, "toString") else str(self.dst1)
+            if ds1:
+                parts.append(ds1)
+        for s in self.srcs:
+            parts.append(_input_to_str(s))
+        return ", ".join(parts)
+
+    def toString(self) -> str:
+        # NB: gfx1250 ``s_set_vgpr_msb`` auto-prepend is deliberately
+        # omitted -- the stinkytofu left-path handles MSB via
+        # ``InsertVgprMsbPass``. See module docstring for the gap.
+        kstr = self.preStr() + " " + self.getArgStr()
+        if self.dpp is not None and hasattr(self.dpp, "toString"):
+            kstr += self.dpp.toString()
+        if self.sdwa is not None and hasattr(self.sdwa, "toString"):
+            kstr += self.sdwa.toString()
+        if self.vop3 is not None and hasattr(self.vop3, "toString"):
+            kstr += self.vop3.toString()
+        return self.formatWithComment(kstr)
+
+    # ----------------------------------------------------- copy
+    def __deepcopy__(self, memo):
+        # rocisa CommonInstruction copy ctor clones dst / dst1 and
+        # deep-copies each src (Container ones via ``->clone()``, scalars
+        # by value). deepcopy gives us that for free.
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = _deepcopy(self.m_memToken, memo) if self.m_memToken else None
+        clone.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
+        clone.dst1 = _deepcopy(self.dst1, memo) if self.dst1 is not None else None
+        clone.srcs = [_deepcopy(s, memo) for s in self.srcs]
+        clone.dpp = _deepcopy(self.dpp, memo) if self.dpp is not None else None
+        clone.sdwa = _deepcopy(self.sdwa, memo) if self.sdwa is not None else None
+        clone.vop3 = _deepcopy(self.vop3, memo) if self.vop3 is not None else None
+        return clone
+
+
+# ``Composite`` / ``Macro`` aren't on the Step-3 critical path; keep
+# them as dummies until a real subclass lights them up.
 CompositeInstruction = make_dummy_class(f"{_P}.CompositeInstruction")
-CommonInstruction = make_dummy_class(f"{_P}.CommonInstruction")
 MacroInstruction = make_dummy_class(f"{_P}.MacroInstruction")
+
+
+# ==========================================================================
+# logicalIR coercion -- rocisa operand -> stinkytofu Register.
+# ==========================================================================
+#
+# rocisa stores instruction operands as a std::variant<Container, int,
+# double, string>. Stinkytofu's ``_stinkytofu.Register`` has matching
+# constructors for the literal cases. RegisterContainer already knows
+# how to build a stinky.Register via ``to_stinky()`` (see
+# ``rocisa_stinkytofu_adaptor.container.RegisterContainer.to_stinky``).
+#
+# String operands deserve a note: KernelWriter sometimes passes raw asm
+# text like ``"0x0"`` or ``"s[\\sgprOffset0]"`` as a src. We round-trip
+# both through ``Register(literal_string)`` -- the stinkytofu emit path
+# prints literal strings verbatim, so ``Register("0x0")`` produces the
+# same byte sequence on output as the rocisa right-path would. The
+# ``"s[\\..." form is a TODO: stinkytofu has no analogous shorthand and
+# the right behaviour is to lower the macro register reference into a
+# concrete sgpr index ahead of the stinky call; for Step 3 we punt on
+# this case and let the literal-string fallthrough emit it untouched,
+# which is byte-correct for inspection but not semantically meaningful
+# until the macro-expansion pass lands.
+def _to_stinky_register(arg: Any) -> Any:
+    """Convert a rocisa-side instruction operand to a stinkytofu Register.
+
+    Accepted inputs (matches ``InstructionInput`` variants):
+      * RegisterContainer (or subclass) -- delegate to ``.to_stinky()``.
+      * int / float -- wraps as a numeric literal Register.
+      * str -- wraps as a literal-string Register (verbatim emit).
+
+    Raises:
+        ImportError: when the ``_stinkytofu.so`` binding is missing.
+        TypeError: on an unsupported operand type.
+    """
+    import stinkytofu as _st  # noqa: WPS433  (runtime: optional dep)
+
+    if hasattr(arg, "to_stinky"):
+        return arg.to_stinky()
+    if isinstance(arg, bool):
+        # ``bool`` is an ``int`` subclass; stinky Register has no bool
+        # ctor, route through int explicitly.
+        return _st.Register(int(arg))
+    if isinstance(arg, int):
+        return _st.Register(arg)
+    if isinstance(arg, float):
+        return _st.Register(arg)
+    if isinstance(arg, str):
+        return _st.Register(arg)
+    raise TypeError(
+        f"rocisa_stinkytofu_adaptor.instruction: cannot coerce operand of "
+        f"type {type(arg).__name__!r} into a stinkytofu Register. Supported "
+        f"types are RegisterContainer (.to_stinky()), int, float, str."
+    )
+
+
+# ==========================================================================
+# VMovB32 -- first real instruction shim (Step-3 vertical slice).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:5054-5076 (struct)
+#         rocisa/rocisa/src/instruction/common.cpp:1930-1942 (binding)
+# logicalIR counterpart:
+#         shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc
+#         (entry: VMovB32; auto-generated _stinkytofu.VMovB32 takes
+#          (dest, src0, comment="") -> LogicalInstruction shared_ptr).
+class VMovB32(CommonInstruction):
+    """``v_mov_b32 dst, src`` shim with stinkytofu left-path bridge.
+
+    Matches ``rocisa::VMovB32``'s ctor signature byte-for-byte:
+    ``VMovB32(dst, src, sdwa=None, comment="", dpp=None)``. Constructed
+    instances are slotted into a ``rocisa.code.Module``; when the module
+    is lowered via ``Module.to_stinky_asm(arch)`` the
+    ``to_stinky_logical()`` method here fabricates a fresh
+    ``_stinkytofu.VMovB32`` shared_ptr that the C++ pipeline consumes.
+
+    Notes:
+        - dst can be any object exposing ``toString()`` (typically a
+          ``RegisterContainer`` from ``rocisa_stinkytofu_adaptor.container``).
+        - src is an ``InstructionInput``-shaped value: Container | int |
+          float | str. See ``_to_stinky_register`` for the routing table.
+        - ``sdwa`` / ``dpp`` are accepted for rocisa-API parity but are
+          NOT forwarded to the stinkytofu binding (the auto-generated
+          binding doesn't expose them). A non-None modifier today will
+          render correctly in rocisa-side ``__str__`` but disappear from
+          the lowered asm; document & raise once a KernelWriter caller
+          actually needs them.
+    """
+
+    def __init__(self, dst: Any, src: Any, sdwa: Any = None,
+                 comment: str = "", dpp: Any = None):
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=[src],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("v_mov_b32")
+
+    def to_stinky_logical(self) -> Any:
+        """Build a fresh ``_stinkytofu.VMovB32(dst_reg, src_reg, comment)``.
+
+        Called by ``rocisa.code.Module._collect_logical_insts`` during
+        ``Module.to_stinky_asm(arch)``. The returned shared_ptr is added
+        to a logical IR module and lowered to asm by the C++ pipeline.
+
+        Raises:
+            ImportError: when the stinkytofu binding is missing.
+            TypeError: when ``dst`` or ``src`` is not a supported type
+                (see ``_to_stinky_register``).
+        """
+        import stinkytofu as _st  # noqa: WPS433  (runtime: optional dep)
+
+        dst_reg = _to_stinky_register(self.dst)
+        src_reg = _to_stinky_register(self.srcs[0])
+        return _st.VMovB32(dst_reg, src_reg, self.comment)
+
+    def __deepcopy__(self, memo):
+        # Inherit CommonInstruction's clone behaviour but ensure
+        # ``__init__`` isn't re-invoked (which would re-run setInst etc.).
+        clone = CommonInstruction.__deepcopy__(self, memo)
+        # ``setInst`` was already called in __init__; the clone's
+        # instStr was copied from self in the base __deepcopy__, so we
+        # don't need to redo it. Returning ``clone`` directly preserves
+        # subclass identity because we used ``self.__class__.__new__``.
+        return clone
 
 
 # ==========================================================================
@@ -468,8 +893,10 @@ _VAddLShiftLeftU32 = make_dummy_class(f"{_P}._VAddLShiftLeftU32")
 VAddLShiftLeftU32 = make_dummy_class(f"{_P}.VAddLShiftLeftU32")
 _VLShiftLeftAddU32 = make_dummy_class(f"{_P}._VLShiftLeftAddU32")
 VLShiftLeftAddU32 = make_dummy_class(f"{_P}.VLShiftLeftAddU32")
-# logicalIR: VMovB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMovB32 = make_dummy_class(f"{_P}.VMovB32")
+# logicalIR: VMovB32  -- real class defined at the bottom of this file
+# (after ``CommonInstruction`` / ``_to_stinky_register`` are in scope).
+# Intentionally NOT declared here so ``from rocisa.instruction import
+# VMovB32`` resolves to the real class via the module-scope binding.
 _VMovB64 = make_dummy_class(f"{_P}._VMovB64")
 # logicalIR: VMovB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VMovB64 = make_dummy_class(f"{_P}.VMovB64")

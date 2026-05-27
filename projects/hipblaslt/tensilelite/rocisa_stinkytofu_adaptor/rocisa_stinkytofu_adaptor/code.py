@@ -27,6 +27,22 @@ What this file is:
     ``ValueSet``, ...).
 
 What it does (real):
+    - ``Module`` / ``TextBlock`` — real Python container nodes that
+      mirror rocisa's tree API (add / items / itemsSize / count /
+      flatitems / findIndex / replaceItem / popFirstItem / ...).
+      ``Module.to_stinky_asm(arch)`` is the **left-path entry point**:
+      walks the item tree, builds a ``_stinkytofu.LogicalModule`` from
+      every leaf that exposes ``to_stinky_logical()``, then routes it
+      through ``_stinkytofu.lower_logical_module(...)`` to return a
+      ``StinkyAsmModule`` ready for ``emitAssembly()``.
+
+      This is the rocisa-shaped entry point that pairs with
+      ``stinkytofu::toStinkyTofuModule()`` (the right-path,
+      rocisa::Module → asm IR, implemented in
+      ``shared/stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp``).
+      Step 3 (instruction shims) plugs in by giving each instruction
+      a ``to_stinky_logical()`` method.
+
     - ``SrdUpperValue(isa)`` — gfx1250-only wrapper backed by the
       stinkytofu C++ free functions ``getSrdUpperValue125X`` /
       ``getSrdUpperDesc125X`` (declared in
@@ -44,10 +60,9 @@ What it does (real):
       stinkytofu adapter is gfx1250-only.
 
 Not yet done (dummy):
-    - Container nodes: ``Module``, ``KernelBody``, ``Label``,
-      ``TextBlock``, ``Macro``, ``StructuredModule``,
-      ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``, ``ValueSet``,
-      ``RegSet``, ``BitfieldUnion``, ``SignatureCodeMeta``,
+    - Container nodes: ``KernelBody``, ``Label``, ``Macro``,
+      ``StructuredModule``, ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``,
+      ``ValueSet``, ``RegSet``, ``BitfieldUnion``, ``SignatureCodeMeta``,
       ``SignatureBase``.
 
 Future:
@@ -65,14 +80,437 @@ logicalIR correspondence:
 
 from __future__ import annotations
 
+import copy as _copy
+from typing import Any, Iterable, List, Optional, Sequence
+
 from ._dummy import make_dummy_class
 
 _P = "rocisa.code"
 
 
+# ---------------------------------------------------------------------------
+# TextBlock -- raw text leaf node.
+# ---------------------------------------------------------------------------
+#
+# rocisa::TextBlock holds a single string and emits it verbatim. We keep
+# ``name = ""`` to match the C++ ctor (``Item("")``) so Module's
+# ``findNamedItem`` / ``removeItemsByName`` behave identically for
+# unnamed TextBlocks (which is the common case: addComment / addSpaceLine
+# both create unnamed TextBlocks).
+class TextBlock:
+    """Raw text leaf; prints ``self.text`` verbatim.
+
+    Created internally by ``Module.addSpaceLine`` / ``Module.addComment*``
+    and also constructed directly by KernelWriter for inline asm / macro
+    snippets. Has no logicalIR counterpart -- ``Module.to_stinky_asm``
+    silently skips TextBlock items.
+    """
+
+    __slots__ = ("name", "text", "parent")
+
+    def __init__(self, text: str = ""):
+        self.name: str = ""
+        self.text: str = text
+        self.parent: Optional["Module"] = None
+
+    def __str__(self) -> str:
+        return self.text
+
+    def toString(self) -> str:
+        return self.text
+
+    def prettyPrint(self, indent: str = "") -> str:
+        return f"{indent}TextBlock\n"
+
+    def __deepcopy__(self, memo):
+        tb = TextBlock.__new__(TextBlock)
+        tb.name = self.name
+        tb.text = self.text
+        tb.parent = None  # cloned subtree gets re-parented by Module.__deepcopy__
+        memo[id(self)] = tb
+        return tb
+
+    def __repr__(self) -> str:
+        return f"TextBlock({self.text!r})"
+
+
+# ---------------------------------------------------------------------------
+# Comment formatters -- low-stakes approximations of rocisa's format.hpp.
+# ---------------------------------------------------------------------------
+#
+# rocisa C++ has slash() / slash50() / block() / blockNewLine() / block3Line()
+# in format.hpp. They control human-readable comment layout, NOT instruction
+# emit, so byte-parity is not on the vertical-slice critical path; KernelWriter
+# only uses them for headers / dividers. We keep the formats simple and
+# distinct (so a comment never silently merges with adjacent text) and document
+# the byte-parity caveat. Lift these into a dedicated module + tighten formats
+# once a KernelWriter diff exposes a mismatch.
+def _slash(comment: str) -> str:
+    """``// COMMENT`` on its own line. Used by ``Module.addComment``."""
+    return f"// {comment}\n"
+
+
+def _slash50(comment: str) -> str:
+    """``// COMMENT`` aligned to col 50 -- mirrors instruction-line layout."""
+    return f"{'':<50}// {comment}\n"
+
+
+def _block(comment: str) -> str:
+    """3-line block comment ``/****/ /* COMMENT */ /****/``."""
+    bar = "/" + "*" * 42 + "/"
+    return f"{bar}\n/* {comment:<40} */\n{bar}\n"
+
+
+def _block_newline(comment: str) -> str:
+    """Same as ``_block`` but with a leading blank line."""
+    return "\n" + _block(comment)
+
+
+def _block_3line(comment: str) -> str:
+    """``_block`` followed by a trailing blank line."""
+    return _block(comment) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Module -- real tree-shaped IR container.
+# ---------------------------------------------------------------------------
+#
+# Methods are 1:1 with the nanobind binding in rocisa/src/code.cpp:157-212.
+# Item-handling semantics (parent rebind on add/setItem, None tolerance on
+# add, ``count`` recurses into sub-Modules but stops at leaves) match
+# rocisa::Module behaviour so byte-for-byte downstream emission is preserved.
+#
+# Items inserted here can be *anything that quacks like a rocisa Item* --
+# we do not type-check on ``Item`` so the dummy instruction shims still
+# work during the bring-up phase. The only hard requirement at lowering
+# time is that logical-IR leaves expose ``to_stinky_logical()`` (Step 3).
+class Module:
+    """Tree-shaped IR container mirroring ``rocisa::Module``.
+
+    The container is identity-based for ``replaceItem`` / ``removeItem``
+    (matches rocisa, which compares ``shared_ptr<Item>`` equality).
+    Children with a ``.parent`` attribute are reparented to this Module
+    on insertion so KernelWriter's tree-walks ascend correctly.
+
+    Left-path entry point::
+
+        asm_module = code_module.to_stinky_asm([12, 5, 0])
+        print(asm_module.emitAssembly())
+
+    See module-level docstring for the architectural picture.
+    """
+
+    __slots__ = ("name", "itemList", "parent", "tempVgpr", "_isNoOpt")
+
+    def __init__(self, name: str = ""):
+        self.name: str = name
+        self.itemList: List[Any] = []
+        self.parent: Optional["Module"] = None
+        self.tempVgpr: Any = None
+        self._isNoOpt: bool = False
+
+    # ------------------------------------------------------------------ add
+    def add(self, item: Any, pos: int = -1) -> Any:
+        """Add ``item`` to ``itemList`` and return it for chaining.
+
+        ``None`` is silently dropped, matching rocisa's ``if(item)``
+        guard (KernelWriter frequently passes optional values directly).
+        """
+        if item is None:
+            return item
+        self._reparent(item)
+        if pos == -1:
+            self.itemList.append(item)
+        else:
+            self.itemList.insert(pos, item)
+        return item
+
+    def addItems(self, items: Iterable[Any]) -> None:
+        for it in items:
+            self.add(it)
+
+    def addSpaceLine(self) -> None:
+        self.add(TextBlock("\n"))
+
+    def addComment(self, comment: str) -> None:
+        self.add(TextBlock(_slash(comment)))
+
+    def addCommentAlign(self, comment: str) -> None:
+        self.add(TextBlock(_slash50(comment)))
+
+    def addComment0(self, comment: str) -> None:
+        self.add(TextBlock(_block(comment)))
+
+    def addComment1(self, comment: str) -> None:
+        self.add(TextBlock(_block_newline(comment)))
+
+    def addComment2(self, comment: str) -> None:
+        self.add(TextBlock(_block_3line(comment)))
+
+    # ---------------------------------------------------------- accessors
+    def items(self) -> List[Any]:
+        return self.itemList
+
+    def itemsSize(self) -> int:
+        return len(self.itemList)
+
+    def count(self) -> int:
+        """Recursive leaf count (sub-Modules expand, everything else +=1)."""
+        n = 0
+        for it in self.itemList:
+            if isinstance(it, Module):
+                n += it.count()
+            else:
+                n += 1
+        return n
+
+    def getItem(self, index: int) -> Any:
+        # rocisa throws ``std::runtime_error("index out of range")``; we
+        # match the message exactly so callers comparing exception text
+        # see the same string regardless of backend.
+        if index >= len(self.itemList) or index < -len(self.itemList):
+            raise RuntimeError("index out of range")
+        return self.itemList[index]
+
+    def setItem(self, index: int, item: Any) -> None:
+        if index >= len(self.itemList) or index < -len(self.itemList):
+            raise RuntimeError("index out of range")
+        self._reparent(item)
+        self.itemList[index] = item
+
+    def setItems(self, items: Sequence[Any]) -> None:
+        self.itemList = list(items)
+        for it in self.itemList:
+            self._reparent(it)
+
+    # ------------------------------------------------------------ find / index
+    def findNamedItem(self, name: str) -> Any:
+        for it in self.itemList:
+            if getattr(it, "name", None) == name:
+                return it
+        return None
+
+    def findIndex(self, target: Any) -> int:
+        for i, it in enumerate(self.itemList):
+            if it is target:
+                return i
+        return -1
+
+    def findIndexByType(self, type_obj: type) -> int:
+        for i, it in enumerate(self.itemList):
+            if isinstance(it, type_obj):
+                return i
+        return -1
+
+    # ------------------------------------------------------------- mutations
+    def replaceItem(self, src: Any, dst: Any) -> None:
+        for i, it in enumerate(self.itemList):
+            if it is src:
+                self._reparent(dst)
+                self.itemList[i] = dst
+                return  # rocisa replaces only the first match
+
+    def replaceItemByIndex(self, index: int, item: Any) -> None:
+        # rocisa silently no-ops when ``index >= itemList.size()``.
+        if index >= len(self.itemList) or index < -len(self.itemList):
+            return
+        self._reparent(item)
+        self.itemList[index] = item
+
+    def removeItem(self, item: Any) -> None:
+        self.itemList = [it for it in self.itemList if it is not item]
+
+    def removeItemByIndex(self, index: int) -> None:
+        if not self.itemList:
+            return
+        # rocisa clamps over-range indices to the last element (not an error).
+        if index >= len(self.itemList):
+            index = len(self.itemList) - 1
+        del self.itemList[index]
+
+    def removeItemsByName(self, name: str) -> None:
+        self.itemList = [
+            it for it in self.itemList if getattr(it, "name", None) != name
+        ]
+
+    def popFirstItem(self) -> Any:
+        if not self.itemList:
+            return None
+        return self.itemList.pop(0)
+
+    def popFirstNItems(self, n: int) -> List[Any]:
+        if n >= len(self.itemList):
+            popped, self.itemList = self.itemList, []
+            return popped
+        popped = self.itemList[:n]
+        self.itemList = self.itemList[n:]
+        return popped
+
+    # ---------------------------------------------------------- tree ops
+    def appendModule(self, module: "Module") -> "Module":
+        for it in module.items():
+            self.add(it)
+        return module
+
+    def addModuleAsFlatItems(self, module: "Module") -> "Module":
+        for it in module.flatitems():
+            self.add(it)
+        return module
+
+    def flatitems(self) -> List[Any]:
+        out: List[Any] = []
+        for it in self.itemList:
+            if isinstance(it, Module):
+                out.extend(it.flatitems())
+            else:
+                out.append(it)
+        return out
+
+    def setParent(self) -> None:
+        for it in self.itemList:
+            self._reparent(it)
+            if isinstance(it, Module):
+                it.setParent()
+
+    def setNoOpt(self, b: bool) -> None:
+        self._isNoOpt = bool(b)
+
+    def isNoOpt(self) -> bool:
+        return self._isNoOpt
+
+    def setInlineAsmPrintMode(self, mode: bool) -> None:
+        for it in self.itemList:
+            if isinstance(it, Module):
+                it.setInlineAsmPrintMode(mode)
+            elif hasattr(it, "setInlineAsm"):
+                it.setInlineAsm(mode)
+
+    def addTempVgpr(self, vgpr: Any) -> None:
+        self.tempVgpr = vgpr
+
+    # --------------------------------------------------------------- render
+    def toString(self) -> str:
+        return "".join(str(it) for it in self.itemList)
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def prettyPrint(self, indent: str = "") -> str:
+        lines = [f'{indent}{type(self).__name__} "{self.name}"']
+        for it in self.itemList:
+            pp = getattr(it, "prettyPrint", None)
+            if callable(pp):
+                # Defensive: dummy shims return None from their noop __getattr__
+                # which would explode the join. Tolerate non-str returns.
+                res = pp(indent + "|--")
+                if isinstance(res, str):
+                    lines.append(res.rstrip("\n"))
+                else:
+                    lines.append(f"{indent}|--{type(it).__name__}")
+            else:
+                lines.append(f"{indent}|--{type(it).__name__}")
+        return "\n".join(lines) + "\n"
+
+    # ------------------------------------------------------------- pickle
+    def __deepcopy__(self, memo):
+        clone = Module(self.name)
+        memo[id(self)] = clone
+        clone._isNoOpt = self._isNoOpt
+        # rocisa clones tempVgpr via Container::clone(); here we deepcopy so
+        # value-typed wrappers stay independent. Non-deepcopyable objects
+        # (rare) fall through to a shallow copy to match nanobind tolerance.
+        if self.tempVgpr is not None:
+            try:
+                clone.tempVgpr = _copy.deepcopy(self.tempVgpr, memo)
+            except Exception:  # noqa: BLE001  (intentionally permissive)
+                clone.tempVgpr = self.tempVgpr
+        for it in self.itemList:
+            new_it = _copy.deepcopy(it, memo)
+            clone._reparent(new_it)
+            clone.itemList.append(new_it)
+        return clone
+
+    def __reduce__(self):
+        # rocisa raises "Module is not picklable"; mirror that exactly so the
+        # ParallelMap2 worker harness sees the same failure mode.
+        raise RuntimeError("Module is not picklable")
+
+    # ----------------------------------------------------- logicalIR handoff
+    def to_stinky_asm(self, arch: Sequence[int]):
+        """Lower this Module tree to a ``stinkytofu.StinkyAsmModule``.
+
+        Walks ``itemList`` in tree order and forwards every leaf that
+        exposes ``to_stinky_logical()`` (the Step-3 instruction shims)
+        into a fresh ``_stinkytofu.LogicalModule``. The logical module
+        is then run through ``_stinkytofu.lower_logical_module(...)``
+        which wires composite expansion + ToStinkyAsmPass and produces
+        a ``StinkyAsmModule`` ready for ``emitAssembly()``.
+
+        Non-logical items (``TextBlock``, ``Label``, raw asm fragments)
+        are silently skipped because they have no logical-IR counterpart.
+        Once Step 3+ lands more instruction families, this also serves
+        as the natural place to surface "leaf X has no
+        ``to_stinky_logical``" diagnostics.
+
+        Args:
+            arch: target ISA ``[major, minor, stepping]``, e.g.
+                ``[12, 5, 0]`` for gfx1250.
+
+        Returns:
+            ``stinkytofu.StinkyAsmModule``.
+
+        Raises:
+            ImportError: when the ``stinkytofu`` Python binding
+                (``_stinkytofu.so``) is not built / on PYTHONPATH.
+        """
+        import stinkytofu as _st  # noqa: WPS433  (optional runtime dep)
+
+        lm = _st.LogicalModule(self.name or "kernel")
+        for inst in self._collect_logical_insts():
+            lm.add(inst)
+        return _st.lower_logical_module(lm, list(arch))
+
+    def _collect_logical_insts(self) -> List[Any]:
+        """In-order walk of leaf instructions exposing ``to_stinky_logical``.
+
+        Discrimination intentionally relies on the *return value* (must be
+        non-None) rather than ``hasattr``: ``rocisa_stinkytofu_adaptor``'s
+        dummy shims (``_dummy.make_dummy_class``) expose a fake
+        ``__getattr__`` that makes every attribute name appear present,
+        so ``hasattr(dummy, "to_stinky_logical")`` is True. The dummy
+        ``_noop`` returns None, which lets us cheaply filter both kinds
+        of "no logical mapping" cases (dummy class + Step-3 shim that
+        deliberately opts out) at the same gate.
+        """
+        out: List[Any] = []
+        for it in self.itemList:
+            if isinstance(it, Module):
+                out.extend(it._collect_logical_insts())
+                continue
+            handle = getattr(it, "to_stinky_logical", None)
+            if not callable(handle):
+                continue  # TextBlock / value object / non-instruction
+            logical = handle()
+            if logical is None:
+                continue  # dummy shim or explicit opt-out
+            out.append(logical)
+        return out
+
+    # ---------------------------------------------------------- internal
+    def _reparent(self, item: Any) -> None:
+        """Best-effort ``item.parent = self`` (frozen / __slots__ tolerant)."""
+        if not hasattr(item, "parent"):
+            return
+        try:
+            item.parent = self
+        except (AttributeError, TypeError):
+            # Some dummy shims forbid attribute writes; not fatal for
+            # rocisa-shape parity here. KernelWriter's tree-walks only
+            # rely on ``parent`` for known item types.
+            pass
+
+
 Label = make_dummy_class(f"{_P}.Label")
-TextBlock = make_dummy_class(f"{_P}.TextBlock")
-Module = make_dummy_class(f"{_P}.Module")
 Macro = make_dummy_class(f"{_P}.Macro")
 StructuredModule = make_dummy_class(f"{_P}.StructuredModule")
 ValueEndif = make_dummy_class(f"{_P}.ValueEndif")
