@@ -66,18 +66,22 @@ inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
         {
             if(entry.path().extension() == ".json"
                && entry.path().filename() != "meta.json")
+            {
                 paths.push_back(entry.path());
+            }
         }
     }
     catch(const std::exception& e)
     {
         std::cerr << "Warning: failed to scan golden reference data in " << dir
-                  << ": " << e.what() << std::endl;
+                  << ": " << e.what() << '\n';
         return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
 
     if(paths.empty())
+    {
         return testing::ValuesIn(std::vector<std::filesystem::path>{""});
+    }
 
     std::sort(paths.begin(), paths.end());
     return testing::ValuesIn(paths);
