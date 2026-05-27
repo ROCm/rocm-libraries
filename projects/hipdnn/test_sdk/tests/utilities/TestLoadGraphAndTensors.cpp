@@ -103,6 +103,14 @@ TEST(TestFillTensorFromFile, NonPackedTensor)
 
     Tensor<int> tensor({2, 3}, {4, 1});
     ASSERT_NO_THROW(fillTensorFromFile(tensor, filename));
+
+    // Verify the raw buffer matches what was written
+    const int* data = tensor.memory().hostData();
+    ASSERT_NE(data, nullptr);
+    for(size_t i = 0; i < values.size(); i++)
+    {
+        EXPECT_EQ(data[i], values[i]) << "Mismatch at buffer index " << i;
+    }
 }
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

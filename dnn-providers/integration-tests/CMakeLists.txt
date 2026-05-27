@@ -185,12 +185,6 @@ install(TARGETS ${INTEGRATION_TESTS_EXE}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Install golden reference data so installed tests can find it at
-# <exe_dir>/../lib/hipdnn_reference_data/
-install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
-
 # --- Package export infrastructure ---
 
 # Generate Config.cmake from template

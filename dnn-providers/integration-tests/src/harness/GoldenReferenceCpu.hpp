@@ -6,7 +6,6 @@
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 #include <gtest/gtest.h>
-#include <iostream>
 #include <unordered_map>
 #include <vector>
 
@@ -57,33 +56,7 @@ protected:
     }
 };
 
-inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
-{
-    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-        / "../lib/golden_reference_data" / subDirectory;
-
-    std::vector<std::filesystem::path> paths;
-    try
-    {
-        for(const auto& entry : std::filesystem::recursive_directory_iterator(dir))
-        {
-            if(entry.path().extension() == ".json"
-               && entry.path().filename() != "meta.json")
-                paths.push_back(entry.path());
-        }
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << "Warning: failed to scan golden reference data in " << dir
-                  << ": " << e.what() << std::endl;
-        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
-    }
-
-    if(paths.empty())
-        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
-
-    return testing::ValuesIn(paths);
-}
+using hipdnn_test_sdk::utilities::getGoldenReferenceParams;
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

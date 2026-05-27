@@ -5,7 +5,12 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 #include <vector>
+
+#include <gtest/gtest.h>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -44,31 +49,38 @@ public:
     }
 };
 
-inline std::vector<std::filesystem::path> filesInDirectoryWithExt(const std::filesystem::path& path,
-                                                                  const std::string& ext)
+/// Scan golden reference data directory for bundle JSON files.
+/// Returns a gtest parameter generator. On failure or empty directory, returns
+/// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
+/// Bundle JSON files are discovered recursively (bundles live in per-bundle
+/// subdirectories). Non-bundle JSON files like meta.json are excluded.
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
+    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+        / "../lib/golden_reference_data" / subDirectory;
+
     std::vector<std::filesystem::path> paths;
-    std::copy_if(std::filesystem::directory_iterator(path),
-                 std::filesystem::directory_iterator(),
-                 std::back_inserter(paths),
-                 [ext](const std::filesystem::path& p) { return p.extension() == ext; });
-
-    return paths;
-}
-
-// Temporary helper function
-inline std::vector<std::filesystem::path>
-    filesInDirectoryWithExtReturnEmptyPathOnThrow(const std::filesystem::path& path,
-                                                  const std::string& ext)
-{
     try
     {
-        return filesInDirectoryWithExt(path, ext);
+        for(const auto& entry : std::filesystem::recursive_directory_iterator(dir))
+        {
+            if(entry.path().extension() == ".json"
+               && entry.path().filename() != "meta.json")
+                paths.push_back(entry.path());
+        }
     }
-    catch(...)
+    catch(const std::exception& e)
     {
-        return {""};
+        std::cerr << "Warning: failed to scan golden reference data in " << dir
+                  << ": " << e.what() << std::endl;
+        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
+
+    if(paths.empty())
+        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
+
+    std::sort(paths.begin(), paths.end());
+    return testing::ValuesIn(paths);
 }
 
 }
