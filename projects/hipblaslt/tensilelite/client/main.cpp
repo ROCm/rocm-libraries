@@ -600,6 +600,7 @@ namespace TensileLite
             DUMP_OPT("num-solutions", int);
             DUMP_OPT("best-solution", bool);
             DUMP_OPT("results-file", std::string);
+            DUMP_OPT("errors-file", std::string);
             DUMP_OPT("log-file", std::string);
             DUMP_OPT("log-file-append", bool);
             DUMP_OPT("log-level", LogLevel);
@@ -1196,18 +1197,9 @@ int main(int argc, const char* argv[])
             reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
         }
 
-        if(args.count("errors-file"))
-        {
-            std::string filename = args["errors-file"].as<std::string>();
-
-            // Truncate the file if it already exists.
-            {
-                std::ofstream clearFile(filename.c_str(), std::ios::trunc);
-            }
-
-            auto logFile = std::make_shared<std::ofstream>(filename.c_str(), std::ios::app);
-            reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Terse));
-        }
+        std::string filename = args["errors-file"].as<std::string>();
+        auto logFile = std::make_shared<std::ofstream>(filename.c_str());
+        reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Terse));
 
         listeners.setReporter(reporters);
     }
