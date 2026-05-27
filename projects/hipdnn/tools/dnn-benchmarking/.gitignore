@@ -47,3 +47,6 @@ dmypy.json
 results.json
 *.log
 .planning/
+
+# Shiv bundles
+*.pyz

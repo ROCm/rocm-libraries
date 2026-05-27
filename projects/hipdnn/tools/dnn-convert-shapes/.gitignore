@@ -22,3 +22,6 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Shiv bundles
+*.pyz
