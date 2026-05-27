@@ -75,6 +75,10 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
                       const int                          Ny,
                       const int                          direction)
 {
+    // Implemented only for single and double precision.
+    static_assert(std::is_same_v<Tfloat, float> || std::is_same_v<Tfloat, double>, "Tfloat must be a float or double.");
+
+    
     hipError_t hip_rt;
     using fftctype
         = std::conditional_t<std::is_same_v<Tfloat, float>, hipfftComplex, hipfftDoubleComplex>;
