@@ -55,9 +55,10 @@ This section is the scope statement. Reviewers should anchor here on what the sy
 | Regression | How it surfaces |
 |------------|-----------------|
 | A previously-supported test silently loses engine support on a claimed asic. | Observed `(op_chain, io_dtype, layout)` is in some matcher's cross-product; engine returned no support → **FAIL**. |
-| A test errors before reaching `recordGraphSupport` (SetUp crash, ASSERT in graph construction, HIP init failure). | Walk of `UnitTest::GetInstance()` finds registered tests with status != PASSED/SKIPPED and no recorded support → **FAIL** with "errored before record; cannot verify claim — fix the error first" (§7.3). Conservative: we treat unknown as broken. |
-| Engineer claims a matcher whose cross-product is wider than the engine actually supports. | Some test in the cross-product runs and returns empty support → **FAIL** pointing at the specific `(op_chain, io_dtype, layout)` triple. Engineer narrows the matcher or adds a `[[test_skips]]`. |
-| A pre-existing claim's cross-product matches zero observed tests when `--write-support-claims` is run. | Tool refuses to wholesale-replace; engineer must investigate (catalog shrank? filter applied? wrong build?). Prevents silent loss of valid claims (§9.5). |
+| An issue occurs before the test runs. | Test errored before it could record its graph properties → **FAIL** with "errored before record; fix the error first." |
+| A matcher is too wide and claims support the engine doesn't have. | Some test in the matcher's cross-product runs and the engine returns no support → **FAIL** pointing at the specific `(op_chain, io_dtype, layout)` triple. Engineer narrows the matcher or adds a `[[test_skips]]`. |
+| A matcher matches zero observed tests. | The matcher is invalid in this run — usually a sign that test detection has broken (fixture renamed, catalog removed, op_chain string drift) → **FAIL** in full unfiltered CI runs. Local partial runs (filtered, sharded) treat this as informational only since coverage is expected to be partial. |
+| The engine claims support for a test that no matcher covers, then the test fails. | Test framework already fails the test on its own; verifier additionally flags that the engine returned support, so triage starts at "engine may be over-claiming via `get_ranked_engine_ids`" rather than at the test data. Suggests adding a `[[test_skips]]` entry with a reason, or fixing the engine. |
 
 ### 3.2 Deliberately not detected
 
@@ -308,7 +309,7 @@ The test is **claimed** iff it matches ≥1 matcher in the block.
 
 ## 7. Failure Detection
 
-### 7.1 The two rules
+### 7.1 The four rules
 
 **Rule A — claim broken.** For each observed test whose `(op_chain, io_dtype, layout)` is claimed by ≥1 matcher: if `supportingEngineIds` is empty → **FAIL**.
 
@@ -318,16 +319,22 @@ Rule B is conservative. A test that crashed in `SetUp()` or threw in graph const
 
 `recordGraphSupport` is moved to the **very first statement** of `verifyGraph` (before any `ASSERT_*`) so that anything that gets a graph constructed gets a record. Tests that fail before producing a graph fall under Rule B.
 
+**Rule C — zero-coverage matcher.** After processing observations, any `[[supported.matchers]]` entry whose cross-product matches zero observed tests → **FAIL** in full unfiltered CI runs. A zero-coverage matcher is invalid: it claims support for tests that don't exist, which usually means test detection broke (fixture renamed, `INSTANTIATE_TEST_SUITE_P` deleted, `op_chain` string drifted because `describeGraph` output changed). In partial local runs (`--gtest_filter` set, sharded, fewer binaries built) this rule degrades to informational stderr only — partial coverage is expected and benign.
+
+**Rule D — engine over-claim diagnostic.** When a test fails (`UnitTest::GetInstance` status == `FAILED`) AND `SupportMatrixCollector` shows the engine returned non-empty `supportingEngineIds` AND no `[[supported.matchers]]` covers it, the verifier annotates the test-failure report with an "engine over-claim" note. This does **not** add a new failure (the test failure itself already fails CI); it sharpens triage so the engineer looks at `get_ranked_engine_ids` instead of the test data. Suggested remediation in the note: add a `[[test_skips]]` entry with a reason, or fix the engine's applicability logic.
+
 ### 7.2 Local partial runs
 
-Tests not observed (filtered out, in an unbuilt binary, in an unselected tier) contribute nothing. The verifier diffs only over `recordGraphSupport` entries. CI runs full → enforces all claimed observations; local filtered runs → enforces what they ran. A matcher with zero observed coverage in this run produces an informational stderr line but does not fail (it might be in a tier not exercised).
+Tests not observed (filtered out, in an unbuilt binary, in an unselected tier) contribute nothing. Rules A, B, D fire only over `recordGraphSupport` entries and the `UnitTest::GetInstance` walk — so CI full runs and local partial runs both behave correctly.
+
+Rule C is the one rule that depends on completeness: a zero-coverage matcher is only a regression in a run that *should* have exercised it. The verifier detects "full CI mode" by checking that `--gtest_filter` is unset, no shard env vars are present, and `--enforce-support-claims` is in effect. Outside that mode Rule C downgrades to an informational stderr line — partial-run friendliness wins because the engineer running locally already knows their coverage is partial.
 
 ### 7.3 Example failure output
 
 ```
-[SUPPORT CLAIMS] arch=gfx942 platform=linux engine=MIOPEN_ENGINE: 2 failures.
+[SUPPORT CLAIMS] arch=gfx942 platform=linux engine=MIOPEN_ENGINE: 3 failures, 1 note.
 
-  CLAIM BROKEN:
+  CLAIM BROKEN (Rule A):
     Smoke/IntegrationGpuConvFwdBiasActiv.Correctness/NCHW_1x16x16x16_1x16x3x3_relu
       observed: op_chain="ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD"
                 io_dtype="fp32" layout="NCHW"
@@ -336,12 +343,27 @@ Tests not observed (filtered out, in an unbuilt binary, in an unselected tier) c
       Action: narrow op_chains to exclude this tuple, add a [[test_skips]] if
               it's broken-but-supported, or fix the engine.
 
-  ERRORED BEFORE RECORD:
+  ERRORED BEFORE RECORD (Rule B):
     Smoke/IntegrationGpuMatmul.Correctness/fp32_NCHW_32x32x32
       status: FAILED
       no SupportMatrixCollector record — likely SetUp() failure
-      Action: fix the underlying test failure; verifier cannot determine if
-              the support claim was broken until the test runs to recordGraphSupport.
+      Action: fix the underlying test failure first; verifier cannot determine
+              if the support claim was broken until the test runs.
+
+  ZERO-COVERAGE MATCHER (Rule C):
+    [[supported.matchers]] block #4 in MIOPEN_ENGINE.supported.toml for arch=gfx942
+      op_chains[0] = "ConvFprop + Pointwise:LEAKY_RELU"  -- 0 observed tests
+      Most likely cause: fixture rename, INSTANTIATE_TEST_SUITE_P deletion,
+      or describeGraph output drift. Regenerate via --write-support-claims.
+
+  ENGINE OVER-CLAIM (Rule D, diagnostic note attached to test failure):
+    Smoke/IntegrationGpuSdpaForward.Correctness/bf16_seq128_head16
+      test status: FAILED (numerical mismatch vs reference)
+      engine returned support: [MIOPEN_ENGINE]
+      no [[supported.matchers]] covers this graph
+      Note: engine claimed it could handle this graph but produced wrong
+            results. Either add a [[test_skips]] entry, or tighten the
+            engine's get_ranked_engine_ids logic to refuse this graph.
 ```
 
 Failures are grouped by `(matcher, op_chain)` when many tests share the same matcher cross-product to avoid drowning the log; the first three offending param strings are listed inline with a `--verbose-claim-failures` flag for the full list. Full lists also written to `support_claim_failures.txt` for CI artifact capture.
@@ -359,9 +381,14 @@ struct GraphDescription
 
 struct ClaimFailure
 {
-    enum Kind { ClaimBroken, ErroredBeforeRecord } kind;
-    std::string testName;
-    GraphDescription graphDesc;    // empty for ErroredBeforeRecord
+    enum Kind {
+        ClaimBroken,         // Rule A
+        ErroredBeforeRecord, // Rule B
+        ZeroCoverageMatcher, // Rule C
+        EngineOverClaim,     // Rule D (note, not a new failure)
+    } kind;
+    std::string testName;          // empty for ZeroCoverageMatcher
+    GraphDescription graphDesc;    // empty for ErroredBeforeRecord / ZeroCoverageMatcher
     std::string layout;
     std::string matchedReason;     // human-readable; for grouping
 };
@@ -534,7 +561,7 @@ The tool refuses if any of:
 - The build is debug (`PrintToStringParamName` may produce different param strings vs release; mandate release builds for baseline generation).
 - The sidecar's filesystem mount is read-only (e.g. some Docker bind-mount configurations).
 - Another process holds a `flock(LOCK_EX)` on the sidecar (concurrent writes refused).
-- The sidecar already contains a `[[supported]]` block for the current `(arch, platform)` AND that block has matchers whose cross-products match zero observed tests (would silently drop a previously valid claim → §3.1 last row).
+- The sidecar already contains a `[[supported]]` block for the current `(arch, platform)` AND that block has matchers whose cross-products match zero observed tests. Such matchers would already fail the verifier under Rule C (§7.1) — the tool refuses to wholesale-replace them silently; the engineer investigates whether the catalog actually shrank or whether the run was under-built.
 
 ### 9.5 Mixed-fixture stderr output
 
@@ -741,5 +768,7 @@ Replace claims with: every unsupported test must have a matching `[[test_skips]]
 - **Graph properties.** The structured tuple `(op_chain, io_dtype, layout)` extracted from `describeGraph()` output and `setTestCaseLayout`.
 - **Matcher.** A `[[supported.matchers]]` entry. Claims that the cross-product of its `op_chains × io_dtypes × layouts` is fully supported by the engine.
 - **Claimed.** A test whose `(op_chain, io_dtype, layout)` lies in some matcher's cross-product for the current `(arch, platform)`.
-- **Claim broken.** An observed claimed test with empty `engineIds`. The only positive failure mode (Rule A in §7.1).
+- **Claim broken.** An observed claimed test with empty `engineIds`. Rule A in §7.1.
+- **Zero-coverage matcher.** A `[[supported.matchers]]` entry whose cross-product matches zero observed tests in a full unfiltered CI run. Indicates broken test detection (fixture rename, catalog removal, `op_chain` drift). Rule C in §7.1.
+- **Engine over-claim.** A test that fails while the engine returned non-empty `supportingEngineIds` and no matcher covers it. Diagnostic note on the existing test failure, not a new failure. Rule D in §7.1.
 - **Sidecar.** The machine-managed `<EngineName>.supported.toml` file containing `[[supported]]` blocks. Always paired with the hand-edited main `<EngineName>.toml`.
