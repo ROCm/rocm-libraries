@@ -23,14 +23,22 @@
 * ************************************************************************ */
 #pragma once
 #include "hipsparse_arguments.hpp"
+#include <hipsparse/hipsparse-version.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {
     return N;
 }
 
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
+#else
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum)
+#endif
+
 // clang-format off
-#define HIPSPARSE_FOREACH_TEST_ENUM TRANSFORM_HIPSPARSE_TEST_ENUM(axpby) \
+#define HIPSPARSE_FOREACH_TEST_ENUM \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(axpby) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(axpyi) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(bsr2csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(bsric02) \
@@ -122,7 +130,7 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csr) \
-    TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_bsr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(spmv_bsr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_coo_aos) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_csr) \

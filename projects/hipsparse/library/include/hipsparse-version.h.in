@@ -35,4 +35,7 @@
 #define hipsparseVersionTweak    @hipsparse_VERSION_TWEAK@
 // clang-format on
 
+/* Feature flags baked in at build time. */
+#cmakedefine HIPSPARSE_WITH_SPMV_BSR
+
 #endif /* HIPSPARSE_VERSION_H */
