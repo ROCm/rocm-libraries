@@ -72,22 +72,33 @@ def find_readobj():
     return None
 
 
-def unbundle_co(co_path, full_target):
-    """Unbundle the device slice of `co_path` for `full_target` into a temp ELF.
+def unbundle_co(co_path):
+    """Unbundle the amdgcn slice of `co_path` into a temp ELF and return its path.
 
-    Returns the ELF path on success, or None on any failure. Caller is
-    responsible for unlinking (or accepting it lives until process exit; we
-    use a deterministic /tmp filename so repeated runs reuse it).
+    Discovers the bundle target via `clang-offload-bundler --list`; returns None
+    on any failure. Deterministic /tmp filename so repeated runs reuse it.
     """
     b = find_bundler()
     if b is None:
+        return None
+    try:
+        listing = subprocess.run(
+            [b, "--list", "--type=o", "--input", str(co_path)],
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError,
+            FileNotFoundError):
+        return None
+    amd = next((t.strip() for t in listing.stdout.splitlines()
+                if "amdgcn-amd-amdhsa" in t), "")
+    if not amd:
         return None
     elf_path = Path(f"/tmp/okl-unbundle-{co_path.stem}.elf")
     host_path = Path(f"/tmp/okl-unbundle-{co_path.stem}.host.o")
     try:
         subprocess.run(
             [b, "--unbundle", "--type=o", "--input", str(co_path),
-             "--targets", f"{full_target},host-x86_64-unknown-linux-gnu-",
+             "--targets", f"{amd},host-x86_64-unknown-linux-gnu-",
              "--output", str(elf_path), "--output", str(host_path)],
             capture_output=True, text=True, timeout=20, check=True,
         )
@@ -201,40 +212,6 @@ def parse_kernel_args(elf_path, kernel_symbol):
         args, ks = kernels[kernel_symbol]
         return args, ks
     return None, None
-
-
-def probe_bundle(co_path):
-    """Run clang-offload-bundler --list on a .co; return (target_arch, xnack, full_target).
-
-    target_arch is the gfxNNN slug (or '' if unknown).
-    xnack is 'on' / 'off' / 'any'.
-    full_target is the verbatim bundle target tuple (e.g.
-    'hipv4-amdgcn-amd-amdhsa--gfx942') so the runner can echo it for diagnostics.
-    """
-    b = find_bundler()
-    if b is None:
-        return ("", "any", "")
-    try:
-        out = subprocess.run(
-            [b, "--list", "--type=o", "--input", str(co_path)],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ("", "any", "")
-    targets = [l.strip() for l in out.stdout.splitlines() if l.strip()]
-    # Pick the first amdgcn target (the gfx slice; the other is host-x86_64).
-    amd = next((t for t in targets if "amdgcn-amd-amdhsa" in t), "")
-    if not amd:
-        return ("", "any", "")
-    # Tail field is "gfx942" or "gfx942:xnack+" or "gfx942:xnack-".
-    tail = amd.rsplit("-", 1)[-1]
-    if not tail.startswith("gfx"):
-        return ("", "any", amd)
-    if ":xnack+" in tail:
-        return (tail.split(":", 1)[0], "on", amd)
-    if ":xnack-" in tail:
-        return (tail.split(":", 1)[0], "off", amd)
-    return (tail, "any", amd)
 
 
 BENCH_CANDIDATES = [
@@ -601,20 +578,12 @@ def write_package(out_dir, args, dump_info):
     dst_co = out / "kernel.co"
     shutil.copyfile(src_co, dst_co)
 
-    # Probe the .co for its bundle target so the runner can preflight arch/xnack
-    # against the running device. Fallback: leave empty and let the runner skip
-    # the check.
-    target_arch, xnack_mode, bundle_target = probe_bundle(dst_co)
-    if not target_arch:
-        print(f"warn: could not determine target arch from {src_co}; "
-              "okl_run will skip arch preflight", file=sys.stderr)
-
     sym = dump_info["kernel_symbol"]
 
     # Parse the .co's amdhsa.kernels[*].args metadata for this kernel. This
     # is the ground-truth kernarg layout the kernel reads; everything in the
     # conf is derived from it.
-    elf_path = unbundle_co(dst_co, bundle_target) if bundle_target else None
+    elf_path = unbundle_co(dst_co)
     elf_args = None
     elf_kernarg_size = None
     if elf_path is not None:
@@ -681,11 +650,6 @@ def write_package(out_dir, args, dump_info):
         f"co_file                 = kernel.co",
         f"kernel_symbol           = {sym}",
         "",
-        "# Loading preflight (read by load_kernel / check_arch_compatible).",
-        f"target_arch             = {target_arch}",
-        f"xnack                   = {xnack_mode}",
-        f"bundle_target           = {bundle_target}",
-        "",
         "# Kernel layout (ground truth from amdhsa.kernels[*].args in the .co).",
         f"kernarg_size            = {kernarg_size}",
         f"workgroup_size_threads  = {dump_info['workgroup_size_threads']}",
@@ -739,9 +703,6 @@ def write_package(out_dir, args, dump_info):
         "kernarg_size":   kernarg_size,
         "num_slots":      len(slots),
         "num_buffers":    len(buffers),
-        "target_arch":    target_arch,
-        "xnack":          xnack_mode,
-        "bundle_target":  bundle_target,
     }
 
 

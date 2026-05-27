@@ -14,15 +14,10 @@
 //
 // Config-file shape (see okl.py --package and research §9 for what populates it):
 //
-// --- Loading (validated by load_kernel + check_arch_compatibility) ---
+// --- Loading (validated by load_kernel) ---
 //   co_file               - .co filename (resolved relative to conf file dir)
 //   kernel_symbol         - exact symbol name from the .co (must exist; verified
 //                           via hipModuleGetFunction + hipFuncGetAttribute)
-//   target_arch           - required, e.g. "gfx942". Compared against the prefix
-//                           of hipDeviceProp.gcnArchName at load time.
-//   xnack                 - optional, one of {any, on, off}. Default: any.
-//   bundle_target         - diagnostic only; full bundle target tuple from the
-//                           .co bundle header.
 //
 // --- ABI / launch ---
 //   kernarg_size            - total kernarg buffer bytes (from ELF
@@ -102,11 +97,6 @@ struct BufferDecl {
 struct Config {
     std::string co_file;
     std::string kernel_symbol;
-
-    // Loading
-    std::string target_arch;
-    std::string xnack = "any";
-    std::string bundle_target;
 
     uint32_t kernarg_size   = 0;
     uint32_t workgroup_size = 0;
@@ -280,16 +270,8 @@ static Config load_config(const std::string& path) {
         auto it = scalars.find(k);
         return it == scalars.end() ? d : uint32_t(parse_u64(it->second));
     };
-    auto opt_str = [&](const char* k, std::string d) {
-        auto it = scalars.find(k);
-        return it == scalars.end() ? std::move(d) : it->second;
-    };
-
     c.co_file        = req_str("co_file");
     c.kernel_symbol  = req_str("kernel_symbol");
-    c.target_arch    = req_str("target_arch");
-    c.xnack          = opt_str("xnack", "any");
-    c.bundle_target  = opt_str("bundle_target", "");
     c.kernarg_size   = uint32_t(parse_u64(req_str("kernarg_size")));
     c.workgroup_size = uint32_t(parse_u64(req_str("workgroup_size_threads")));
     c.m              = opt_u32("m", 0);
@@ -305,59 +287,6 @@ static Config load_config(const std::string& path) {
 // Loading interface (see kernel-packaging-research.md §8).
 // Unchanged from part 1.
 // ----------------------------------------------------------------------------
-
-struct ArchTuple {
-    std::string base;
-    std::string xnack;
-};
-
-static ArchTuple parse_arch_tuple(const std::string& s) {
-    ArchTuple t;
-    auto colon = s.find(':');
-    t.base = (colon == std::string::npos) ? s : s.substr(0, colon);
-    std::string rest = (colon == std::string::npos) ? "" : s.substr(colon + 1);
-    while (!rest.empty()) {
-        auto next = rest.find(':');
-        std::string feat = rest.substr(0, next);
-        if (feat == "xnack+") t.xnack = "on";
-        else if (feat == "xnack-") t.xnack = "off";
-        rest = (next == std::string::npos) ? "" : rest.substr(next + 1);
-    }
-    return t;
-}
-
-static ArchTuple device_arch_tuple() {
-    int dev = 0;
-    HIP_CHECK(hipGetDevice(&dev));
-    hipDeviceProp_t prop{};
-    HIP_CHECK(hipGetDeviceProperties(&prop, dev));
-    return parse_arch_tuple(prop.gcnArchName);
-}
-
-static void check_arch_compatible(const Config& c, const ArchTuple& dev) {
-    if (c.target_arch != dev.base) {
-        fprintf(stderr,
-                "okl_run: arch mismatch\n"
-                "  conf target_arch : %s\n"
-                "  device gcnArchName: %s (base=%s, xnack=%s)\n"
-                "  This .co will not load on this device. Rebuild the package "
-                "for %s, or run on a %s GPU.\n",
-                c.target_arch.c_str(), dev.base.c_str(), dev.base.c_str(),
-                dev.xnack.empty() ? "unspecified" : dev.xnack.c_str(),
-                dev.base.c_str(), c.target_arch.c_str());
-        std::exit(1);
-    }
-    if (c.xnack != "any" && !dev.xnack.empty() && c.xnack != dev.xnack) {
-        fprintf(stderr,
-                "okl_run: xnack mismatch\n"
-                "  conf xnack       : %s\n"
-                "  device xnack     : %s\n"
-                "  Pass xnack=any to relax this check, or build the kernel "
-                "for the matching xnack mode.\n",
-                c.xnack.c_str(), dev.xnack.c_str());
-        std::exit(1);
-    }
-}
 
 struct LoadedKernel {
     hipModule_t   module;
@@ -456,9 +385,6 @@ int main(int argc, char** argv) {
     std::filesystem::path co_path = c.co_file;
     if (co_path.is_relative()) co_path = conf_path.parent_path() / co_path;
 
-    ArchTuple dev_arch = device_arch_tuple();
-    check_arch_compatible(c, dev_arch);
-
     // 1. Allocate and init every declared buffer.
     std::unordered_map<std::string, void*> buf_ptrs;
     std::unordered_map<std::string, uint64_t> buf_sizes;
@@ -541,11 +467,6 @@ int main(int argc, char** argv) {
 
     printf("conf:      %s\n", conf_path.string().c_str());
     printf("co:        %s\n", co_path.string().c_str());
-    printf("target:    arch=%s xnack=%s  device=%s:xnack%s%s\n",
-           c.target_arch.c_str(), c.xnack.c_str(), dev_arch.base.c_str(),
-           dev_arch.xnack == "on" ? "+" : (dev_arch.xnack == "off" ? "-" : "?"),
-           c.bundle_target.empty() ? "" :
-               (std::string("  bundle=") + c.bundle_target).c_str());
     printf("kernel:    %.80s%s\n", c.kernel_symbol.c_str(),
            c.kernel_symbol.size() > 80 ? "..." : "");
     if (lk.num_regs >= 0 || lk.lds_bytes >= 0) {
