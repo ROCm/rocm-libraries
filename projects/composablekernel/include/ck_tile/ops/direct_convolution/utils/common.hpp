@@ -25,4 +25,10 @@ enum class EpilogueType
     RegistersToGlobalMemory       // Write MFMA results directly from registers to global memory
 };
 
+enum class InputBuffering
+{
+    Double, // Two LDS input buffers, ping-pong; next fetch overlaps current consume.
+    Single  // One LDS input buffer; consume and refill serialize. Halves the input LDS pool.
+};
+
 } // namespace ck_tile::direct_conv

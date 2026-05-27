@@ -114,6 +114,43 @@ TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config2_C128_K128_Ho100)
     ASSERT_TRUE((RunFprop<2>(1, 100, 100, 1, 128, 128, 3, 3, 1, 1)));
 }
 
+// Config 48: single-buffer LDS input counterpart of Config 2.
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K128_Pad1)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 8, 8, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K128_NoPad)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 8, 8, 1, 128, 128, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<48>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K64)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 8, 8, 1, 128, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K16)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 8, 8, 1, 128, 16, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K128_Ho100)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 100, 100, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// rocprof-target shape — primary perf comparison point against Config 2.
+TEST_F(DirectConvNonGrouped32cFp16V3FpropTest, Fprop_Config48_C128_K256_H256)
+{
+    ASSERT_TRUE((RunFprop<48>(2, 256, 256, 1, 128, 256, 3, 3, 1, 1)));
+}
+
 // --- Dgrad, v3 cross-wave LDS reduction ---
 
 class DirectConvNonGrouped32cFp16V3DgradTest
