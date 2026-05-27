@@ -28,7 +28,7 @@
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/non_grouped_conv_compute_loop_v3.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/non_grouped_conv_compute_loop_v3_single_buf.hpp"
+#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
@@ -240,7 +240,6 @@ struct Config
 
     SwizzleType swizzle_type = SwizzleType::None;
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
-    InputBuffering input_buffering = InputBuffering::Double;
     int vector_size = 8;
 
     std::string GetName() const
@@ -268,9 +267,7 @@ struct Config
             epilogue_suffix = "_lds_staged_epilogue";
         }
 
-        std::string buf_suffix = (input_buffering == InputBuffering::Single) ? "_single_buf" : "";
-
-        return base + epilogue_suffix + buf_suffix;
+        return base + epilogue_suffix;
     }
 };
 
@@ -354,10 +351,6 @@ static constexpr Config<DT> configs[] = {
     {.waves_per_wg = 8, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},   // 46
     {.waves_per_wg = 8, .swizzle_type = SwizzleType::CyclicShift, .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},                                  // 47
 
-    // --- Single-buffer LDS input (index 48) ---
-    // Counterpart of Config 2: 16x16x32, waves_per_wg=4, fprop, no swizzle,
-    // but with a single LDS input buffer (halves input LDS pool).
-    {.waves_per_wg = 4, .input_buffering = InputBuffering::Single},                                                                                          // 48
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 };
@@ -1088,24 +1081,12 @@ __device__ void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __r
         OutputWriterV3Lds<cfg>,
         OutputWriterV3<cfg>>;
 
-    if constexpr(cfg.input_buffering == InputBuffering::Single)
-    {
-        conv_compute_loop_v3_single_buf<
-            TC, cfg, MfmaFn,
-            ConvBlockCoordsT<cfg>, ConvInputLoader<cfg>, WeightLoader<cfg>,
-            OutputWriterType,
-            ElementType>(
-            in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
-    }
-    else
-    {
-        conv_compute_loop_v3<
-            TC, cfg, MfmaFn,
-            ConvBlockCoordsT<cfg>, ConvInputLoader<cfg>, WeightLoader<cfg>,
-            OutputWriterType,
-            ElementType>(
-            in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
-    }
+    conv_compute_loop_v3<
+        TC, cfg, MfmaFn,
+        ConvBlockCoordsT<cfg>, ConvInputLoader<cfg>, WeightLoader<cfg>,
+        OutputWriterType,
+        ElementType>(
+        in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
 }
 
 template <auto cfg>
