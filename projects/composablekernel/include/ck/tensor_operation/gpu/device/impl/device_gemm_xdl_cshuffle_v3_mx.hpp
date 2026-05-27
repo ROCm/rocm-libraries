@@ -308,7 +308,7 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
         static constexpr index_t APackedSize = packed_size_v<ADataType>;
         static constexpr index_t BPackedSize = packed_size_v<BDataType>;
 
-        static constexpr long_index_t TwoGB    = long_index_t{1} << 31;
+        static constexpr long_index_t TwoGB    = INT32_MAX;
         static constexpr index_t PartitionSize = 256;
 
         index_t M;

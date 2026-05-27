@@ -175,7 +175,7 @@ struct DeviceGemmMultiD_Xdl_CShuffle_V3 : public DeviceGemmMultipleDSplitK<ALayo
         std::array<index_t, NumDTensor> StrideDs;
         index_t StrideC;
 
-        static constexpr long_index_t TwoGB    = (long_index_t{1} << 31);
+        static constexpr long_index_t TwoGB    = INT32_MAX;
         static constexpr index_t PartitionSize = 256;
 
         Partitioner() = default;
