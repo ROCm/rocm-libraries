@@ -81,6 +81,14 @@ extern int n_hip_failures;
     catch(const ROCFFT_FAIL& e)                                                     \
     {                                                                               \
         GTEST_FAIL() << e.what();                                                   \
+    }                                                                               \
+    catch(const fft_params::unimplemented_exception& e)                             \
+    {                                                                               \
+        GTEST_SKIP() << "Unimplemented exception: " << e.what();                    \
+    }                                                                               \
+    catch(...)                                                                      \
+    {                                                                               \
+        GTEST_FAIL() << "unidentified exception caught during test.";               \
     }
 
 #endif

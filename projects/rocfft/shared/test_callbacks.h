@@ -34,11 +34,6 @@ struct callback_test_data
     double scalar;
 };
 
-// Function that's called when a HIP runtime error happens during
-// setup of callback functions.  The string describes what went
-// wrong.
-typedef std::function<void(const std::string&)> callback_hip_error_handler;
-
 // Get a pointer (on the host) to a load callback device function for
 // the current device
 void* get_load_callback_host(fft_array_type itype,
