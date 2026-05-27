@@ -805,8 +805,7 @@ ROCSOLVER_KERNEL void larft_set_diag(rocblas_int k,
         tp = tau + b * strideT;
         Fp = F + b * strideF;
 
-        // If tau is zero, set Householder = Identity, otherwise use 1/tau.
-        Fp[i + i * ldf] = (tp[i] == 0 ? 1 : 1 / tp[i]);
+        Fp[i + i * ldf] = 1 / tp[i];
     }
 }
 
