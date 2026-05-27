@@ -2267,17 +2267,20 @@ def test_scheduler_R2_FP8_MT256():
                     if em.ui_slot is not None and (ui % R) != em.ui_slot:
                         gated_by_ui[ui].append(
                             (em.opType, getattr(em.source, 'tensor', None)))
-    # ui=0 (first copy of an R-period) must emit scale GR + scale gr_inc
-    # (DTL + SRD advance + LDS write-side swap) and must NOT emit scale
-    # lr_inc (the LDS read-side swap must defer to the last copy).
+    # ui=0 (first copy of an R-period) must GATE OUT scale GR + scale
+    # gr_inc + scale lr_inc — all three live in the last copy (ui=R-1) to
+    # avoid the GR/LR write-after-read race on multi-tile R>1 (see
+    # `_assign_ui_slots` docstring for the rationale).
     gated_ui0_opTypes = {opType for opType, _ in gated_by_ui[0]}
-    assert gated_ui0_opTypes == {'lr_inc'}, (
-        f"ui=0 must gate ONLY scale lr_inc, got {gated_ui0_opTypes}")
-    # ui=R-1 (last copy of an R-period) must emit scale lr_inc and must
-    # NOT emit scale GR or scale gr_inc.
+    assert gated_ui0_opTypes == {'lr_inc', 'gr', 'gr_inc'}, (
+        f"ui=0 must gate scale lr_inc/gr/gr_inc (all defer to last copy), "
+        f"got {gated_ui0_opTypes}")
+    # ui=R-1 (last copy of an R-period) emits scale lr_inc and scale gr +
+    # scale gr_inc (nothing is gated out at ui=R-1 — all scale ops fire here).
     gated_last_opTypes = {opType for opType, _ in gated_by_ui[R - 1]}
-    assert gated_last_opTypes == {'gr', 'gr_inc'}, (
-        f"ui=R-1 must gate scale gr and gr_inc, got {gated_last_opTypes}")
+    assert gated_last_opTypes == set(), (
+        f"ui=R-1 must gate nothing (all scale ops fire here), "
+        f"got {gated_last_opTypes}")
 
 
 def test_scheduler_R2_FP8_MT256_partN2_symmetric_mxsa_lr():

@@ -2093,7 +2093,8 @@ class LogicalScheduler:
         self._completed.add(Pass.EMIT)
         return all_partitions
 
-    def _assign_ui_slots(self, emitted_3d: List[List[List[EmittedModule]]]) -> None:
+    def _assign_ui_slots(self, emitted_3d: List[List[List[EmittedModule]]],
+                          is_preloop: bool = False) -> None:
         """Tag scale ops with the body-copy slot they should fire in (R>1).
 
         The scheduler owns the per-iter cadence decision — the emitter is
@@ -2101,12 +2102,39 @@ class LogicalScheduler:
         ``ui_slot`` matches the current ``unroll_iter % R`` (or whose
         ``ui_slot`` is ``None``, meaning "fire on every body copy").
 
-        Cadence under R>1:
-          - scale ``gr`` / ``gr_inc`` → ``ui_slot=0`` (DTL + SRD advance +
-            LW swap at the START of the period)
+        Cadence under R>1 (mainloop):
+          - scale ``gr`` / ``gr_inc`` → ``ui_slot=R-1`` (DTL + SRD advance +
+            LW swap at the END of the period, AFTER all R-period scale LR
+            reads have completed)
           - scale ``lr_inc``          → ``ui_slot=R-1`` (LDS read-side swap
             AFTER all R-period scale reads)
           - data ops / mfma / lr      → ``ui_slot=None`` (every body copy)
+
+        Why ui_slot=R-1 for gr/gr_inc (E5 fix for multi-tile R>1 bug):
+          With ui_slot=0, scale GR fires in C0 *before* C1's scale LR reads.
+          The GR LW swap toggles LW to the SAME LDS half that LR is still
+          reading from for the rest of the R-period, producing a
+          write-after-read race: C1 part 0's ds_reads can pick up the newly
+          written prefetch data instead of the current R-period's data.
+          Race is non-deterministic (depends on whether buffer_load lds=True
+          completes before ds_read) and produces wildly-wrong scale values
+          in multi-tile-per-WG configs. ui_slot=R-1 delays GR until AFTER
+          the last R-period LR consumer (C1), so LR swap fires first and GR
+          targets the freshly-vacated slot rather than the still-being-read
+          one.
+
+        PRELOOP (``is_preloop=True``): scale GR/gr_inc are NOT gated (they
+          must always fire on the single PRELOOP pass, which runs with
+          unroll_iter=0).  lr_inc still gated to R-1 (legacy: PRELOOP has
+          no scale lr_inc anyway, this is a no-op there).
+
+        PGR < 2: scale GR/gr_inc stay at ui_slot=0 (legacy) because PGR=0
+          has no PRELOOP fetch, so the mainloop's first body iter must
+          fire its own GR in C0 BEFORE the LR can consume it.  Moving GR
+          to C1 (R-1) for PGR=0 would leave the first iter's C0 LR
+          reading uninitialised LDS.  The GR/LR race fix only applies
+          where PRELOOP supplies the first R-period's scale data, i.e.
+          PGR>=2 with mxfp8 ScaleDepthURatio>1.
 
         R==1 is a no-op: every op stays ``ui_slot=None`` and the populate
         path is bit-identical to the pre-refactor "scale_op_gated_out=False"
@@ -2115,6 +2143,10 @@ class LogicalScheduler:
         R = self.config.scaleSchedulingPeriod
         if R <= 1:
             return
+        # E5 fix targets PGR>=2 (where PRELOOP supplies the first R-period's
+        # scale data, freeing mainloop GR to defer to C1).  PGR<2 mainloops
+        # must keep scale GR in C0 so the first body iter's LR has data.
+        defer_gr_to_period_end = self.config.pgr >= 2
         for partition_emitted in emitted_3d:
             for emitted in partition_emitted:
                 for em in emitted:
@@ -2122,7 +2154,15 @@ class LogicalScheduler:
                     if tensor not in ('SA', 'SB'):
                         continue
                     if em.opType in ('gr', 'gr_inc'):
-                        em.ui_slot = 0
+                        if is_preloop:
+                            # PRELOOP: always fire (single pass at ui=0).
+                            em.ui_slot = None
+                        elif defer_gr_to_period_end:
+                            # MAINLOOP PGR>=2: defer to C1 (avoid GR/LR race).
+                            em.ui_slot = R - 1
+                        else:
+                            # MAINLOOP PGR<2: legacy (GR in C0 so first iter's LR has data).
+                            em.ui_slot = 0
                     elif em.opType == 'lr_inc':
                         em.ui_slot = R - 1
 
@@ -2284,13 +2324,30 @@ class LogicalScheduler:
 
         Covers partitions 0..offsetPartition-1 with proper deduplication.
         Each unique (tensor, tile-range, k-range) appears exactly once.
+
+        MX-scale R>1 widening: when ``hasScale and R > 1`` (the mxfp8
+        ScaleDepthURatio>1 path), PRELOOP MT=1 must cover ALL partitions
+        — not just partition 0 — because the GR/LR cadence for scale
+        prefetches one full R-period of scale + paired data into LDS, and
+        mainloop iter 0's partition>0 reads have no other in-flight source
+        for non-partition-0 tiles.  Without this widening (with the
+        ui_slot=R-1 GR cadence above), residual partition>0 LDS reads in
+        mainloop iter 0 see uninitialized / cross-tile-leftover data on
+        multi-tile-per-WG configs.  R==1 / hasScale==False paths keep the
+        legacy ``offsetPartition`` cap so existing BF16 / non-scale
+        schedules stay byte-identical.
         """
         self._ensure_pass(Pass.LR)
         cfg = self.config
 
         seen = set()
         result = []
-        for pi in range(cfg.offsetPartition):
+        widen_to_all_partitions = (
+            cfg.hasScale
+            and cfg.scaleSchedulingPeriod > 1
+        )
+        numP = cfg.numPartitions if widen_to_all_partitions else cfg.offsetPartition
+        for pi in range(numP):
             target_range = self._partition_tile_range(pi)
             for slot in self._partitions[0]:
                 k = slot.mfma.subIterK
@@ -2374,7 +2431,7 @@ class LogicalScheduler:
             ])
 
         self._preloop_emitted = [[emitted]]
-        self._assign_ui_slots(self._preloop_emitted)
+        self._assign_ui_slots(self._preloop_emitted, is_preloop=True)
         return self._preloop_emitted
 
     def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):

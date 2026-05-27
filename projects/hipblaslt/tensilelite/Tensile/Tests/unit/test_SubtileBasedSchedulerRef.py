@@ -1380,7 +1380,11 @@ def test_256x256_fp8_R2_ui_slot_tagging():
     body-copy slot they should fire in under R>1.
 
     Verifies the cadence the scheduler hands to ``InstructionEmitter.populate``:
-      - scale ``gr`` / ``gr_inc`` → ui_slot == 0    (start of R-period)
+      - scale ``gr`` / ``gr_inc`` → ui_slot == R-1 (end of R-period; AFTER
+        all R-period scale LR reads.  Was ui_slot=0; changed to R-1 to fix
+        the multi-tile R>1 GR-LR LDS write-after-read race that produced
+        wildly-wrong scale values on persistent-loop iters where the GR LW
+        swap toggled LW to the half LR was still reading from.)
       - scale ``lr_inc``          → ui_slot == R-1  (end of R-period)
       - data ops / mfma / lr      → ui_slot is None (every body copy)
     """
@@ -1393,8 +1397,9 @@ def test_256x256_fp8_R2_ui_slot_tagging():
             for em in emitted:
                 tensor = getattr(em.source, 'tensor', None)
                 if tensor in ('SA', 'SB') and em.opType in ('gr', 'gr_inc'):
-                    assert em.ui_slot == 0, (
-                        f"scale {em.opType}({tensor}) must carry ui_slot=0, "
+                    assert em.ui_slot == R - 1, (
+                        f"scale {em.opType}({tensor}) must carry "
+                        f"ui_slot={R-1} (mainloop end-of-period), "
                         f"got {em.ui_slot}")
                 elif tensor in ('SA', 'SB') and em.opType == 'lr_inc':
                     assert em.ui_slot == R - 1, (
