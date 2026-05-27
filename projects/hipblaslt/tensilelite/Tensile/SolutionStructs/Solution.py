@@ -865,6 +865,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+      if state["DebugStreamK"] != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
 
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
