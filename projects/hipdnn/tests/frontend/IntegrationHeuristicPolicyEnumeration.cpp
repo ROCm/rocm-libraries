@@ -64,7 +64,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
     }
 }
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, TestGoodHeuristicPluginPolicyIsEnumerated)
+TEST_F(IntegrationHeuristicPolicyEnumeration, GoodHeuristicPluginPolicyIsEnumerated)
 {
     // main.cpp wires test_good_heuristic_plugin in additively before any test
     // runs. Its policy must appear in the enumeration; if it does not, either
