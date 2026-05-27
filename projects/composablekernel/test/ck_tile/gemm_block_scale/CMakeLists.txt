@@ -50,7 +50,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_aquant_preshuffle PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
-    # ABQuant tests
+    # ABQuant tests split into 4 files
     add_gtest_executable(test_tile_gemm_quant_abquant_base
         test_gemm_quant_abquant_base.cpp
     )
@@ -58,9 +58,6 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
 
     add_gtest_executable(test_tile_gemm_quant_abquant_padding
         test_gemm_quant_abquant_padding.cpp
-    )
-    add_gtest_executable(test_tile_gemm_quant_abquant_fusedaquant
-        test_gemm_quant_abquant_fusedaquant.cpp
     )
     target_compile_options(test_tile_gemm_quant_abquant_padding PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
