@@ -3760,9 +3760,9 @@ class Solution(collections.abc.Mapping):
       bGlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
       glvwMlimit = 16
       if state["GlobalReadVectorWidthMetadata"] < glvwMlimit:
-        # If we have valid solutionIndex, this means we are during TensileCreateLibrary stage
-        # We don't print rejection reason for first attempt to expand GRVWM.
-        _printRejectionReason = ("SolutionIndex" not in state) and printRejectionReason
+        # If SolutionIndex is present and non-negative, this means we are during TensileCreateLibrary stage
+        # Don't print rejection reason for the first attempt to expand GRVWM.
+        _printRejectionReason = (state.get("SolutionIndex", -1) == -1) and printRejectionReason
         if state["ProblemType"]["Sparse"] == 2:
           GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM, glvwMlimit) #sum all need read
           tvm = totalElementsM // GlobalReadVectorWidth
