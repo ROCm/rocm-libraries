@@ -426,14 +426,16 @@ __device__ void run_steqr(const rocblas_int tid,
 
             // Get scaling factor
             anorm = find_max_tridiag(lsv, lendsv, D, E);
+
+            // Save for the case we have to undo the scaling later
+            lsv_scaling = lsv;
+            lendsv_scaling = lendsv;
         }
         __syncthreads();
 
         if(lend == l)
             continue;
 
-        lsv_scaling = lsv;
-        lendsv_scaling = lendsv;
         // Scale submatrix
         if(anorm == 0)
             continue;
