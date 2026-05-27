@@ -6,5 +6,9 @@
 # Sets up a QLPack with dependencies for our check(s).
 mkdir -p codeql/build
 cd codeql/build
+# Run install codeql script if zip not found
+if [[ ! -f /opt/codeql/codeql-cli.zip ]]; then
+  ./codeql/install_codeql
+fi
 unzip -q /opt/codeql/codeql-cli.zip
 mv codeql-codeql-cli-* codeql-cli
