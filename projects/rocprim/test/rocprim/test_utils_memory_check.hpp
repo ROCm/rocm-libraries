@@ -198,7 +198,7 @@ private:
         while(meminfo >> label >> value >> unit)
         {
             if(label == "MemAvailable:")
-                return value * 1024; // kB → bytes
+                return value * 1024; // kB -> bytes
         }
         return 0;
 #endif
