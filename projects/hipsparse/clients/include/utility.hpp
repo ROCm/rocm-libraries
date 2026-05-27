@@ -526,7 +526,6 @@ inline hipDoubleComplex testing_mult(hipDoubleComplex p, hipDoubleComplex q)
 {
     return hipCmul(p, q);
 }
-
 /* ============================================================================================ */
 /*! \brief div */
 template <typename T>
@@ -670,9 +669,9 @@ static inline double testing_real(hipDoubleComplex x)
 template <typename T>
 inline T random_generator()
 {
-    // return rand()/( (T)RAND_MAX + 1);
-    return make_DataType<T>(rand() % 10 + 1,
-                            rand() % 10 + 1); // generate a integer number between [1, 10]
+    const auto re = rand() % 10 + 1;
+    const auto im = rand() % 10 + 1;
+    return make_DataType<T>(re, im);
 };
 
 /* ============================================================================================ */
@@ -7515,7 +7514,7 @@ void host_hybmv(int                  m,
 
             if(beta != zero)
             {
-                y[i] = testing_fma(alpha, sum, testing_mult(beta, y[i]));
+                y[i] = testing_fma(beta, y[i], testing_mult(alpha, sum));
             }
             else
             {
@@ -7534,12 +7533,20 @@ void host_hybmv(int                  m,
             y[i] = testing_mult(y[i], coo_beta);
         }
 
-        for(int i = 0; i < coo_nnz; ++i)
+        int i = 0;
+        while(i < coo_nnz)
         {
-            int row = coo_row_ind[i] - idx_base;
-            int col = coo_col_ind[i] - idx_base;
+            const int row     = coo_row_ind[i] - idx_base;
+            T         row_sum = zero;
 
-            y[row] = testing_fma(alpha, testing_mult(coo_val[i], x[col]), y[row]);
+            while(i < coo_nnz && (coo_row_ind[i] - idx_base) == row)
+            {
+                const int col = coo_col_ind[i] - idx_base;
+                row_sum       = row_sum + testing_mult(coo_val[i], x[col]);
+                ++i;
+            }
+
+            y[row] = testing_fma(alpha, row_sum, y[row]);
         }
     }
 }

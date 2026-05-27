@@ -186,7 +186,16 @@ _expectedParamTypes = _getExpectedTypes(validParameters)
 # Parameters to skip during type validation because YAML serialization
 # inherently produces a different type (e.g. [9, 0, 10] -> list) and the
 # conversion to the canonical type happens downstream in the pipeline.
-_skipTypeCheck = {"ISA"}
+# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
 
 
 # Module-level collector that accumulates type mismatches across all Solution
@@ -274,7 +283,7 @@ def validateParameterTypes(state, srcFile=""):
 
 
 def printTypeMismatchSummary(numFiles=0):
-  """Print a summary of all collected type mismatches.
+  """Print a summary of all collected type mismatches to stdout.
 
   If no mismatches have been collected, prints a confirmation message
   showing how many files were checked cleanly, and returns 0.  Otherwise
@@ -701,6 +710,7 @@ class Solution(collections.abc.Mapping):
     # Use nonDTL loads in DTL tail loop
     state["NonDTLTailLoopA"] = False
     state["NonDTLTailLoopB"] = False
+    state["NonDTLTailLoopMetadata"] = False
     if state["ProblemType"]["MXBlockA"]:
       state["NonDTLTailLoopMXSA"] = False
     if state["ProblemType"]["MXBlockB"]:
@@ -736,6 +746,8 @@ class Solution(collections.abc.Mapping):
         if state["ProblemType"]["MXBlockB"]:
           state["NonDTLTailLoopMXSB"] = True
           state["tailLoopOptMXSB"] = False
+    if state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]:
+      state["NonDTLTailLoopMetadata"] = True
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
@@ -862,6 +874,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+      if state["DebugStreamK"] != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
 
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
@@ -1595,8 +1611,8 @@ class Solution(collections.abc.Mapping):
         if not isaInfoMap[isa].archCaps["HasF32XEmulation"]:
           reject(state, printRejectionReason, "Missing emulation for F32X")
           return
-        if state["_ScheduleIterAlg"] not in (1, 3):
-          reject(state, printRejectionReason, "F32X Emulation only supported with Schedule Iter Alg == (1 or 3)")
+        if state["_ScheduleIterAlg"] not in (0, 1, 3):
+          reject(state, printRejectionReason, "F32X emulation requires ScheduleIterAlg to be one of {0, 1, 3}")
           return
         if tuple(state["MatrixInstruction"])[:3] in ((16, 16, 8), (16, 16, 16), (32, 32, 4)):
           reject(state, printRejectionReason, "tf32 emulation currently only supports mfma MI 16x16x32 and 32x32x16")
@@ -1655,24 +1671,27 @@ class Solution(collections.abc.Mapping):
           state["SubGroupMetadata"] = state["SubGroupB"]
           state["MacroTileMetadata"] = state["MacroTileB"]
           state["WaveSeparateGlobalReadMetadata"] = state["WaveSeparateGlobalReadB"]
-          state["DirectToLdsMetadata"] = False
           state["ProblemType"]["MirrorDimsMetadata"]  = list(state["ProblemType"]["MirrorDimsB"])
           state["VectorWidthMetadata"] = state["VectorWidthB"]
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileB"]
+        if state["DirectToLdsMetadata"] and not state["DirectToLdsB"]:
+          state["DirectToLdsMetadata"] = False
       else:
         if not state["DirectToVgprSparseMetadata"]:
           state["ThreadTileMetadata"] = state["ThreadTileA"]
           state["SubGroupMetadata"] = state["SubGroupA"]
           state["MacroTileMetadata"] = state["MacroTileA"]
           state["WaveSeparateGlobalReadMetadata"] = state["WaveSeparateGlobalReadA"]
-          state["DirectToLdsMetadata"] = False
           state["ProblemType"]["MirrorDimsMetadata"]  = list(state["ProblemType"]["MirrorDimsA"])
           state["VectorWidthMetadata"] = state["VectorWidthA"]
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileA"]
+        if state["DirectToLdsMetadata"] and not state["DirectToLdsA"]:
+          state["DirectToLdsMetadata"] = False
     elif not state["ProblemType"]["Sparse"]:
       state["DirectToVgprSparseMetadata"] = False
+      state["DirectToLdsMetadata"] = False
       state["MIWaveTileMetadata"] = 0
 
     if state["NonTemporal"] != -1:
@@ -1687,12 +1706,14 @@ class Solution(collections.abc.Mapping):
     # set True for DTL
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
     state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
+    state["UseGeneralizedNLCOneMetadata"] = state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]
 
     state["UseGeneralizedNLCOneMXSA"] = False
     state["UseGeneralizedNLCOneMXSB"] = False
 
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
+    state["LocalWriteUseSgprMetadata"] = False
     state["StoreSwapAddr"] = False
 
     if state["WorkGroupMappingXCC"] == -1:
@@ -2181,6 +2202,48 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+      
+    halfPLR: int = state["HalfPLR"]
+    state["HalfPLRA"] = bool(halfPLR & 0x01)
+    state["HalfPLRB"] = bool(halfPLR & 0x02)
+    if state["HalfPLR"]:
+      state["ClusterLocalRead"] = 0
+      state["SuppressNoLoadLoop"] = True
+      if state["PrefetchLocalRead"] != 1:
+        reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
+        return
+      if state["PrefetchGlobalRead"] == 0:
+        reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
+        return
+      if state["LoopIters"] == 1:
+        reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
+        return
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
+        return
+      if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
+        (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
+        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
+        return
+      if not state["EnableMatrixInstruction"]:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
+        return
+      if state["_ScheduleIterAlg"] != 0:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0")
+        return
+      if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
+        (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
+        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
+        return
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
+        return
+      if state["ConvertAfterDS"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
+        return
+      if state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
+        return
 
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
@@ -3721,6 +3784,17 @@ class Solution(collections.abc.Mapping):
           if not isDtlDoable:
             if state["UseGeneralizedNLCOne%s"%tc]:
               reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
+    if state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]:
+      sparseTc = 'B' if state["ProblemType"]["Sparse"] == 2 else 'A'
+      # DirectToLdsMetadata requires GRVWMetadata ∈ {4, 16} (dword/dwordx4), similar to isDirectToLdsDoable
+      grvwm = state["GlobalReadVectorWidthMetadata"]
+      grvwmCheck = (grvwm == 4) or (grvwm == 16 and isaInfoMap[state["ISA"]].asmCaps["HasDirectToLdsx4"])
+      if state["DirectToLds%s"%sparseTc] and (not state["DirectToVgprSparseMetadata"]) and grvwmCheck:
+        state["DirectToLdsMetadata"] = True
+        state["LocalWriteUseSgprMetadata"] = True
+      else:
+        state["DirectToLdsMetadata"] = False
+        state["LocalWriteUseSgprMetadata"] = False
 
     # Update parent variable so kernel display is accurate
     if state["DirectToLdsA"] and state["DirectToLdsB"]:
@@ -3888,7 +3962,12 @@ class Solution(collections.abc.Mapping):
             blockWidth = bw
             break
         if blockWidth == 0:
-          reject(state, printRejectionReason, "invalid local write block width")
+          reject(state, printRejectionReason,
+                 "invalid local write block width "
+                 "(nwcv=%s, bpe=%s, bpr=%s, localWriteWidth=%s). "
+                 "This typically means TransposeLDS=0 is incompatible with the selected "
+                 "DataType and MatrixInstruction (e.g. FP4 + [16,16,128] requires TransposeLDS=1)."
+                 % (nwcv, bpe, bpr, localWriteWidth))
 
         return blockWidth
 
@@ -3910,6 +3989,10 @@ class Solution(collections.abc.Mapping):
           nwpv = vw
 
         blockWidth = findValidWriteBlockWidth(nwcv, bpe, bpr)
+        if blockWidth == 0:
+          # Solution already rejected in findValidWriteBlockWidth; bail out to
+          # avoid ZeroDivisionError at "vw // nwcvpi" below.
+          return False
         nwcvpi = int(blockWidth * bpr / bpe)
 
         serials = []
@@ -3958,7 +4041,8 @@ class Solution(collections.abc.Mapping):
 
     # set NoLdsWriteCode if (DirectToVgpr or DirectToLds)A+B is enabled
     state["NoLdsWriteCode"] = False
-    if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]):
+    if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]) \
+      and (not state["ProblemType"]["Sparse"] or state["DirectToLdsMetadata"] or state["DirectToVgprSparseMetadata"]):
       state["NoLdsWriteCode"] = True
       # MX case
       if state["ProblemType"]["MXBlockA"]:
@@ -4300,6 +4384,14 @@ class Solution(collections.abc.Mapping):
 
     # Sparse problem
     if state["ProblemType"]["Sparse"]:
+      if state["DirectToLdsA"] or state["DirectToLdsB"] or state["DirectToLdsMetadata"]:
+        if state["ExpandPointerSwap"]:
+          reject(state, printRejectionReason, "Sparse + DirectToLds + ExpandPointerSwap=1 currently unsupported")
+          return False
+        if state["PrefetchGlobalRead"] == 1:
+          reject(state, printRejectionReason, "Sparse + DirectToLds + PrefetchGlobalRead=1 currently unsupported")
+          return False
+      
       # if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
       #   reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
       #   return
