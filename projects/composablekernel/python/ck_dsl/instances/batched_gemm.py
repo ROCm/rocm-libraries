@@ -168,7 +168,7 @@ def build_persistent_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
 def batched_gemm_signature(spec: BatchedGemmSpec):
     from ..helpers.spec import SignatureBuilder
 
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("A", "f16")
         .ptr("B", "f16")
@@ -179,8 +179,13 @@ def batched_gemm_signature(spec: BatchedGemmSpec):
         .scalar("stride_a", "i32")
         .scalar("stride_b", "i32")
         .scalar("stride_c", "i32")
-        .build()
     )
+    if spec.trait.active_tile_skip:
+        # Two extra args used by the active-tile gate at the start
+        # of the kernel; their layout must match the kernel's
+        # ``b.param`` order in ``build_universal_gemm``.
+        sig = sig.ptr("SortedTokenIds", "i32").scalar("slot_size", "i32")
+    return sig.build()
 
 
 def batched_gemm_grid(

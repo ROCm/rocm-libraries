@@ -1,0 +1,81 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "results": [
+    {
+      "ms_best": 0.010492645502090454,
+      "ms_median": 0.010528850555419921,
+      "pct_hbm": 40.01278799673115,
+      "vs_rocblas": 1.0089082213548515,
+      "max_abs": 0.0,
+      "label": "tm16_tn16_tk1024_w1x1x1_bs64_wpeNone"
+    },
+    {
+      "ms_best": 0.010521860122680663,
+      "ms_median": 0.01055385947227478,
+      "pct_hbm": 39.901689920302516,
+      "vs_rocblas": 1.0117173194885254,
+      "max_abs": 0.0,
+      "label": "tm16_tn16_tk1024_w1x1x1_bs64_wpe4"
+    },
+    {
+      "error": "max_abs=19264.0",
+      "label": "tm16_tn32_tk1024_w1x2x1_bs128_wpeNone"
+    },
+    {
+      "error": "max_abs=20304.0",
+      "label": "tm16_tn32_tk1024_w1x2x1_bs128_wpe4"
+    },
+    {
+      "error": "max_abs=38252.0",
+      "label": "tm16_tn32_tk512_w1x2x1_bs128_wpeNone"
+    },
+    {
+      "error": "max_abs=45502.0",
+      "label": "tm16_tn32_tk512_w1x2x1_bs128_wpe4"
+    },
+    {
+      "label": "tm16_tn64_tk1024_w1x4x1_bs256_wpeNone",
+      "error": "compile: invalid GEMM spec: LDS budget 165888 > 160 KiB cap (AB=163840, C=2048)"
+    },
+    {
+      "label": "tm16_tn64_tk1024_w1x4x1_bs256_wpe4",
+      "error": "compile: invalid GEMM spec: LDS budget 165888 > 160 KiB cap (AB=163840, C=2048)"
+    },
+    {
+      "error": "max_abs=25896.0",
+      "label": "tm16_tn64_tk512_w1x4x1_bs256_wpeNone"
+    },
+    {
+      "error": "max_abs=39296.0",
+      "label": "tm16_tn64_tk512_w1x4x1_bs256_wpe4"
+    },
+    {
+      "error": "max_abs=281932.0",
+      "label": "tm32_tn32_tk1024_w2x2x1_bs256_wpeNone"
+    },
+    {
+      "error": "max_abs=448108.0",
+      "label": "tm32_tn32_tk1024_w2x2x1_bs256_wpe4"
+    },
+    {
+      "error": "max_abs=2716.625",
+      "label": "tm32_tn32_tk512_w2x2x1_bs256_wpeNone"
+    },
+    {
+      "error": "max_abs=3010.0",
+      "label": "tm32_tn32_tk512_w2x2x1_bs256_wpe4"
+    },
+    {
+      "error": "max_abs=21216.0",
+      "label": "tm16_tn64_tk256_w1x4x1_bs256_wpeNone"
+    },
+    {
+      "error": "max_abs=25256.0",
+      "label": "tm16_tn64_tk256_w1x4x1_bs256_wpe4"
+    }
+  ]
+}

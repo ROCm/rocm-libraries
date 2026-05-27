@@ -29,7 +29,7 @@ hook is element-wise and cannot combine gate and up accumulators.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ..helpers.tensor_view import (
@@ -681,6 +681,19 @@ def build_moe_interleaved_gate_up_silu_gemm(
     stride_a = b.param("stride_a", I32)
     stride_b = b.param("stride_b", I32)  # per expert = 2*N*K
     stride_c = b.param("stride_c", I32)  # per expert = M*N
+    if u.trait.active_tile_skip:
+        # MoE active-tile gate. ``SortedTokenIds`` carries the
+        # bucket -> token-id map produced by ``moe_sorting``; -1
+        # marks an inactive padded row. ``slot_size`` is the
+        # per-expert padded row count.
+        sorted_token_ids = b.param(
+            "SortedTokenIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
+        slot_size_p = b.param("slot_size", I32)
 
     t = spec.tile
     a_per_lane, b_per_lane, c_per_lane = _mfma_atom_widths(u)
@@ -779,13 +792,39 @@ def build_moe_interleaved_gate_up_silu_gemm(
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             val = a_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
             a_lds.store_vec(b, row, col, value=val, n=load_vec)
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            val = b_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-            b_lds.store_vec(b, row, col, value=val, n=load_vec)
+        # B-load: identical preshuffle pattern to ``gemm_universal``,
+        # except the GEMM N is ``2*N`` (gate+up packed along N) so
+        # the n_tile_count uses ``2*N``.
+        if u.trait.preshuffle_b:
+            n_tile_idx = b.div(block_n_off, c_block_n)
+            k_tile_idx = b.div(k_off, c_block_k)
+            two_n = b.mul(N, b.const_i32(2))
+            n_tile_count = b.div(two_n, c_block_n)
+            tile_offset_elements = b.mul(
+                b.add(b.mul(k_tile_idx, n_tile_count), n_tile_idx),
+                b.const_i32(block_n * block_k),
+            )
+            base_off = b.add(batch_off_b, tile_offset_elements)
+            for e in range(b_vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
+                row = b.div(vec_idx, c_block_k_div_vec)
+                col_v = b.mod(vec_idx, c_block_k_div_vec)
+                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                if load_vec == 1:
+                    val = b.global_load(WGateUp, glob_off, storage_dtype)
+                    b_lds.store_scalar(b, row, col, value=val)
+                else:
+                    val = b.global_load_vN(WGateUp, glob_off, storage_dtype, load_vec)
+                    b_lds.store_vec(b, row, col, value=val, n=load_vec)
+        else:
+            for e in range(b_vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                row = b.div(vec_idx, c_block_k_div_vec)
+                col_v = b.mod(vec_idx, c_block_k_div_vec)
+                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                val = b_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
+                b_lds.store_vec(b, row, col, value=val, n=load_vec)
 
     def emit_mfma_phase(iter_vars: List[Value]) -> List[Value]:
         if (t.warp_tile_m, t.warp_tile_n) == (16, 16):
@@ -832,30 +871,48 @@ def build_moe_interleaved_gate_up_silu_gemm(
                     flat += 1
         return new_accs
 
-    for_op = b.scf_for_iter(c0, K, c_block_k, accs, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        emit_load_phase(k0)
-        b.sync()
-        new_accs = emit_mfma_phase(list(iter_vars))
-        b.sync()
-        b.scf_yield(*new_accs)
+    # ---- active-tile gate ----
+    # Bucket head index = ``block_id_z * slot_size + block_m_off``;
+    # the interleaved kernel does not yet support chiplet swizzle so
+    # ``block_m_off == block_id_y * tile_m`` here, but the form
+    # mirrors the universal kernel's gate.
+    do_work_cond: Optional[Value] = None
+    if u.trait.active_tile_skip:
+        bucket_head = b.add(b.mul(b.block_id_z(), slot_size_p), block_m_off)
+        first_token = b.global_load_i32(sorted_token_ids, bucket_head)
+        do_work_cond = b.cmp_ge(first_token, c0)
 
-    _emit_interleaved_silu_epilogue(
-        b,
-        u,
-        for_op.results,
-        C_smem,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        block_m_off,
-        block_n_off,
-        M,
-        N,
-        Hidden,
-        c_per_lane,
-        batch_off_c=batch_off_c,
-    )
+    def emit_compute_and_epilogue() -> None:
+        for_op = b.scf_for_iter(c0, K, c_block_k, accs, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            emit_load_phase(k0)
+            b.sync()
+            new_accs = emit_mfma_phase(list(iter_vars))
+            b.sync()
+            b.scf_yield(*new_accs)
+
+        _emit_interleaved_silu_epilogue(
+            b,
+            u,
+            for_op.results,
+            C_smem,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off,
+            block_n_off,
+            M,
+            N,
+            Hidden,
+            c_per_lane,
+            batch_off_c=batch_off_c,
+        )
+
+    if do_work_cond is None:
+        emit_compute_and_epilogue()
+    else:
+        with b.scf_if(do_work_cond):
+            emit_compute_and_epilogue()
     return b.kernel
 
 
@@ -1051,7 +1108,7 @@ def moe_interleaved_gate_up_silu_gemm_signature(
 ):
     from ..helpers.spec import SignatureBuilder
 
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("A", "f16")
         .ptr("WGateUp", "f16")
@@ -1062,8 +1119,10 @@ def moe_interleaved_gate_up_silu_gemm_signature(
         .scalar("stride_a", "i32")
         .scalar("stride_b", "i32")
         .scalar("stride_c", "i32")
-        .build()
     )
+    if spec.trait.active_tile_skip:
+        sig = sig.ptr("SortedTokenIds", "i32").scalar("slot_size", "i32")
+    return sig.build()
 
 
 def moe_interleaved_gate_up_silu_gemm_grid(

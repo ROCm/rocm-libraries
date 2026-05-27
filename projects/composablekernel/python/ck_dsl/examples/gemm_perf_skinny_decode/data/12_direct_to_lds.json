@@ -1,0 +1,38 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "tile": {
+    "tile_m": 16,
+    "tile_n": 16,
+    "tile_k": 512,
+    "warp_m": 1,
+    "warp_n": 1,
+    "warp_k": 1,
+    "warp_tile_m": 16,
+    "warp_tile_n": 16,
+    "warp_tile_k": 32
+  },
+  "results": {
+    "baseline_no_dtl": {
+      "ms_median": 0.013360079526901245,
+      "ms_best": 0.013297879695892334,
+      "ms_spread_pct": 5.672195856841561,
+      "tflops_best": 5.046583781377544,
+      "gbs_best": 2525.7560429257724,
+      "pct_hbm": 31.571950536572153,
+      "max_abs_diff": 0.0
+    },
+    "direct_to_lds": {
+      "ms_median": 0.014372295141220093,
+      "ms_best": 0.014363290071487426,
+      "ms_spread_pct": 1634.097328753176,
+      "tflops_best": 4.672248744263533,
+      "gbs_best": 2338.4057435889263,
+      "pct_hbm": 29.23007179486158,
+      "max_abs_diff": 0.0
+    }
+  }
+}
