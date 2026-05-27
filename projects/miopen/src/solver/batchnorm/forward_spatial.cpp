@@ -227,8 +227,6 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     int stash_method = 0;
     size_t nelements = 1;
 
-    auto const waveSize = handle.GetWavefrontWidth();
-
     GetVariantFromKernelId(
         config.kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
 
@@ -242,7 +240,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             xlocalsize = 256;
         }
         xgridsize = c * xlocalsize;
-        ldsgcn    = xlocalsize / waveSize;
+        ldsgcn    = xlocalsize / 64;
         ldsnogcn  = xlocalsize;
     }
     else
@@ -284,7 +282,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                 (xlocalsize * ylocalsize * zlocalsize) / xlocalsize_final / zlocalsize_final;
         }
         ldsnogcn = xlocalsize * ylocalsize * zlocalsize;
-        ldsgcn   = xlocalsize * ylocalsize * zlocalsize / waveSize;
+        ldsgcn   = xlocalsize * ylocalsize * zlocalsize / 64;
     }
 
     auto result = ConvSolution{miopenStatusSuccess};
@@ -318,7 +316,6 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
             {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
-            {"MIO_BN_GFX125X", (StartsWith(handle.GetDeviceName(), "gfx125") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
             {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
             {"MIO_BN_VEC_SIZE", vectorsize},
@@ -330,8 +327,6 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         build_params.Define("MIO_BN_NHW", in_nhw);
         build_params.Define("MIO_BN_CHW", in_nstride);
         build_params.Define("MIO_BN_NCHW", in_nchw);
-
-        build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
 
         kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cpp";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";

@@ -145,8 +145,7 @@
 #endif
 
 #ifndef MIO_BN_LDSGCN_SIZE
-// 4 SIMD with up to 16 wave each => at most 64 waves
-#define MIO_BN_LDSGCN_SIZE 64
+#define MIO_BN_LDSGCN_SIZE 16
 #endif
 
 #ifndef MIO_BN_LDS_SIZE
