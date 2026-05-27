@@ -156,6 +156,26 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            # Fence the scale ds_read on EVERY body copy under R>1 + PGR>=2.
+            # The deferred scale GR (buffer_load_b128 lds=True at ui_slot=R-1
+            # per the Round 4 fix) writes LDS via the vmem path; both intra-
+            # iter (C1 GR vs same-iter C1 LR after scheduler reorder) and
+            # inter-iter (prior C1 GR still in-flight when next C0 LR fires)
+            # paths can race the scale ds_read against the LDS-bound vmem
+            # store. Narrower gatings (C0-only or C1-only) only partially
+            # close the window; the all-body-iter fence is what stably hits
+            # 10/10 across 3 runs of subtile_mxfp8_correctness_regression.yaml.
+            # adjustVmcnt=False keeps the InstructionScheduler post-pass from
+            # bumping vlcnt back up by the count of buffer_loads scheduled
+            # before the fence (which would degrade vmcnt(0) to "satisfied
+            # immediately"). R==1 / pgr<2: emitter is bit-identical to legacy.
+            R = self.config.scaleSchedulingPeriod
+            pgr = self.config.pgr
+            if R > 1 and pgr >= 2:
+                module.add(SWaitCntEx(
+                    adjustVmcnt=False,
+                    vlcnt=0, vscnt=-1, dscnt=-1, kmcnt=-1,
+                    comment=f"vmcnt(0) before scale {tc} ds_read: serialize deferred scale GR (R>1+PGR>=2)"))
             # One ds_read_b32 per scale group loads the whole (2,2) LR subtile
             # (4 MMA scale tiles = 4 bytes/lane) into a single VGPR.  dsOffset
             # strides only in M; the K position is implicit because one b32
