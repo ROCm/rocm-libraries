@@ -1273,6 +1273,13 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
     # to avoid pulling stale OOB-zeroed dwords into LDS).
     module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA))
     module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB))
+    # MX scale operands: SrdMXS{A,B}+2 tightened with K_pad=256 (host scale
+    # re-scatter granularity from DataInitialization.cpp::rearrangePaddedMXScaleLayout).
+    # No-op when DepthU<=256 since host padding alone already covers K_rem.
+    if kernel["ProblemType"].get("MXBlockA", 0) > 0 and "MX" in tensorParametersA:
+      module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA["MX"]))
+    if kernel["ProblemType"].get("MXBlockB", 0) > 0 and "MX" in tensorParametersB:
+      module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB["MX"]))
     module.add(scheduler.emitTailLoop(writer, kernel))
     module.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,

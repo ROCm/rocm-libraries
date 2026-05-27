@@ -4432,19 +4432,28 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  # Tighten Srd{A,B}+2 (num_records / OOB limit) just before the tail loop.
+  # Tighten Srd{A,B,MXSA,MXSB}+2 (num_records / OOB limit) just before the tail loop.
   #
   # Replaces the conservative tile-boundary limit set in computeLoadSrd
   #   Srd+2 = (numLine * stride + DepthU) * bpeGR
   # with a tail-aware limit using the actual K remainder:
-  #   Srd+2 = (numLine * stride + K_rem) * bpeGR
+  #   Srd+2 = (numLine * stride + K_rem_aligned) * bpe_K_byteStride
   # where:
-  #   numLine = min(SizeI/J - WG*MT, MT) - 1   (0-based last line index)
-  #   K_rem   = SizesSum % DepthU              (already in LoopCounter<unrollChar>
-  #                                             after calculateLoopNumIter(-1))
-  #   stride  = strideRef(tc, tP['tileIdx'])   in elements
+  #   numLine        = min(SizeI/J - WG*MT, MT) - 1   (0-based last line index)
+  #   K_rem          = SizesSum % DepthU              (already in
+  #                    LoopCounter<unrollChar> after calculateLoopNumIter(-1))
+  #   K_rem_aligned  = roundUp(K_rem, K_pad)
+  #                    - K_pad = 1 for A/B (plain bf16/fp4 etc.)
+  #                    - K_pad = 256 for MX scale operands (matches host pad
+  #                      from DataInitialization.cpp::rearrangePaddedMXScaleLayout)
+  #   stride         = strideRef(tc, tP['tileIdx'])   in elements
+  #   bpe_K_byteStride
+  #                  = tP["bpeGR"]                   for A/B
+  #                  = swizzleSize0 / mxBlock        for MX scale (matches
+  #                    computeLoadSrd's swizzle math; 1 for mxBlock=32)
   #
-  # bf16 A/B only — FP4 / MX scale / swizzled paths fall through unchanged.
+  # Supports: bf16/fp4/int8 A/B + MX scale MXSA/MXSB.
+  # Swizzled A/B (SwizzleTensor*) and non-1 groOffsetInMacroTile fall through.
   ##############################################################################
   def computeTailLoopSrdLimit(self, kernel, tP):
     module = Module("computeTailLoopSrdLimit")
@@ -4452,10 +4461,37 @@ class KernelWriterAssembly(KernelWriter):
 
     if not kernel.get("UseSubtileImpl"):
       return module
-    if tc not in ("A", "B"):
+    if tc not in ("A", "B", "MXSA", "MXSB"):
       return module
     if self.states.groOffsetInMacroTile != 1:
       return module
+
+    isMx = tc in ("MXSA", "MXSB")
+
+    # MX-scale specifics: K-padding granularity from host scale re-scatter, and
+    # K-direction byte stride from the swizzle math in computeLoadSrd.
+    MX_PAD_K = 256
+    if isMx:
+      tcab = "A" if tc == "MXSA" else "B"
+      mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
+      if mxBlock <= 0:
+        return module
+      depthU = int(kernel["DepthU"])
+      # When DepthU <= MX_PAD_K, roundUp(K_rem, 256) >= DepthU so the clip is
+      # always a no-op; host padding alone already covers the over-read.
+      if depthU <= MX_PAD_K:
+        return module
+      mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+      isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+      swizzleSize0 = 32 if isMxSwizzledScale else 1
+      if swizzleSize0 % mxBlock != 0:
+        return module
+      bytesPerKElement = swizzleSize0 // mxBlock  # 1 for gauntlet mxBlock=32
+      kPad = MX_PAD_K
+      bpeForLimit = float(bytesPerKElement)
+    else:
+      kPad = 1
+      bpeForLimit = float(tP["bpeGR"])
 
     strideF = self.strideRef(tc, tP['tileIdx'])
     if self.isConstUnitStride(strideF):
@@ -4463,14 +4499,13 @@ class KernelWriterAssembly(KernelWriter):
 
     mt = kernel[tP["mt"]]
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
-
-    # Determine tile axis (Index0 for A, Index1 for B) by scanning numDim — mirrors
-    # the loop in computeLoadSrd that picks the M/N dim from indices.
     tileIdx = tP["tileIdx"]
 
     with self.allocTmpSgpr(3) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
-      module.addComment1("Tighten Srd%s+2 for tail loop: (numLine * stride + K_rem) * bpe"%tc)
+      module.addComment1(
+        "Tighten Srd%s+2 for tail loop: (numLine * stride + roundUp(K_rem,%u)) * %s"
+        % (tc, kPad, "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
 
       # tileStart = WG * MT (element units)
       module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(tP["wg"]), src1=mt,
@@ -4490,13 +4525,24 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=strideF,
                          comment="numLine * stride (element units)"))
 
-      # limit_elems = m_stride_elems + K_rem (full tail, including odd trailing
-      # element so the boundary DTL load doesn't need to bump Srd+2).
-      module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(loopCounterName),
-                         comment="+ K_rem"))
+      if kPad > 1:
+        # K_rem_aligned = roundUp(K_rem, kPad) = (K_rem + kPad - 1) & ~(kPad-1)
+        padMaskInv = (~(kPad - 1)) & 0xffffffff
+        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(loopCounterName),
+                           src1=(kPad - 1),
+                           comment="K_rem + (K_pad-1) for roundUp"))
+        module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(padMaskInv),
+                           comment="K_rem_aligned = roundUp(K_rem, %u)" % kPad))
+        module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1),
+                           comment="+ K_rem_aligned"))
+      else:
+        # limit_elems = m_stride_elems + K_rem (full tail, including odd trailing
+        # element so the boundary DTL load doesn't need to bump Srd+2).
+        module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(loopCounterName),
+                           comment="+ K_rem"))
 
-      # Srd+2 = limit_elems * bpeGR (bytes)
-      module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+      # Srd+2 = limit_elems * bpe_K_byteStride (bytes)
+      module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, bpeForLimit,
                                    comment="buffer_load limit for %s (tail-loop tight)"%tc))
 
     return module
