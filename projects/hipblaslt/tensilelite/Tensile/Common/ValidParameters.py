@@ -948,6 +948,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different

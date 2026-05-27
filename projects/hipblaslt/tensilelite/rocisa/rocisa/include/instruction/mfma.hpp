@@ -659,7 +659,7 @@ namespace rocisa
         std::vector<InstructionInput> getSrcParams() const override
         {
             // ignore block parameter since it's not an operand in mxmfma instruction.
-            return {a, b, acc2, mxsa, mxsb};
+            return {a, b, (acc2 ? InstructionInput(acc2) : InstructionInput(acc2_imm)), mxsa, mxsb};
         }
 
         std::string preStr() const override

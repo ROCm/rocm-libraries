@@ -4849,10 +4849,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     packPre = [ Module() for i in range (self.states.numPackBuffer ) ]
     self.preLoopLocalWriteCode = None
 
-    # If it will enter the unrolled loop, skip initC with v_mov
-    # TODO: Expand MFMAInstruction function to support "isComplex"
-    initCIterWmma = kernel["EnableMatrixInstruction"] and not kernel["LdsInitCVgprs"] and not kernel["ForceUnrollSubIter"] \
-                    and not kernel["ProblemType"]["DataType"].isComplex() and not kernel["ProblemType"]["Sparse"]
+    # InitCIterWmma is resolved to 0/1 in SolutionStructs/Solution.py (-1 auto path).
+    initCIterWmma = bool(kernel["InitCIterWmma"])
 
     waitForPGRLabel = Label("waitForPGR", "")
     if kernel["PrefetchGlobalRead"]:
