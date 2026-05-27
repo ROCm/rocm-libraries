@@ -2083,19 +2083,17 @@ class LogicalScheduler:
             'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
         }
         preamble.extend(self._make_gr_all_tensors(0, all_tiles))
-        # waitcount 0 + boundary 16-bit DTL load (bf16 odd K_rem) + sync.
-        # The boundary load MUST sit after WaitGR (the dwordx4 OOB write to
-        # LDS@boundary has retired) and before SyncOp (other waves stay in
-        # sync). For non-bf16 / non-Subtile paths this is a no-op Module.
-        preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
-        preamble.append(SyncOp())
+        # OOB on buffer will not correctly read 16-bit because of Dword granularity.
+        # Adding logic to perform a Boundary 16-bit DTL load (bf16 odd K_rem).
         preamble.append(InlineModuleOp(
             build=lambda em: em.writer.tailLoopBoundaryDtlLoadAB(
                 em.kernel,
                 em.tensorParametersMap['A'],
                 em.tensorParametersMap['B']),
             label="tail_boundary_ab"))
+        preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
+        
 
         # Loop over partitions to re-use vgpr tile maps.
         all_partitions = []

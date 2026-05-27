@@ -4890,7 +4890,7 @@ class KernelWriterAssembly(KernelWriter):
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkipAB"), "")
 
-    module.addComment1("Tail-loop boundary DTL load (A+B merged)")
+    module.addComment1("Tail-loop boundary DTL load (A+B)")
 
     # ── Shared block: parity gate + K-derived values ──────────────────────────
     # Reserve sgprs that must outlive the per-tensor block.
@@ -5138,9 +5138,9 @@ class KernelWriterAssembly(KernelWriter):
                                    saddr=sgpr("Srd%s" % tc, 4),
                                    soffset=ldSoffset, mubuf=mubuf,
                                    comment="boundary 16-bit DTL load -> LDS@m0"))
-          module.add(SWaitCnt(vlcnt=0, comment="wait for boundary DTL load"))
+          
           module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
-          module.add(SBarrier())
+          
 
           if numGR > 1:
             self.vgprPool.checkIn(vMerged)
