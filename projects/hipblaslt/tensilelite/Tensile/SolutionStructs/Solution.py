@@ -38,6 +38,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple
 from Tensile.Common.DataType import DataType
+from rocisa.enum import DataTypeEnum
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
 from Tensile.Common.ValidParameters import validParameters
@@ -49,6 +50,181 @@ from Tensile.Components.CustomSchedule import hasCustomSchedule
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
+
+
+# ============================================================================
+# MX scale-format combination validation (gfx1250 v_wmma_scale rules).
+#
+# gfx1250's v_wmma_scale_f32_16x16x128_f8f6f4 only accepts a fixed set of
+# (matrix-A class, A-scale fmt, matrix-B class, B-scale fmt) tuples. The
+# AMDGPU assembler does not enforce these joint constraints (see
+# ROCm/llvm-project#2634), so the kernel generator has to reject candidates
+# that would otherwise codegen into illegal encodings.
+#
+# Tensilelite enum spellings used below:
+#   - matrix FP8        -> DataTypeEnum.Float8           (also FP8 _fnuz)
+#   - matrix BF8        -> DataTypeEnum.BFloat8          (also BF8 _fnuz)
+#   - matrix FP6 / BF6  -> DataTypeEnum.Float6 / BFloat6
+#   - matrix FP4        -> DataTypeEnum.Float4
+#   - scale  E8         -> DataTypeEnum.E8     (UE8M0)
+#   - scale  E5M3       -> DataTypeEnum.E5M3
+#   - scale  E4M3       -> DataTypeEnum.Float8 (same byte as OCP FP8)
+# ============================================================================
+
+# Matrix classes governed by the gfx1250 f8f6f4 MX rules.
+_MX_FP8_LIKE = frozenset({
+    DataTypeEnum.Float8.value,
+    DataTypeEnum.Float8_fnuz.value,
+})
+_MX_BF8_LIKE = frozenset({
+    DataTypeEnum.BFloat8.value,
+    DataTypeEnum.BFloat8_fnuz.value,
+})
+_MX_F6_LIKE  = frozenset({
+    DataTypeEnum.Float6.value,
+    DataTypeEnum.BFloat6.value,
+})
+_MX_FP4      = frozenset({DataTypeEnum.Float4.value})
+_MX_ALL      = _MX_FP8_LIKE | _MX_BF8_LIKE | _MX_F6_LIKE | _MX_FP4
+
+# Legal scale formats per matrix class (FP4 has 3, everyone else needs E8).
+_E8_ONLY      = frozenset({DataTypeEnum.E8.value})
+_FP4_SCALES   = frozenset({
+    DataTypeEnum.E8.value,
+    DataTypeEnum.E5M3.value,
+    DataTypeEnum.Float8.value,  # E4M3 byte
+})
+
+
+def _mxMatrixLabel(dtValue):
+    """ISA-spec spelling for the matrix class enum value."""
+    if dtValue in _MX_FP8_LIKE:
+        return "FP8"
+    if dtValue in _MX_BF8_LIKE:
+        return "BF8"
+    if dtValue == DataTypeEnum.Float6.value:
+        return "FP6"
+    if dtValue == DataTypeEnum.BFloat6.value:
+        return "BF6"
+    if dtValue == DataTypeEnum.Float4.value:
+        return "FP4"
+    return str(dtValue)
+
+
+def _mxScaleLabel(dtValue):
+    """ISA-spec spelling for an MX scale enum value."""
+    if dtValue == DataTypeEnum.E8.value:
+        return "E8"
+    if dtValue == DataTypeEnum.E5M3.value:
+        return "E5M3"
+    if dtValue == DataTypeEnum.Float8.value:
+        return "E4M3"
+    return str(dtValue)
+
+
+def _mxEnumValue(field):
+    """Resolve a ProblemType field that may be a ``DataType`` instance, a raw
+    ``DataTypeEnum``, or ``None`` to its underlying enum value (or ``None``).
+    Solution.py is called both before and after Problem.cleanupProblemTypeForLogging
+    flattens the type, so the helper has to handle both shapes."""
+    if field is None:
+        return None
+    # DataType wraps a DataTypeEnum and exposes .value (a DataTypeEnum). Plain
+    # DataTypeEnum values have a .value too (the underlying int).
+    value = getattr(field, "value", field)
+    return getattr(value, "value", value)
+
+
+def _isLegalMXScaleForMatrix(matrixVal, scaleVal):
+    """Per-side rule: does the matrix class accept this scale dtype?"""
+    if matrixVal not in _MX_ALL:
+        return True  # Non-MX matrix class - the joint MX rules don't apply.
+    if matrixVal in _MX_FP4:
+        return scaleVal in _FP4_SCALES
+    return scaleVal in _E8_ONLY  # FP8/BF8/FP6/BF6
+
+
+def _validateMXScaleFormatCombination(state, printRejectionReason):
+    """Reject candidate solutions whose joint MX scale-format tuple is not
+    legal on gfx1250.
+
+    Rules enforced (per the ISA / table-valid-combinations.txt):
+
+    * FP8 / BF8 / FP6 / BF6 (incl. _fnuz variants) must pair with E8 (UE8M0)
+      scale.
+    * FP4 accepts E8, E5M3, or E4M3 scale.
+    * When both A and B are FP4 the two scales must match.
+
+    Sides whose ``MXBlock`` is 0 carry no MX scale and are skipped: the
+    helper short-circuits to ``True`` when neither side has MX scaling.
+
+    Args:
+        state: Solution state dict. Reads
+            ``state["ProblemType"]["DataType{A,B}"]`` (matrix dtype),
+            ``state["ProblemType"]["DataTypeMXS{A,B}"]`` (scale dtype),
+            ``state["ProblemType"]["MXBlock{A,B}"]`` (int).
+        printRejectionReason: Forwarded to :func:`reject`.
+
+    Returns:
+        ``True`` if the state is valid (no reject fired); ``False`` if a
+        reject was emitted, in which case ``state["Valid"]`` is also
+        ``False`` and the caller should propagate the early return upstream.
+    """
+    pt = state["ProblemType"]
+    mxBlockA = pt.get("MXBlockA", 0)
+    mxBlockB = pt.get("MXBlockB", 0)
+    if not mxBlockA and not mxBlockB:
+        return True  # No MX scaling on either side - rules don't apply.
+
+    # Resolve enum values. A side without MX scaling is reported as (None,
+    # None) so the FP4xFP4 joint rule cannot fire spuriously across a
+    # mixed MX / non-MX problem and the per-side rule short-circuits.
+    if mxBlockA:
+        aMatrix = _mxEnumValue(pt.get("DataTypeA"))
+        aScale  = _mxEnumValue(pt.get("DataTypeMXSA"))
+    else:
+        aMatrix, aScale = None, None
+    if mxBlockB:
+        bMatrix = _mxEnumValue(pt.get("DataTypeB"))
+        bScale  = _mxEnumValue(pt.get("DataTypeMXSB"))
+    else:
+        bMatrix, bScale = None, None
+
+    reasons = []
+    if mxBlockA and not _isLegalMXScaleForMatrix(aMatrix, aScale):
+        reasons.append(
+            "matrix A class %s does not accept scale format %s"
+            % (_mxMatrixLabel(aMatrix), _mxScaleLabel(aScale)))
+    if mxBlockB and not _isLegalMXScaleForMatrix(bMatrix, bScale):
+        reasons.append(
+            "matrix B class %s does not accept scale format %s"
+            % (_mxMatrixLabel(bMatrix), _mxScaleLabel(bScale)))
+    # FP4 x FP4 -> scales must match. (FP6/FP8/BF6/BF8 each already pin scale
+    # to E8, so a mixed-class problem cannot have mismatching scales except
+    # via the FP4-only rule.)
+    if (mxBlockA and mxBlockB
+        and aMatrix in _MX_FP4 and bMatrix in _MX_FP4
+        and _isLegalMXScaleForMatrix(aMatrix, aScale)
+        and _isLegalMXScaleForMatrix(bMatrix, bScale)
+        and aScale != bScale):
+        reasons.append(
+            "FP4 x FP4 requires AScale (%s) == BScale (%s)"
+            % (_mxScaleLabel(aScale), _mxScaleLabel(bScale)))
+
+    if not reasons:
+        return True
+
+    tuple_str = (
+        "(A=%s, AScale=%s, B=%s, BScale=%s)"
+        % (_mxMatrixLabel(aMatrix) if aMatrix is not None else "None",
+           _mxScaleLabel(aScale)   if aScale  is not None else "None",
+           _mxMatrixLabel(bMatrix) if bMatrix is not None else "None",
+           _mxScaleLabel(bScale)   if bScale  is not None else "None"))
+    reject(state, printRejectionReason,
+           "Invalid MX scale-format combination %s: %s; "
+           "see table-valid-combinations.txt / ROCm/llvm-project#2634."
+           % (tuple_str, "; ".join(reasons)))
+    return False
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -2151,6 +2327,12 @@ class Solution(collections.abc.Mapping):
         isaInfoMap[isa].asmCaps,
         isaInfoMap[isa].archCaps,
         printRejectionReason):
+      return
+
+    # MX scale-format combination validation. Rejects candidates whose joint
+    # (A type, A scale, B type, B scale) tuple is not legal on gfx1250 (see
+    # _validateMXScaleFormatCombination / ROCm/llvm-project#2634).
+    if not _validateMXScaleFormatCombination(state, printRejectionReason):
       return
 
     tdmInst: int = state["TDMInst"]
