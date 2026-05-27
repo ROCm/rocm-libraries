@@ -13,8 +13,18 @@
 // Run:     ./okl_run path/to/kernel.conf
 //
 // Config-file keys (see okl.py --package for what populates them):
+//
+// --- Loading (validated by load_kernel + check_arch_compatibility, §8) ---
 //   co_file               - .co filename (resolved relative to conf file dir)
-//   kernel_symbol         - exact symbol name from the .co
+//   kernel_symbol         - exact symbol name from the .co (verified via
+//                           hipModuleGetFunction + hipFuncGetAttribute)
+//   target_arch           - required, e.g. "gfx942". Compared against the
+//                           prefix of hipDeviceProp.gcnArchName at load time.
+//   xnack                 - optional, one of {any, on, off}. Default: any.
+//   bundle_target         - diagnostic only; full bundle target tuple from
+//                           the .co bundle header.
+//
+// --- ABI / launch (hardcoded 104-byte legacy layout) ---
 //   internal_args         - u32, kernarg bytes [4..7]   (from TENSILE_DB dump)
 //   internal_args1        - u32, kernarg bytes [8..11]  (from TENSILE_DB dump)
 //   macro_tile_0          - u32, MT0 (from _MT<a>x<b>x<c>_ in kernel name)
@@ -54,6 +64,11 @@
 struct Config {
     std::string co_file;
     std::string kernel_symbol;
+
+    // Loading preflight (see §8 of kernel-packaging-research.md)
+    std::string target_arch;
+    std::string xnack = "any";
+    std::string bundle_target;
 
     uint32_t internal_args  = 0;
     uint32_t internal_args1 = 0;
@@ -132,10 +147,17 @@ static Config load_config(const std::string& path) {
                    ? d
                    : float(std::strtod(it->second.c_str(), nullptr));
     };
+    auto opt_str = [&](const char* k, std::string d) {
+        auto it = kv.find(k);
+        return it == kv.end() ? std::move(d) : it->second;
+    };
 
     Config c;
     c.co_file        = req_str("co_file");
     c.kernel_symbol  = req_str("kernel_symbol");
+    c.target_arch    = req_str("target_arch");
+    c.xnack          = opt_str("xnack", "any");
+    c.bundle_target  = opt_str("bundle_target", "");
     c.internal_args  = req_u32("internal_args");
     c.internal_args1 = req_u32("internal_args1");
     c.macro_tile_0   = req_u32("macro_tile_0");
@@ -166,6 +188,130 @@ static Config load_config(const std::string& path) {
     return c;
 }
 
+// ----------------------------------------------------------------------------
+// Loading interface (see kernel-packaging-research.md §8).
+// ----------------------------------------------------------------------------
+
+struct ArchTuple {
+    std::string base;
+    std::string xnack;
+};
+
+static ArchTuple parse_arch_tuple(const std::string& s) {
+    ArchTuple t;
+    auto colon = s.find(':');
+    t.base = (colon == std::string::npos) ? s : s.substr(0, colon);
+    std::string rest = (colon == std::string::npos) ? "" : s.substr(colon + 1);
+    while (!rest.empty()) {
+        auto next = rest.find(':');
+        std::string feat = rest.substr(0, next);
+        if (feat == "xnack+") t.xnack = "on";
+        else if (feat == "xnack-") t.xnack = "off";
+        rest = (next == std::string::npos) ? "" : rest.substr(next + 1);
+    }
+    return t;
+}
+
+static ArchTuple device_arch_tuple() {
+    int dev = 0;
+    HIP_CHECK(hipGetDevice(&dev));
+    hipDeviceProp_t prop{};
+    HIP_CHECK(hipGetDeviceProperties(&prop, dev));
+    return parse_arch_tuple(prop.gcnArchName);
+}
+
+static void check_arch_compatibility(const Config& c, const ArchTuple& dev) {
+    if (c.target_arch != dev.base) {
+        fprintf(stderr,
+                "okl_run: arch mismatch\n"
+                "  conf target_arch : %s\n"
+                "  device gcnArchName: %s (base=%s, xnack=%s)\n"
+                "  This .co will not load on this device. Rebuild the package "
+                "for %s, or run on a %s GPU.\n",
+                c.target_arch.c_str(), dev.base.c_str(), dev.base.c_str(),
+                dev.xnack.empty() ? "unspecified" : dev.xnack.c_str(),
+                dev.base.c_str(), c.target_arch.c_str());
+        std::exit(1);
+    }
+    if (c.xnack != "any" && !dev.xnack.empty() && c.xnack != dev.xnack) {
+        fprintf(stderr,
+                "okl_run: xnack mismatch\n"
+                "  conf xnack       : %s\n"
+                "  device xnack     : %s\n"
+                "  Pass xnack=any to relax this check, or build the kernel "
+                "for the matching xnack mode.\n",
+                c.xnack.c_str(), dev.xnack.c_str());
+        std::exit(1);
+    }
+}
+
+struct LoadedKernel {
+    hipModule_t   module;
+    hipFunction_t function;
+    int           num_regs;
+    int           lds_bytes;
+};
+
+static LoadedKernel load_kernel(const std::filesystem::path& co_path,
+                                const std::string& kernel_symbol) {
+    if (!std::filesystem::exists(co_path)) {
+        fprintf(stderr, "okl_run: .co file not found: %s\n",
+                co_path.string().c_str());
+        std::exit(1);
+    }
+
+    LoadedKernel lk{};
+    hipError_t err = hipModuleLoad(&lk.module, co_path.c_str());
+    if (err == hipErrorNoBinaryForGpu) {
+        fprintf(stderr,
+                "okl_run: hipModuleLoad rejected %s (hipErrorNoBinaryForGpu).\n"
+                "  This usually means the bundle has no slice for the running "
+                "GPU arch. Use:\n"
+                "    clang-offload-bundler --list --type=o --input=%s\n"
+                "  to see which targets ARE in the bundle.\n",
+                co_path.string().c_str(), co_path.string().c_str());
+        std::exit(1);
+    } else if (err != hipSuccess) {
+        fprintf(stderr, "okl_run: hipModuleLoad(%s) failed: %s\n",
+                co_path.string().c_str(), hipGetErrorString(err));
+        std::exit(1);
+    }
+
+    err = hipModuleGetFunction(&lk.function, lk.module, kernel_symbol.c_str());
+    if (err == hipErrorNotFound) {
+        fprintf(stderr,
+                "okl_run: kernel symbol not found in module:\n"
+                "  symbol: %s\n"
+                "  co    : %s\n"
+                "HIP does not enumerate module symbols. To list what IS there:\n"
+                "    clang-offload-bundler --unbundle --type=o --input=%s \\\n"
+                "        --output=/tmp/host.o --output=/tmp/dev.o \\\n"
+                "        --targets=host-x86_64-unknown-linux-gnu-,"
+                "hipv4-amdgcn-amd-amdhsa--<arch>\n"
+                "    llvm-readobj --notes /tmp/dev.o | grep '\\.symbol:'\n",
+                kernel_symbol.c_str(), co_path.string().c_str(),
+                co_path.string().c_str());
+        (void)hipModuleUnload(lk.module);
+        std::exit(1);
+    } else if (err != hipSuccess) {
+        fprintf(stderr, "okl_run: hipModuleGetFunction failed: %s\n",
+                hipGetErrorString(err));
+        (void)hipModuleUnload(lk.module);
+        std::exit(1);
+    }
+
+    lk.num_regs = -1;
+    lk.lds_bytes = -1;
+    int v = 0;
+    if (hipFuncGetAttribute(&v, HIP_FUNC_ATTRIBUTE_NUM_REGS, lk.function) ==
+        hipSuccess)
+        lk.num_regs = v;
+    if (hipFuncGetAttribute(&v, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
+                            lk.function) == hipSuccess)
+        lk.lds_bytes = v;
+    return lk;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s path/to/kernel.conf\n", argv[0]);
@@ -177,6 +323,10 @@ int main(int argc, char** argv) {
     // Resolve .co path relative to conf dir if not absolute.
     std::filesystem::path co_path = c.co_file;
     if (co_path.is_relative()) co_path = conf_path.parent_path() / co_path;
+
+    // Arch preflight before any allocation: fail fast on the cheap thing.
+    ArchTuple dev_arch = device_arch_tuple();
+    check_arch_compatibility(c, dev_arch);
 
     // 1. Allocate buffers.
     void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr;
@@ -192,10 +342,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(dD, 0xee, c.size_d_bytes));  // poison so we can detect write
 
     // 3. Load module and resolve kernel.
-    hipModule_t module;
-    HIP_CHECK(hipModuleLoad(&module, co_path.c_str()));
-    hipFunction_t kernel;
-    HIP_CHECK(hipModuleGetFunction(&kernel, module, c.kernel_symbol.c_str()));
+    LoadedKernel lk = load_kernel(co_path, c.kernel_symbol);
 
     // 4. Build the kernarg buffer (legacy ABI, see research §6).
     std::vector<uint8_t> kernarg(c.kernarg_size, 0);
@@ -242,7 +389,7 @@ int main(int argc, char** argv) {
 
     auto launch = [&]() {
         HIP_CHECK(hipExtModuleLaunchKernel(
-            kernel, globalX, 1, 1, c.workgroup_size, 1, 1,
+            lk.function, globalX, 1, 1, c.workgroup_size, 1, 1,
             /*sharedMemBytes=*/0, /*stream=*/nullptr, nullptr, launch_params,
             nullptr, nullptr));
     };
@@ -265,8 +412,16 @@ int main(int argc, char** argv) {
 
     printf("conf:      %s\n", conf_path.string().c_str());
     printf("co:        %s\n", co_path.string().c_str());
+    printf("target:    arch=%s xnack=%s  device=%s:xnack%s%s\n",
+           c.target_arch.c_str(), c.xnack.c_str(), dev_arch.base.c_str(),
+           dev_arch.xnack == "on" ? "+" : (dev_arch.xnack == "off" ? "-" : "?"),
+           c.bundle_target.empty() ? "" :
+               (std::string("  bundle=") + c.bundle_target).c_str());
     printf("kernel:    %.80s%s\n", c.kernel_symbol.c_str(),
            c.kernel_symbol.size() > 80 ? "..." : "");
+    if (lk.num_regs >= 0 || lk.lds_bytes >= 0) {
+        printf("resources: regs=%d lds=%d bytes\n", lk.num_regs, lk.lds_bytes);
+    }
     printf("problem:   M=%u N=%u K=%u batch=%u  alpha=%g beta=%g\n",
            c.m, c.n, c.k, c.batch, c.alpha, c.beta);
     printf("grid:      %u workgroups x %u threads = %u global threads\n",
@@ -303,6 +458,6 @@ int main(int argc, char** argv) {
 
     HIP_CHECK(hipFree(dA)); HIP_CHECK(hipFree(dB));
     HIP_CHECK(hipFree(dC)); HIP_CHECK(hipFree(dD));
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(lk.module));
     return 0;
 }

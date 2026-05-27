@@ -1310,3 +1310,222 @@ output), the buffer layout becomes fully data-driven.
 - **xnack variants.** The shipped CO files I unbundled were plain `gfx942`.
   Builds with xnack+/xnack- ABI will have a different bundle target string;
   use `clang-offload-bundler --list` to discover at packaging time.
+
+
+## 8. Kernel loading interface
+
+This section covers the slice of okl_run.cpp that turns a (config-file,
+.co-on-disk) pair into a `hipFunction_t` ready to launch. The kernarg buffer
+construction and launch loop are out of scope here.
+
+### 8.1 What the runtime gives us, and what it does not
+
+`hipModuleLoad` is a one-shot: it accepts a path, opens the file, parses the
+`__CLANG_OFFLOAD_BUNDLE__` wrapper (when present), picks the slice matching
+the current device, and loads it. Failure modes that we hit in practice:
+
+- **wrong arch in the bundle**: `hipModuleLoad` returns `hipErrorNoBinaryForGpu`
+  (216). The runtime cannot tell you which slices the bundle DOES have.
+- **file missing**: returns `hipErrorFileNotFound` (301). Path is not echoed in
+  the error string.
+- **path is a junk file**: returns `hipErrorInvalidImage` or similar.
+
+The Tensile runtime works around the arch problem by trying each xnack variant
+in turn — see `tensilelite/src/hip/HipSolutionAdapter.cpp:256-263`:
+
+```cpp
+for(auto ver : {"", "-xnack-", "-xnack+"})
+{
+    std::string modifiedCOName = codeObjectFile;
+    modifiedCOName.insert(loc, ver);
+    err = loadCodeObjectFile(codeObjectDir + modifiedCOName);
+    if(err == hipSuccess) break;
+}
+```
+
+i.e. it brute-forces three filenames (`...co`, `...-xnack-.co`, `...-xnack+.co`)
+and stops on the first that loads. The arch base (`gfx942`) is already baked
+into the filename when the lazy-loader hands it off (see `FindCodeObject` at
+`HipSolutionAdapter.cpp:241-268` and the caller chain from `launchKernel` at
+`:411-414`).
+
+`hipModuleGetFunction` is a string lookup: pass a name, get a function or
+`hipErrorNotFound`. The HIP API surface in `/opt/rocm-7.2.1/include/hip/hip_runtime_api.h`
+exposes `hipModuleGetFunctionCount` (line 6362) but NO enumeration call — there
+is no `hipModuleGetFunctionNames` or equivalent. The only programmatic way to
+list the symbols in a module is to inspect the underlying ELF directly via
+`llvm-readobj` / HSA, BEFORE loading.
+
+`hipFuncGetAttribute` (line 6474) is useful as a confirmation probe: after a
+successful `hipModuleGetFunction` it returns register count, LDS size, etc.,
+sourced from the kernel descriptor (`.kd`) that lives next to the text symbol.
+A `hipSuccess` here means the loader actually wired up both the code and the
+descriptor; useful sanity for our standalone path that bypasses Tensile.
+
+### 8.2 What's inside a .co (the bundle metadata)
+
+Every Tensile shard is a `clang-offload-bundler` wrapper around one or more
+ELF objects, one per target. `clang-offload-bundler --list` reads the bundle
+header without unpacking anything. Real example:
+
+```
+$ /opt/rocm-7.2.1/lib/llvm/bin/clang-offload-bundler --list --type=o \
+    --input=/opt/rocm-6.4.3/lib/hipblaslt/library/TensileLibrary_BB_BB_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx942.co
+hipv4-amdgcn-amd-amdhsa--gfx942
+host-x86_64-unknown-linux-gnu-
+```
+
+Tuple format is `<kind>-<triple>--<arch>[:feature][:feature]...`. For our
+purposes the trailing field is the only one that varies between shards and
+the only one the HIP runtime cares about for arch matching.
+
+After unbundling the device slice with
+`--unbundle --type=o --targets=hipv4-amdgcn-amd-amdhsa--gfx942 --output=dev.o`,
+the resulting ELF carries the full kernel ABI in an `NT_AMDGPU_METADATA` note:
+
+```
+$ llvm-readobj --notes dev.o | head -50
+... amdhsa.kernels:
+  - .args:
+      - .name:    Gemm info     .offset: 0   .size: 4   .value_kind: by_value
+      - .name:    kernel info0  .offset: 4   .size: 4   ...
+      ...
+    .symbol:    Cijk_..._MT32x16x512_..._WG32_4_1.kd
+    .name:      Cijk_..._MT32x16x512_..._WG32_4_1
+```
+
+`.name` is what `hipModuleGetFunction` resolves. `.symbol` is the kernel
+descriptor name (the same string + `.kd`). For each kernel in the shard there
+is one entry. `grep '\.symbol:'` is a cheap way to enumerate.
+
+### 8.3 The principled loading interface (this commit)
+
+The pre-existing `okl_run.cpp` just did:
+
+```cpp
+HIP_CHECK(hipModuleLoad(&module, co_path.c_str()));
+HIP_CHECK(hipModuleGetFunction(&kernel, module, c.kernel_symbol.c_str()));
+```
+
+That deferred everything to the runtime. Failures bubbled up as bare HIP
+error strings ("no binary for GPU") with no context about what was expected.
+
+The new interface in `okl_run.cpp` is three small named pieces:
+
+1. `parse_arch_tuple(s)` — splits a `gcnArchName`-style string
+   (e.g. `gfx942:xnack-`) into `{base, xnack}`. Pure function.
+
+2. `device_arch_tuple()` — wraps `hipGetDevice` + `hipGetDeviceProperties` and
+   parses `gcnArchName`. Returns `ArchTuple` for the currently selected device.
+
+3. `check_arch_compatible(conf, device)` — compares conf's expected
+   `target_arch` (e.g. `gfx942`) and `xnack` (`any`/`on`/`off`) against the
+   device tuple. Exits with a precise message naming both sides on mismatch.
+   Runs BEFORE `hipModuleLoad`.
+
+4. `load_kernel(co_path, kernel_symbol)` — returns
+   `{hipModule_t, hipFunction_t, num_regs, lds_bytes}`. Steps:
+   - `std::filesystem::exists(co_path)` precheck; clean message if missing.
+   - `hipModuleLoad`; on `hipErrorNoBinaryForGpu`, emit a message pointing the
+     user at `clang-offload-bundler --list` to see what arches ARE in the bundle.
+   - `hipModuleGetFunction`; on `hipErrorNotFound`, emit a message with the
+     symbol asked for, the .co path, and the exact `clang-offload-bundler` +
+     `llvm-readobj` recipe to enumerate what IS available. We cannot enumerate
+     from HIP, so we punt to the user with the right tools.
+   - `hipFuncGetAttribute(NUM_REGS|SHARED_SIZE_BYTES)` as a confirmation probe.
+     Recorded for diagnostics; failures here are non-fatal because some HIP
+     builds report a subset.
+
+The choices behind this shape:
+
+- **Single (arch, xnack) per conf, not a list.** Conf is generated from one
+  bench dump, which always picked one shard. A multi-arch package would be a
+  parallel directory of confs, not one fat conf. KISS.
+- **`target_arch` is required.** Without it we'd be reproducing the silent
+  `hipErrorNoBinaryForGpu` mystery. Set the field to an empty string in the
+  conf to opt out explicitly.
+- **`xnack=any` default.** The shipped ROCm 6.4.3 bundle has plain `gfx942`
+  shards (no xnack feature suffix in the bundle target), so demanding a
+  specific xnack at runtime would reject every shipped kernel. `any` is the
+  only sane default; the field exists so xnack-variant packages can lock down.
+- **`bundle_target` is diagnostic only.** Verbatim string from
+  `clang-offload-bundler --list`, echoed in the runner's preamble for human
+  inspection. We don't string-match on it because the format is brittle (kind
+  prefix `hipv4-` may shift over ROCm versions).
+- **No introspection step on load.** I considered shelling out to
+  `llvm-readobj --notes` on each load to verify the symbol up front, but the
+  cost (fork + ELF parse of a multi-MB file) outweighed the benefit (an error
+  message a few μs earlier). The `hipFuncGetAttribute` probe achieves the same
+  "symbol really there with a descriptor" assurance for free.
+
+### 8.4 Conf-field additions
+
+| key | required | source | what it means |
+|---|---|---|---|
+| `target_arch` | yes | `okl.py probe_bundle()` → bundle target's trailing field | gfxNNN slug; runner rejects load if `hipDeviceProp.gcnArchName` base doesn't match |
+| `xnack` | no (default `any`) | bundle target's `:xnack+` / `:xnack-` suffix | `any` skips xnack check; `on`/`off` must match device |
+| `bundle_target` | no | bundle target verbatim | diagnostic only; printed in runner preamble |
+
+Population path in `okl.py`:
+
+```python
+def probe_bundle(co_path):
+    # runs clang-offload-bundler --list, picks the amdgcn target,
+    # returns (target_arch, xnack_mode, full_target_string)
+```
+
+If `clang-offload-bundler` is not found, fields are written as blank and the
+runner skips the check (with a warning at packaging time).
+
+### 8.5 Before / after
+
+Before (the legacy minimal conf, all loading-related):
+
+```
+co_file       = kernel.co
+kernel_symbol = Cijk_..._MT32x32x128_..._WG32_8_1
+```
+
+After:
+
+```
+co_file       = kernel.co
+kernel_symbol = Cijk_..._MT32x32x128_..._WG32_8_1
+target_arch   = gfx942
+xnack         = any
+bundle_target = hipv4-amdgcn-amd-amdhsa--gfx942
+```
+
+And the runner's preamble now includes:
+
+```
+target:    arch=gfx942 xnack=any  device=gfx942:xnack-  bundle=hipv4-amdgcn-amd-amdhsa--gfx942
+resources: regs=256 lds=51200 bytes
+```
+
+### 8.6 Error-path coverage (verified)
+
+Forcing each failure mode by editing a known-good conf:
+
+| failure | conf change | runner output (first line + exit code) |
+|---|---|---|
+| missing .co | `co_file = does-not-exist.co` | `okl_run: .co file not found: ...` (exit 1) |
+| wrong arch  | `target_arch = gfx950`        | `okl_run: arch mismatch` + both sides + remediation (exit 1) |
+| wrong xnack | `xnack = on`                  | `okl_run: xnack mismatch` + both sides + remediation (exit 1) |
+| wrong sym   | `kernel_symbol = Cijk_DoesNotExist_...` | `okl_run: kernel symbol not found in module:` + `clang-offload-bundler` + `llvm-readobj` recipe (exit 1) |
+
+### 8.7 Things deliberately not done
+
+- **No module caching.** The runner loads exactly one .co per invocation;
+  caching would matter only for a long-lived process loading many shards
+  (which is Tensile's job, not ours). `m_kernels` in `SolutionAdapter`
+  (`HipSolutionAdapter.cpp:296-310`) is the precedent if we ever need it.
+- **No `bundle_target` string-matching.** The kind prefix (`hipv4-` today,
+  `hipv5-` in some HIP versions) is not stable; matching on it is a
+  liability. The arch slug is what `hipModuleLoad` actually keys on.
+- **No multi-arch package format.** One conf = one shard = one (arch, xnack)
+  pair. Multi-arch is a directory of confs, not a fat conf.
+- **No symbol-list embedding in the conf.** We don't precompute "what symbols
+  are in this .co" because (a) the user already knows the one they want
+  (`kernel_symbol`) and (b) hot-introspection at runtime is cheap to defer to
+  the explicit `llvm-readobj` recipe in the error message.

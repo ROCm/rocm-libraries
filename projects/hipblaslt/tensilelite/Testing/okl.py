@@ -33,6 +33,59 @@ DTYPE_BYTES = {
     "f8_fnuz_r": 1, "bf8_fnuz_r": 1,
 }
 
+# clang-offload-bundler: used to read the .co's bundle target tuple at
+# packaging time so the runner can preflight arch match against the device.
+BUNDLER_CANDIDATES = [
+    "/opt/rocm/lib/llvm/bin/clang-offload-bundler",
+    "/opt/rocm-7.2.1/lib/llvm/bin/clang-offload-bundler",
+    "/opt/rocm-6.4.3/lib/llvm/bin/clang-offload-bundler",
+]
+
+
+def find_bundler():
+    p = shutil.which("clang-offload-bundler")
+    if p:
+        return p
+    for c in BUNDLER_CANDIDATES:
+        if Path(c).is_file() and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def probe_bundle(co_path):
+    """Run clang-offload-bundler --list on a .co; return (target_arch, xnack, full_target).
+
+    target_arch is the gfxNNN slug (or '' if unknown).
+    xnack is 'on' / 'off' / 'any'.
+    full_target is the verbatim bundle target tuple (e.g.
+    'hipv4-amdgcn-amd-amdhsa--gfx942') so the runner can echo it for diagnostics.
+    """
+    b = find_bundler()
+    if b is None:
+        return ("", "any", "")
+    try:
+        out = subprocess.run(
+            [b, "--list", "--type=o", "--input", str(co_path)],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return ("", "any", "")
+    targets = [l.strip() for l in out.stdout.splitlines() if l.strip()]
+    # Pick the first amdgcn target (the gfx slice; the other is host-x86_64).
+    amd = next((t for t in targets if "amdgcn-amd-amdhsa" in t), "")
+    if not amd:
+        return ("", "any", "")
+    # Tail field is "gfx942" or "gfx942:xnack+" or "gfx942:xnack-".
+    tail = amd.rsplit("-", 1)[-1]
+    if not tail.startswith("gfx"):
+        return ("", "any", amd)
+    if ":xnack+" in tail:
+        return (tail.split(":", 1)[0], "on", amd)
+    if ":xnack-" in tail:
+        return (tail.split(":", 1)[0], "off", amd)
+    return (tail, "any", amd)
+
+
 BENCH_CANDIDATES = [
     "/home/alvasile/rocm-libraries/projects/hipblaslt/build/release/clients/hipblaslt-bench",
     "/opt/rocm/bin/hipblaslt-bench",
@@ -181,6 +234,15 @@ def write_package(out_dir, args, dump_info):
     dst_co = out / "kernel.co"
     shutil.copyfile(src_co, dst_co)
 
+    # Probe the .co for its bundle target so the runner can preflight arch/xnack
+    # against the running device. Fallback: leave empty and let the runner skip
+    # the check (with a warning here so the user notices).
+    target_arch, xnack_mode, bundle_target = probe_bundle(dst_co)
+    if not target_arch:
+        print(f"warn: could not determine target arch from {src_co}; "
+              "set target_arch manually in kernel.conf before running okl_run.",
+              file=sys.stderr)
+
     sym = dump_info["kernel_symbol"]
     mt0, mt1 = parse_macro_tile(sym)
     if mt0 is None:
@@ -243,6 +305,11 @@ def write_package(out_dir, args, dump_info):
 co_file                 = kernel.co
 kernel_symbol           = {sym}
 
+# Loading preflight (read by load_kernel / check_arch_compatibility).
+target_arch             = {target_arch}
+xnack                   = {xnack_mode}
+bundle_target           = {bundle_target}
+
 # From TENSILE_DB=0x40 dump (bit-packed; treat as opaque)
 internal_args           = 0x{internal_args:08x}
 internal_args1          = 0x{internal_args1:08x}
@@ -295,6 +362,9 @@ beta                    = {beta}
         "workgroup_size_threads": dump_info["workgroup_size_threads"],
         "grid_workgroups": dump_info["grid_workgroups"],
         "kernarg_size":   kernarg_size,
+        "target_arch":    target_arch,
+        "xnack":          xnack_mode,
+        "bundle_target":  bundle_target,
     }
 
 
