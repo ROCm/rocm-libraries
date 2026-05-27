@@ -25,7 +25,7 @@ The schedule is built in these passes:
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 from bisect import bisect_left
 import copy
 import io
@@ -453,16 +453,20 @@ class SkipOp(BaseOp):
 
 
 @dataclass
-class TailBoundaryLoadABOp(BaseOp):
-    """Combined A+B boundary load: shared parity gate + K math, then per-tensor
-    M math and DTL load under a single skip label."""
-    tensor: str = "AB"
+class InlineModuleOp(BaseOp):
+    """Inline a writer-built Module at this point in the schedule.
+
+    The callback receives the InstructionEmitter (so it can reach writer,
+    kernel, tensorParametersMap, etc.) and must return a rocisa Module.
+    Use this for one-off boilerplate that doesn't deserve its own Op class."""
+    build: Optional[Callable] = None
+    label: str = "inline"
 
     def __post_init__(self):
-        self.kind = 'tail_boundary_ab'
+        self.kind = 'inline'
 
     def __str__(self):
-        return "tail_boundary_ab"
+        return f"inline({self.label})"
 
 
 @dataclass
@@ -2085,7 +2089,12 @@ class LogicalScheduler:
         # sync). For non-bf16 / non-Subtile paths this is a no-op Module.
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
-        preamble.append(TailBoundaryLoadABOp())
+        preamble.append(InlineModuleOp(
+            build=lambda em: em.writer.tailLoopBoundaryDtlLoadAB(
+                em.kernel,
+                em.tensorParametersMap['A'],
+                em.tensorParametersMap['B']),
+            label="tail_boundary_ab"))
         preamble.append(SyncOp())
 
         # Loop over partitions to re-use vgpr tile maps.

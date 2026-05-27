@@ -97,7 +97,7 @@ class InstructionEmitter:
             'gr_inc':           lambda em, ui: self.emit_gr_inc(em.source),
             'skip':             lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
-            'tail_boundary_ab': lambda em, ui: self.emit_tail_boundary_ab(),
+            'inline':       lambda em, ui: self.emit_inline(em.source),
         }
 
         # Sentinel for the long-lived per-lane diff vgpr. Set by
@@ -218,14 +218,12 @@ class InstructionEmitter:
     def emit_sync(self):
         return [SBarrier(comment="Barrier")]
 
-    def emit_tail_boundary_ab(self):
-        """Emit the combined A+B boundary load (shared parity gate + K math)."""
-        tPA = self.tensorParametersMap.get('A')
-        tPB = self.tensorParametersMap.get('B')
-        if tPA is None or tPB is None:
+    def emit_inline(self, source):
+        """Emit a writer-built Module supplied by an InlineModuleOp callback."""
+        if source.build is None:
             return []
-        mod = self.writer.tailLoopBoundaryDtlLoadAB(self.kernel, tPA, tPB)
-        return list(mod.flatitems())
+        mod = source.build(self)
+        return list(mod.flatitems()) if mod is not None else []
 
     def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor."""
