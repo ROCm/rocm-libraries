@@ -3398,6 +3398,29 @@ class KernelWriterAssembly(KernelWriter):
       kStr += "\n"
     kStr += f"{self.kernelName}_preloaded: // Kernel start when preloading\n"
 
+    # gfx12 (RDNA4) workgroup-ID workaround.
+    # On gfx12, the HW does not populate the per-wave WG ID SGPRs (e.g. s2/s3/s4)
+    # the way gfx9/10/11 does even when .amdhsa_system_sgpr_workgroup_id_{x,y,z}
+    # are requested; instead, the WG IDs are passed in the trap-temporary
+    # ("architected SGPR") registers ttmp7 and ttmp9 with the following layout
+    # (matches what amdclang++ -mcpu=gfx1201 emits for blockIdx.{x,y,z}):
+    #     WG.X  =  ttmp9
+    #     WG.Y  =  ttmp7[15:0]
+    #     WG.Z  =  ttmp7[31:16]
+    # Without this rehydration the SGPRs aliased to sgprWorkGroup{0,1,2} contain
+    # stale wave-launch garbage, which silently corrupts every downstream tile /
+    # SRD / shadow-limit computation and produces an out-of-bounds buffer access
+    # that page-faults. Copy the ttmp values into sgprWorkGroup{0,1,2} before
+    # anything reads them. This is a no-op on gfx9/10/11 paths.
+    if self.version[0] == 12:
+      kStr += self.comment("gfx12: hydrate WorkGroup IDs from architected ttmp registers")
+      kStr += inst("s_mov_b32", sgpr("WorkGroup0"), "ttmp9",
+                   "WorkGroup0 = ttmp9")
+      kStr += inst("s_and_b32", sgpr("WorkGroup1"), "ttmp7", "0xFFFF",
+                   "WorkGroup1 = ttmp7[15:0]")
+      if kernel["ProblemType"]["NumIndicesC"] > 2:
+        kStr += inst("s_lshr_b32", sgpr("WorkGroup2"), "ttmp7", "16",
+                     "WorkGroup2 = ttmp7[31:16]")
 
     if kernel["StorePriorityOpt"]:
       kStr += inst("s_setprio 3", "optimization store")
