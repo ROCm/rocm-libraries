@@ -3,6 +3,9 @@
 #pragma once
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/numeric/e5m3.hpp"
+#include "ck_tile/core/numeric/e4m3.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
 #include "amdgcn_mma.hpp"
 #include "mma_selector.hpp"
@@ -153,9 +156,9 @@ struct MmaPipelineBase
     }
 
     // Entry point for dense and sparse operations. TODO: Add c_vec = a_vec * b_vec variant.
-    template <typename CTensor, typename ATensor, typename BTensor, bool post_nop_ = false>
-    CK_TILE_DEVICE void
-    operator()(CTensor& c, ATensor& a, BTensor& b, bool_constant<post_nop_> = {})
+    // TODO: Parse params with WarpGemmParamsParser<>
+    template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE void operator()(CTensor& c, const ATensor& a, const BTensor& b)
     {
         exec(a, b, c);
     }
@@ -177,6 +180,9 @@ struct MmaPipelineBase
         {
             if constexpr(Flags & MmaPipelineOptionFlag::ABSwap)
             {
+                // TODO: Figure out which combination of a/b, scale_A/B, and opselA/B needs to be
+                // AB-swapped in order to get correct results. Note that WarpGemmParamsParser
+                // already seems to swap opselA and B.
                 decltype(auto) a_transformed = Derived::ATransform::exec(b);
                 decltype(auto) b_transformed = Derived::BTransform::exec(a);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
@@ -203,22 +209,19 @@ struct MmaPipelineBase
     // Entry point for scale operations. TODO: Add c_vec = a_vec * b_vec variant (+ scaleless
     // variant?)
     // TODO: Add support for other scale types.
-    template <index_t opselA,
-              index_t opselB,
-              typename CTensor,
-              typename ATensor,
-              typename BTensor,
-              bool post_nop_ = false>
+    // TODO: Parse params with WarpGemmParamsParser<>
+    template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
     CK_TILE_DEVICE void operator()(CTensor& c,
                                    const ATensor& a,
                                    const BTensor& b,
                                    const int32_t& a_scale,
-                                   const int32_t& b_scale,
-                                   bool_constant<post_nop_> = {}) const
+                                   const int32_t& b_scale) const
     {
-        exec<opselA, opselB>(a, b, c, a_scale, b_scale);
+        using P = WarpGemmParamsParser<Params...>;
+        exec<P::op_sel_a, P::op_sel_b>(a, b, c, a_scale, b_scale);
     }
 };
+
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 #include <concepts>

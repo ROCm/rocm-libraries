@@ -106,11 +106,11 @@ struct TileDistrEncCalc
     }
 
     static constexpr index_t compressionRatioA = UncompressedA ? 1 : MmaOp::kCompressionRatio;
-    using AEnc_ = ABWarpDstrEnc<MmaOp::kM,
-                                MmaOp::kARepeat,
-                                NumAccessA,
-                                MmaOp::APackedSize,
-                                compressionRatioA>;
+    using AEnc_                                = ABWarpDstrEnc<MmaOp::kM,
+                                                               MmaOp::kARepeat,
+                                                               NumAccessA,
+                                                               MmaOp::APackedSize,
+                                                               compressionRatioA>;
     using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB, MmaOp::BPackedSize>;
 
     public:

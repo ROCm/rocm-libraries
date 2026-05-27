@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_attribute_mfma.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_mma_pipeline.hpp"
 #include "ck_tile/core/arch/mma/mma_wavewise.hpp"
@@ -121,6 +122,20 @@ struct MmaPipelineSelector<false,
                                      AttrNumAccessBV>;
 };
 
+// TODO: Figure out how to deal with the "packed" version of AttrNumAccess. In the unification
+// framework there is no reason to combine packedness with AttrNumAccess but in CK Tile they did,
+// alongside the refactor introducing gfx1250.
+template <WGAttrNumAccessEnum AttrNumAccess>
+struct get_wgattr_num_access_safe_v
+{
+    static constexpr int32_t value = get_wgattr_num_access<AttrNumAccess>::value;
+};
+template <>
+struct get_wgattr_num_access_safe_v<WGAttrNumAccessEnum::Default>
+{
+    static constexpr int32_t value = 1;
+};
+
 template <typename AType,
           typename BType,
           typename AccType,
@@ -150,17 +165,20 @@ struct UnificationDispatcher
 
     // Scale checks.
     // TODO: Add the tiny types after those are merged.
-    static_assert(!IsMx || (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t>));
-    static_assert(!IsMx || (std::is_same_v<BType, fp8_t> || std::is_same_v<BType, bf8_t>));
+    static_assert(!IsMx || (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t> ||
+                            std::is_same_v<AType, pk_fp4_t>));
+    static_assert(!IsMx || (std::is_same_v<BType, fp8_t> || std::is_same_v<BType, bf8_t> ||
+                            std::is_same_v<BType, pk_fp4_t>));
 
     // Convert SwizzleA bool to SwizzleFactor. This used to be hardcoded in a number of places in
     // the original dispatcher / warpgemms, generally using a factor of 2 if swizzling was
     // requested but not always. TODO: Check original usage for correct swizzle factors.
     static constexpr index_t SwizzleFactor = SwizzleA ? 2 : 1;
 
-    // Convert WGAttrNumAccessEnums to index_t values.
-    static constexpr index_t AttrNumAccessAV = get_wgattr_num_access<AttrNumAccessA>::value;
-    static constexpr index_t AttrNumAccessBV = get_wgattr_num_access<AttrNumAccessB>::value;
+    // Convert WGAttrNumAccessEnums to index_t values. Default value sent to 1 for now, but needs a
+    // better implementation TODO.
+    static constexpr index_t AttrNumAccessAV = get_wgattr_num_access_safe_v<AttrNumAccessA>::value;
+    static constexpr index_t AttrNumAccessBV = get_wgattr_num_access_safe_v<AttrNumAccessB>::value;
 
     using Type =
         typename MmaPipelineSelector<IsMx,

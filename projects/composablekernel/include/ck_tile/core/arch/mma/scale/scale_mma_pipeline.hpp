@@ -104,6 +104,13 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     // TODO: Check if this makes sense with numAccess and Compression.
     static constexpr index_t kKPerThread = MmaOp::kABKPerLane * FragsK;
 
+    // These values seem to indicate some sort of canonical "k elements per thread" value before
+    // potential further splitting with attrNumAccess. For MFMA it seems to be just kKPerThread, but
+    // for WMMA it is meant to be what used to be known as kABK1PerLane. See LayoutFromDataType<>.
+    // TODO: Check this in WMMA pipelines / gfx1250.
+    static constexpr index_t kAKPack = MmaOp::kABKPerLane * FragsK;
+    static constexpr index_t kBKPack = MmaOp::kABKPerLane * FragsK;
+
     // CK Tile expects this structure with some old-style layout params. Added for compatibility.
     struct WarpGemmAttribute
     {
