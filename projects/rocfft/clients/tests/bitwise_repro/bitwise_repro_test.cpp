@@ -32,6 +32,11 @@ using ::testing::ValuesIn;
 
 TEST(bitwise_repro_test, compare_precisions)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
 
     rocfft_params params_1;
     // clang-format off
@@ -82,6 +87,12 @@ TEST(bitwise_repro_test, compare_precisions)
 
 TEST(bitwise_repro_test, compare_lengths)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
+
     rocfft_params params_1;
     // clang-format off
     params_1.from_token(std::string("complex_forward_len_64_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0"));
@@ -131,6 +142,12 @@ TEST(bitwise_repro_test, compare_lengths)
 
 TEST(bitwise_repro_test, compare_transform_types)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
+
     rocfft_params params_1;
     // clang-format off
     params_1.from_token(std::string("complex_forward_len_256_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_256_odist_256_ioffset_0_0_ooffset_0_0"));

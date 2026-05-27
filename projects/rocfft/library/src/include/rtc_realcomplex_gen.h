@@ -34,6 +34,7 @@ struct RealComplexSpecs
 {
     ComputeScheme           scheme;
     size_t                  dim;
+    size_t                  lensz;
     rocfft_precision        precision;
     rocfft_array_type       inArrayType;
     rocfft_array_type       outArrayType;
