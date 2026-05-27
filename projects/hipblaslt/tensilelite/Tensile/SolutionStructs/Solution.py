@@ -454,6 +454,18 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 # Solution
 ################################################################################
+# rocm-libraries-l1l6: transient key used to ferry the pre-CMS-derivation
+# state snapshot out of ``assignDerivedParameters`` (a @staticmethod
+# operating on a bare dict with no ``self`` to assign to) into
+# ``Solution.__init__``, which promotes it to ``self._pre_cms_state`` and
+# pops the key. This key MUST NOT appear in any finalized Solution's
+# mapping — if it does, something has bypassed ``Solution.__init__``'s
+# post-derivation cleanup, which would resurrect the y391-era magic-key
+# contract (snapshot leaking into ``dict(solution)`` and breaking
+# Solution idempotence).
+_PRE_CMS_STATE_TRANSIENT_KEY = "__pre_cms_state_transient__"
+
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -536,11 +548,35 @@ class Solution(collections.abc.Mapping):
       isaInfoMap,
       assembler.rocm_version
     )
+    # rocm-libraries-l1l6: promote the transient pre-CMS-derivation
+    # snapshot off the state dict into a real attribute. See
+    # `_PRE_CMS_STATE_TRANSIENT_KEY` and `pre_cms_state()` for rationale.
+    # Pop unconditionally — derivation always writes the snapshot before
+    # the CMS-dispatch block (Solution.py ~:2007); a missing key means
+    # derivation bailed early (e.g. via reject) and this Solution is not
+    # a valid build target anyway.
+    self._pre_cms_state = self._state.pop(_PRE_CMS_STATE_TRANSIENT_KEY, None)
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
 
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
 
+
+  def pre_cms_state(self):
+    """Return the dict snapshot Solution.assignDerivedParameters took
+    immediately before its CMS-dispatch resolution block. Used by
+    rocm-libraries-xj16's real-vs-real validator (Approach A) to
+    re-derive a clean non-CMS reference Solution without inheriting
+    CMS-only injected flags. Raises AttributeError if
+    assignDerivedParameters has not run yet."""
+    if not hasattr(self, "_pre_cms_state") or self._pre_cms_state is None:
+      raise AttributeError(
+        "Solution.pre_cms_state(): snapshot is unavailable. Either "
+        "assignDerivedParameters has not run on this Solution yet, or "
+        "it bailed out before reaching the pre-CMS snapshot site "
+        "(Solution.py ~:2007). See rocm-libraries-l1l6."
+      )
+    return self._pre_cms_state
 
   ########################################
   # get a list of kernel parameters for this solution
@@ -2435,12 +2471,24 @@ class Solution(collections.abc.Mapping):
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
 
-    # rocm-libraries-y391: snapshot the pre-CMS-derivation state so
-    # build_non_cms_reference (Approach A's Build #2) can re-derive
+    # rocm-libraries-y391 (snapshot mechanism) / rocm-libraries-l1l6
+    # (attribute-not-magic-key): snapshot the pre-CMS-derivation state
+    # so build_non_cms_reference (Approach A's Build #2) can re-derive
     # from a guaranteed-clean source without needing a centrally-
     # maintained list of "CMS-only flags to scrub". The snapshot is
     # Solution-internal — only consumed by
     # Tensile.Components.CustomSchedule.approach_a.build_non_cms_reference.
+    #
+    # Transport mechanism: ``assignDerivedParameters`` is a @staticmethod
+    # operating on a bare state dict (no ``self`` to assign to). We stash
+    # the snapshot under a transient key here; ``Solution.__init__`` pops
+    # it off the state dict immediately after this call returns and
+    # promotes it to ``self._pre_cms_state`` (accessor
+    # ``Solution.pre_cms_state()``). Final ``dict(solution)`` therefore
+    # never contains the snapshot key — Solution stays idempotent. This
+    # supersedes m7o5/y391's persistent ``state["_pre_cms_derived_state"]``
+    # magic-key contract, which leaked the snapshot into every CMS
+    # solution's mapping surface.
     #
     # Placement: AFTER all non-CMS-conditional derivation has run (so
     # the snapshot represents the dict as it would be if no schedule
@@ -2453,10 +2501,8 @@ class Solution(collections.abc.Mapping):
     #
     # Note: AssignedDerivedParameters is False at this point (reset at
     # the top of this function), so re-feeding the snapshot through
-    # Solution does NOT short-circuit derivation. The snapshot key
-    # itself is not copied recursively (dict(state) is a shallow copy
-    # taken before the key is assigned).
-    state["_pre_cms_derived_state"] = dict(state)
+    # Solution does NOT short-circuit derivation.
+    state[_PRE_CMS_STATE_TRANSIENT_KEY] = dict(state)
 
     # CMS dispatch resolution (rocm-libraries-2bww, strict model).
     #

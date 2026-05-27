@@ -603,13 +603,12 @@ def real_kernel_capture_pair_approach_a(isa_infrastructure):
     )
 
     # --- Build #2: non-CMS reference via Approach A's helper.
-    # rocm-libraries-y391: cms_solution carries
-    # `_pre_cms_derived_state` — the snapshot Solution.assignDerivedParameters
-    # took before its CMS-injection block. `build_non_cms_reference` uses
-    # that snapshot directly as the re-derivation base, so the non-CMS
-    # build sees the un-mutated config without any per-flag fix-up here.
+    # rocm-libraries-l1l6: `build_non_cms_reference` takes the Solution
+    # directly and reads the pre-CMS-derivation snapshot via
+    # `cms_solution.pre_cms_state()`. No magic-key surface area in
+    # `dict(cms_solution)` (supersedes y391's transient leak).
     default_cap = build_non_cms_reference(
-        dict(cms_solution), asm, isaInfoMap)
+        cms_solution, asm, isaInfoMap)
     return default_cap, cms_cap
 
 

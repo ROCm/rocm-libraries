@@ -98,7 +98,7 @@ def test_build_non_cms_reference_returns_body_shaped_capture(isa_infrastructure)
     config = dict(CANONICAL_TF32_4X4_TN_CONFIG)
 
     capture = build_non_cms_reference(
-        dict(_make_solution(config, asm, isaInfoMap)), asm, isaInfoMap)
+        _make_solution(config, asm, isaInfoMap), asm, isaInfoMap)
 
     # Body shape: ML-1, ML, NGL, NLL all present at codepath 0.
     assert 0 in capture.main_loop_prev, (
@@ -200,7 +200,7 @@ def test_non_cms_reference_compares_clean_against_cms_build(isa_infrastructure):
 
     # --- Build #2: non-CMS reference (NEW path). ---
     ref_cap = build_non_cms_reference(
-        dict(_make_solution(config, asm, isaInfoMap)), asm, isaInfoMap)
+        _make_solution(config, asm, isaInfoMap), asm, isaInfoMap)
 
     # --- Wire ref + subj into compare_graphs. ---
     ref_graph = build_dataflow_graph(ref_cap)
@@ -213,29 +213,40 @@ def test_non_cms_reference_compares_clean_against_cms_build(isa_infrastructure):
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "rocm-libraries-y391 changed the residual SHAPE: with the "
-        "Solution.py pre-CMS-derivation snapshot, the non-CMS reference "
-        "build now inherits UsePLRPack=True from the canonical config's "
-        "user-set fields (only Solution.assignDerivedParameters-set "
-        "fields get reverted by the snapshot, not user-set YAML fields). "
-        "Result: compare_graphs surfaces CaptureConsistencyError (28 "
-        "LR/MFMA identity-set differences) instead of the m7o5-era "
-        "exactly-3 OrderInvertedFailures pin. Needs investigation — "
-        "either snapshot site moved earlier OR test re-pinned against "
-        "the new shape. Tracked separately."
-    )
-)
 def test_non_cms_reference_compare_graphs_surfaces_only_known_residuals(
     isa_infrastructure,
 ):
     """Pin the exact residual surfaced by Approach A so any new kind of
     failure surfaces as a test failure (not a silent shape change).
 
-    The known residuals are 3 ``OrderInvertedFailure`` instances on
-    GRA/GRB nodes in the ML body. Anything else is a NEW finding that
-    should escalate per the bead's "STOP and surface" rule for Cycle 2.
+    rocm-libraries-l1l6 (2026-05-26) re-pin: the residual shape changed
+    between m7o5 and y391 once the pre-CMS-derivation snapshot started
+    feeding ``build_non_cms_reference``. Under m7o5 (pre-snapshot,
+    YAML-override hack) the residual was 3 ``OrderInvertedFailure``
+    instances on GRA/GRB in the ML body. Under y391+ (post-snapshot,
+    principled), the residual is a ``CaptureConsistencyError`` raised
+    by ``compare_graphs``'s data-flow node identity-set check: 28
+    identities in ref-but-not-subj, 28 identities in subj-but-not-ref,
+    each side split exactly ``{LR: 14, MFMA: 14}``.
+
+    This new shape is the principled "accept whatever Tensilelite
+    mutates" baseline from ``2LZD_INVESTIGATION.md §6.2 Q2``: the
+    canonical CMS YAML sets ``UsePLRPack=True`` as a *user-set* field,
+    so the snapshot mechanism (which only reverts
+    ``assignDerivedParameters``-set fields, NOT user-set YAML fields)
+    correctly preserves it on the non-CMS reference build. The
+    resulting LR/MFMA identity differences reflect the actual
+    schedule-level divergence between the CMS path's per-tile MFMA
+    ordering and the non-CMS path's SIA3 scheduler — both consuming
+    the same ``UsePLRPack=True`` flag but producing different ds_read
+    / v_mfma offset orderings. Earlier proposals to move the snapshot
+    site *earlier* in ``Solution.assignDerivedParameters`` were
+    rejected because that would resurrect m7o5's hack of silently
+    overriding user-supplied YAML.
+
+    Any change in (a) the failure class, (b) the per-side identity
+    count, or (c) the per-side category split should escalate per the
+    bead's "STOP and surface" rule for Cycle 2.
     """
     from Tensile.Components.CustomSchedule.approach_a import (
         build_non_cms_reference,
@@ -243,6 +254,7 @@ def test_non_cms_reference_compare_graphs_surfaces_only_known_residuals(
     from Tensile.Components.CMSValidator import (
         build_dataflow_graph, compare_graphs,
     )
+    from Tensile.Components.ScheduleCapture import CaptureConsistencyError
     from cms_test_utils import _make_solution
 
     _isa, isaInfoMap, asm = isa_infrastructure
@@ -256,50 +268,58 @@ def test_non_cms_reference_compare_graphs_surfaces_only_known_residuals(
         pass
     cms_cap = cms_writer._last_cms_capture
     assert cms_cap is not None
-    # rocm-libraries-y391: cms_solution carries _pre_cms_derived_state —
-    # the snapshot Solution.assignDerivedParameters took before its
-    # CMS-injection block. build_non_cms_reference uses that snapshot
-    # directly as the re-derivation base; no per-flag fix-up needed.
+    # rocm-libraries-l1l6: cms_solution carries the pre-CMS-derivation
+    # snapshot as an attribute (`cms_solution.pre_cms_state()`).
+    # `build_non_cms_reference` reads it via the accessor; the dict
+    # surface of `cms_solution` no longer leaks the snapshot.
     ref_cap = build_non_cms_reference(
-        dict(cms_solution), asm, isaInfoMap)
+        cms_solution, asm, isaInfoMap)
 
     ref_graph = build_dataflow_graph(ref_cap)
     subj_graph = build_dataflow_graph(cms_cap)
-    failures = compare_graphs(ref_graph, subj_graph)
 
-    unexpected = []
-    for f in failures:
-        if type(f).__name__ != "OrderInvertedFailure":
-            unexpected.append(("non-OrderInverted", type(f).__name__,
-                               getattr(f, "producer", None),
-                               getattr(f, "consumer", None)))
-            continue
-        prod_cat = getattr(f.producer, "category", "") or ""
-        cons_cat = getattr(f.consumer, "category", "") or ""
-        prod_body = getattr(f.producer, "body_label", None)
-        cons_body = getattr(f.consumer, "body_label", None)
-        if prod_body != "ML" or cons_body != "ML":
-            unexpected.append(("ML-body-only-violation", type(f).__name__,
-                               prod_body, cons_body))
-            continue
-        if not (prod_cat in ("GRA", "GRB") and cons_cat in ("GRA", "GRB")):
-            unexpected.append(("GR-only-violation", type(f).__name__,
-                               prod_cat, cons_cat))
-    assert not unexpected, (
-        f"Approach-A surfaced unexpected residuals beyond the known "
-        f"GRA/GRB ML OrderInverted set; surface to the user per the "
-        f"bead's STOP-and-surface rule: {unexpected[:5]}"
+    # The y391+ residual surfaces as a CaptureConsistencyError raised
+    # inside compare_graphs's data-flow node identity-set check (see
+    # CMSValidator.py around the `data-flow node identity sets differ`
+    # branch). Pin the exception class + the per-side breakdown so any
+    # drift in (failure class, identity counts, per-class breakdown)
+    # fails the test.
+    with pytest.raises(CaptureConsistencyError) as excinfo:
+        compare_graphs(ref_graph, subj_graph)
+
+    msg = str(excinfo.value)
+    # Per-side identity counts. We pin the literal "28 identities" twice
+    # rather than parse the message because the error string is the
+    # contract — any change to the count silently breaking the principled
+    # baseline shows up here.
+    assert "in reference but not subject: 28 identities" in msg, (
+        f"Expected 28 identities in ref-but-not-subject; full message:\n{msg}"
     )
-    # Pin the COUNT in addition to the SHAPE. The known residual is
-    # exactly 3 OrderInvertedFailures; a count drift within the same
-    # shape (e.g. 3 -> 5) would silently slip past the shape-only check
-    # above. Per nyb5 reviewer 2026-05-13.
-    assert len(failures) == 3, (
-        f"Approach-A residual COUNT changed: expected exactly 3 "
-        f"OrderInvertedFailures on GRA/GRB in ML, got {len(failures)}. "
-        f"All have the right shape but the count is off — investigate "
-        f"per rocm-libraries-3ija."
+    assert "in subject but not reference: 28 identities" in msg, (
+        f"Expected 28 identities in subj-but-not-reference; full message:\n{msg}"
     )
+    # Per-side category breakdown. Both sides should split exactly
+    # {LR: 14, MFMA: 14}. dict.__repr__ key ordering can vary, so we
+    # check both orderings the error formatter could produce.
+    expected_breakdowns = (
+        "{'MFMA': 14, 'LR': 14}",
+        "{'LR': 14, 'MFMA': 14}",
+    )
+    for side in ("in reference but not subject", "in subject but not reference"):
+        assert any(brk in msg for brk in expected_breakdowns), (
+            f"Expected {side} breakdown to be one of {expected_breakdowns}; "
+            f"full message:\n{msg}"
+        )
+    # Negative check: no other categories may appear in the breakdown.
+    # Surfacing e.g. {'GRA': X, ...} or {'LR': 14, 'MFMA': 14, 'GW': N}
+    # would be a NEW finding that escalates per the bead's STOP-and-
+    # surface rule.
+    for forbidden in ("'GRA'", "'GRB'", "'GW'", "'LW'", "'WAIT'"):
+        assert forbidden not in msg, (
+            f"Residual surfaced unexpected category {forbidden} beyond "
+            f"the principled-baseline {{LR, MFMA}} set; STOP and surface "
+            f"per the bead's rule. Full message:\n{msg}"
+        )
 
 
 # =============================================================================
@@ -328,7 +348,7 @@ def test_non_cms_reference_has_lcc_in_every_main_loop_body(isa_infrastructure):
     _isa, isaInfoMap, asm = isa_infrastructure
     config = dict(CANONICAL_TF32_4X4_TN_CONFIG)
     capture = build_non_cms_reference(
-        dict(_make_solution(config, asm, isaInfoMap)), asm, isaInfoMap)
+        _make_solution(config, asm, isaInfoMap), asm, isaInfoMap)
 
     # Filter to LCC-tagged instructions; ShadowLimitA/B decrements are
     # also SSubU32 but tagged GRIncA / GRIncB — they're not LCC. Per

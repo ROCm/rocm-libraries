@@ -6563,10 +6563,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             build_non_cms_reference,
           )
           # `build_non_cms_reference` forces UseCustomMainLoopSchedule=0
-          # on its config copy (approach_a.py:118), so the recursion
-          # guard via `is_cms_callsite` is structural — Build #2 cannot
-          # re-enter shape (a).
-          kernel_config = dict(kernel)
+          # on its config copy (approach_a.py:_prepare_non_cms_config),
+          # so the recursion guard via `is_cms_callsite` is structural —
+          # Build #2 cannot re-enter shape (a).
+          # rocm-libraries-l1l6: pass the Solution itself (not
+          # `dict(kernel)`); `build_non_cms_reference` reads the pre-CMS
+          # snapshot via `solution.pre_cms_state()`.
           isaInfoMap = getattr(kernel, "isaInfoMap", None)
           if isaInfoMap is None:
             # If the Solution wasn't built with an isaInfoMap, we
@@ -6582,7 +6584,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               f"{kernel.get('DepthU')}."
             )
           ctx.default = build_non_cms_reference(
-            kernel_config, self.assembler, isaInfoMap,
+            kernel, self.assembler, isaInfoMap,
           )
         else:
           # rocm-libraries-nyb5 shape (b): consume the natural non-CMS

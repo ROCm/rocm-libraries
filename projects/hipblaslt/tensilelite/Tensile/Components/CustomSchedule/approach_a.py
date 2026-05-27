@@ -39,7 +39,7 @@ that second build.
 
 Public API:
 
-    build_non_cms_reference(kernel_config, asm, isaInfoMap) -> FourPartCapture
+    build_non_cms_reference(solution, asm, isaInfoMap) -> FourPartCapture
 
 The helper is the foundation of the meta-bead ``rocm-libraries-71hw``
 work decomposition. Its capture is consumed by ``compare_graphs`` as the
@@ -53,24 +53,27 @@ pattern at ``Tensile/Tests/unit/_dump_carveout_assembly.py:229`` and
 guarantees zero state contamination between the CMS build and the non-CMS
 reference build.
 
-Pre-CMS-derivation snapshot (rocm-libraries-y391, supersedes m7o5):
+Pre-CMS-derivation snapshot (rocm-libraries-y391, refined by
+rocm-libraries-l1l6):
 
 For the production call site (``KernelWriter.py`` mid-CMS-build), the
-input ``kernel_config`` comes from ``dict(kernel)`` where ``kernel`` is
-a Solution that has already been through
+input ``solution`` is one that has already been through
 ``Solution.assignDerivedParameters`` with its CMS-injection block having
 fired (``Solution.py:2007-2013`` and ``2027-2030``). Flipping only
-``UseCustomMainLoopSchedule`` on that post-CMS dict leaves CMS-only
+``UseCustomMainLoopSchedule`` on the post-CMS state dict leaves CMS-only
 framework-derived flags asserted and blows the non-CMS scheduler's vgpr
 budget (m7o5: 523 vgpr on MT 192x256x32 TF32 emulation kernels).
 
 The principled fix is for ``Solution.assignDerivedParameters`` to
-snapshot its own pre-CMS-derivation state into
-``state["_pre_cms_derived_state"]`` — see Solution.py around the CMS
-dispatch resolution block. ``build_non_cms_reference`` consumes that
-snapshot directly: no local knowledge of which flags Solution.py
-injects for CMS, so future schedules adding new ``required_flags``
-inject correctly with zero maintenance to this module.
+snapshot its own pre-CMS-derivation state and stash it on the Solution
+itself; ``build_non_cms_reference`` consumes that snapshot via the
+``solution.pre_cms_state()`` accessor (rocm-libraries-l1l6 replaced the
+y391-era ``state["_pre_cms_derived_state"]`` magic-key contract with a
+real ``Solution._pre_cms_state`` attribute + accessor — see
+``Solution.py``'s ``pre_cms_state`` for the canonical reference). No
+local knowledge of which flags Solution.py injects for CMS lives in this
+module, so future schedules adding new ``required_flags`` inject
+correctly with zero maintenance here.
 
 Cross-references:
     - ``2LZD_INVESTIGATION.md §6 + §6.2`` — Approach A pick + Q2/Q3
@@ -99,16 +102,15 @@ _DERIVATION_GATE_KEYS = (
 )
 
 
-def _prepare_non_cms_config(kernel_config):
+def _prepare_non_cms_config(solution):
     """Return a deep-copied config suitable for non-CMS re-derivation.
 
-    Requires ``kernel_config["_pre_cms_derived_state"]`` — the snapshot
-    that ``Solution.assignDerivedParameters`` takes immediately before
-    its CMS-injection block (rocm-libraries-y391, Solution.py:1999).
-    Raises if absent. The snapshot is set unconditionally by Solution.py
-    for every solution, so any caller going through ``Solution(...)``
-    always has it; callers that hand-construct configs must either go
-    through ``Solution`` or set the snapshot themselves.
+    Reads the pre-CMS-derivation snapshot from
+    ``solution.pre_cms_state()`` (rocm-libraries-l1l6, Solution.py
+    ``pre_cms_state``). Raises ``AttributeError`` via the accessor if
+    ``Solution.assignDerivedParameters`` has not run or bailed before
+    reaching the snapshot site (Solution.py ~:2007). Every Solution
+    that completed normal construction carries the attribute.
 
     The returned config:
       * Comes from the snapshot — no CMS-only mutations carried over.
@@ -117,39 +119,38 @@ def _prepare_non_cms_config(kernel_config):
       * Has ``Assigned*DerivedParameters`` gate markers stripped so the
         second derivation pass runs end-to-end (Solution.py:457-459,
         1223-1225 short-circuit on these).
-      * Has ``_pre_cms_derived_state`` itself dropped so the snapshot
-        doesn't propagate recursively through nested re-derivation.
     """
-    snapshot = kernel_config.get("_pre_cms_derived_state")
-    if snapshot is None:
+    try:
+        snapshot = solution.pre_cms_state()
+    except AttributeError as exc:
         raise RuntimeError(
-            "build_non_cms_reference: kernel_config is missing "
-            "'_pre_cms_derived_state'. Solution.assignDerivedParameters "
-            "sets this unconditionally (Solution.py:1999); callers that "
-            "hand-construct configs without going through Solution must "
-            "set it themselves. See rocm-libraries-y391."
-        )
+            "build_non_cms_reference: Solution has no pre-CMS snapshot. "
+            "Solution.assignDerivedParameters sets self._pre_cms_state "
+            "before its CMS-dispatch block (Solution.py ~:2007); the "
+            "accessor raises if it never ran or bailed early. See "
+            "rocm-libraries-l1l6 (supersedes y391's magic-key contract)."
+        ) from exc
 
     config = deepcopy(dict(snapshot))
     config["UseCustomMainLoopSchedule"] = 0
     for k in _DERIVATION_GATE_KEYS:
         config.pop(k, None)
-    config.pop("_pre_cms_derived_state", None)
     return config
 
 
-def build_non_cms_reference(kernel_config, asm, isaInfoMap):
+def build_non_cms_reference(solution, asm, isaInfoMap):
     """Build a non-CMS reference kernel and return its ``FourPartCapture``.
 
     Args:
-        kernel_config: dict-shaped solution config. MUST carry
-            ``_pre_cms_derived_state`` — the snapshot
-            ``Solution.assignDerivedParameters`` takes immediately before
-            its CMS-injection block (Solution.py:1999, rocm-libraries-
-            y391). That snapshot is the re-derivation base; the rest of
-            the input is ignored. ``UseCustomMainLoopSchedule=0`` is
-            forced on the snapshot so the non-CMS branch of
-            ``assignDerivedParameters`` fires on the second pass.
+        solution: a ``Solution`` instance (post-``assignDerivedParameters``)
+            from which to derive the non-CMS reference build. The
+            ``solution.pre_cms_state()`` snapshot is the re-derivation
+            base; the rest of ``solution`` is ignored.
+            ``UseCustomMainLoopSchedule=0`` is forced on the snapshot so
+            the non-CMS branch of ``assignDerivedParameters`` fires on
+            the second pass. Raises ``RuntimeError`` (wrapping
+            ``AttributeError``) if ``solution`` carries no snapshot —
+            see ``_prepare_non_cms_config``.
         asm: The ``Assembler`` instance from ``isa_infrastructure``.
         isaInfoMap: The ISA info map from ``isa_infrastructure``.
 
@@ -172,6 +173,12 @@ def build_non_cms_reference(kernel_config, asm, isaInfoMap):
     caching, test/CI-only gating, and process-pool isolation are
     reserved for after correctness lands.
 
+    rocm-libraries-l1l6 (2026-05-26): takes a ``Solution`` and consumes
+    the snapshot via the ``pre_cms_state()`` accessor instead of probing
+    a dict for the ``_pre_cms_derived_state`` magic key (y391's contract,
+    now retired). Solution stays idempotent; ``dict(solution)`` no
+    longer carries the snapshot.
+
     rocm-libraries-y391 (2026-05-27): replaces the brittle
     ``_CMS_FRAMEWORK_DERIVED_DEFAULTS`` scrub list from m7o5
     (d21c97fb431). The scrub list required this module to track every
@@ -192,10 +199,10 @@ def build_non_cms_reference(kernel_config, asm, isaInfoMap):
         sys.path.insert(0, tests_unit)
     from cms_test_utils import _make_solution
 
-    non_cms_config = _prepare_non_cms_config(kernel_config)
+    non_cms_config = _prepare_non_cms_config(solution)
 
     # Q5 — second writer instance, fully isolated.
-    solution = _make_solution(non_cms_config, asm, isaInfoMap)
+    non_cms_solution = _make_solution(non_cms_config, asm, isaInfoMap)
 
     writer = KernelWriterAssembly(asm, DebugConfig())
     # Switch on the new non-CMS capture path (gated separately from
@@ -204,7 +211,7 @@ def build_non_cms_reference(kernel_config, asm, isaInfoMap):
     # this bead).
     writer.enable_capture_non_cms_build()
 
-    writer._getKernelSource(solution)
+    writer._getKernelSource(non_cms_solution)
 
     capture = writer._last_default_capture
     if capture is None:
