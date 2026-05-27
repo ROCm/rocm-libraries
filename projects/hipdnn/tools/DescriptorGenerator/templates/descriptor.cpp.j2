@@ -452,7 +452,7 @@ std::string {{ op.class_name }}::toString() const
     str += ", compute_data_type=";
     str += {{ op.fbs_namespace }}::EnumNameDataType(_computeDataType);
 {% endif %}
-    str += '}';
+    str += "}";
     return str;
 }
 
