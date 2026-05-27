@@ -28,9 +28,9 @@
 
 namespace v3 = ck_tile::direct_conv::conv_32c_tile::v3;
 
-// Config 49: M16N16K32 fp16 Fprop, waves_per_wg=2, c_slices_per_wave=2,
+// Config 44: M16N16K32 fp16 Fprop, waves_per_wg=2, c_slices_per_wave=2,
 // SwizzleType::None. total_block_c = 128, per-chunk block_c = 64.
-static constexpr int CFG_CSPW2_FPROP = 49;
+static constexpr int CFG_CSPW2_FPROP = 44;
 
 // Test kernel: construct ConvInputLoader, then for input row `target_y`
 // prefetch chunk 0 into LDS buffer 0 and chunk 1 into LDS buffer 1, then
