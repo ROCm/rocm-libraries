@@ -68,6 +68,9 @@ struct is_floating_point<half_t> : true_type
 {};
 
 template<>
+constexpr bool is_floating_point_v<half_t> = true;
+
+template<>
 class numeric_limits<half_t>
 {
 public:
