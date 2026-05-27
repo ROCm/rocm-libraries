@@ -231,7 +231,6 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
     }
 }
 
-
 def nthreads() {
     def nproc = sh(returnStdout: true, script: 'nproc')
     echo "Number of cores: ${nproc}"
