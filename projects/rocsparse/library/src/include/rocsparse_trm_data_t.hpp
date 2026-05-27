@@ -26,7 +26,6 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_indextype_utils.hpp"
-#include "rocsparse_memory.hpp"
 #include "rocsparse_pivot_info_t.hpp"
 #include "rocsparse_trm_info.hpp"
 #include <memory>

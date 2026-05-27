@@ -24,43 +24,6 @@
 
 #pragma once
 
-#include <hip/hip_runtime_api.h>
-
-//
-// This section is conditional to the definition
-// of ROCSPARSE_WITH_MEMSTAT
-//
-#ifndef ROCSPARSE_WITH_MEMSTAT
-
-#include "rocsparse_memory.hpp"
-
-#else
-
 #include "rocsparse-auxiliary.h"
-
-#define ROCSPARSE_HIP_SOURCE_MSG(msg_) #msg_
-#define ROCSPARSE_HIP_SOURCE_TAG(msg_) __FILE__ " " ROCSPARSE_HIP_SOURCE_MSG(msg_)
-
-#define rocsparse_hipMalloc(p_, nbytes_) \
-    rocsparse_hip_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipFree(p_) rocsparse_hip_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipMallocAsync(p_, nbytes_, stream_) \
-    rocsparse_hip_malloc_async((p_), (nbytes_), (stream_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipFreeAsync(p_, stream_) \
-    rocsparse_hip_free_async((p_), (stream_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipHostMalloc(p_, nbytes_) \
-    rocsparse_hip_host_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipHostFree(p_) rocsparse_hip_host_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipMallocManaged(p_, nbytes_) \
-    rocsparse_hip_malloc_managed((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#define rocsparse_hipFreeManaged(p_) \
-    rocsparse_hip_free_managed((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
-
-#endif
+#include "rocsparse_hip.hpp"
+#include <hip/hip_runtime_api.h>
