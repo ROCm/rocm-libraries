@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -116,20 +116,21 @@ int main()
                                                    buffer_size,
                                                    dbuffer));
 
-    ROCSPARSE_CHECK(rocsparse_scsritilu0_compute(handle,
-                                                 alg,
-                                                 option,
-                                                 &nmaxiter,
-                                                 tol,
-                                                 m,
-                                                 nnz,
-                                                 dcsr_row_ptr,
-                                                 dcsr_col_ind,
-                                                 dcsr_val,
-                                                 dilu0,
-                                                 idx_base,
-                                                 buffer_size,
-                                                 dbuffer));
+    ROCSPARSE_CHECK(rocsparse_scsritilu0_compute_ex(handle,
+                                                    alg,
+                                                    option,
+                                                    &nmaxiter,
+                                                    1,
+                                                    tol,
+                                                    m,
+                                                    nnz,
+                                                    dcsr_row_ptr,
+                                                    dcsr_col_ind,
+                                                    dcsr_val,
+                                                    dilu0,
+                                                    idx_base,
+                                                    buffer_size,
+                                                    dbuffer));
 
     std::vector<float> hilu0(nnz);
     HIP_CHECK(hipMemcpy(hilu0.data(), dilu0, sizeof(float) * nnz, hipMemcpyDeviceToHost));
