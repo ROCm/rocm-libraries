@@ -33,8 +33,10 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
@@ -73,6 +75,8 @@ const std::vector<PassInfo> availablePasses = {
     {"RemoveDelayAluPass", []() { return createRemoveDelayAluPass(); }},
     {"InsertDelayAluPass", []() { return createInsertDelayAluPass(); }},
     {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
+    {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
+    {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
 };
 
 /**
