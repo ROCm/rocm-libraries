@@ -54,12 +54,15 @@ def _mock_dtype(num_bytes=2):
     return mock
 
 
-def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
+def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
+                  miWaveGroup=None, sourceSwap=False):
     mxblock = 32 if fp4 else 0
     bpe = 0.5 if fp4 else 2
     matrixInstK = 128 if fp4 else 32
     if depthU is None:
         depthU = 256 if fp4 else 64
+    if miWaveGroup is None:
+        miWaveGroup = [2, 2]
     dtype = _mock_dtype(bpe)
     problemType = {
         "DataTypeA": dtype,
@@ -80,9 +83,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
         "MatrixInstM": 16,
         "MatrixInstN": 16,
         "MatrixInstK": matrixInstK,
-        "MIWaveGroup": list(waveGroup),
+        "MIWaveGroup": list(miWaveGroup),
         "WavefrontSize": 64,
-        "SourceSwap": False,
+        "SourceSwap": sourceSwap,
         "MIArchVgpr": False,
         "NonTemporalA": 0,
         "NonTemporalB": 0,
@@ -96,47 +99,58 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
     return kernel
 
 
-def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
-                         grSA_k=2, grSA_mn=8, grSB_k=2, grSB_mn=8, pgr=2):
+def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
+                         grSA_k=2, grSA_mn=8, grSB_k=2, grSB_mn=8, pgr=2,
+                         miWaveGroup=None):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B."""
-    kernel = create_kernel(256, 256, fp4=True, depthU=depthU)
+    kernel = create_kernel(256, 256, fp4=True, depthU=depthU, miWaveGroup=miWaveGroup)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel)
     scaleTiB = makeTileInfo('MXSB', kernel)
+    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
         numSubIterK=tiA.localMMATileGrid[1],
         lrA=ReadGranularity(mn=1, k=k_gran),
         lrB=ReadGranularity(mn=1, k=k_gran),
-        grA=ReadGranularity(mn=1, k=2),
-        grB=ReadGranularity(mn=1, k=2),
+        grA=grA,
+        grB=grB,
         lrSA=ReadGranularity(mn=2, k=2),
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=numPartM,
-        numPartitionsN=numPartN,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=pgr,
     )
 
 
-def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1):
+def make_cfg_bf16(MT0=256, MT1=256, depthU=64, partSizeM=0, partSizeN=0,
+                  miWaveGroup=None, sourceSwap=False, lrA=None, lrB=None):
     """Build BF16 config without scale tensors."""
-    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
+    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU,
+                           miWaveGroup=miWaveGroup, sourceSwap=sourceSwap)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
+    if lrA is None:
+        lrA = ReadGranularity(mn=1, k=1)
+    if lrB is None:
+        lrB = ReadGranularity(mn=1, k=1)
+    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
         numSubIterK=tiA.localMMATileGrid[1],
-        lrA=ReadGranularity(mn=1, k=1),
-        lrB=ReadGranularity(mn=1, k=1),
-        grA=ReadGranularity(mn=1, k=2),
-        grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=numPartM,
-        numPartitionsN=numPartN,
+        lrA=lrA,
+        lrB=lrB,
+        grA=grA,
+        grB=grB,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
     )
 
 
@@ -157,7 +171,7 @@ def make_cfg_bf16_pgr0(MT0=256, MT1=256, depthU=64):
     )
 
 
-def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, numPartM=1, numPartN=1):
+def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, partSizeM=0, partSizeN=0):
     """Build BF16 config with pgr=1."""
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
     tiA = makeTileInfo('A', kernel)
@@ -170,8 +184,8 @@ def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, numPartM=1, numPartN=1):
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=numPartM,
-        numPartitionsN=numPartN,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=1,
     )
 
@@ -439,7 +453,7 @@ class TestPlaceLRs:
         """MT=256x256, DU=256, FP4, k=1, 2x2 partition.
         8x8 tiles → 4 partitions of 4x4. Column-major traversal.
         """
-        cfg = make_cfg_256x256_fp4(numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
         assert cfg.partitionSizeM == 4
         assert cfg.partitionSizeN == 4
@@ -499,7 +513,7 @@ class TestPlaceLRs:
         """MT=256x256, DU=512, FP4, k=1, 2x2 partition.
         numSubIterK=4. 4 partitions × 4 subIterKs = 16 slots.
         """
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
         assert cfg.numSubIterK == 4
 
@@ -532,7 +546,7 @@ class TestPlaceLRs:
         """MT=256x256, DU=256, FP4, k=2, 2x2 partition.
         Each partition: A/B loaded per side, wrapping across partitions.
         """
-        cfg = make_cfg_256x256_fp4(k_gran=2, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(k_gran=2, partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
 
         sched = LogicalScheduler(cfg)
@@ -561,7 +575,7 @@ class TestPlaceLRs:
         """MT=320x320, BF16, DU=64, k=1, 10x1 partition. No scale.
         B never changes → only A wrapping LRs needed.
         """
-        cfg = make_cfg_bf16(320, 320, numPartM=10, numPartN=1)
+        cfg = make_cfg_bf16(320, 320, partSizeM=1, partSizeN=10)
         assert cfg.numMFMATilesM == 10
         assert cfg.numMFMATilesN == 10
         assert cfg.numSubIterK == 2
@@ -612,10 +626,11 @@ class TestPlaceLRs:
 class TestAssignVgprTiles:
 
     def _assert_no_conflict_and_unrolling(self, sched):
-        """Validate no MFMA/LR vgprTileId overlap and unrolling continuity."""
+        """Validate vgprTileId invariants: no overlap, bounds, alternation, continuity."""
         parts = sched._partitions
         num_iters = sched.unroll_factor
 
+        # 1. No MFMA/LR vgprTileId overlap
         for pi, slots in enumerate(parts):
             for slot in slots:
                 if not slot.mfma:
@@ -630,6 +645,62 @@ class TestAssignVgprTiles:
                         assert mfma_vids.isdisjoint(lr_vids), \
                             f"P{pi} k={slot.subIterK} iter={ui}: MFMA/LR {lr.tensor} overlap"
 
+        # 2. All vgprTileIds within [0, tile_peaks)
+        for pi, slots in enumerate(parts):
+            for slot in slots:
+                if slot.mfma:
+                    for tensor, maps in slot.mfma.vgpr_tile_maps.items():
+                        peak = sched.tile_peaks[tensor]
+                        for ui, tile_map in enumerate(maps):
+                            for tid, vid in tile_map.items():
+                                assert 0 <= vid < peak, \
+                                    f"P{pi} k={slot.subIterK} iter={ui}: " \
+                                    f"MFMA {tensor} vid={vid} out of [0, {peak})"
+                for lr in slot.lrs:
+                    if not lr.vgpr_tile_map:
+                        continue
+                    peak = sched.tile_peaks[lr.tensor]
+                    for ui, tile_map in enumerate(lr.vgpr_tile_map):
+                        for tid, vid in tile_map.items():
+                            assert 0 <= vid < peak, \
+                                f"P{pi} k={slot.subIterK} iter={ui}: " \
+                                f"LR {lr.tensor} vid={vid} out of [0, {peak})"
+
+        # 3. Double-buffer alternation: MFMAs in different K-groups use different sets.
+        cfg = sched.config
+        lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
+        if cfg.hasScale:
+            lr_grans['SA'] = cfg.lrSA
+            lr_grans['SB'] = cfg.lrSB
+
+        for ui in range(num_iters):
+            for pi, slots in enumerate(parts):
+                by_k = {}
+                for slot in slots:
+                    if not slot.mfma:
+                        continue
+                    by_k.setdefault(slot.subIterK, []).append(slot)
+                sorted_ks = sorted(by_k.keys())
+                for i in range(len(sorted_ks) - 1):
+                    k0, k1 = sorted_ks[i], sorted_ks[i + 1]
+                    for s0 in by_k[k0]:
+                        for s1 in by_k[k1]:
+                            for tensor in sched.tile_peaks:
+                                gran = lr_grans[tensor]
+                                if k0 // gran.k == k1 // gran.k:
+                                    continue
+                                maps0 = s0.mfma.vgpr_tile_maps.get(tensor, [])
+                                maps1 = s1.mfma.vgpr_tile_maps.get(tensor, [])
+                                if ui >= len(maps0) or ui >= len(maps1):
+                                    continue
+                                common_tiles = (set(maps0[ui].keys())
+                                                & set(maps1[ui].keys()))
+                                for tid in common_tiles:
+                                    assert maps0[ui][tid] != maps1[ui][tid], \
+                                        f"P{pi} iter={ui}: {tensor} tile {tid} " \
+                                        f"same vid at k={k0} and k={k1}"
+
+        # 4. Unrolling continuity
         if sched.needs_unrolling:
             last_ui = num_iters - 1
             wrapping_writes = {}
@@ -714,7 +785,7 @@ class TestAssignVgprTiles:
 
     def test_DU512_partition_2x2(self):
         """DU=512 + 2x2 partition. All partitions have tile maps."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.assign_vgpr_tiles()
 
@@ -723,6 +794,177 @@ class TestAssignVgprTiles:
                 assert len(slot.mfma.vgpr_tile_maps['A']) > 0
 
         assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 1: BF16 2x2 ──
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_2x2(self, depthU):
+        """BF16 256x256 with default miWaveGroup=[2,2]."""
+        cfg = make_cfg_bf16(depthU=depthU)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 2: BF16 1x4 / 4x1 ──
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_1x4(self, depthU):
+        """BF16 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
+        cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[1, 4])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 32, 'B': 8}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_4x1(self, depthU):
+        """BF16 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
+        cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[4, 1])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 8, 'B': 32}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 3: BF16 multi-partition along N ──
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
+        (4, 8),
+        (3, 6),
+        (2, 4),
+    ])
+    def test_bf16_partition_N(self, partSizeN, expected_peak_B):
+        """BF16 256x256 (tilesN=8) with partitions along N."""
+        cfg = make_cfg_bf16(depthU=64, partSizeN=partSizeN)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 3b: BF16 multi-partition on asymmetric macro tiles ──
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (6, 12, [6, 6]),
+        (4, 8,  [4, 4, 4]),
+        (3, 6,  [3, 3, 3, 3]),
+        (5, 10, [5, 2, 5]),
+    ])
+    def test_bf16_partition_256x384(self, partSizeN, expected_peak_B, expected_partN):
+        """BF16 256x384 (tilesN=12) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=384, depthU=64, partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (4, 8,  [4, 3, 4]),
+        (3, 6,  [3, 2, 3, 3]),
+        (6, 12, [6, 5]),
+    ])
+    def test_bf16_partition_256x352(self, partSizeN, expected_peak_B, expected_partN):
+        """BF16 256x352 (tilesN=11, odd) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=352, depthU=64, partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (4, 8,  [4, 4, 3, 4, 4, 4]),
+        (6, 12, [6, 5, 6, 6]),
+        (8, 16, [8, 7, 8]),
+    ])
+    def test_bf16_partition_256x368(self, partSizeN, expected_peak_B, expected_partN):
+        """BF16 256x368 miWaveGroup=[4,1] (tilesM=4, tilesN=23) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=368, depthU=64, miWaveGroup=[4, 1],
+                            partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 8
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 4: FP4 2x2 ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_2x2(self, depthU, expect_unrolling):
+        """FP4 256x256 with default miWaveGroup=[2,2]."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16, 'SA': 8, 'SB': 8}
+        assert sched.needs_unrolling == expect_unrolling
+
+        for pi in range(cfg.numPartitions):
+            for slot in sched._partitions[pi]:
+                if slot.mfma:
+                    assert len(slot.mfma.vgpr_tile_maps['SA']) > 0
+                    assert len(slot.mfma.vgpr_tile_maps['SB']) > 0
+
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 5: FP4 1x4 / 4x1 ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_1x4(self, depthU, expect_unrolling):
+        """FP4 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[1, 4])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 32, 'B': 8, 'SA': 16, 'SB': 4}
+        assert sched.needs_unrolling == expect_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_4x1(self, depthU, expect_unrolling):
+        """FP4 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[4, 1])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 8, 'B': 32, 'SA': 4, 'SB': 16}
+        assert sched.needs_unrolling == expect_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 6: BF16 with lrA/lrB k=2 granularity ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(64, True), (128, False)])
+    def test_bf16_lr_k2(self, depthU, expect_unrolling):
+        """BF16 with LR k=2 granularity — odd k-groups trigger unrolling."""
+        cfg = make_cfg_bf16(
+            depthU=depthU,
+            lrA=ReadGranularity(mn=1, k=2),
+            lrB=ReadGranularity(mn=1, k=2),
+        )
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16}
+        assert sched.needs_unrolling == expect_unrolling
         self._assert_no_conflict_and_unrolling(sched)
 
 
@@ -750,63 +992,95 @@ class TestPlaceGRs:
         _assert_gr(slots[1], 'SB', 0, 2, 0, 8)
 
     def test_1x1_k1_DU512(self):
-        """256x256, DU512, FP4. GR k=2 → two k-chunks. grSA/SB k=4 → full MT."""
+        """256x256, DU512, FP4. GR k=2 → two k-chunks. grSA/SB k=4 → full MT.
+        Spaced-out distribution: B splits across s0/s1, SA migrates to s1, A k=2-4 sits whole at s2.
+        """
         cfg = make_cfg_256x256_fp4(depthU=512)
         sched = LogicalScheduler(cfg)
         slots = sched.place_GRs()
 
-        _assert_slot_grs(slots[0], ['A'])
+        _assert_slot_grs(slots[0], ['A', 'B'])
         _assert_gr(slots[0], 'A', 0, 2, 0, 8)
-        _assert_slot_grs(slots[1], ['B'])
-        _assert_gr(slots[1], 'B', 0, 2, 0, 8)
-        _assert_slot_grs(slots[2], ['SA', 'SB', 'A'])
-        _assert_gr(slots[2], 'A', 2, 4, 0, 6)
-        _assert_slot_grs(slots[3], ['A', 'B'])
-        _assert_gr(slots[3], 'A', 2, 4, 6, 8)
+        _assert_gr(slots[0], 'B', 0, 2, 0, 1)
+        _assert_slot_grs(slots[1], ['B', 'SA'])
+        _assert_gr(slots[1], 'B', 0, 2, 1, 8)
+        _assert_gr(slots[1], 'SA', 0, 4, 0, 8)
+        _assert_slot_grs(slots[2], ['SB', 'A'])
+        _assert_gr(slots[2], 'SB', 0, 4, 0, 8)
+        _assert_gr(slots[2], 'A', 2, 4, 0, 8)
+        _assert_slot_grs(slots[3], ['B'])
         _assert_gr(slots[3], 'B', 2, 4, 0, 8)
 
     def test_2x2_k1_DU256(self):
-        """256x256, DU256, FP4, 2x2 partition. Cross-MT dedup removes n+1 duplicates."""
-        cfg = make_cfg_256x256_fp4(numPartM=2, numPartN=2)
+        """256x256, DU256, FP4, 2x2 partition. Cross-MT dedup removes n+1 duplicates.
+        Spaced-out distribution: tensors split into smaller atoms across more slots;
+        scale GRs migrate to the last slot of the last partition.
+        """
+        cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         slots = sched.place_GRs()
         parts = sched._partitions
 
-        # P0: A n+1
+        # P0: A n+1 split, B n+1 starts at s1
         _assert_slot_grs(parts[0][0], ['A'], "P0 s0")
-        _assert_gr(parts[0][0], 'A', 0, 2, 4, 6, mt=1)
-        _assert_slot_grs(parts[0][1], ['A'], "P0 s1")
-        _assert_gr(parts[0][1], 'A', 0, 2, 6, 8, mt=1)
+        _assert_gr(parts[0][0], 'A', 0, 2, 4, 7, mt=1)
+        _assert_slot_grs(parts[0][1], ['A', 'B'], "P0 s1")
+        _assert_gr(parts[0][1], 'A', 0, 2, 7, 8, mt=1)
+        _assert_gr(parts[0][1], 'B', 0, 2, 4, 5, mt=1)
 
-        # P1: B n+1
+        # P1: B n+1 finishes, A n+2 starts at s1
         _assert_slot_grs(parts[1][0], ['B'], "P1 s0")
-        _assert_gr(parts[1][0], 'B', 0, 2, 4, 6, mt=1)
+        _assert_gr(parts[1][0], 'B', 0, 2, 5, 7, mt=1)
+        _assert_slot_grs(parts[1][1], ['B', 'A'], "P1 s1")
+        _assert_gr(parts[1][1], 'B', 0, 2, 7, 8, mt=1)
+        _assert_gr(parts[1][1], 'A', 0, 2, 0, 1, mt=2)
 
-        # P3: B n+2, SA n+2, SB n+2
-        _assert_slot_grs(parts[3][1], ['B', 'SA', 'SB'], "P3 s1")
+        # P2: A n+2 finishes, B n+2 starts
+        _assert_slot_grs(parts[2][0], ['A'], "P2 s0")
+        _assert_gr(parts[2][0], 'A', 0, 2, 1, 4, mt=2)
+        _assert_slot_grs(parts[2][1], ['B'], "P2 s1")
+        _assert_gr(parts[2][1], 'B', 0, 2, 0, 2, mt=2)
+
+        # P3: B n+2 finishes at s0; SA/SB n+2 at s1 (last slot)
+        _assert_slot_grs(parts[3][0], ['B'], "P3 s0")
+        _assert_gr(parts[3][0], 'B', 0, 2, 2, 4, mt=2)
+        _assert_slot_grs(parts[3][1], ['SA', 'SB'], "P3 s1")
         _assert_gr(parts[3][1], 'SA', 0, 2, 0, 8, mt=2)
         _assert_gr(parts[3][1], 'SB', 0, 2, 0, 8, mt=2)
 
     def test_2x2_k1_DU512(self):
-        """256x256, DU512, FP4, 2x2 partition. GR k=2 × 2 chunks + scale."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        """256x256, DU512, FP4, 2x2 partition. GR k=2 × 2 chunks + scale.
+        Spaced-out distribution: A k=0-2 and k=2-4 chunks split across slots within P0;
+        B n+1 starts in P0 s3; SA/SB migrate to P3 s3 (last slot of last partition).
+        """
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.place_GRs()
         parts = sched._partitions
 
-        # P0: A n+1 across 4 slots
-        for i, (k_s, k_e) in enumerate([(0,2),(0,2),(2,4),(2,4)]):
-            _assert_slot_grs(parts[0][i], ['A'], f"P0 s{i}")
-        _assert_gr(parts[0][0], 'A', 0, 2, 4, 6, mt=1)
-        _assert_gr(parts[0][2], 'A', 2, 4, 4, 6, mt=1)
+        # P0 s0: A n+1 k=0-2 [4-7]
+        _assert_slot_grs(parts[0][0], ['A'], "P0 s0")
+        _assert_gr(parts[0][0], 'A', 0, 2, 4, 7, mt=1)
+        # P0 s1: A n+1 k=0-2 tail [7-8] + A n+1 k=2-4 head [4-5]
+        _assert_slot_grs(parts[0][1], ['A', 'A'], "P0 s1")
+        _assert_gr(parts[0][1], 'A', 0, 2, 7, 8, mt=1, idx=0)
+        _assert_gr(parts[0][1], 'A', 2, 4, 4, 5, mt=1, idx=1)
+        # P0 s2: A n+1 k=2-4 [5-7]
+        _assert_slot_grs(parts[0][2], ['A'], "P0 s2")
+        _assert_gr(parts[0][2], 'A', 2, 4, 5, 7, mt=1)
+        # P0 s3: A n+1 k=2-4 tail [7-8] + B n+1 k=0-2 head [4-5]
+        _assert_slot_grs(parts[0][3], ['A', 'B'], "P0 s3")
+        _assert_gr(parts[0][3], 'A', 2, 4, 7, 8, mt=1)
+        _assert_gr(parts[0][3], 'B', 0, 2, 4, 5, mt=1)
 
-        # P3 s0: SA+SB n+2
-        _assert_slot_grs(parts[3][0], ['SA', 'SB'], "P3 s0")
-        _assert_gr(parts[3][0], 'SA', 0, 4, 0, 8, mt=2)
+        # P2 s3: SA+SB n+2 (migrated from P3 s0 to P2 s3)
+        _assert_slot_grs(parts[2][3], ['SA', 'SB'], "P2 s3")
+        _assert_gr(parts[2][3], 'SA', 0, 4, 0, 8, mt=2)
+        _assert_gr(parts[2][3], 'SB', 0, 4, 0, 8, mt=2)
 
     def test_10x1_bf16(self):
         """320x320, BF16, 10x1 partition. No scales."""
-        cfg = make_cfg_bf16(320, 320, numPartM=10, numPartN=1)
+        cfg = make_cfg_bf16(320, 320, partSizeM=1, partSizeN=10)
         sched = LogicalScheduler(cfg)
         sched.place_GRs()
         parts = sched._partitions
@@ -821,6 +1095,35 @@ class TestPlaceGRs:
             b_idx = (pi - 5) * 2
             _assert_slot_grs(parts[pi][0], ['B'], f"P{pi} s0")
             _assert_gr(parts[pi][0], 'B', 0, 2, b_idx, b_idx+1, mt=2)
+
+    def test_1x19_bf16(self):
+        """320x304, BF16, 1x19 partition, wg=[4,1]. High partition count with sourceSwap."""
+        cfg = make_cfg_bf16(320, 304, partSizeN=1,
+                            miWaveGroup=[4, 1], sourceSwap=True)
+        sched = LogicalScheduler(cfg)
+        sched.place_GRs()
+        parts = sched._partitions
+
+        # Collect (partition, subIterK) for each tensor/mt.
+        b_n1 = []
+        a_n2 = []
+        for pi in range(19):
+            for slot in parts[pi]:
+                for gr in slot.grs:
+                    if gr.tensor == 'B' and gr.mtIteration == 1:
+                        b_n1.append((pi, slot.subIterK))
+                    elif gr.tensor == 'A' and gr.mtIteration == 2:
+                        a_n2.append((pi, slot.subIterK))
+
+        # 9 B n+1 atoms (grB.mn=2) spread across P0..P10
+        assert b_n1 == [
+            (0,0),(1,0),(2,1),(3,1),(5,0),(6,0),(7,1),(8,1),(10,0)]
+        # 5 A n+2 atoms spread across P11..P16
+        assert a_n2 == [(11,0),(12,1),(13,1),(15,0),(16,0)]
+
+        # B n+2 at P17
+        _assert_slot_grs(parts[17][1], ['B'], "P17 s1")
+        _assert_gr(parts[17][1], 'B', 0, 2, 0, 2, mt=2)
 
     def test_pgr1_gr_before_corresponding_lr(self):
         """PGR=1: GR(T, mt=X) must be placed strictly before first LR(T, mt=X)."""
@@ -890,7 +1193,7 @@ class TestAnnotateDeps:
 
     def test_2x2_DU512(self):
         """256x256, DU512, FP4, 2x2 partition. Per-partition deps."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.annotate_deps()
         parts = sched._partitions
@@ -1008,7 +1311,7 @@ class TestRemoveCrossDeps:
 
     def test_2x2_DU512(self):
         """256x256, DU512, FP4, 2x2 partition. Spot checks."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.remove_cross_deps()
         parts = sched._partitions
@@ -1072,7 +1375,7 @@ class TestInsertGrLrInc:
 
     def test_multipartition_bf16_gr_inc_only_at_base_id_0(self):
         """128x128, BF16, 2x2 partition. gr_inc only at tileId_start=0."""
-        cfg = make_cfg_bf16(128, 128, numPartM=2, numPartN=2)
+        cfg = make_cfg_bf16(128, 128, partSizeM=2, partSizeN=2)
         assert cfg.numPartitions == 4
 
         sched = LogicalScheduler(cfg)
@@ -1372,12 +1675,12 @@ class TestFromTileInfo:
 class TestPartitionCandidates:
 
     def test_square(self):
-        """M==N: partitions N."""
+        """M==N: partitions N, full then divUp(N,2) down to 1."""
         kernel = create_kernel(256, 256)
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(1, 1), (1, 2), (1, 4), (1, 8)]
+        assert candidates == [(8, 8), (8, 4), (8, 3), (8, 2), (8, 1)]
 
     def test_n_larger(self):
         """N > M: partitions N."""
@@ -1385,7 +1688,7 @@ class TestPartitionCandidates:
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(1, 1), (1, 2), (1, 4), (1, 8)]
+        assert candidates == [(2, 8), (2, 4), (2, 3), (2, 2), (2, 1)]
 
     def test_m_larger(self):
         """M > N: partitions M."""
@@ -1393,16 +1696,16 @@ class TestPartitionCandidates:
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(1, 1), (2, 1), (4, 1), (8, 1)]
+        assert candidates == [(8, 2), (4, 2), (3, 2), (2, 2), (1, 2)]
 
     def test_prime_dim(self):
-        """Prime-sized dimension: only (1,1) and (prime,1)."""
+        """Prime-sized dimension: full then divUp down to 1."""
         cfg_tiA = MagicMock()
         cfg_tiB = MagicMock()
         cfg_tiA.localMMATileGrid = [5, 2]
         cfg_tiB.localMMATileGrid = [3, 2]
         candidates = SchedulerConfig.get_partition_candidates(cfg_tiA, cfg_tiB)
-        assert candidates == [(1, 1), (5, 1)]
+        assert candidates == [(5, 3), (3, 3), (2, 3), (1, 3)]
 
     def test_composite(self):
         """Composite dimension with mixed prime factors."""
@@ -1411,7 +1714,160 @@ class TestPartitionCandidates:
         cfg_tiA.localMMATileGrid = [2, 2]
         cfg_tiB.localMMATileGrid = [6, 2]
         candidates = SchedulerConfig.get_partition_candidates(cfg_tiA, cfg_tiB)
-        assert candidates == [(1, 1), (1, 2), (1, 3), (1, 6)]
+        assert candidates == [(2, 6), (2, 3), (2, 2), (2, 1)]
+
+
+# ══════════════════════════════════════════════════════════════
+# _normalize_partition_sizes
+# ══════════════════════════════════════════════════════════════
+
+class TestNormalizePartitionSizes:
+    """Pin the current behavior of SchedulerConfig._normalize_partition_sizes.
+
+    These tests exercise the staticmethod directly; they bypass __post_init__
+    so no full SchedulerConfig is constructed.
+    """
+
+    norm = staticmethod(SchedulerConfig._normalize_partition_sizes)
+
+    # ── single-int spec ──────────────────────────────────────
+
+    def test_zero_means_full_dim(self):
+        assert self.norm(0, 16, 'N') == [16]
+
+    def test_spec_equals_total(self):
+        assert self.norm(16, 16, 'N') == [16]
+
+    def test_divides_evenly(self):
+        assert self.norm(8, 16, 'N') == [8, 8]
+        assert self.norm(8, 24, 'N') == [8, 8, 8]
+        assert self.norm(1, 5, 'N') == [1, 1, 1, 1, 1]
+
+    def test_single_full_with_remainder(self):
+        # num_full == 1 → [s, remainder]
+        assert self.norm(8, 12, 'N') == [8, 4]
+        assert self.norm(22, 23, 'N') == [22, 1]
+
+    def test_remainder_placed_in_middle(self):
+        # num_full=2, remainder=4, mid=1 → [s, rem, s]
+        assert self.norm(8, 20, 'N') == [8, 4, 8]
+        # num_full=2, remainder=7, mid=1 → [8,7,8]
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
+        # num_full=5, remainder=3, mid=2 → [4,4,3,4,4,4]
+        assert self.norm(4, 23, 'N') == [4, 4, 3, 4, 4, 4]
+        # num_full=3, remainder=2, mid=1 → [4,2,4,4]
+        assert self.norm(4, 14, 'N') == [4, 2, 4, 4]
+
+    def test_spec_one(self):
+        assert self.norm(1, 4, 'N') == [1, 1, 1, 1]
+
+    # ── invalid single-int spec ──────────────────────────────
+
+    def test_spec_negative_raises(self):
+        with pytest.raises(AssertionError, match="must be in"):
+            self.norm(-1, 16, 'N')
+
+    def test_spec_larger_than_total_raises(self):
+        with pytest.raises(AssertionError, match="must be in"):
+            self.norm(20, 16, 'N')
+
+    # ── explicit list spec ───────────────────────────────────
+
+    def test_list_passthrough(self):
+        assert self.norm([8, 8], 16, 'N') == [8, 8]
+        assert self.norm([22, 1], 23, 'N') == [22, 1]
+        assert self.norm([4, 4, 3, 4, 4, 4], 23, 'N') == [4, 4, 3, 4, 4, 4]
+
+    def test_tuple_spec_returned_as_list(self):
+        result = self.norm((8, 8), 16, 'N')
+        assert result == [8, 8]
+        assert isinstance(result, list)
+
+    def test_list_wrong_sum_raises(self):
+        with pytest.raises(AssertionError, match="must sum to 16"):
+            self.norm([8, 7], 16, 'N')
+
+    def test_list_with_zero_raises(self):
+        with pytest.raises(AssertionError, match="must be >= 1"):
+            self.norm([8, 0, 8], 16, 'N')
+
+    def test_list_with_negative_raises(self):
+        with pytest.raises(AssertionError, match="must be >= 1"):
+            self.norm([10, -2, 8], 16, 'N')
+
+    def test_dim_label_in_error(self):
+        with pytest.raises(AssertionError, match="for M"):
+            self.norm([1, 2], 16, 'M')
+
+    # ── mn-aware behavior ────────────────────────────────────
+
+    def test_mn_default_is_one(self):
+        # Default mn=1: behavior identical to the pre-mn algorithm.
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
+
+    def test_mn_already_aligned_passthrough(self):
+        assert self.norm(8, 16, 'N', 2) == [8, 8]
+        assert self.norm(8, 24, 'N', 4) == [8, 8, 8]
+
+    def test_mn_snaps_spec_down(self):
+        # 7 snaps down to 6 (largest mn-multiple <= 7), then split as usual.
+        assert self.norm(7, 16, 'N', 2) == [6, 4, 6]
+
+    def test_mn_snaps_spec_clamped_to_mn(self):
+        # spec=1 with mn=2 snaps up to mn (the floor of valid sizes).
+        assert self.norm(1, 16, 'N', 2) == [2] * 8
+
+    def test_mn_remainder_stays_aligned(self):
+        # total=22, s=8 → num_full=2, remainder=6 (even). mid=1 → [8,6,8].
+        assert self.norm(8, 22, 'N', 2) == [8, 6, 8]
+        # total=20, s=8 → [8,4,8]; remainder 4 is mn-aligned.
+        assert self.norm(8, 20, 'N', 4) == [8, 4, 8]
+
+    def test_mn_zero_spec_uses_full_dim(self):
+        # spec=0 means "one partition for the whole dim"; if the whole dim
+        # is mn-aligned the result is [total].
+        assert self.norm(0, 16, 'N', 2) == [16]
+
+    def test_mn_total_not_aligned_falls_back_to_single(self):
+        # total=23, mn=2: no multi-partition split is mn-valid → [total].
+        # Caller's vgpr-budget loop sees a single big partition and moves on.
+        assert self.norm(0, 23, 'N', 2) == [23]
+        assert self.norm(8, 23, 'N', 2) == [23]
+        assert self.norm(22, 23, 'N', 2) == [23]
+
+    def test_mn_spec_equals_total(self):
+        assert self.norm(16, 16, 'N', 2) == [16]
+        # Aligned total but spec snaps down → multi-partition.
+        assert self.norm(16, 16, 'N', 4) == [16]
+
+    def test_mn_one_full_with_aligned_remainder(self):
+        # num_full=1 path with mn-aligned remainder.
+        assert self.norm(8, 12, 'N', 4) == [8, 4]
+        assert self.norm(12, 16, 'N', 4) == [12, 4]
+
+    def test_mn_explicit_list_aligned_passes(self):
+        assert self.norm([8, 4, 8], 20, 'N', 2) == [8, 4, 8]
+        assert self.norm([4, 4, 4, 4], 16, 'N', 4) == [4, 4, 4, 4]
+
+    def test_mn_explicit_list_unaligned_raises(self):
+        # The [22,1] FP4 case from standalone: 1 is not a multiple of mn=2.
+        with pytest.raises(AssertionError, match="multiples of mn=2"):
+            self.norm([22, 1], 23, 'N', 2)
+
+    def test_mn_explicit_list_one_unaligned_element_raises(self):
+        with pytest.raises(AssertionError, match="multiples of mn=4"):
+            self.norm([8, 6, 8], 22, 'N', 4)
+
+    def test_mn_monotonic_candidate_sweep(self):
+        # Mirrors how Kernel.py iterates get_partition_candidates from large
+        # to small. Snapping DOWN must keep the post-normalization sequence
+        # non-increasing in partition size, so the vgpr-budget loop never
+        # re-tries a size it already rejected.
+        candidates = [16, 8, 7, 6, 5, 4, 3, 2, 1]
+        normalized_first = [self.norm(s, 16, 'N', 2)[0] for s in candidates]
+        # Each step is <= the previous step.
+        for prev, cur in zip(normalized_first, normalized_first[1:]):
+            assert cur <= prev, f"non-monotonic: {normalized_first}"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1462,15 +1918,15 @@ class TestGetNumVgpr:
         scaleTiA = makeTileInfo('MXSA', kernel)
         scaleTiB = makeTileInfo('MXSB', kernel)
 
-        def _build_and_count(numPartM, numPartN):
-            cfg = make_cfg_256x256_fp4(numPartM=numPartM, numPartN=numPartN)
+        def _build_and_count(partSizeM, partSizeN):
+            cfg = make_cfg_256x256_fp4(partSizeM=partSizeM, partSizeN=partSizeN)
             sched = LogicalScheduler(cfg)
             sched.build()
             return sched.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
 
-        vgpr_1x1 = _build_and_count(1, 1)
-        vgpr_1x2 = _build_and_count(1, 2)
-        vgpr_1x4 = _build_and_count(1, 4)
+        vgpr_1x1 = _build_and_count(0, 0)
+        vgpr_1x2 = _build_and_count(0, 4)
+        vgpr_1x4 = _build_and_count(0, 2)
 
         assert vgpr_1x1 >= vgpr_1x2
         assert vgpr_1x2 >= vgpr_1x4
@@ -1646,7 +2102,9 @@ class TestIntegration:
 
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
 # Also calls the instruction scheduler to verify the emitted modules are valid input and to show the final instruction counts.
-
+# Example usage:
+#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 320 --mt1 320 --du 64 --pgr 1 --wg 2x2 --partition-size 10x2
+#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 256 --mt1 256 --du 256 --dtype fp4 --pgr 2 --wg 2x2 --partition-size 8x4
 if __name__ == "__main__":
     import sys
     import io
@@ -1661,10 +2119,8 @@ if __name__ == "__main__":
                         help="DepthU (default: 64 for bf16, 512 for fp4)")
     parser.add_argument("--dtype", choices=["bf16", "fp4"], default="bf16",
                         help="Data type (default: bf16)")
-    parser.add_argument("--partition-m", type=int, default=1,
-                        help="numPartitionsM (default: 1)")
-    parser.add_argument("--partition-n", type=int, default=1,
-                        help="numPartitionsN (default: 1)")
+    parser.add_argument("--partition-size", type=str, default="0x0",
+                        help="partitionSize as MxN in MFMA tiles (0 = full dim, default: 0x0)")
     parser.add_argument("--wg", type=str, default="2x2",
                         help="MIWaveGroup as MxN (default: 2x2)")
     parser.add_argument("--pgr", type=int, choices=[0, 1, 2], default=1,
@@ -1682,8 +2138,13 @@ if __name__ == "__main__":
         parser.error(f"--wg must be MxN (e.g. 2x2), got: {args.wg}")
     waveGroup = (int(wg_parts[0]), int(wg_parts[1]))
 
+    ps_parts = args.partition_size.lower().split("x")
+    if len(ps_parts) != 2:
+        parser.error(f"--partition-size must be MxN (e.g. 10x2), got: {args.partition_size}")
+    partSizeM, partSizeN = int(ps_parts[0]), int(ps_parts[1])
+
     kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
-                           waveGroup=waveGroup)
+                           miWaveGroup=list(waveGroup))
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
@@ -1702,8 +2163,8 @@ if __name__ == "__main__":
         lrB=ReadGranularity(mn=1, k=1),
         grA=grA,
         grB=grB,
-        numPartitionsM=args.partition_m,
-        numPartitionsN=args.partition_n,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=args.pgr,
     )
     if fp4:
@@ -1719,7 +2180,7 @@ if __name__ == "__main__":
 
     print(f"Config: MT={args.mt0}x{args.mt1}, DU={args.du}, dtype={args.dtype}, "
           f"WG={waveGroup[0]}x{waveGroup[1]}, "
-          f"partitions={args.partition_m}x{args.partition_n}, pgr={args.pgr}")
+          f"partitionSize={partSizeM}x{partSizeN}, pgr={args.pgr}")
     print(f"        numMFMATilesM={cfg.numMFMATilesM}, "
           f"numMFMATilesN={cfg.numMFMATilesN}, "
           f"numSubIterK={cfg.numSubIterK}, "
@@ -1836,23 +2297,25 @@ if __name__ == "__main__":
         scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
     )
 
-    def _print_emitLoop(label, emitted_3d):
-        module = sched._emitLoop(writer, kernel, label, emitted_3d)
+    def _print_emitLoop(label, emitted_3d, schedule=True):
+        module = sched._emitLoop(writer, kernel, label, emitted_3d, schedule=schedule)
         buf = io.StringIO()
         for inst in module.flatitems():
             buf.write(f"  {str(inst).rstrip()}\n")
         return buf.getvalue()
 
-    for label, emitted_3d in [
-        ("PRELOOP",  sched._preloop_emitted),
+    for section in [
+        ("PRELOOP",  sched._preloop_emitted, False),
         ("MAINLOOP", sched._emitted_per_unroll[0]),
         ("NGLL",     sched._ngll_per_unroll[0]),
         ("NLL",      sched._nll_per_unroll[0]),
     ]:
+        label, emitted_3d = section[0], section[1]
+        schedule = section[2] if len(section) > 2 else True
         print(f"{'=' * 60}")
         print(f"  {label} (emitLoop)")
         print(f"{'=' * 60}")
-        print(_print_emitLoop(label, emitted_3d))
+        print(_print_emitLoop(label, emitted_3d, schedule=schedule))
         if interactive:
             input("Press Enter for next step...")
 
@@ -1953,7 +2416,7 @@ class TestPGR0Config:
                 numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
                 lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
                 grA=ReadGranularity(mn=1, k=2), grB=ReadGranularity(mn=1, k=2),
-                pgr=0, numPartitionsN=2,
+                pgr=0, partitionSizeN=4,
             )
 
 

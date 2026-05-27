@@ -33,7 +33,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
     // Create a batchnorm inference graph - this does not use SDPA attributes
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
@@ -54,8 +54,8 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
     {
         throw std::runtime_error("Q, K and V tensors must have a dimension of 4");
     }
-    std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
-    std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
 
     return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         qDims,
@@ -81,7 +81,8 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
 
     SKIP_IF_NO_DEVICES();
 
-    std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
 
     for(const auto& test : getCompatibleGraphsForArch(deviceString, cfg_fmha_fwd))
     {
@@ -95,13 +96,14 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 
     SKIP_IF_NO_DEVICES();
 
-    std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
 
-    std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
         {GraphTest{createSdpaFwdGraph(), "Valid test with q head dim 128"}, true},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 192}), "Valid test with q head dim 192"}, true},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 100}), "Final dimension not 128"}, false},
@@ -154,12 +156,12 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
     // Create an SDPA graph with known dimensions (withStats = false by default)
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     // Get the workspace size from the plan builder
-    HipKernelSettings settings;
-    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
+    const HipKernelSettings settings;
+    const size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
     // Forward-only kernel uses LDS internally, no external workspace needed
     // LSE (when present) is an optional output tensor (stats_tensor_uid), not workspace
