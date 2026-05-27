@@ -193,6 +193,7 @@ protected:
 // Test cases
 // ---------------------------------------------------------------------------
 
+// cppcheck-suppress syntaxError
 TEST_P(GPU_ConvWorkSpaceSizeRange_FP32, Forward) { RunFwd(GetParam()); }
 TEST_P(GPU_ConvWorkSpaceSizeRange_FP32, BackwardData) { RunBwdData(GetParam()); }
 TEST_P(GPU_ConvWorkSpaceSizeRange_FP32, BackwardWeights) { RunBwdWeights(GetParam()); }
