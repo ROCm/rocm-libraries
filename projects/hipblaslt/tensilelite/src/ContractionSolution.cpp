@@ -752,9 +752,11 @@ namespace TensileLite
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
+            // Dynamic Stream-K uses a different kernel argument layout from Stream-K 1/2/3.
             if(sizeMapping.streamK == 4)
             {
                 AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                assert(pAMDGPU != nullptr);
                 int overrideTiles = pAMDGPU->skTiles;
                 int overrideSplit = pAMDGPU->skSplit;
 
@@ -781,48 +783,15 @@ namespace TensileLite
                 args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
                 args.template append<uint32_t>("SKGrid", sk.grid);
             }
-
-            auto tiles = problem.getNumTiles(sizeMapping, 1);
-
-            // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
-            // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-            auto     itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-            auto     totalIters   = tiles * itersPerTile;
-
-            uint32_t magicNumberItersPerTile;
-            uint32_t magicShiftItersPerTile;
-            magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
-
-            args.template append<uint32_t>("itersPerTile", itersPerTile);
-            args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
-            args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-
-            // Custom kernels still use totalIters
-            if(!sizeMapping.customKernelName.empty())
+            else
             {
-                args.template append<uint32_t>("totalIters", totalIters);
-            }
-
-            if(sizeMapping.streamK == 1) // Basic SK
-            {
-                uint32_t itersPerWave = CeilDivide(static_cast<uint32_t>(totalIters), static_cast<uint32_t>(numWorkGroups.x));
-                args.template append<uint32_t>("SKItersPerWG", itersPerWave);
-            }
-            else if(sizeMapping.streamK >= 2) // Two-tile SK
-            {
-                if(sk.reduction == origami::reduction_t::parallel)
-                {
-                    std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-                            << "setting GSU to 1." << std::endl;
-                    gsu = 1;
-                }
-
                 auto tiles = problem.getNumTiles(sizeMapping, 1);
 
                 // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
                 // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-                auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                auto     itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
                 auto     totalIters   = tiles * itersPerTile;
+
                 uint32_t magicNumberItersPerTile;
                 uint32_t magicShiftItersPerTile;
                 magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
@@ -830,15 +799,43 @@ namespace TensileLite
                 args.template append<uint32_t>("itersPerTile", itersPerTile);
                 args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
                 args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-                args.template append<uint32_t>("totalIters", totalIters);
+
+                // Custom kernels still use totalIters
+                if(!sizeMapping.customKernelName.empty())
+                {
+                    args.template append<uint32_t>("totalIters", totalIters);
+                }
 
                 if(sizeMapping.streamK == 1) // Basic SK
                 {
-                    uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
+                    uint32_t itersPerWave = CeilDivide(static_cast<uint32_t>(totalIters),
+                                                       static_cast<uint32_t>(numWorkGroups.x));
                     args.template append<uint32_t>("SKItersPerWG", itersPerWave);
                 }
                 else if(sizeMapping.streamK >= 2) // Two-tile SK
                 {
+                    if(sk.reduction == origami::reduction_t::parallel)
+                    {
+                        std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+                                  << "setting GSU to 1." << std::endl;
+                        gsu = 1;
+                    }
+
+                    auto tiles = problem.getNumTiles(sizeMapping, 1);
+
+                    // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
+                    // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
+                    auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                    auto     totalIters   = tiles * itersPerTile;
+                    uint32_t magicNumberItersPerTile;
+                    uint32_t magicShiftItersPerTile;
+                    magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
+
+                    args.template append<uint32_t>("itersPerTile", itersPerTile);
+                    args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
+                    args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
+                    args.template append<uint32_t>("totalIters", totalIters);
+
                     if(sk.reduction == origami::reduction_t::parallel)
                     {
                         uint32_t skSplit

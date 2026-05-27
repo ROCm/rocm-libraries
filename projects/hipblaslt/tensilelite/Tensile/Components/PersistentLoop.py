@@ -22,7 +22,7 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SCmpGeU32, SMulI32, SLongBranchNegative
+from rocisa.instruction import VMovB32, SBarrier, SCmpGeU32, SMulI32, SLongBranchNegative
 from ..Component import Component
 import abc
 
@@ -134,6 +134,7 @@ class PersistentLoopOn(PersistentLoop):
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
         elif kernel["StreamK"] == 4:
             # module.add(SCmpGeU32(src0=sgpr("StreamKTileIdx"), src1=sgpr("SKTiles"), comment="Check if done all StreamK tiles"))
+            module.add(SBarrier(comment="Sync before SK4 persistent re-entry"))
             with writer.allocTmpSgpr(3) as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
         elif kernel["StreamK"] == 2:
