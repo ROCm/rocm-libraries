@@ -43,8 +43,14 @@ set(OGRAD_DOT_O_VARIANTS
 )
 
 set(DQDKDV_VARIANTS
+    fmha_bwd_dqdkdv_fp16_d32_batch
+    fmha_bwd_dqdkdv_bf16_d32_batch
+    fmha_bwd_dqdkdv_fp16_d96_batch
+    fmha_bwd_dqdkdv_bf16_d96_batch
     fmha_bwd_dqdkdv_fp16_d128_batch
     fmha_bwd_dqdkdv_bf16_d128_batch
+    fmha_bwd_dqdkdv_fp16_d256_batch
+    fmha_bwd_dqdkdv_bf16_d256_batch
     fmha_bwd_dqdkdv_fp16_d128_batch_cmask
     fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br
     fmha_bwd_dqdkdv_fp16_d128_batch_swa
