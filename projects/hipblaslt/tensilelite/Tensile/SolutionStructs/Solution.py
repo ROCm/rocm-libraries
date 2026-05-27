@@ -742,6 +742,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, f"DepthUMX={depthUMX} must be >= DepthU={state['DepthU']}")
         if depthUMX % state["DepthU"] != 0:
           reject(state, printRejectionReason, f"DepthUMX={depthUMX} must be a multiple of DepthU={state['DepthU']}")
+        if depthUMX > state["DepthU"] and state["PrefetchGlobalRead"] > 1:
+          reject(state, printRejectionReason,
+                 f"DepthUMX={depthUMX} with DepthU={state['DepthU']} already prefetches "
+                 f"{depthUMX // state['DepthU']}x DepthU ahead; PrefetchGlobalRead={state['PrefetchGlobalRead']} "
+                 f"would overwrite LDS buffers that haven't been consumed yet")
 
       bytesLoaded = state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
