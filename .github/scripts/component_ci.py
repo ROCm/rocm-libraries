@@ -1,90 +1,32 @@
 """
 Determines which component CI jobs to run based on changed files.
 
-Outputs per-platform JSON matrices via GITHUB_OUTPUT:
-  - linux_components: components to run on Linux
-  - windows_components: components to run on Windows
+Outputs boolean flags per component via GITHUB_OUTPUT:
+  - stinkytofu=true/false
+  - rocisa=true/false
 
-Each component entry has:
-  - name: display name
-  - dir: working directory relative to repo root
-  - build: whether to run invoke build
-  - test: whether to run ctest
-  - build_gcc: whether to run GCC build (Linux only)
-  - build_static: whether to run static build (Windows only)
-  - requirements: path to requirements.txt relative to dir (or empty)
-  - pip_test_path: pytest directory relative to dir (or empty)
-
-Component config format:
-  Each component has common fields (name, dir, paths) and per-platform
-  config under "linux" and "windows" keys. A platform value can be:
-    - a dict of step flags for that platform
-    - a string referencing another platform (e.g. "linux") to reuse its config
-    - omitted to skip that platform entirely
+Each component defines a set of path patterns. If any changed file matches,
+that component is marked as triggered.
 
 Usage:
   python component_ci.py
 """
 
 import fnmatch
-import json
 import os
 import subprocess
 
 COMPONENTS = {
-    "stinkytofu": {
-        "name": "StinkyTofu",
-        "dir": "shared/stinkytofu",
-        "paths": [
-            "shared/stinkytofu/**",
-        ],
-        "linux": {
-            "build": True,
-            "test": True,
-            "build_gcc": True,
-            "requirements": "requirements.txt",
-            "pip_test_path": "python_module/tests",
-        },
-        "windows": {
-            "build": True,
-            "test": True,
-            "build_static": True,
-            "requirements": "requirements.txt",
-            "pip_test_path": "python_module/tests",
-        },
-    },
-    "rocisa": {
-        "name": "rocISA",
-        "dir": "projects/hipblaslt/tensilelite/rocisa",
-        "paths": [
-            "projects/hipblaslt/tensilelite/rocisa/**",
-            "shared/stinkytofu/**",
-        ],
-        "linux": {
-            "pip_test_path": "test",
-        },
-        "windows": "linux",
-    },
+    "stinkytofu": [
+        "shared/stinkytofu/**",
+    ],
+    "rocisa": [
+        "projects/hipblaslt/tensilelite/rocisa/**",
+        "shared/stinkytofu/**",
+    ],
 }
 
 WORKFLOW_FILE = ".github/workflows/component-ci.yml"
-
-STEP_FIELDS = (
-    "build",
-    "test",
-    "build_gcc",
-    "build_static",
-    "requirements",
-    "pip_test_path",
-)
-STEP_DEFAULTS = {
-    "build": False,
-    "test": False,
-    "build_gcc": False,
-    "build_static": False,
-    "requirements": "",
-    "pip_test_path": "",
-}
 
 
 def get_changed_files(base_ref: str) -> set[str]:
@@ -108,57 +50,10 @@ def matches_paths(changed_files: set[str], patterns: list[str]) -> bool:
 
 def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
     results = {}
-    for key, config in COMPONENTS.items():
-        component_patterns = config["paths"] + [WORKFLOW_FILE]
-        results[key] = matches_paths(changed_files, component_patterns)
+    for key, patterns in COMPONENTS.items():
+        all_patterns = patterns + [WORKFLOW_FILE]
+        results[key] = matches_paths(changed_files, all_patterns)
     return results
-
-
-def resolve_platform_config(config: dict, platform: str) -> dict | None:
-    """Resolve platform config, following string references."""
-    platform_config = config.get(platform)
-    if platform_config is None:
-        return None
-    if isinstance(platform_config, str):
-        platform_config = config[platform_config]
-    return platform_config
-
-
-def make_entry(config: dict, platform: str) -> dict | None:
-    platform_config = resolve_platform_config(config, platform)
-    if platform_config is None:
-        return None
-
-    entry = {
-        "name": config["name"],
-        "dir": config["dir"],
-    }
-    for field in STEP_FIELDS:
-        entry[field] = platform_config.get(field, STEP_DEFAULTS[field])
-    return entry
-
-
-def build_outputs(changed: dict[str, bool]) -> dict[str, str]:
-    linux_components = []
-    windows_components = []
-
-    for key, is_changed in changed.items():
-        if not is_changed:
-            continue
-        config = COMPONENTS[key]
-
-        linux_entry = make_entry(config, "linux")
-        if linux_entry is not None:
-            linux_components.append(linux_entry)
-
-        windows_entry = make_entry(config, "windows")
-        if windows_entry is not None:
-            windows_components.append(windows_entry)
-
-    return {
-        "linux_components": json.dumps(linux_components),
-        "windows_components": json.dumps(windows_components),
-    }
 
 
 def set_github_output(outputs: dict[str, str]):
@@ -183,8 +78,7 @@ def main():
         changed = detect_changed_components(changed_files)
 
     print(f"Changed components: {changed}")
-    outputs = build_outputs(changed)
-    print(f"Outputs: {outputs}")
+    outputs = {k: str(v).lower() for k, v in changed.items()}
     set_github_output(outputs)
 
 
