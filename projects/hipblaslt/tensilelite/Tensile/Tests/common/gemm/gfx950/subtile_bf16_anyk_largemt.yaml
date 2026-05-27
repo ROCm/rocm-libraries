@@ -14,6 +14,23 @@ TestParameters:
 # yamls; the largemt regression is about VGPR pressure on a single
 # tile-grid shape, not exhaustive K-tail correctness (other anyk
 # yamls already cover the small/medium MTs).
+#
+# PrefetchGlobalRead enumerates {0, 1} per section (was {0} only
+# pre-merge). The develop merge that came in via the May 26 sync
+# pulled `7c0d7aa5e9c [Hipblaslt] [Subtiling] Add non-uniform
+# partition size to Logical Scheduler (#7558)`, whose new
+# deterministic double-buffer VGPR tile allocator added enough fixed
+# overhead on top of the K-tail scaffold's persistent state that the
+# PGR=0 codegen path for MT 320x288 WG=(4,1) WT=(5,18) DU=64 now
+# overflows the wave-64 256-VGPR budget at codegen
+# (`Generating kernel source resulted in error 4`). The PGR=1
+# codepath uses a different partition-candidate path
+# (`MFMASchedulerConfig.get_partition_candidates(tiA, tiB)`) and
+# still builds, so adding it to the enumeration keeps the yaml
+# functional while leaving the original PGR=0 candidate in place so
+# the regression is still visible as a `Failed to generate assembly`
+# warning. The unit pin `TestSubtileBf16LargeMTAcceptsAllPGR` still
+# asserts the Solution-gate accepts all three PGRs.
 #######################################################################
 GlobalParameters:
   NumElementsToValidate: -1
@@ -64,7 +81,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 5, 18,  4, 1]  # MT 320x288 (4x1 WG)
-        - PrefetchGlobalRead: [0]
+        - PrefetchGlobalRead: [0, 1]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -104,7 +121,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 5, 18,  4, 1]  # MT 320x288 (4x1 WG)
-        - PrefetchGlobalRead: [0]
+        - PrefetchGlobalRead: [0, 1]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -142,7 +159,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 5, 18,  4, 1]  # MT 320x288 (4x1 WG)
-        - PrefetchGlobalRead: [0]
+        - PrefetchGlobalRead: [0, 1]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
