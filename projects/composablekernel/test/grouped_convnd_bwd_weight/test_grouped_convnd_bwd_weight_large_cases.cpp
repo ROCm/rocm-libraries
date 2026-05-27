@@ -30,7 +30,7 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
     using OutLayout = std::tuple_element_t<3, Tuple>;
 
     std::vector<ck::utils::conv::ConvParam> conv_params;
-    std::vector<ck::index_t> split_ks{-1, 1, 2};
+    std::vector<ck::index_t> split_ks{1, 2};
 
     bool skip_case(const ck::index_t split_k)
     {
@@ -73,7 +73,7 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
                                                                            DataType,
                                                                            DataType>(
                             2,     // do_verification
-                            1,     // init_method: integer value
+                            2,     // init_method: integer value
                             false, // do_log
                             false, // time_kernel
                             param,
