@@ -197,18 +197,16 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
     }
 
     // For non-fused case, scale descriptor and bias descriptor are equivalent
-    const bool fused = _params.optActivation().has_value() && _params.optBias().has_value();
     miopenTensorDescriptor_t biasDescriptor = _params.scale().tensorDescriptor();
+    void* biasPtr = nullptr;
     miopenActivationDescriptor_t activationDescriptor = nullptr;
-    void* const biasPtr = fused ? miopen_utils::findDeviceBuffer(_params.optBias().value().uid(),
-                                                                 deviceBuffers,
-                                                                 numDeviceBuffers)
-                                      .ptr
-                                : nullptr;
 
-    if(fused)
+    if(_params.optActivation().has_value() && _params.optBias().has_value())
     {
+        auto biasBuffer = miopen_utils::findDeviceBuffer(
+            _params.optBias().value().uid(), deviceBuffers, numDeviceBuffers);
         biasDescriptor = _params.optBias().value().tensorDescriptor();
+        biasPtr = biasBuffer.ptr;
         activationDescriptor = _params.optActivation().value().activationDescriptor();
     }
 

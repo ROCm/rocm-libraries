@@ -310,31 +310,30 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
         savedVarDesc = _trainingParams.invVariance().tensorDescriptor();
     }
 
-    const bool hasRunningStats = _trainingParams.hasRunningStats();
-    void* const prevRunningMeanPtr
-        = hasRunningStats ? miopen_utils::findDeviceBuffer(_trainingParams.prevRunningMean().uid(),
-                                                           deviceBuffers,
-                                                           numDeviceBuffers)
-                                .ptr
-                          : nullptr;
-    void* const prevRunningVariancePtr
-        = hasRunningStats
-              ? miopen_utils::findDeviceBuffer(
-                    _trainingParams.prevRunningVariance().uid(), deviceBuffers, numDeviceBuffers)
-                    .ptr
-              : nullptr;
-    void* const nextRunningMeanPtr
-        = hasRunningStats ? miopen_utils::findDeviceBuffer(_trainingParams.nextRunningMean().uid(),
-                                                           deviceBuffers,
-                                                           numDeviceBuffers)
-                                .ptr
-                          : nullptr;
-    void* const nextRunningVariancePtr
-        = hasRunningStats
-              ? miopen_utils::findDeviceBuffer(
-                    _trainingParams.nextRunningVariance().uid(), deviceBuffers, numDeviceBuffers)
-                    .ptr
-              : nullptr;
+    void* prevRunningMeanPtr = nullptr;
+    void* prevRunningVariancePtr = nullptr;
+    void* nextRunningMeanPtr = nullptr;
+    void* nextRunningVariancePtr = nullptr;
+
+    if(_trainingParams.hasRunningStats())
+    {
+        prevRunningMeanPtr = miopen_utils::findDeviceBuffer(_trainingParams.prevRunningMean().uid(),
+                                                            deviceBuffers,
+                                                            numDeviceBuffers)
+                                 .ptr;
+        prevRunningVariancePtr
+            = miopen_utils::findDeviceBuffer(
+                  _trainingParams.prevRunningVariance().uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
+        nextRunningMeanPtr = miopen_utils::findDeviceBuffer(_trainingParams.nextRunningMean().uid(),
+                                                            deviceBuffers,
+                                                            numDeviceBuffers)
+                                 .ptr;
+        nextRunningVariancePtr
+            = miopen_utils::findDeviceBuffer(
+                  _trainingParams.nextRunningVariance().uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
+    }
 
     // Check if activation fusion is enabled
     const auto& optActivation = _trainingParams.optActivation();

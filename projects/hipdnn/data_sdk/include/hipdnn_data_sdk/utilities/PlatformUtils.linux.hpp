@@ -96,7 +96,7 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
 inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symbolName)
 {
     auto _ = dlerror();
-    const void* const symbol = dlsym(RTLD_DEFAULT, symbolName);
+    void* symbol = dlsym(RTLD_DEFAULT, symbolName);
     const char* error = dlerror();
     if(error != nullptr)
     {
