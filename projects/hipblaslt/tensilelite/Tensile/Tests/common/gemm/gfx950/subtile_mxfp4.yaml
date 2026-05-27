@@ -742,7 +742,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
         - ActivationFuncCall: [0]
-        - DepthU: [256, 512]
+        - DepthU: [256, 512, 768]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - TransposeLDS: [1]
