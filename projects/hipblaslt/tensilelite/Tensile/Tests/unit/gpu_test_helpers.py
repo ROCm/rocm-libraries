@@ -561,7 +561,8 @@ def assemble_kernel(asm_source, output_path):
             "-o", obj_path,
             asm_path
         ])
-        os.rename(obj_path, output_path)
+        import shutil
+        shutil.move(obj_path, output_path)
     finally:
         if os.path.exists(asm_path):
             os.unlink(asm_path)

@@ -82,11 +82,12 @@ def fill_mma_tile_buffer(tileInfo, mt, du, stride):
 # Assembly generation
 # ---------------------------------------------------------------------------
 
-def generate_srd_setup():
+def generate_srd_setup(num_records_bytes):
     module = Module("SRD setup")
     module.add(SMovB64(dst=sgpr("SrdA+0", 2), src=sgpr(4, 2), comment="SrdA base = input_A_ptr"))
-    module.add(SMovB32(dst=sgpr("SrdA+2"), src="0xFFFFFFFF",   comment="SrdA NumRecords = max"))
-    module.add(SMovB32(dst=sgpr("SrdA+3"), src="0x20000",      comment="SrdA OOB_SELECT=2"))
+    module.add(SMovB32(dst=sgpr("SrdA+2"), src=hex(num_records_bytes),
+                       comment=f"SrdA NumRecords = {num_records_bytes} bytes (mt_a*stride_a*bpe)"))
+    module.add(SMovB32(dst=sgpr("SrdA+3"), src="0x20000", comment="SrdA OOB_SELECT=2 (raw buffer)"))
     return module
 
 
@@ -216,7 +217,8 @@ def generate_gr_offset_kernel(cfg):
         (6, 2, 0x08, "output_ptr"),
         (stride_sgpr, 1, 0x10, "strideA"),
     ])
-    srd_module = generate_srd_setup()
+    num_records_bytes = cfg.mt_a * cfg.stride_a * BPE
+    srd_module = generate_srd_setup(num_records_bytes)
 
     inner_asm = "\n".join([
         str(prologue),
