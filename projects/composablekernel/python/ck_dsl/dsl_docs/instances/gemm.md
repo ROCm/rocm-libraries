@@ -450,7 +450,7 @@ Controlled experiment rule:
 Change one lever, verify correctness, inspect IR/ISA/resources, then benchmark.
 ```
 
-See `optimization/optimization_playbook.md` for the canonical lever loop and `RUNBOOK_COMPLIANCE.md` for the empirical conv pass that climbed 111 -> 280 TFLOPS by applying five levers in series.
+See `optimization/optimization_runbook.md` (the loop is §0 "The Loop"; the lever catalog is §12.1) and `optimization/runbook_compliance.md` for the empirical conv pass that applies five levers in series.
 
 ## Failure Modes
 

@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Structural comparison of unified-attention HSACOs (Triton vs CK DSL).
 
 For each input HSACO:
@@ -53,7 +54,10 @@ CATEGORIES: list[tuple[str, re.Pattern]] = [
     ("LDS_read", re.compile(r"^ds_read_|^ds_load_")),
     ("LDS_write", re.compile(r"^ds_write_|^ds_store_")),
     ("LDS_other", re.compile(r"^ds_(permute|bpermute|swizzle|atomic)")),
-    ("global_load", re.compile(r"^global_load_|^buffer_load_|^flat_load_|^global_load_lds_")),
+    (
+        "global_load",
+        re.compile(r"^global_load_|^buffer_load_|^flat_load_|^global_load_lds_"),
+    ),
     ("global_store", re.compile(r"^global_store_|^buffer_store_|^flat_store_")),
     ("AGPR_move", re.compile(r"^v_accvgpr_")),
     (
@@ -167,9 +171,7 @@ def extract_kernel_meta(elf: Path) -> list[dict]:
 # Function label: "0000000000001a00 <kernel_unified_attention_2d>:"
 _LABEL_RE = re.compile(r"^([0-9a-fA-F]+)\s+<(.+)>:\s*$")
 # Instruction: leading whitespace, mnemonic, operands, " // ADDR: BYTES"
-_INSN_RE = re.compile(
-    r"^\s+(\S+)(?:\s+.*)?//\s+([0-9a-fA-F]+):\s+[0-9a-fA-F ]+\s*$"
-)
+_INSN_RE = re.compile(r"^\s+(\S+)(?:\s+.*)?//\s+([0-9a-fA-F]+):\s+[0-9a-fA-F ]+\s*$")
 # Branch instruction: same plus parse target hex literal in operand
 _BRANCH_RE = re.compile(
     r"^\s+(s_cbranch_\w+|s_branch)\s+(-?\d+|0x[0-9a-fA-F]+)\b.*//\s+([0-9a-fA-F]+):"
@@ -179,8 +181,12 @@ _BRANCH_RE = re.compile(
 @dataclass
 class KernelDisasm:
     name: str
-    instructions: list[tuple[int, str]] = field(default_factory=list)  # (addr_int, mnem)
-    branches: list[tuple[int, int]] = field(default_factory=list)  # (src_addr, tgt_addr)
+    instructions: list[tuple[int, str]] = field(
+        default_factory=list
+    )  # (addr_int, mnem)
+    branches: list[tuple[int, int]] = field(
+        default_factory=list
+    )  # (src_addr, tgt_addr)
 
 
 def parse_disasm(text: str) -> list[KernelDisasm]:
@@ -230,7 +236,9 @@ def parse_disasm(text: str) -> list[KernelDisasm]:
 
 def detect_loops(k: KernelDisasm) -> list[tuple[int, int]]:
     """Backward branches → (target_idx, source_idx) tuples."""
-    addr_to_idx: dict[int, int] = {addr: i for i, (addr, _m) in enumerate(k.instructions)}
+    addr_to_idx: dict[int, int] = {
+        addr: i for i, (addr, _m) in enumerate(k.instructions)
+    }
     loops: list[tuple[int, int]] = []
     for src, tgt in k.branches:
         if tgt >= src:
@@ -361,15 +369,13 @@ def main() -> int:
         print(
             f"  LDS bytes    : static={lds_static}  dynamic={lds_dyn}  total={lds_total}"
         )
-        print(
-            f"  scratch={scratch}  kernarg={kargs}  max_flat_wg={mwgs}{nw_str}"
-        )
+        print(f"  scratch={scratch}  kernarg={kargs}  max_flat_wg={mwgs}{nw_str}")
         if klp:
             sa = k.instructions[klp[0]][0]
             ea = k.instructions[klp[1]][0]
             print(
                 f"  K-loop range : insn[{klp[0]}..{klp[1]}] "
-                f"({klp[1]-klp[0]+1} insts)  [0x{sa:x}..0x{ea:x}]"
+                f"({klp[1] - klp[0] + 1} insts)  [0x{sa:x}..0x{ea:x}]"
                 f"   ({len(loops)} backward branches total)"
             )
         else:

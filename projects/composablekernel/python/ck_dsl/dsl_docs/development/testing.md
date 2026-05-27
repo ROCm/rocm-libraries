@@ -243,7 +243,7 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 - Run `analyze_llvm_ir(art.llvm_text)` and confirm the intended MFMA shape / vector store / async LDS load appears.
 - Run `analyze_hsaco(...)` and check VGPR / SGPR / LDS.
 - Benchmark with `benchmark_manifest(..., attempts=5)` and check `spread_pct` — high spread means cold cache or scheduler instability, not a permanent regression.
-- Compare against the empirical results in `RUNBOOK_COMPLIANCE.md` if the kernel is one of the bake-offs.
+- Compare against the empirical results in `runbook_compliance.md` if the kernel is one of the bake-offs.
 
 ### "Async kernel only fails under benchmark pressure"
 

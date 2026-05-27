@@ -1,10 +1,12 @@
-#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Utility wrappers for ROCm profiling tools.
 
 This module provides Python wrappers around ROCm command-line tools,
 making them easier to call from Python scripts and ensuring they're
 accessible regardless of PATH configuration.
 """
+
 import os
 import subprocess
 import shutil
@@ -12,10 +14,12 @@ from pathlib import Path
 
 
 # Default ROCm installation path
-ROCM_PATH = os.environ.get('ROCM_PATH', '/opt/rocm')
+ROCM_PATH = os.environ.get("ROCM_PATH", "/opt/rocm")
 
 
-def find_rocm_tool(tool_name: str, search_paths: list[str] | None = None) -> Path | None:
+def find_rocm_tool(
+    tool_name: str, search_paths: list[str] | None = None
+) -> Path | None:
     """Find a ROCm tool by searching common installation paths.
 
     Args:
@@ -27,10 +31,10 @@ def find_rocm_tool(tool_name: str, search_paths: list[str] | None = None) -> Pat
     """
     if search_paths is None:
         search_paths = [
-            f'{ROCM_PATH}/bin',
-            f'{ROCM_PATH}/llvm/bin',
-            '/usr/bin',
-            '/usr/local/bin',
+            f"{ROCM_PATH}/bin",
+            f"{ROCM_PATH}/llvm/bin",
+            "/usr/bin",
+            "/usr/local/bin",
         ]
 
     # First check if it's in PATH
@@ -54,8 +58,8 @@ def run_rocprof(
     stats: bool = True,
     kernel_trace: bool = True,
     output_file: str | None = None,
-    output_format: str = 'csv',
-    timeout: int = 300
+    output_format: str = "csv",
+    timeout: int = 300,
 ) -> subprocess.CompletedProcess:
     """Run rocprofv3 with specified options.
 
@@ -74,7 +78,7 @@ def run_rocprof(
         FileNotFoundError: If rocprofv3 not found
         subprocess.TimeoutExpired: If command times out
     """
-    rocprof = find_rocm_tool('rocprofv3')
+    rocprof = find_rocm_tool("rocprofv3")
     if not rocprof:
         raise FileNotFoundError(
             "rocprofv3 not found. Please ensure ROCm is installed and "
@@ -85,31 +89,26 @@ def run_rocprof(
     rocprof_cmd = [str(rocprof)]
 
     if stats:
-        rocprof_cmd.append('--stats')
+        rocprof_cmd.append("--stats")
     if kernel_trace:
-        rocprof_cmd.append('--kernel-trace')
+        rocprof_cmd.append("--kernel-trace")
 
-    rocprof_cmd.extend(['-f', output_format])
+    rocprof_cmd.extend(["-f", output_format])
 
     if output_file:
-        rocprof_cmd.extend(['-o', output_file])
+        rocprof_cmd.extend(["-o", output_file])
 
-    rocprof_cmd.append('--')
+    rocprof_cmd.append("--")
     rocprof_cmd.extend(command)
 
-    return subprocess.run(
-        rocprof_cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout
-    )
+    return subprocess.run(rocprof_cmd, capture_output=True, text=True, timeout=timeout)
 
 
 def run_llvm_objdump(
     input_file: Path,
-    mcpu: str = 'gfx950',
+    mcpu: str = "gfx950",
     disassemble: bool = True,
-    symbolize_operands: bool = True
+    symbolize_operands: bool = True,
 ) -> str:
     """Run llvm-objdump to disassemble a code object.
 
@@ -125,7 +124,7 @@ def run_llvm_objdump(
     Raises:
         FileNotFoundError: If llvm-objdump not found
     """
-    llvm_objdump = find_rocm_tool('llvm-objdump')
+    llvm_objdump = find_rocm_tool("llvm-objdump")
     if not llvm_objdump:
         raise FileNotFoundError(
             "llvm-objdump not found. Please ensure ROCm LLVM is installed."
@@ -134,11 +133,11 @@ def run_llvm_objdump(
     cmd = [str(llvm_objdump)]
 
     if disassemble:
-        cmd.append('-d')
+        cmd.append("-d")
     if symbolize_operands:
-        cmd.append('--symbolize-operands')
+        cmd.append("--symbolize-operands")
 
-    cmd.extend(['--mcpu', mcpu, str(input_file)])
+    cmd.extend(["--mcpu", mcpu, str(input_file)])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -161,7 +160,7 @@ def run_roc_obj_extract(input_file: Path, output_dir: Path) -> list[Path]:
     Raises:
         FileNotFoundError: If roc-obj-extract not found
     """
-    roc_obj_extract = find_rocm_tool('roc-obj-extract')
+    roc_obj_extract = find_rocm_tool("roc-obj-extract")
     if not roc_obj_extract:
         raise FileNotFoundError(
             "roc-obj-extract not found. Please ensure ROCm is installed."
@@ -173,7 +172,7 @@ def run_roc_obj_extract(input_file: Path, output_dir: Path) -> list[Path]:
         [str(roc_obj_extract), str(input_file)],
         cwd=output_dir,
         capture_output=True,
-        text=True
+        text=True,
     )
 
     if result.returncode != 0:
@@ -189,33 +188,26 @@ def get_rocm_info() -> dict:
     Returns:
         Dictionary with ROCm version, path, and available tools
     """
-    info = {
-        'rocm_path': ROCM_PATH,
-        'tools': {},
-        'version': None
-    }
+    info = {"rocm_path": ROCM_PATH, "tools": {}, "version": None}
 
     # Find all tools
-    tools = ['rocprofv3', 'llvm-objdump', 'roc-obj-extract', 'rocm-smi', 'rocminfo']
+    tools = ["rocprofv3", "llvm-objdump", "roc-obj-extract", "rocm-smi", "rocminfo"]
     for tool in tools:
         tool_path = find_rocm_tool(tool)
-        info['tools'][tool] = str(tool_path) if tool_path else None
+        info["tools"][tool] = str(tool_path) if tool_path else None
 
     # Get ROCm version from rocminfo
-    rocminfo = find_rocm_tool('rocminfo')
+    rocminfo = find_rocm_tool("rocminfo")
     if rocminfo:
         try:
             result = subprocess.run(
-                [str(rocminfo)],
-                capture_output=True,
-                text=True,
-                timeout=10
+                [str(rocminfo)], capture_output=True, text=True, timeout=10
             )
-            for line in result.stdout.split('\n'):
-                if 'Runtime Version:' in line:
-                    info['version'] = line.split(':')[-1].strip()
+            for line in result.stdout.split("\n"):
+                if "Runtime Version:" in line:
+                    info["version"] = line.split(":")[-1].strip()
                     break
-        except:
+        except Exception:
             pass
 
     return info
@@ -227,7 +219,7 @@ def verify_rocm_tools() -> tuple[bool, list[str]]:
     Returns:
         Tuple of (all_found: bool, missing: list of missing tool names)
     """
-    required_tools = ['rocprofv3', 'llvm-objdump', 'roc-obj-extract']
+    required_tools = ["rocprofv3", "llvm-objdump", "roc-obj-extract"]
     missing = []
 
     for tool in required_tools:
@@ -237,7 +229,7 @@ def verify_rocm_tools() -> tuple[bool, list[str]]:
     return (len(missing) == 0, missing)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Test tool detection
     print("ROCm Tool Detection")
     print("=" * 60)
@@ -247,7 +239,7 @@ if __name__ == '__main__':
     print(f"ROCm Version: {info['version'] or 'Unknown'}")
     print("\nTools:")
 
-    for tool, path in info['tools'].items():
+    for tool, path in info["tools"].items():
         status = "✓" if path else "✗"
         print(f"  {status} {tool:20s} {path or 'NOT FOUND'}")
 

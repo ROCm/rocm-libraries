@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """ISA extraction tool for FlyDSL and CK Tile kernels."""
+
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,10 +23,10 @@ def extract_flydsl_isa(kernel_path: Path, output_dir: Path) -> Path:
 
     # Set up environment for ISA dump
     env = os.environ.copy()
-    env['FLYDSL_DUMP_IR'] = '1'
-    env['FLYDSL_DUMP_DIR'] = str(output_dir)
-    env['FLYDSL_RUNTIME_ENABLE_CACHE'] = '0'
-    env['FLYDSL_DEBUG_ENABLE_DEBUG_INFO'] = '1'
+    env["FLYDSL_DUMP_IR"] = "1"
+    env["FLYDSL_DUMP_DIR"] = str(output_dir)
+    env["FLYDSL_RUNTIME_ENABLE_CACHE"] = "0"
+    env["FLYDSL_DEBUG_ENABLE_DEBUG_INFO"] = "1"
 
     # Run the kernel to trigger ISA dump
     result = subprocess.run(
@@ -33,7 +34,7 @@ def extract_flydsl_isa(kernel_path: Path, output_dir: Path) -> Path:
         env=env,
         capture_output=True,
         text=True,
-        timeout=120
+        timeout=120,
     )
 
     if result.returncode != 0:
@@ -67,10 +68,10 @@ def extract_cktile_isa(so_path: Path, output_dir: Path) -> Path:
 
     # Extract code object from .so
     result = subprocess.run(
-        ['roc-obj-extract', str(so_path)],
+        ["roc-obj-extract", str(so_path)],
         cwd=output_dir,
         capture_output=True,
-        text=True
+        text=True,
     )
 
     if result.returncode != 0:
@@ -95,9 +96,9 @@ def extract_cktile_isa(so_path: Path, output_dir: Path) -> Path:
         llvm_objdump = "llvm-objdump"
 
     result = subprocess.run(
-        [str(llvm_objdump), '-d', '--mcpu=gfx950', str(co_file)],
+        [str(llvm_objdump), "-d", "--mcpu=gfx950", str(co_file)],
         capture_output=True,
-        text=True
+        text=True,
     )
 
     if result.returncode != 0:
@@ -122,19 +123,19 @@ def count_instructions(isa_file: Path) -> dict:
     content = isa_file.read_text()
 
     counts = {
-        'v_mfma': content.count('v_mfma'),
-        'ds_read': content.count('ds_read'),
-        'ds_write': content.count('ds_write'),
-        'buffer_load': content.count('buffer_load'),
-        'global_load': content.count('global_load'),
-        's_waitcnt': content.count('s_waitcnt'),
-        's_barrier': content.count('s_barrier'),
-        's_sched_barrier': content.count('s_sched_barrier'),
-        's_sched_group_barrier': content.count('s_sched_group_barrier'),
-        's_setprio': content.count('s_setprio'),
-        'v_bitop3': content.count('v_bitop3'),  # XOR swizzle indicator
-        'v_xor': content.count('v_xor'),
-        'total_lines': len(content.split('\n'))
+        "v_mfma": content.count("v_mfma"),
+        "ds_read": content.count("ds_read"),
+        "ds_write": content.count("ds_write"),
+        "buffer_load": content.count("buffer_load"),
+        "global_load": content.count("global_load"),
+        "s_waitcnt": content.count("s_waitcnt"),
+        "s_barrier": content.count("s_barrier"),
+        "s_sched_barrier": content.count("s_sched_barrier"),
+        "s_sched_group_barrier": content.count("s_sched_group_barrier"),
+        "s_setprio": content.count("s_setprio"),
+        "v_bitop3": content.count("v_bitop3"),  # XOR swizzle indicator
+        "v_xor": content.count("v_xor"),
+        "total_lines": len(content.split("\n")),
     }
 
     return counts
@@ -147,9 +148,9 @@ def print_summary(isa_file: Path, counts: dict):
         isa_file: Path to ISA file
         counts: Dictionary with instruction counts
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"ISA Summary: {isa_file.name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  v_mfma:                  {counts['v_mfma']:6d}")
     print(f"  ds_read:                 {counts['ds_read']:6d}")
     print(f"  ds_write:                {counts['ds_write']:6d}")
@@ -163,15 +164,19 @@ def print_summary(isa_file: Path, counts: dict):
     print(f"  v_bitop3 (XOR swizzle):  {counts['v_bitop3']:6d}")
     print(f"  v_xor:                   {counts['v_xor']:6d}")
     print(f"  Total lines:             {counts['total_lines']:6d}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Extract ISA from FlyDSL or CK Tile kernels')
-    parser.add_argument('--flydsl', type=str, help='Path to FlyDSL kernel Python file')
-    parser.add_argument('--cktile', type=str, help='Path to CK Tile .so file')
-    parser.add_argument('--output', type=str, required=True, help='Output directory')
-    parser.add_argument('--summary', action='store_true', help='Print instruction summary')
+    parser = argparse.ArgumentParser(
+        description="Extract ISA from FlyDSL or CK Tile kernels"
+    )
+    parser.add_argument("--flydsl", type=str, help="Path to FlyDSL kernel Python file")
+    parser.add_argument("--cktile", type=str, help="Path to CK Tile .so file")
+    parser.add_argument("--output", type=str, required=True, help="Output directory")
+    parser.add_argument(
+        "--summary", action="store_true", help="Print instruction summary"
+    )
 
     args = parser.parse_args()
 
@@ -183,14 +188,14 @@ def main():
 
     # Extract FlyDSL ISA
     if args.flydsl:
-        flydsl_isa = extract_flydsl_isa(Path(args.flydsl), output_dir / 'flydsl')
+        flydsl_isa = extract_flydsl_isa(Path(args.flydsl), output_dir / "flydsl")
         if flydsl_isa and args.summary:
             counts = count_instructions(flydsl_isa)
             print_summary(flydsl_isa, counts)
 
     # Extract CK Tile ISA
     if args.cktile:
-        cktile_isa = extract_cktile_isa(Path(args.cktile), output_dir / 'cktile')
+        cktile_isa = extract_cktile_isa(Path(args.cktile), output_dir / "cktile")
         if cktile_isa and args.summary:
             counts = count_instructions(cktile_isa)
             print_summary(cktile_isa, counts)
@@ -198,5 +203,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

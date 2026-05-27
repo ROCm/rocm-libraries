@@ -42,8 +42,8 @@ New to the DSL? Read in this order:
 16. `runtime/manifest_schema.md`
 17. `runtime/comgr_and_hipmodule.md`
 18. `runtime/limitations.md`
-19. `optimization/runbook_mapping.md`
-20. `optimization/optimization_playbook.md`
+19. `optimization/optimization_runbook.md` — long-form, section-by-section (includes the iteration loop, knob catalog, case studies, probe workflow, arch reference)
+20. `optimization/runbook_mapping.md`
 21. `optimization/measured_results.md`
 22. `fusion/overview.md`
 23. `autotune/overview.md`
@@ -125,6 +125,6 @@ Conventional anchors:
 - High-level compile: `python/ck_dsl/helpers/compile.py`.
 - Manifest schema: `python/ck_dsl/helpers/manifest.py`.
 - Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
-- DSL runbook compliance table: `python/ck_dsl/RUNBOOK_COMPLIANCE.md`.
+- DSL runbook compliance table: `python/ck_dsl/dsl_docs/optimization/runbook_compliance.md`.
 - Coordinate-transform DAG walkthrough: `python/ck_dsl/TRANSFORM_DAG.md`.
 - Helpers reference: `python/ck_dsl/helpers/README.md`.
