@@ -45,6 +45,10 @@ from Tensile.Tests.unit._subtile_tailloop_fixtures import (
     wrap_with_skiptoend,
 )
 
+from Tensile.Components.Subtile.SubtileTailSrdTighten import (
+    _swizzleSize0ForMN,
+)
+
 
 # ── Mock kernel + writer ──
 
@@ -102,6 +106,16 @@ def _create_kernel(MT0=256, MT1=256, *, fp4=False, depthU=None, no_tail_loop=Fal
         "ProblemType": problemType,
         "NoTailLoop": no_tail_loop,
         "AssertSummationElementMultiple": 32,
+        # UseSubtileImpl + MXScaleFormat mirror what
+        # `subtile_mxfp4*.yaml` sets (`UseSubtileImpl: [1]` and
+        # `MXScaleFormat: 1`, which resolves to `"HostPreSwizzle"`
+        # post-Solution). The new SRD-tighten swizzle-size helper
+        # (`SubtileTailSrdTighten._swizzleSize0ForMN`) and the
+        # `KernelWriterAssembly.computeLoadSrd` swizzle branch both
+        # gate on these two, so a minimal fixture must populate them
+        # for fp4 MX scale paths to match production behaviour.
+        "UseSubtileImpl": True,
+        "MXScaleFormat": "HostPreSwizzle" if fp4 else "NoSwizzle",
     }
     if fp4:
         kernel["_DepthUMXSA"] = depthU // mxblock
@@ -1654,4 +1668,187 @@ class TestTailSrdTightenSubtileMXData:
             "PGR=2 DU=512 fp4 must emit MX data SRD tighten AFTER "
             "PGRTailEntryL: (entry=%d, srdA-data=%d)"
             % (entry_pos, data_match.start())
+        )
+
+
+# ── Tests: _swizzleSize0ForMN helper (swizzle-size table) ────────────────────
+
+class TestSwizzleSize0ForMN:
+    """`_swizzleSize0ForMN(kernel, tc)` mirrors the swizzle-branch in
+    `KernelWriterAssembly.computeLoadSrd()`. The SRD-tighten delta
+    math depends on the M/N-direction swizzle block size, and review
+    feedback (PR #7782) flagged that the previous implicit derivation
+    via `lrSubtileSize * lrGlobalSubtileGrid[1] / DepthU` obscured
+    the intent. This helper exposes the {32, 16, 1} swizzle-size
+    table directly so all three SRD-tighten paths (MX scale, subtile
+    swizzled A/B, plain non-swizzled) share one source of truth that
+    stays in lockstep with `computeLoadSrd()`.
+
+    Reference table (from `computeLoadSrd()`):
+
+      | path                                             | swizzleSize0 |
+      |--------------------------------------------------|--------------|
+      | MX scale + MXScaleFormat in {HostPreSwizzle,     |          32  |
+      |   InMemorySwizzle}                               |              |
+      | A/B + SwizzleTensor{A,B}=True + UseSubtileImpl=1 |          16  |
+      | otherwise (plain bf16/fp16/int8 A/B,             |           1  |
+      |   non-swizzled MX scale, non-subtile)            |              |
+    """
+
+    def test_mxsa_host_preswizzle_returns_32(self):
+        kernel = {
+            "UseSubtileImpl": True,
+            "MXScaleFormat": "HostPreSwizzle",
+            "ProblemType": {},
+        }
+        assert _swizzleSize0ForMN(kernel, "MXSA") == 32
+        assert _swizzleSize0ForMN(kernel, "MXSB") == 32
+
+    def test_mxsa_in_memory_swizzle_returns_32(self):
+        kernel = {
+            "UseSubtileImpl": True,
+            "MXScaleFormat": "InMemorySwizzle",
+            "ProblemType": {},
+        }
+        assert _swizzleSize0ForMN(kernel, "MXSA") == 32
+        assert _swizzleSize0ForMN(kernel, "MXSB") == 32
+
+    def test_mxsa_noswizzle_collapses_to_1(self):
+        """`NoSwizzle` / `Auto` MX scale layouts use the same SRD math
+        as plain non-swizzled tensors: swizzleSize0 = 1. (No current
+        production yaml exercises this with DepthU > 256, but the
+        helper must collapse cleanly to keep the generalized formula
+        consistent.)
+        """
+        for fmt in ("NoSwizzle", "Auto"):
+            kernel = {
+                "UseSubtileImpl": True,
+                "MXScaleFormat": fmt,
+                "ProblemType": {},
+            }
+            assert _swizzleSize0ForMN(kernel, "MXSA") == 1, fmt
+            assert _swizzleSize0ForMN(kernel, "MXSB") == 1, fmt
+
+    def test_ab_preshuffled_subtile_returns_16(self):
+        kernel = {
+            "UseSubtileImpl": True,
+            "ProblemType": {
+                "SwizzleTensorA": True,
+                "SwizzleTensorB": True,
+            },
+        }
+        assert _swizzleSize0ForMN(kernel, "A") == 16
+        assert _swizzleSize0ForMN(kernel, "B") == 16
+
+    def test_ab_preshuffled_requires_use_subtile(self):
+        """`SwizzleTensor{A,B}` without `UseSubtileImpl=1` collapses
+        to 1 (the legacy DTV path uses its own SRD math; the subtile
+        swizzle-16 case only applies when both flags are set).
+        """
+        kernel = {
+            "UseSubtileImpl": False,
+            "ProblemType": {
+                "SwizzleTensorA": True,
+                "SwizzleTensorB": True,
+            },
+        }
+        assert _swizzleSize0ForMN(kernel, "A") == 1
+        assert _swizzleSize0ForMN(kernel, "B") == 1
+
+    def test_plain_ab_returns_1(self):
+        """Plain bf16/fp16/int8 A/B (no SwizzleTensor, no MX): the
+        non-swizzled case. SRD-tighten formula reduces to
+        `delta_K * 1 * bpe = delta_K * bpe`, matching
+        `emitTailSrdTightenSubtile`.
+        """
+        kernel = {
+            "UseSubtileImpl": True,
+            "MXScaleFormat": "NoSwizzle",
+            "ProblemType": {
+                "SwizzleTensorA": False,
+                "SwizzleTensorB": False,
+            },
+        }
+        assert _swizzleSize0ForMN(kernel, "A") == 1
+        assert _swizzleSize0ForMN(kernel, "B") == 1
+
+    def test_per_operand_swizzle_independent(self):
+        """`SwizzleTensorA` and `SwizzleTensorB` are independent: a
+        kernel that swizzles only A must report 16 for A and 1 for B
+        (= asymmetric configuration; the SRD tightener must clip each
+        operand with its own swizzle factor).
+        """
+        kernel = {
+            "UseSubtileImpl": True,
+            "ProblemType": {
+                "SwizzleTensorA": True,
+                "SwizzleTensorB": False,
+            },
+        }
+        assert _swizzleSize0ForMN(kernel, "A") == 16
+        assert _swizzleSize0ForMN(kernel, "B") == 1
+
+    def test_mxscaleformat_default_is_noswizzle(self):
+        """Missing `MXScaleFormat` key defaults to NoSwizzle (matches
+        `kernel.get("MXScaleFormat", "NoSwizzle")` in
+        `computeLoadSrd()`). The helper must not raise KeyError.
+        """
+        kernel = {
+            "UseSubtileImpl": True,
+            "ProblemType": {},
+        }
+        assert _swizzleSize0ForMN(kernel, "MXSA") == 1
+        assert _swizzleSize0ForMN(kernel, "MXSB") == 1
+
+
+class TestTailSrdTightenMXBytesPerKElement:
+    """Pin the per-K-element byte stride used in
+    `emitTailSrdTightenSubtileMX` for the gauntlet MX scale config
+    (mxBlock=32). Review feedback (PR #7782) replaced the implicit
+    `lrSubtileSize * lrGlobalSubtileGrid[1] / DepthU` derivation
+    with the explicit `swizzleSize0 / mxBlock = 32 / 32 = 1`
+    formula; the assembly emit must remain the same (no extra shift
+    instruction) because `bytesPerKElement == 1` skips the shift.
+    """
+
+    def _emit_fp4_asm(self, *, depthU, pgr=0):
+        kernel = _create_kernel(256, 256, fp4=True, depthU=depthU,
+                                no_tail_loop=False)
+        _augment_kernel_for_tail_scaffold(kernel, pgr)
+        kwa = _build_minimal_kwa(kernel)
+        tPA = {"is_sparse": False, "tpsMetadata": None}
+        tPB = {"is_sparse": False, "tpsMetadata": None}
+        module = kwa._emitTailLoopScaffoldSubtile(kernel, tPA, tPB)
+        return wrap_with_skiptoend(module)
+
+    def test_mx_tighten_no_shift_for_mxblock_32(self):
+        """For mxBlock=32 / swizzleSize0=32, the explicit formula
+        `bytesPerKElement_MX = swizzleSize0 / mxBlock = 1`, so the
+        emit must NOT include a `s_lshift_left_b32 delta` (the shift
+        is only emitted when bytesPerKElement != 1). The
+        `s_sub_u32 SrdMXSA+2, SrdMXSA+2, delta` consumes delta_K
+        directly as bytes.
+        """
+        asm = self._emit_fp4_asm(depthU=512)
+        tail = _extract_tail_section(asm)
+        assert tail
+        # Banner must be present (= tightener fired).
+        assert "MX scale follow-up" in tail
+        # delta_K computation must be present.
+        assert re.search(
+            r"s_sub_u32\s+s\[?\d+\]?,\s*(?:512|0x200)\s*,\s*s\[?\d+\]?"
+            r"[^\n]*delta_K = DepthU - remainK_MX",
+            tail
+        )
+        # No `delta_bytes = delta_K * bytesPerKElement_MX` shift for
+        # the gauntlet (mxBlock=32) -- the explicit formula collapses
+        # to bytesPerK=1, matching the pre-refactor numerical result.
+        # A future mxBlock=16 config (untested today) would emit the
+        # shift; pinning the absence here catches an accidental
+        # re-introduction.
+        assert "delta_bytes = delta_K * bytesPerKElement_MX" not in tail, (
+            "DepthU=512 mxfp4 (mxBlock=32) tail must NOT emit a "
+            "bytesPerKElement_MX shift -- swizzleSize0/mxBlock = "
+            "32/32 = 1 collapses to a direct sub. Tail head:\n"
+            + tail[:2500]
         )

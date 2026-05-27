@@ -38,8 +38,62 @@ from rocisa.instruction import (
 
 # Host MX-scale K-padding granularity guaranteed by
 # `DataInitialization.cpp::rearrangePaddedMXScaleLayout` (pads K-blocks
-# to a multiple of 8 mxBlocks = 256 K-elements).
+# to a multiple of 8 mxBlocks = 256 K-elements). The value is specific
+# to the MX scale's host pre-pad and is not a generic "swizzle K pad" --
+# the subtile-swizzled A/B path's K-direction swizzle size is 32 (per
+# the `swizzleSize1 = 32` in `KernelWriterAssembly.computeLoadSrd()`),
+# not 256, so keeping the name MX-scoped avoids a misleading rename.
+# (Nakajee's PR review flagged this rename as deferrable; keeping it
+# accurate over generic.)
 MX_PAD_K = 256
+
+
+def _swizzleSize0ForMN(kernel, tc):
+    """Return the M/N-direction swizzle block size used by the
+    ``computeLoadSrd()`` byte-stride math for operand ``tc``.
+
+    Mirrors the same branch as
+    ``KernelWriterAssembly.computeLoadSrd()`` (look for
+    ``isMxSwizzledScaleLayout`` / ``isSwizzledSubtile``):
+
+      * MX scale (``tc in {MXSA, MXSB}``) with a swizzled
+        ``MXScaleFormat`` (``HostPreSwizzle`` / ``InMemorySwizzle``)
+        -> 32 (M/N rows packed per 256-K swizzle block; the per-K-
+        element byte stride along K is ``swizzleSize0 / mxBlock``,
+        so for ``mxBlock == 32`` it collapses to 1 byte/K-element).
+      * Subtile A/B with ``SwizzleTensor{A,B}`` (PreShuffled DTV
+        path) and ``UseSubtileImpl=1`` -> 16 (MXFP4 swizzle's M/N
+        block size; the per-K-element byte stride is
+        ``swizzleSize0 / 1 = 16`` bytes).
+      * Anything else (plain bf16/fp16/int8 A/B, non-swizzled MX
+        scale, non-subtile) -> 1. The K-direction byte stride for
+        this path is then ``1 * bpe = bpe`` bytes/K-element, which
+        is what :func:`emitTailSrdTightenSubtile` uses directly.
+
+    With this helper, the SRD-tighten delta math is the same shape
+    for all three paths:
+
+        delta_bytes = delta_K * (swizzleSize0 / blockGran) * bpe_K
+
+    where ``blockGran`` is ``mxBlock`` for MX scale and ``1``
+    otherwise, and ``bpe_K`` is the per-K-element data bpe (only the
+    non-swizzled bf16/fp16/int8 path uses ``bpe_K > 1``; swizzled MX
+    paths absorb the K-direction bpe into ``swizzleBlockSize``).
+    Keeping the helper here (rather than re-importing the predicate
+    from :mod:`KernelWriterAssembly`) avoids a circular import; the
+    branches must stay in sync with ``computeLoadSrd()``.
+    """
+    useSubtile = bool(kernel.get("UseSubtileImpl"))
+    mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+    isMxSwizzledScale = ("MXS" in tc) and \
+        mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+    if isMxSwizzledScale:
+        return 32
+    isPreShuffledAB = tc in ("A", "B") and \
+        kernel["ProblemType"].get("SwizzleTensor%s" % tc, False)
+    if isPreShuffledAB and useSubtile:
+        return 16
+    return 1
 
 
 def emitTailSrdTightenSubtile(kw, kernel):
@@ -102,6 +156,15 @@ def emitTailSrdTightenSubtile(kw, kernel):
 
     No SRD restore is needed: the tail body is the last GR site for
     A/B before the kernel epilogue (epilogue uses SrdC / SrdD).
+
+    Swizzle-size cross-reference (see :func:`_swizzleSize0ForMN`):
+    this helper is the ``swizzleSize0 == 1`` case of the generalized
+    SRD-tighten formula ``delta_bytes = delta_K * swizzleSize0 *
+    bpe_K`` -- non-MX, non-swizzled A/B reduces to ``delta_bytes =
+    delta_K * 1 * bpe = delta_K * bpe`` (modulo the bpr=4 round-UP
+    on K_remain*bpe). The swizzled A/B path (DTV / PreShuffled) has
+    ``swizzleSize0 == 16`` and is gated out below; see the MX
+    tighteners for the ``swizzleSize0 in {16, 32}`` paths.
     """
     module = Module("tailSrdTightenSubtile")
     if kernel["ProblemType"].get("MXBlockA", 0) > 0 \
@@ -178,12 +241,21 @@ def emitTailSrdTightenSubtileMX(kw, kernel):
 
       - 256 is the host MX-scale K-padding granularity guaranteed by
         ``DataInitialization.cpp::rearrangePaddedMXScaleLayout``;
-      - ``bytesPerKElement_MX = bytesPerDU_MX / DepthU``, where
-        ``bytesPerDU_MX = lrSubtileSize * lrGlobalSubtileGrid[1]``
-        matches the per-DU SRD-advance value the PGR>0 large-counter
-        advance uses (so the tightening is dimensionally consistent
-        with the rest of the MX path). For all current MXSA_B4/
-        MXSB_B4 / MXSA_B8/MXSB_B8 configs ``bytesPerKElement_MX == 1``.
+      - ``bytesPerKElement_MX = swizzleSize0 / mxBlock``. This is the
+        explicit form of ``computeLoadSrd()``'s K-direction stride
+        for the MX swizzled scale layout: that helper computes
+        ``swizzleBlockSize = swizzleSize0 * swizzleSize1 / mxBlock``
+        (with ``swizzleSize0=32``, ``swizzleSize1=256``) and adds
+        ``swizzleBlockSize * (DepthU / swizzleSize1)`` bytes to
+        ``Srd<tc>+2``, so the per-K-element K-stride is
+        ``swizzleBlockSize / swizzleSize1 = swizzleSize0 / mxBlock``.
+        For the gauntlet configs (mxfp4/mxfp8, ``mxBlock == 32``)
+        this collapses to 1 byte/K-element, matching the previously
+        implicit ``lrSubtileSize * lrGlobalSubtileGrid[1] / DepthU``
+        derivation that this helper used to use. For ``mxBlock == 16``
+        the explicit formula yields 2 bytes/K-element. See
+        :func:`_swizzleSize0ForMN` for the cross-reference to
+        ``computeLoadSrd()``.
 
     Static gate -- emit nothing when ``DepthU <= MX_PAD_K=256``: for
     any K_remain in [0, DepthU-1] with DepthU <= 256,
@@ -216,14 +288,14 @@ def emitTailSrdTightenSubtileMX(kw, kernel):
     depthU = int(kernel["DepthU"])
     if depthU <= MX_PAD_K:
         return module
-    # Derive bytesPerKElement_MX per operand from the same expression
-    # the PGR>0 large-counter SRD-advance uses (so the tightening's
-    # byte convention matches the advance's; any future MX layout
-    # change propagates through one place).
-
-    def _bytesPerDU_MX(ti):
-        return int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-
+    # Derive bytesPerKElement_MX explicitly as `swizzleSize0 / mxBlock`,
+    # matching `computeLoadSrd()`'s K-direction stride. This replaces
+    # the previously implicit `lrSubtileSize * lrGlobalSubtileGrid[1]
+    # / DepthU` derivation, which gave the same numerical value for
+    # the gauntlet configs but obscured the SRD-byte intent (review
+    # feedback). Cross-check against the legacy derivation is kept
+    # below in debug-only form so a divergence (e.g. a future subtile
+    # state change) is caught loudly rather than silently mis-clipping.
     mxOperands = []
     if hasMxA:
         mxOperands.append(('MXSA', kw.states.mxsa.tileInfo))
@@ -231,12 +303,33 @@ def emitTailSrdTightenSubtileMX(kw, kernel):
         mxOperands.append(('MXSB', kw.states.mxsb.tileInfo))
     bytesPerKList = []
     for tc, ti in mxOperands:
-        bytesPerDU = _bytesPerDU_MX(ti)
-        if bytesPerDU % depthU != 0:
-            # Non-integer bytesPerKElement: bail rather than emit a
-            # runtime divide. No current MX config hits this.
+        swizzleSize0 = _swizzleSize0ForMN(kernel, tc)
+        tcab = "A" if tc == "MXSA" else "B"
+        mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
+        if mxBlock <= 0 or swizzleSize0 <= 0:
             return module
-        bytesPerKList.append(bytesPerDU // depthU)
+        if swizzleSize0 % mxBlock != 0:
+            # Non-integer bytesPerKElement (e.g. swizzleSize0=32 with
+            # mxBlock > 32). No current MX config hits this; bail
+            # rather than emit a runtime divide.
+            return module
+        bytesPerKElement = swizzleSize0 // mxBlock
+        # Cross-check: the legacy derivation must agree for any
+        # config where `lrSubtileSize * lrGlobalSubtileGrid[1]` is
+        # populated (it is in all subtile MX paths). If subtile state
+        # is absent, skip the assertion; if present, mismatch raises.
+        legacyBytesPerDU = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
+        if legacyBytesPerDU > 0 and legacyBytesPerDU % depthU == 0:
+            legacyBytesPerK = legacyBytesPerDU // depthU
+            assert legacyBytesPerK == bytesPerKElement, (
+                "MX SRD-tighten K-stride mismatch for %s: explicit "
+                "swizzleSize0/mxBlock = %d/%d = %d but legacy "
+                "lrSubtileSize*lrGlobalSubtileGrid[1]/DepthU = %d/%d "
+                "= %d. The SRD-advance and SRD-tighten byte conventions "
+                "must agree; investigate before relaxing this check."
+                % (tc, swizzleSize0, mxBlock, bytesPerKElement,
+                   legacyBytesPerDU, depthU, legacyBytesPerK))
+        bytesPerKList.append(bytesPerKElement)
     if any(b != bytesPerKList[0] for b in bytesPerKList):
         return module
     bytesPerKElement = bytesPerKList[0]
@@ -306,6 +399,16 @@ def emitTailSrdTightenSubtileMXData(kw, kernel):
         does not model; the swizzled-MX clip is deferred);
       - ``DepthU > 256``;
       - per-MX-operand bpe in {0.5, 1}.
+
+    Swizzle-size cross-reference (see :func:`_swizzleSize0ForMN`):
+    this helper handles the ``swizzleSize0 == 1`` case for the MX
+    DATA tensor side (non-swizzled). The companion path for
+    PreShuffled MX data A/B (``swizzleSize0 == 16``) would use
+    ``delta_bytes = delta_K * swizzleSize0`` (the bpe is already
+    absorbed into ``swizzleBlockSize``); that path is gated out
+    below and deferred -- no current gauntlet config exercises it,
+    and emitting the swizzled-MX-data clip without runtime coverage
+    would risk over- vs under-tightening regressions.
     """
     module = Module("tailSrdTightenSubtileMXData")
     hasMxA = kernel["ProblemType"].get("MXBlockA", 0) > 0
