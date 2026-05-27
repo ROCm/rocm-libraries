@@ -124,15 +124,6 @@ public:
         char* env = common::__get_env("ROCPRIM_MEMCHECK_LOGGING");
         logging_enabled = (env != nullptr) && (strcmp(env, "1") == 0);
         common::clean_env(env);
-
-        rocprim::detail::target_arch arch;
-        HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
-        is_apu = test_utils::is_apu(arch);
-
-        if(logging_enabled)
-        {
-            std::cout << "MemCheck: is_apu=" << is_apu << std::endl;
-        }
     }
 
     template<typename T>
@@ -214,7 +205,6 @@ private:
     }
 
     bool  logging_enabled = false;
-    bool  is_apu          = false;
     float padding_factor;
 };
 
