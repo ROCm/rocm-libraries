@@ -518,6 +518,18 @@ TEST_F(TestResampleBwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestResampleBwdOperationDescriptor, SetGenerateIndex)
+{
+    auto desc = getDescriptor();
+    bool generateIndex = true;
+
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 1, &generateIndex));
+
+    ASSERT_TRUE(desc->getData().generate_index.has_value());
+    EXPECT_EQ(desc->getData().generate_index.value(), true);
+}
+
 TEST_F(TestResampleBwdOperationDescriptor, SetResampleParamsWrongType)
 {
     auto desc = getDescriptor();
@@ -661,6 +673,39 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeComputeType)
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestResampleBwdOperationDescriptor, GetAttributeGenerateIndex)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    bool generateIndex = true;
+    desc->setAttribute(
+        HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 1, &generateIndex);
+    desc->finalize();
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &retrieved));
+
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_EQ(retrieved, true);
+}
+
+TEST_F(TestResampleBwdOperationDescriptor, GetAttributeGenerateIndexUnsetQueryReturnsZero)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = -1;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 0, &elementCount, nullptr));
+
+    EXPECT_EQ(elementCount, 0);
 }
 
 // =============================================================================

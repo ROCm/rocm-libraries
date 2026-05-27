@@ -57,6 +57,7 @@ protected:
 
         auto dx = graph->resample_bwd(dy, attrs);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
+        dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
         return graph;
     }
@@ -219,6 +220,7 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, AutoAssignedUidsPreservedInLifti
 
     auto dx = graph->resample_bwd(dy, attrs);
     dx->set_output(true).set_name("dx");
+    dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
     auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -227,13 +229,11 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, AutoAssignedUidsPreservedInLifti
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 2u);
 
-    // Verify all UIDs are positive and distinct
+    // Verify all UIDs are distinct. Auto-assignment starts from 0, so UID 0 is valid.
     std::vector<int64_t> uids;
     uids.reserve(tensorMap.size());
     for(const auto& [uid, tensor] : tensorMap)
     {
-        EXPECT_GT(uid, 0)
-            << "Auto-assigned UID should be positive"; // NOLINT(readability-implicit-bool-conversion)
         uids.push_back(uid);
     }
     std::sort(uids.begin(), uids.end());
@@ -286,6 +286,7 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, GenerateIndexPreservedInLiftingR
 
     auto dx = graph->resample_bwd(dy, attrs);
     dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
+    dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -306,7 +307,8 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     auto* opNode = dynamic_cast<ResampleBwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr) << "Expected a ResampleBwdNode";
 
-    EXPECT_EQ(opNode->attributes.get_generate_index(), true);
+    ASSERT_TRUE(opNode->attributes.get_generate_index().has_value());
+    EXPECT_EQ(opNode->attributes.get_generate_index().value(), true);
 }
 
 } // namespace

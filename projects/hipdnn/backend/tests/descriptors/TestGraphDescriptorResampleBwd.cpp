@@ -86,6 +86,14 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        HIPDNN_TYPE_INT64,
                        static_cast<int64_t>(window.size()),
                        window.data());
+
+    auto resampleMode = HIPDNN_RESAMPLE_MAXPOOL;
+    desc->setAttribute(HIPDNN_ATTR_RESAMPLE_MODE, HIPDNN_TYPE_RESAMPLE_MODE, 1, &resampleMode);
+
+    auto paddingMode = HIPDNN_PADDING_ZERO_PAD;
+    desc->setAttribute(
+        HIPDNN_ATTR_RESAMPLE_PADDING_MODE, HIPDNN_TYPE_PADDING_MODE, 1, &paddingMode);
+
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     if(!name.empty())
