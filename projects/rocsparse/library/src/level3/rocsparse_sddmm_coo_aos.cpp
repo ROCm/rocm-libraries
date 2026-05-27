@@ -131,10 +131,11 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
                                     int64_t              batch_stride_B,
                                     const T*             beta,
                                     const I*             C_row_data,
-                                    const J*             C_col_data,
-                                    C*                   C_val_data,
                                     int64_t              offsets_batch_stride_C,
-                                    int64_t              columns_values_batch_stride_C,
+                                    const J*             C_col_data,
+                                    int64_t              indices_batch_stride_C,
+                                    C*                   C_val_data,
+                                    int64_t              values_batch_stride_C,
                                     int64_t              batch_count,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
@@ -270,9 +271,11 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
                                        batch_stride_B,                                   \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),  \
                                        C_val_data,                                       \
+                                       values_batch_stride_C,                            \
                                        C_row_data,                                       \
+                                       offsets_batch_stride_C,                           \
                                        C_col_data,                                       \
-                                       columns_values_batch_stride_C,                    \
+                                       indices_batch_stride_C,                           \
                                        C_base,                                           \
                                        handle->pointer_mode == rocsparse_pointer_mode_host)
 

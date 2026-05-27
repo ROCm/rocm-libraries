@@ -132,9 +132,11 @@ namespace rocsparse
                            int64_t batch_stride_B,
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                            C* __restrict__ coo_val,
+                           int64_t values_batch_stride_C,
                            const I* __restrict__ coo_row_ind,
+                           int64_t row_indices_batch_stride_C,
                            const I* __restrict__ coo_col_ind,
-                           int64_t              batch_stride_C,
+                           int64_t col_indices_batch_stride_C,
                            rocsparse_index_base coo_base,
                            bool                 is_host_mode)
     {
@@ -166,9 +168,9 @@ namespace rocsparse
             load_pointer(dense_B, hipBlockIdx_y, batch_stride_B),
             ldb,
             beta,
-            load_pointer(coo_val, hipBlockIdx_y, batch_stride_C),
-            load_pointer(coo_row_ind, hipBlockIdx_y, batch_stride_C),
-            load_pointer(coo_col_ind, hipBlockIdx_y, batch_stride_C),
+            load_pointer(coo_val, hipBlockIdx_y, values_batch_stride_C),
+            load_pointer(coo_row_ind, hipBlockIdx_y, row_indices_batch_stride_C),
+            load_pointer(coo_col_ind, hipBlockIdx_y, col_indices_batch_stride_C),
             coo_base);
     }
 
