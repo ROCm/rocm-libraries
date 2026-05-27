@@ -412,6 +412,10 @@ validParameters = { # we need to make sure this matches develop
     #  2: DirectToLds A only (no DTLB)
     #  3: DirectToLds B only (no DTLA)
     "DirectToLds": [0, 1, 2, 3],
+    # DirectToLds for sparse metadata.
+    # Requires DirectToLds on the dense side (B if Sparse==2 else A),
+    # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
+    "DirectToLdsMetadata": [0, 1],
     # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
@@ -1025,6 +1029,12 @@ validParameters = { # we need to make sure this matches develop
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
+    # Enable PLR 0.5 to save vgprs
+    # 0: Disabled
+    # 1: Use PLR 0.5 for A
+    # 2: Use PLR 0.5 for B
+    # 3: Use PLR 0.5 for both A and B
+    "HalfPLR": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {
