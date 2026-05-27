@@ -1,7 +1,7 @@
 // Composable Kernel Jenkins Pipeline
 // See vars/ck.groovy for helper function implementations.
 
-def ck
+ck = null
 
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
@@ -243,7 +243,9 @@ pipeline {
                 script {
                     checkout scm
                     dir("projects/composablekernel") {
-                        ck = load "vars/ck.groovy"
+                        if (ck == null) {
+                            ck = load "vars/ck.groovy"
+                        }
                     }
                     ck.checkoutComposableKernel()
                     env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || ck.shouldRunCICheck())

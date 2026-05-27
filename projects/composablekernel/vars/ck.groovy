@@ -231,22 +231,6 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
     }
 }
 
-class Version {
-    int major, minor, patch
-    @Override
-    String toString() {
-        return [major, minor, patch].findAll().join('.')
-    }
-}
-def parseVersion(String versionString) {
-    if (!versionString) return null
-    int[] tokens = versionString.split(/\./).collect { it as int } // Splits the string by '.' and converts each part to an integer.
-    return new Version(
-        major: tokens[0],
-        minor: tokens.length > 1 ? tokens[1] : null,
-        patch: tokens.length > 2 ? tokens[2] : null,
-    )
-}
 
 def nthreads() {
     def nproc = sh(returnStdout: true, script: 'nproc')
