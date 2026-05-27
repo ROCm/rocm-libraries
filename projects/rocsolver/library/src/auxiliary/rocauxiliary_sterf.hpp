@@ -325,9 +325,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const I n,
 }
 
 template <typename T, typename I>
-void rocsolver_sterf_getMemorySize(const I n,
-                                   const I batch_count,
-                                   size_t* size_stack)
+void rocsolver_sterf_getMemorySize(const I n, const I batch_count, size_t* size_stack)
 {
     // if quick return no workspace needed
     if(n == 0 || !batch_count)
@@ -341,8 +339,7 @@ void rocsolver_sterf_getMemorySize(const I n,
 }
 
 template <typename T, typename I>
-rocblas_status
-    rocsolver_sterf_argCheck(rocblas_handle handle, const I n, T D, T E, I* info)
+rocblas_status rocsolver_sterf_argCheck(rocblas_handle handle, const I n, T D, T E, I* info)
 {
     // order is important for unit tests:
 
