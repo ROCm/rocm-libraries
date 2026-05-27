@@ -23,44 +23,39 @@
  * ************************************************************************ */
 #pragma once
 #ifdef GOOGLE_TEST
-
-#include "rocsparse-debugging.h"
-
+#include "rocsparse_clients_test_hip_debug_api.hpp"
 #include <map>
-#include <mutex>
+namespace rocsparse_clients_test
+{
+    struct hip_debug_t
+    {
+    private:
+        bool        m_enabled{};
+        std::string m_filename{};
+        hip_debug_t();
+        bool m_non_permissive{};
+      
+    public:
+        static std::map<std::string, hip_debug_api_history_t> s_map;
+        const std::string&                                              get_filename() const;
+        hip_debug_api_history_t& get_hip_debug_api_history(const char* name);
+        bool                               get_non_permissive() const;
+        void                               set_non_permissive(bool);
+        rocsparse_status check(rocsparse_handle, bool non_permissive, std::ostream&) const;
+
+        void                   report(rocsparse_handle, std::ostream&) const;
+        static hip_debug_t& instance();
+        bool                   enabled() const;
+        void                   enable();
+        void                   disable();
+        void                   set_sync_report_filename(const char* filename);
+
+    };
+}
 
 namespace rocsparse_clients_test
 {
-
-    std::string memory_debug_synchronicity_t2string(int32_t value);
-
-    struct memory_debug_synchronicity_info_t
-    {
-    protected:
-        int32_t                     m_synchronicity_value{};
-        uint64_t                    m_ncalls{};
-        std::map<int32_t, uint64_t> m_histo_calls{};
-        mutable std::mutex          m_mutex{};
-
-    public:
-        int32_t  get_synchronicity_value() const;
-        uint64_t get_ncalls() const;
-
-        uint64_t get_calls(int32_t) const;
-        void     add_call(int32_t);
-        memory_debug_synchronicity_info_t(int32_t);
-        memory_debug_synchronicity_info_t() = default;
-
-        // The mutex member is neither copyable nor movable. Provide explicit
-        // copy/move operations that synchronize access to the source object
-        // and leave the destination's mutex default-constructed.
-        memory_debug_synchronicity_info_t(const memory_debug_synchronicity_info_t& other);
-        memory_debug_synchronicity_info_t(memory_debug_synchronicity_info_t&& other) noexcept;
-        memory_debug_synchronicity_info_t&
-            operator=(const memory_debug_synchronicity_info_t& other);
-        memory_debug_synchronicity_info_t&
-            operator=(memory_debug_synchronicity_info_t&& other) noexcept;
-    };
+    void hip_debug_check_api(rocsparse_handle handle, const char* name);
 }
 
 #endif

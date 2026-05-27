@@ -27,7 +27,7 @@
 #include "rocsparse-auxiliary.h"
 #include "rocsparse-debugging.h"
 #include "rocsparse-functions.h"
-#include "rocsparse_clients_test_memory_debug.hpp"
+#include "rocsparse_clients_test_hip_debug.hpp"
 
 #define ROCSPARSE_CLIENTS_TEST_WRAP(NAME)                                                \
     inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;                       \
@@ -36,19 +36,19 @@
         template <typename... P>                                                         \
         static inline rocsparse_status apply(rocsparse_handle handle, P... p)            \
         {                                                                                \
-            rocsparse_status status;                                                     \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())             \
-            {                                                                            \
-                status = rocsparse_memory_debug_reset(handle);                           \
+	  rocsparse_status status;					\
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
+	      {								\
+                status = rocsparse_hip_debug_start(handle,nullptr);		\
                 if(status != rocsparse_status_success)                                   \
                     return status;                                                       \
             }                                                                            \
             status = rocsparse_real_##NAME##_ptr(handle, p...);                          \
             if(status != rocsparse_status_success)                                       \
                 return status;                                                           \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())             \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
             {                                                                            \
-                rocsparse_clients_test::memory_debug_check_synchronicity(handle, #NAME); \
+                rocsparse_clients_test::hip_debug_check_api(handle, #NAME); \
             }                                                                            \
             return status;                                                               \
         }                                                                                \
@@ -56,18 +56,18 @@
         inline rocsparse_status operator()(rocsparse_handle handle, P&&... p) const      \
         {                                                                                \
             rocsparse_status status;                                                     \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())             \
-            {                                                                            \
-                status = rocsparse_memory_debug_reset(handle);                           \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
+	      {								\
+                status = rocsparse_hip_debug_start(handle, nullptr);		\
                 if(status != rocsparse_status_success)                                   \
                     return status;                                                       \
             }                                                                            \
             status = rocsparse_real_##NAME##_ptr(handle, p...);                          \
             if(status != rocsparse_status_success)                                       \
                 return status;                                                           \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())             \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
             {                                                                            \
-                rocsparse_clients_test::memory_debug_check_synchronicity(handle, #NAME); \
+                rocsparse_clients_test::hip_debug_check_api(handle, #NAME); \
             }                                                                            \
             return status;                                                               \
         }                                                                                \
@@ -82,18 +82,18 @@
         static inline rocsparse_status apply(P... p)                                      \
         {                                                                                 \
             rocsparse_status status;                                                      \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())              \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
             {                                                                             \
-                status = rocsparse_memory_debug_reset(nullptr);                           \
+	      status = rocsparse_hip_debug_start(nullptr, nullptr);		\
                 if(status != rocsparse_status_success)                                    \
                     return status;                                                        \
             }                                                                             \
             status = rocsparse_real_##NAME##_ptr(p...);                                   \
             if(status != rocsparse_status_success)                                        \
                 return status;                                                            \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())              \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
             {                                                                             \
-                rocsparse_clients_test::memory_debug_check_synchronicity(nullptr, #NAME); \
+                rocsparse_clients_test::hip_debug_check_api(nullptr, #NAME); \
             }                                                                             \
             return status;                                                                \
         }                                                                                 \
@@ -101,18 +101,18 @@
         inline rocsparse_status operator()(P&&... p) const                                \
         {                                                                                 \
             rocsparse_status status;                                                      \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())              \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
             {                                                                             \
-                status = rocsparse_memory_debug_reset(nullptr);                           \
+	      status = rocsparse_hip_debug_start(nullptr, nullptr);		\
                 if(status != rocsparse_status_success)                                    \
                     return status;                                                        \
             }                                                                             \
             status = rocsparse_real_##NAME##_ptr(p...);                                   \
             if(status != rocsparse_status_success)                                        \
                 return status;                                                            \
-            if(rocsparse_clients_test::memory_debug_t::instance().enabled())              \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
             {                                                                             \
-                rocsparse_clients_test::memory_debug_check_synchronicity(nullptr, #NAME); \
+                rocsparse_clients_test::hip_debug_check_api(nullptr, #NAME); \
             }                                                                             \
             return status;                                                                \
         }                                                                                 \

@@ -24,7 +24,7 @@
 #include <cstring>
 
 #include "rocsparse-debugging.h"
-#include "rocsparse_clients_test_memory_debug_synchronicity.hpp"
+#include "rocsparse_clients_test_hip_debug_api.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -35,62 +35,69 @@
 
 namespace rocsparse_clients_test
 {
-    std::string memory_debug_synchronicity_t2string(int32_t value)
-    {
-        // Build a list of set categories, then join either as
-        // "<single>_only" if exactly one bit is set, or
-        // "<a>_or_<b>[_or_<c>...]" otherwise.
-        const char*   names[] = {"host", "synchronous", "partially_synchronous", "asynchronous"};
-        const int32_t bits[]  = {rocsparse_memory_debug_synchronicity_host,
-                                rocsparse_memory_debug_synchronicity_sync,
-                                rocsparse_memory_debug_synchronicity_psync,
-                                rocsparse_memory_debug_synchronicity_async};
+  std::string hip_debug_api_t2string(int32_t value)
+  {
+    const char*   names[] =
+      {
+	"host",
+	"synchronous",
+	"partially_synchronous",
+	"asynchronous"
+      };
+    
+    const int32_t bits[] =
+      {
+	rocsparse_hip_debug_api_history_none,
+	rocsparse_hip_debug_api_history_sync,
+	rocsparse_hip_debug_api_history_psync,
+	rocsparse_hip_debug_api_history_async
+      };
+    
+    int         count = 0;
+    const char* first = nullptr;
+    std::string out;
+    for(int i = 0; i < 4; ++i)
+      {
+	if(value & bits[i])
+	  {
+	    if(count == 0)
+	      {
+		first = names[i];
+		out   = names[i];
+	      }
+	    else
+	      {
+		out += "_or_";
+		out += names[i];
+	      }
+	    ++count;
+	  }
+      }
 
-        int         count = 0;
-        const char* first = nullptr;
-        std::string out;
-        for(int i = 0; i < 4; ++i)
-        {
-            if(value & bits[i])
-            {
-                if(count == 0)
-                {
-                    first = names[i];
-                    out   = names[i];
-                }
-                else
-                {
-                    out += "_or_";
-                    out += names[i];
-                }
-                ++count;
-            }
-        }
+    if(count == 0)
+      {
+	return std::string("unknown");
+      }
+    if ( (count == 1) && (value != rocsparse_hip_debug_api_history_none) )
+      {
+	return std::string(first) + "_only";
+      }
+    return out;
+  }
 
-        if(count == 0)
-        {
-            return std::string("unknown");
-        }
-        if(count == 1)
-        {
-            return std::string(first) + "_only";
-        }
-        return out;
-    }
-
-    int32_t memory_debug_synchronicity_info_t::get_synchronicity_value() const
+    int32_t hip_debug_api_history_t::get_api_value() const
     {
         std::lock_guard<std::mutex> lock(this->m_mutex);
-        return this->m_synchronicity_value;
+        return this->m_api_value;
     }
 
-    uint64_t memory_debug_synchronicity_info_t::get_ncalls() const
+    uint64_t hip_debug_api_history_t::get_ncalls() const
     {
         std::lock_guard<std::mutex> lock(this->m_mutex);
         return this->m_ncalls;
     }
 
-    uint64_t memory_debug_synchronicity_info_t::get_calls(const int32_t value) const
+    uint64_t hip_debug_api_history_t::get_calls(const int32_t value) const
     {
         std::lock_guard<std::mutex> lock(this->m_mutex);
         if(auto search = this->m_histo_calls.find(value); search != this->m_histo_calls.end())
@@ -99,61 +106,59 @@ namespace rocsparse_clients_test
             return 0;
     }
 
-    void memory_debug_synchronicity_info_t::add_call(const int32_t value)
+    void hip_debug_api_history_t::add_call(const int32_t value)
     {
         std::lock_guard<std::mutex> lock(this->m_mutex);
         this->m_histo_calls[value] += 1;
         ++this->m_ncalls;
     }
 
-    memory_debug_synchronicity_info_t::memory_debug_synchronicity_info_t(int32_t s)
-        : m_synchronicity_value(s)
+    hip_debug_api_history_t::hip_debug_api_history_t(int32_t s)
+        : m_api_value(s)
     {
     }
 
-    memory_debug_synchronicity_info_t::memory_debug_synchronicity_info_t(
-        const memory_debug_synchronicity_info_t& other)
+    hip_debug_api_history_t::hip_debug_api_history_t(
+        const hip_debug_api_history_t& other)
     {
         std::lock_guard<std::mutex> lock(other.m_mutex);
-        this->m_synchronicity_value = other.m_synchronicity_value;
+        this->m_api_value = other.m_api_value;
         this->m_ncalls              = other.m_ncalls;
         this->m_histo_calls         = other.m_histo_calls;
     }
 
-    memory_debug_synchronicity_info_t::memory_debug_synchronicity_info_t(
-        memory_debug_synchronicity_info_t&& other) noexcept
+    hip_debug_api_history_t::hip_debug_api_history_t(
+        hip_debug_api_history_t&& other) noexcept
     {
         std::lock_guard<std::mutex> lock(other.m_mutex);
-        this->m_synchronicity_value = other.m_synchronicity_value;
+        this->m_api_value = other.m_api_value;
         this->m_ncalls              = other.m_ncalls;
         this->m_histo_calls         = std::move(other.m_histo_calls);
     }
 
-    memory_debug_synchronicity_info_t&
-        memory_debug_synchronicity_info_t::operator=(const memory_debug_synchronicity_info_t& other)
+    hip_debug_api_history_t&
+        hip_debug_api_history_t::operator=(const hip_debug_api_history_t& other)
     {
         if(this == &other)
             return *this;
-        // Lock both mutexes simultaneously to avoid deadlock from
-        // concurrent assignments in the opposite direction.
         std::lock(this->m_mutex, other.m_mutex);
         std::lock_guard<std::mutex> lock_this(this->m_mutex, std::adopt_lock);
         std::lock_guard<std::mutex> lock_other(other.m_mutex, std::adopt_lock);
-        this->m_synchronicity_value = other.m_synchronicity_value;
+        this->m_api_value = other.m_api_value;
         this->m_ncalls              = other.m_ncalls;
         this->m_histo_calls         = other.m_histo_calls;
         return *this;
     }
 
-    memory_debug_synchronicity_info_t& memory_debug_synchronicity_info_t::operator=(
-        memory_debug_synchronicity_info_t&& other) noexcept
+    hip_debug_api_history_t& hip_debug_api_history_t::operator=(
+        hip_debug_api_history_t&& other) noexcept
     {
         if(this == &other)
             return *this;
         std::lock(this->m_mutex, other.m_mutex);
         std::lock_guard<std::mutex> lock_this(this->m_mutex, std::adopt_lock);
         std::lock_guard<std::mutex> lock_other(other.m_mutex, std::adopt_lock);
-        this->m_synchronicity_value = other.m_synchronicity_value;
+        this->m_api_value = other.m_api_value;
         this->m_ncalls              = other.m_ncalls;
         this->m_histo_calls         = std::move(other.m_histo_calls);
         return *this;

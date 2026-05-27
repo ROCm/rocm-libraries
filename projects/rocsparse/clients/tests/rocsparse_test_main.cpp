@@ -23,7 +23,6 @@
  * ************************************************************************ */
 
 #include "rocsparse_clients_envariables.hpp"
-#include "rocsparse_clients_test_memory_debug_wrappers.hpp"
 #include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
@@ -71,7 +70,6 @@ int main(int argc, char** argv)
     // Add additional debug check for kernel launches.
     //
     rocsparse_enable_debug_kernel_launch();
-
     //
     // Enable test debug arguments.
     //
@@ -82,7 +80,6 @@ int main(int argc, char** argv)
         rocsparse_clients_envariables::set(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS,
                                            true);
     }
-
     // Get version
     rocsparse_handle handle;
     rocsparse_status status = rocsparse_create_handle(&handle);
@@ -123,12 +120,14 @@ int main(int argc, char** argv)
         return status;
     }
 
+    //  rocsparse_hip_debug_reset(handle);
+
     // Get user device id from command line
     int dev = 0;
 
     // Override for showSkipped: -1 = auto, 0 = hide, 1 = show
-    int showSkippedOverride = -1;
-
+    int         showSkippedOverride = -1;
+    const char* hip_debug_filename{};
     for(int i = 1; i < argc; ++i)
     {
         if(strcmp(argv[i], "--device") == 0 && argc > i + 1)
@@ -158,23 +157,25 @@ int main(int argc, char** argv)
                 std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
                 exit(EXIT_FAILURE);
             }
-            rocsparse_clients_test::memory_debug_t::instance().enable();
-            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(argv[++i]);
+            rocsparse_clients_test::hip_debug_t::instance().enable();
+            hip_debug_filename = argv[++i];
         }
         else if(strcmp(argv[i], "--test-sync") == 0)
         {
-            rocsparse_clients_test::memory_debug_t::instance().enable();
-            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
-                "rocsparse_test_sync.json");
-            rocsparse_clients_test::memory_debug_t::instance().set_non_permissive(false);
+            rocsparse_clients_test::hip_debug_t::instance().enable();
+            rocsparse_clients_test::hip_debug_t::instance().set_non_permissive(false);
         }
-        else if(strcmp(argv[i], "--test-sync-validate") == 0)
+        else if(strcmp(argv[i], "--test-sync-full") == 0)
         {
-            rocsparse_clients_test::memory_debug_t::instance().enable();
-            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
-                "rocsparse_test_sync.json");
-            rocsparse_clients_test::memory_debug_t::instance().set_non_permissive(true);
+            rocsparse_clients_test::hip_debug_t::instance().enable();
+            rocsparse_clients_test::hip_debug_t::instance().set_non_permissive(true);
         }
+    }
+
+    if(rocsparse_clients_test::hip_debug_t::instance().enabled())
+    {
+        rocsparse_clients_test::hip_debug_t::instance().set_sync_report_filename(
+            (hip_debug_filename) ? hip_debug_filename : "rocsparse_hip_debug.json");
     }
 
     // Device query
@@ -312,20 +313,23 @@ int main(int argc, char** argv)
     //
     // Check function properties.
     //
-    auto& memory_debug = rocsparse_clients_test::memory_debug_t::instance();
-    if(memory_debug.enabled())
+    auto& hip_debug = rocsparse_clients_test::hip_debug_t::instance();
+    if(hip_debug.enabled())
     {
-        std::cout << "synchronicity check " << std::endl;
-        auto status_info_prop
-            = memory_debug.check(nullptr, memory_debug.get_non_permissive(), std::cerr);
+        std::cout << "hip debug api history report " << hip_debug.get_filename() << std::endl;
+        std::ofstream out(hip_debug.get_filename());
+        hip_debug.report(nullptr, out);
+
+        std::cout << "hip debug api history check " << std::endl;
+        auto status_info_prop = hip_debug.check(nullptr, hip_debug.get_non_permissive(), std::cerr);
+
         if(status_info_prop != rocsparse_status_success)
         {
-            ADD_FAILURE() << argv[0] << ": memory_debug_t::check failed " << std::endl;
-            return status_info_prop;
+            ADD_FAILURE() << argv[0] << ": hip_debug_t::check failed " << std::endl;
+            return -1;
         }
-        std::cout << "synchronicity report " << memory_debug.get_filename() << std::endl;
-        std::ofstream out(memory_debug.get_filename());
-        memory_debug.report(nullptr, out);
+        std::cout << "hhhhhh " << std::endl;
+        return ret;
     }
 
     auto& reproducibility = rocsparse_reproducibility_t::instance();

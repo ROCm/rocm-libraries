@@ -75,7 +75,7 @@
 
 #else
 
-#include "rocsparse_clients_test_memory_debug_wrappers.hpp"
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
 #define REAL_TEMPLATE(NAME_, ...)                                      \
     template <typename T>                                              \
     using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);  \

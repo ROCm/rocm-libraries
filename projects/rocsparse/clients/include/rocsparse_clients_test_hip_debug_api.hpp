@@ -23,38 +23,44 @@
  * ************************************************************************ */
 #pragma once
 #ifdef GOOGLE_TEST
-#include "rocsparse_clients_test_memory_debug_synchronicity.hpp"
+
+#include "rocsparse-debugging.h"
+
 #include <map>
+#include <mutex>
+
 namespace rocsparse_clients_test
 {
-    struct memory_debug_t
+
+    std::string hip_debug_api_t2string(int32_t value);
+
+    struct hip_debug_api_history_t
     {
-    private:
-        bool        m_enabled{};
-        std::string m_filename{};
-        memory_debug_t() = default;
-        bool m_non_permissive{};
+    protected:
+        int32_t                     m_api_value{};
+        uint64_t                    m_ncalls{};
+        std::map<int32_t, uint64_t> m_histo_calls{};
+        mutable std::mutex          m_mutex{};
 
     public:
-        static std::map<std::string, memory_debug_synchronicity_info_t> s_map;
-        const std::string&                                              get_filename() const;
-        memory_debug_synchronicity_info_t& get_memory_debug_synchronicity_info(const char* name);
-        bool                               get_non_permissive() const;
-        void                               set_non_permissive(bool);
-        rocsparse_status check(rocsparse_handle, bool non_permissive, std::ostream&) const;
+        int32_t  get_api_value() const;
+        uint64_t get_ncalls() const;
 
-        void                   report(rocsparse_handle, std::ostream&) const;
-        static memory_debug_t& instance();
-        bool                   enabled() const;
-        void                   enable();
-        void                   disable();
-        void                   set_sync_report_filename(const char* filename);
+        uint64_t get_calls(int32_t) const;
+        void     add_call(int32_t);
+        hip_debug_api_history_t(int32_t);
+        hip_debug_api_history_t() = default;
+
+        // The mutex member is neither copyable nor movable. Provide explicit
+        // copy/move operations that synchronize access to the source object
+        // and leave the destination's mutex default-constructed.
+        hip_debug_api_history_t(const hip_debug_api_history_t& other);
+        hip_debug_api_history_t(hip_debug_api_history_t&& other) noexcept;
+        hip_debug_api_history_t&
+            operator=(const hip_debug_api_history_t& other);
+        hip_debug_api_history_t&
+            operator=(hip_debug_api_history_t&& other) noexcept;
     };
-}
-
-namespace rocsparse_clients_test
-{
-    void memory_debug_check_synchronicity(rocsparse_handle handle, const char* name);
 }
 
 #endif

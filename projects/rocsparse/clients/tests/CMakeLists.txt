@@ -74,6 +74,7 @@ else()
 endif()
 
 set(ROCSPARSE_TEST_SOURCES
+  test_hip_debug.cpp
   test_axpby.cpp
   test_axpyi.cpp
   test_doti.cpp
@@ -224,6 +225,7 @@ set(ROCSPARSE_TEST_SOURCES
 )
 
 set(ROCSPARSE_CLIENTS_TESTINGS
+../testings/testing_hip_debug.cpp
 ../testings/testing_axpby.cpp
 ../testings/testing_axpyi.cpp
 ../testings/testing_doti.cpp
@@ -414,8 +416,8 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
-  ../common/rocsparse_clients_test_memory_debug.cpp
-  ../common/rocsparse_clients_test_memory_debug_synchronicity.cpp
+  ../common/rocsparse_clients_test_hip_debug.cpp
+  ../common/rocsparse_clients_test_hip_debug_api.cpp
  ../common/rocsparseio.cpp
   )
 
