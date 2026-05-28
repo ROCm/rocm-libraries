@@ -8,15 +8,14 @@ Required environment variables:
 import fnmatch
 import json
 import logging
-import subprocess
 from pathlib import Path
 import sys
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
-import time
-from typing import Mapping, Optional, Iterable, List
+from typing import Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
+from ci_utils import get_modified_paths, set_github_output
 
 # Add TheRock's github_actions to path for shared utilities
 THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
@@ -73,55 +72,6 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
     return any(not is_path_skippable(p) for p in paths)
-
-
-def set_github_output(d: Mapping[str, str]):
-    """Sets GITHUB_OUTPUT values.
-    See https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/passing-information-between-jobs
-    """
-    logging.info(f"Setting github output:\n{d}")
-    step_output_file = os.environ.get("GITHUB_OUTPUT", "")
-    if not step_output_file:
-        logging.warning(
-            "Warning: GITHUB_OUTPUT env var not set, can't set github outputs"
-        )
-        return
-    with open(step_output_file, "a") as f:
-        f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-
-
-def retry(max_attempts, delay_seconds, exceptions):
-    def decorator(func):
-        def newfn(*args, **kwargs):
-            attempt = 0
-            while attempt < max_attempts:
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    print(
-                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
-                    )
-                    attempt += 1
-                    if attempt < max_attempts:
-                        backoff = delay_seconds * (2 ** (attempt - 1))
-                        time.sleep(backoff)
-            return func(*args, **kwargs)
-
-        return newfn
-
-    return decorator
-
-
-@retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
-def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
-    """Returns the paths of modified files relative to the base reference."""
-    return subprocess.run(
-        ["git", "diff", "--name-only", base_ref],
-        stdout=subprocess.PIPE,
-        check=True,
-        text=True,
-        timeout=60,
-    ).stdout.splitlines()
 
 
 GITHUB_WORKFLOWS_CI_PATTERNS = [

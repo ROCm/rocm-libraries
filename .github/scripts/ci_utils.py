@@ -1,0 +1,60 @@
+"""Shared CI utilities for GitHub Actions workflow scripts."""
+
+import logging
+import os
+import subprocess
+import time
+from typing import Mapping
+
+logging.basicConfig(level=logging.INFO)
+
+
+def retry(max_attempts, delay_seconds, exceptions):
+    """Retry decorator with exponential backoff."""
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            attempt = 0
+            while attempt < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run, "
+                        f"attempt {attempt} of {max_attempts}"
+                    )
+                    attempt += 1
+                    if attempt < max_attempts:
+                        backoff = delay_seconds * (2 ** (attempt - 1))
+                        time.sleep(backoff)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError,))
+def get_modified_paths(base_ref: str) -> set[str]:
+    """Returns paths of files changed relative to the base reference."""
+    result = subprocess.run(
+        ["git", "diff", "--name-only", base_ref],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return set(result.stdout.splitlines())
+
+
+def set_github_output(outputs: Mapping[str, str]):
+    """Writes key=value pairs to GITHUB_OUTPUT (or prints if not in CI)."""
+    logging.info(f"Setting github output:\n{dict(outputs)}")
+    output_file = os.environ.get("GITHUB_OUTPUT", "")
+    if not output_file:
+        for k, v in outputs.items():
+            print(f"{k}={v}")
+        return
+    with open(output_file, "a") as f:
+        for k, v in outputs.items():
+            f.write(f"{k}={v}\n")

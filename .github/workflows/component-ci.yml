@@ -30,6 +30,7 @@ jobs:
         with:
           sparse-checkout: |
             .github/actions/ci-env
+            .github/scripts/ci_utils.py
             .github/scripts/component_ci.py
           fetch-depth: 2
       - uses: ./.github/actions/ci-env

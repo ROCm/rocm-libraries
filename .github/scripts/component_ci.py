@@ -14,7 +14,8 @@ Usage:
 
 import fnmatch
 import os
-import subprocess
+
+from ci_utils import get_modified_paths, set_github_output
 
 COMPONENTS = {
     "stinkytofu": [
@@ -27,17 +28,6 @@ COMPONENTS = {
 }
 
 WORKFLOW_FILE = ".github/workflows/component-ci.yml"
-
-
-def get_changed_files(base_ref: str) -> set[str]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", base_ref],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    )
-    return set(result.stdout.splitlines())
 
 
 def matches_paths(changed_files: set[str], patterns: list[str]) -> bool:
@@ -56,17 +46,6 @@ def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
     return results
 
 
-def set_github_output(outputs: dict[str, str]):
-    output_file = os.environ.get("GITHUB_OUTPUT", "")
-    if not output_file:
-        for k, v in outputs.items():
-            print(f"{k}={v}")
-        return
-    with open(output_file, "a") as f:
-        for k, v in outputs.items():
-            f.write(f"{k}={v}\n")
-
-
 def main():
     base_ref = os.environ.get("BASE_REF", "HEAD^")
     is_workflow_dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
@@ -74,7 +53,7 @@ def main():
     if is_workflow_dispatch:
         changed = {key: True for key in COMPONENTS}
     else:
-        changed_files = get_changed_files(base_ref)
+        changed_files = get_modified_paths(base_ref)
         changed = detect_changed_components(changed_files)
 
     print(f"Changed components: {changed}")
