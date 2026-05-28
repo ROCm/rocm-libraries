@@ -1137,6 +1137,34 @@ namespace rocisa
         }
     };
 
+    struct SBfeU32 : public CommonInstruction
+    {
+        SBfeU32(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_bfe_u32");
+        }
+
+        SBfeU32(const SBfeU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBfeU32>(*this);
+        }
+    };
+
     struct SBfmB32 : public CommonInstruction
     {
         SBfmB32(const std::shared_ptr<Container>& dst,
@@ -1365,12 +1393,38 @@ namespace rocisa
 
     struct SBarrier : public Instruction
     {
-        SBarrier(const std::string& comment = "")
+        SBarrier(const bool separate = false, const bool wait = false,
+                 const bool clusterBarrier = false, const std::string& comment = "")
             : Instruction(InstType::INST_NOTYPE, comment)
+            , separate(separate)
+            , wait(wait)
+            , clusterBarrier(clusterBarrier)
+            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
+            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
         {
-            if(getAsmCaps()["HasNewBarrier"])
+            if(hasNewBarrier)
             {
-                setInst("s_barrier_signal -1 \ns_barrier_wait -1");
+                int code = -1;
+                if (hasClusterBarrier and clusterBarrier)
+                {
+                    code = -3;
+                }
+
+                if(separate)
+                {
+                    if(wait)
+                    {
+                        setInst("s_barrier_wait " + std::to_string(code));
+                    }
+                    else
+                    {
+                        setInst("s_barrier_signal " + std::to_string(code));
+                    }
+                }
+                else
+                {
+                    setInst("s_barrier_signal " + std::to_string(code) + "\ns_barrier_wait " + std::to_string(code));
+                }
             }
             else
             {
@@ -1380,6 +1434,11 @@ namespace rocisa
 
         SBarrier(const SBarrier& other)
             : Instruction(other)
+            , separate(other.separate)
+            , wait(other.wait)
+            , clusterBarrier(other.clusterBarrier)
+            , hasNewBarrier(other.hasNewBarrier)
+            , hasClusterBarrier(other.hasClusterBarrier)
         {
         }
 
@@ -1407,6 +1466,24 @@ namespace rocisa
         {
             return formatWithComment(instStr);
         }
+
+        bool getSeparate() const { return separate; }
+        bool getWait() const { return wait; }
+        bool getClusterBarrier() const { return clusterBarrier; }
+        bool getHasNewBarrier() const { return hasNewBarrier; }
+        bool getHasClusterBarrier() const { return hasClusterBarrier; }
+
+    private:
+        // Constructor arguments preserved so downstream consumers (e.g. the
+        // rocisa -> stinkytofu conversion) can recover the requested barrier
+        // form without parsing the textual instStr.
+        bool separate;
+        bool wait;
+        bool clusterBarrier;
+        // Snapshot of the asm caps at construction time so consumers see the
+        // exact form that was emitted into instStr.
+        bool hasNewBarrier;
+        bool hasClusterBarrier;
     };
 
     // Virtual scheduling fence: emits no assembly, but carries MemTokenData

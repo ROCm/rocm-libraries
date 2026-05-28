@@ -84,8 +84,6 @@ def make_256x256_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -132,8 +130,7 @@ def make_384x256_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=2,
-        numPartitionsN=1,
+        partitionSizeM=6,
     )
 
 
@@ -227,8 +224,7 @@ def make_320x320_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=5,
+        partitionSizeN=2,
     )
 
 
@@ -363,8 +359,6 @@ def make_256x256_bf16_pgr0():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=0,
     )
 
@@ -420,8 +414,6 @@ def make_256x256_bf16_pgr1():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -486,8 +478,6 @@ def make_256x256_fp4():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -556,8 +546,6 @@ def make_128x128_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -644,8 +632,6 @@ def make_128x128_fp4():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -653,63 +639,63 @@ EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1 = """\
 MAINLOOP (dependency paths):
   Partition 0:
     subIterK=0:
-      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-3] <- [5]
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 5] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [1]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [1]) [0-3]
         [ 3] lr         LR SA (MT n, subIterK [2,3]) [0-3]
-        [ 6] wait_lr    wait_lr
-        [ 7] sync       sync
-        [ 8] gr_inc     gr_inc(A)
+        [ 7] wait_lr    wait_lr
+        [ 8] sync       sync
+        [ 9] gr_inc     gr_inc(A)
         [ 4] gr         GR A (MT n+2, subIterK [0,1]) ids [0-3]
+        [10] gr_inc     gr_inc(B)
+        [ 5] gr         GR B (MT n+2, subIterK [0,1]) ids [0-0]
     subIterK=1:
-      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-3] , B : [0-3] <- [5]
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 5] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
-        [ 6] wait_gr    wait_gr(A=12,B=8,SA=1,SB=1)
-        [ 7] sync       sync
+        [ 7] wait_gr    wait_gr(A=12,B=9,SA=1,SB=1)
+        [ 8] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-3]
         [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-3]
       path 1:
-        [ 8] gr_inc     gr_inc(B)
-        [ 4] gr         GR B (MT n+2, subIterK [0,1]) ids [0-3]
+        [ 4] gr         GR B (MT n+2, subIterK [0,1]) ids [1-3]
+        [ 9] sync       sync
+        [10] gr_inc     gr_inc(SA)
+        [ 5] gr         GR SA (MT n+2, subIterK [0,3]) ids [0-3]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-3] , B : [0-3] <- [6]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-3] , B : [0-3] <- [5]
       preMFMA path 0:
-        [ 6] wait_lr    wait_lr
+        [ 5] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-3]
-        [ 7] wait_lr    wait_lr
-        [ 8] sync       sync
-        [ 9] gr_inc     gr_inc(SA)
-        [ 3] gr         GR SA (MT n+2, subIterK [0,3]) ids [0-3]
-        [10] gr_inc     gr_inc(SB)
-        [ 4] gr         GR SB (MT n+2, subIterK [0,3]) ids [0-3]
-        [ 5] gr         GR A (MT n+2, subIterK [2,3]) ids [0-1]
+        [ 6] wait_lr    wait_lr
+        [ 7] sync       sync
+        [ 8] gr_inc     gr_inc(SB)
+        [ 3] gr         GR SB (MT n+2, subIterK [0,3]) ids [0-3]
+        [ 4] gr         GR A (MT n+2, subIterK [2,3]) ids [0-3]
     subIterK=3:
-      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-3] , B : [0-3] <- [7]
+      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 7] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
-        [ 8] wait_gr    wait_gr(A=10,B=8,SA=1,SB=1)
-        [ 9] sync       sync
-        [10] lr_inc     lr_inc(A)
-        [11] lr_inc     lr_inc(B)
-        [12] lr_inc     lr_inc(SA)
-        [13] lr_inc     lr_inc(SB)
+        [ 7] wait_gr    wait_gr(A=12,B=8,SA=1,SB=1)
+        [ 8] sync       sync
+        [ 9] lr_inc     lr_inc(A)
+        [10] lr_inc     lr_inc(B)
+        [11] lr_inc     lr_inc(SA)
+        [12] lr_inc     lr_inc(SB)
         [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-3]
         [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-3]
         [ 3] lr         LR SA (MT n+1, subIterK [0,1]) [0-3]
         [ 4] lr         LR SB (MT n+1, subIterK [0,1]) [0-3]
       path 1:
-        [ 5] gr         GR A (MT n+2, subIterK [2,3]) ids [2-3]
-        [14] sync       sync
-        [ 6] gr         GR B (MT n+2, subIterK [2,3]) ids [0-3]
+        [ 5] gr         GR B (MT n+2, subIterK [2,3]) ids [0-3]
 """
 
 
@@ -719,7 +705,6 @@ def test_128x128_fp4_partition_1x1():
     sched = LogicalScheduler(cfg)
     sched.emit()
     actual = sched.print_emit_dep_order()
-    # Note: [14] sync       sync is not needed because of the grouping of LRs. We could add an extra pass to detect those. TDB.
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1, (
         f"Emit dependency order mismatch.\n"
         f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1}\n"
@@ -745,8 +730,6 @@ def make_256x256_fp4_pgr0():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=0,
     )
 
@@ -816,8 +799,6 @@ def make_256x256_fp4_pgr1():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -884,8 +865,6 @@ def make_128x128_bf16_pgr1():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -972,8 +951,6 @@ def make_128x96_bf16_pgr1_wg4x1():
         lrB=ReadGranularity(mn=1, k=1),
         grA=grA,
         grB=grB,
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -989,38 +966,38 @@ EXPECTED_EMIT_DEP_ORDER_128x96_BF16_PGR1_WG4x1 = """\
 MAINLOOP (dependency paths):
   Partition 0:
     subIterK=0:
-      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-1] , B : [0-5] <- [4]
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-1] , B : [0-5] <- [5]
       preMFMA path 0:
-        [ 4] wait_lr    wait_lr
+        [ 5] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [1]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [1]) [0-5]
       path 1:
-        [ 5] gr_inc     gr_inc(A)
+        [ 6] gr_inc     gr_inc(A)
         [ 3] gr         GR A (MT n+1, subIterK [0,1]) ids [0-1]
+        [ 7] gr_inc     gr_inc(B)
+        [ 4] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
     subIterK=1:
       MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-1] , B : [0-5] <- [4]
       preMFMA path 0:
         [ 4] wait_lr    wait_lr
       path 0:
-        [ 5] wait_gr    wait_gr(A=2)
+        [ 5] wait_gr    wait_gr(A=2,B=1)
         [ 6] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-5]
       path 1:
-        [ 7] gr_inc     gr_inc(B)
-        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [0-3]
+        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [2-5]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-1] , B : [0-5] <- [6]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-1] , B : [0-5] <- [5]
       preMFMA path 0:
-        [ 6] wait_lr    wait_lr
+        [ 5] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-5]
       path 1:
-        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
-        [ 4] gr         GR A (MT n+1, subIterK [2,3]) ids [0-1]
-        [ 5] gr         GR B (MT n+1, subIterK [2,3]) ids [0-5]
+        [ 3] gr         GR A (MT n+1, subIterK [2,3]) ids [0-1]
+        [ 4] gr         GR B (MT n+1, subIterK [2,3]) ids [0-5]
     subIterK=3:
       MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-1] , B : [0-5] <- [3]
       preMFMA path 0:
@@ -1071,8 +1048,6 @@ def make_128x128_fp4_pgr1():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -1081,43 +1056,44 @@ EXPECTED_EMIT_DEP_ORDER_128x128_FP4_PGR1 = """\
 MAINLOOP (dependency paths):
   Partition 0:
     subIterK=0:
-      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-3] <- [5]
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 5] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [1]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [1]) [0-3]
         [ 3] lr         LR SA (MT n, subIterK [2,3]) [0-3]
       path 1:
-        [ 6] gr_inc     gr_inc(A)
+        [ 7] gr_inc     gr_inc(A)
         [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [0-3]
+        [ 8] gr_inc     gr_inc(B)
+        [ 5] gr         GR B (MT n+1, subIterK [0,1]) ids [0-0]
     subIterK=1:
-      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-3] , B : [0-3] <- [5]
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 5] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
-        [ 6] wait_gr    wait_gr(A=4)
-        [ 7] sync       sync
+        [ 7] wait_gr    wait_gr(A=4,B=1)
+        [ 8] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-3]
         [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-3]
       path 1:
-        [ 8] gr_inc     gr_inc(B)
-        [ 4] gr         GR B (MT n+1, subIterK [0,1]) ids [0-3]
+        [ 4] gr         GR B (MT n+1, subIterK [0,1]) ids [1-3]
+        [ 9] gr_inc     gr_inc(SA)
+        [ 5] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-3]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-3] , B : [0-3] <- [7]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 7] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-3]
       path 1:
-        [ 8] gr_inc     gr_inc(SA)
-        [ 3] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-3]
-        [ 9] gr_inc     gr_inc(SB)
-        [ 4] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-3]
-        [ 5] gr         GR A (MT n+1, subIterK [2,3]) ids [0-3]
-        [ 6] gr         GR B (MT n+1, subIterK [2,3]) ids [0-3]
+        [ 7] gr_inc     gr_inc(SB)
+        [ 3] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-3]
+        [ 4] gr         GR A (MT n+1, subIterK [2,3]) ids [0-3]
+        [ 5] gr         GR B (MT n+1, subIterK [2,3]) ids [0-3]
     subIterK=3:
       MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-3] , B : [0-3] <- [5]
       preMFMA path 0:

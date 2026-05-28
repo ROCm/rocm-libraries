@@ -3,13 +3,12 @@
 
 /**
  * @file TestHeuristicPlugin.cpp
- * @brief Unit tests for HeuristicPlugin class (RFC 0007 Part 1)
+ * @brief Unit tests for HeuristicPlugin's load-time validation helpers.
  *
- * These tests verify the plugin wrapper class including:
- * - Symbol resolution and error handling
- * - Plugin metadata access
- * - Handle lifecycle
- * - Policy descriptor lifecycle
+ * Workflow / call-sequence / metadata-passthrough behaviors are covered via
+ * real plugins in IntegrationHeuristicPlugin.cpp — gmock can only round-trip
+ * its own configured returns, which would not exercise any HeuristicPlugin
+ * logic.
  */
 
 #include "HipdnnException.hpp"
@@ -19,215 +18,78 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
+
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
 using ::testing::NiceMock;
 using ::testing::Return;
 
-namespace
-{
-// Helper to create fake handles for testing
-// NOLINTBEGIN(performance-no-int-to-ptr)
-hipdnnHeuristicHandle_t makeFakeHandle(int id)
-{
-    return reinterpret_cast<hipdnnHeuristicHandle_t>(static_cast<uintptr_t>(id));
-}
-
-hipdnnHeuristicPolicyDescriptor_t makeFakePolicyDescriptor(int id)
-{
-    return reinterpret_cast<hipdnnHeuristicPolicyDescriptor_t>(static_cast<uintptr_t>(id));
-}
-// NOLINTEND(performance-no-int-to-ptr)
-} // anonymous namespace
-
 class TestHeuristicPlugin : public ::testing::Test
 {
-protected:
-    void SetUp() override
-    {
-        // Tests use mocks, not real plugin shared libraries
-    }
-
-    void TearDown() override {}
 };
 
-// ========== Mock Plugin Behavior Tests ==========
-// Note: Trivial single-method mocking tests removed - integration tests with real plugins
-// provide better coverage of actual behavior
+// ========== Plugin Metadata Validation ==========
+// HeuristicPlugin::validatePluginMetadata is the load-time gate invoked from
+// resolveSymbols(). Each test below pins one specific rejection path that is
+// otherwise unreachable without a dedicated test plugin .so.
 
-// ========== Complete Workflow Tests ==========
-// Note: Complete workflow is tested with real plugins in TestHeuristicPluginLoading
+namespace
+{
+const std::string_view GOOD_POLICY_NAME = "TestPolicy::Good";
+const int64_t GOOD_POLICY_ID = hipdnn_data_sdk::utilities::policyNameToId("TestPolicy::Good");
+} // namespace
 
-// ========== Multiple Handles Tests ==========
-
-TEST_F(TestHeuristicPlugin, MockPluginCanManageMultipleHandles)
+TEST_F(TestHeuristicPlugin, ValidatePluginMetadataRejectsNonHeuristicPluginType)
 {
     const NiceMock<MockHeuristicPlugin> plugin;
+    EXPECT_CALL(plugin, type()).WillRepeatedly(Return(HIPDNN_PLUGIN_TYPE_ENGINE));
 
-    const auto handle1 = makeFakeHandle(1);
-    const auto handle2 = makeFakeHandle(2);
-    const auto handle3 = makeFakeHandle(3);
-
-    EXPECT_CALL(plugin, createHandle())
-        .WillOnce(Return(handle1))
-        .WillOnce(Return(handle2))
-        .WillOnce(Return(handle3));
-
-    // Create multiple handles
-    const auto h1 = plugin.createHandle();
-    const auto h2 = plugin.createHandle();
-    const auto h3 = plugin.createHandle();
-
-    EXPECT_EQ(h1, handle1);
-    EXPECT_EQ(h2, handle2);
-    EXPECT_EQ(h3, handle3);
-
-    // All handles should be unique
-    EXPECT_NE(h1, h2);
-    EXPECT_NE(h2, h3);
-    EXPECT_NE(h1, h3);
+    EXPECT_THROW(HeuristicPlugin::validatePluginMetadata(plugin), HipdnnException);
 }
 
-// ========== Multiple Policy Descriptors Tests ==========
-
-TEST_F(TestHeuristicPlugin, MockPluginCanManageMultiplePolicyDescriptors)
+TEST_F(TestHeuristicPlugin, ValidatePluginMetadataRejectsPolicyIdNameHashMismatch)
 {
     const NiceMock<MockHeuristicPlugin> plugin;
+    EXPECT_CALL(plugin, type()).WillRepeatedly(Return(HIPDNN_PLUGIN_TYPE_HEURISTIC));
+    EXPECT_CALL(plugin, name()).WillRepeatedly(Return("MockPlugin"));
+    // Plugin reports policy name "TestPolicy::Good" but tags it with an ID that
+    // is NOT policyNameToId("TestPolicy::Good"). validatePluginMetadata must
+    // reject this mismatch.
+    const int64_t bogusId = GOOD_POLICY_ID ^ int64_t { 0xDEADBEEF };
+    EXPECT_CALL(plugin, getAllPolicyIds()).WillRepeatedly(Return(std::vector<int64_t>{bogusId}));
+    EXPECT_CALL(plugin, getPolicyName(bogusId)).WillRepeatedly(Return(GOOD_POLICY_NAME));
 
-    const auto handle = makeFakeHandle(42);
-    const auto desc1 = makeFakePolicyDescriptor(1);
-    const auto desc2 = makeFakePolicyDescriptor(2);
-    const auto desc3 = makeFakePolicyDescriptor(3);
-
-    EXPECT_CALL(plugin, createPolicyDescriptor(handle))
-        .WillOnce(Return(desc1))
-        .WillOnce(Return(desc2))
-        .WillOnce(Return(desc3));
-
-    // Create multiple descriptors from same handle
-    const auto d1 = plugin.createPolicyDescriptor(handle);
-    const auto d2 = plugin.createPolicyDescriptor(handle);
-    const auto d3 = plugin.createPolicyDescriptor(handle);
-
-    EXPECT_EQ(d1, desc1);
-    EXPECT_EQ(d2, desc2);
-    EXPECT_EQ(d3, desc3);
-
-    // All descriptors should be unique
-    EXPECT_NE(d1, d2);
-    EXPECT_NE(d2, d3);
-    EXPECT_NE(d1, d3);
+    EXPECT_THROW(HeuristicPlugin::validatePluginMetadata(plugin), HipdnnException);
 }
 
-// ========== Call Count Verification Tests ==========
+// ========== Policy ID Buffer Validation ==========
+// HeuristicPlugin::validatePolicyIdsBuffer is invoked from getAllPolicyIds()
+// after the second (fetch) call into the plugin and gates the lazy enumeration
+// cache. Tests below exercise it directly with raw buffers since
+// MockHeuristicPlugin overrides getAllPolicyIds() entirely.
 
-TEST_F(TestHeuristicPlugin, MockPluginTracksCallCounts)
+TEST_F(TestHeuristicPlugin, ValidatePolicyIdsBufferRejectsZeroPolicyCount)
 {
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    const auto handle = makeFakeHandle(42);
-
-    EXPECT_CALL(plugin, createHandle()).Times(3).WillRepeatedly(Return(handle));
-
-    // Create handle 3 times
-    plugin.createHandle();
-    plugin.createHandle();
-    plugin.createHandle();
-
-    // Expectations verified by gmock
+    std::vector<int64_t> ids;
+    EXPECT_THROW(HeuristicPlugin::validatePolicyIdsBuffer(0, 0, ids), HipdnnException);
 }
 
-TEST_F(TestHeuristicPlugin, MockPluginVerifiesCallSequence)
+TEST_F(TestHeuristicPlugin, ValidatePolicyIdsBufferRejectsCountMismatchBetweenQueries)
 {
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    const auto handle = makeFakeHandle(42);
-    const auto descriptor = makeFakePolicyDescriptor(100);
-
-    {
-        const ::testing::InSequence seq;
-
-        EXPECT_CALL(plugin, createHandle()).WillOnce(Return(handle));
-
-        EXPECT_CALL(plugin, createPolicyDescriptor(handle)).WillOnce(Return(descriptor));
-
-        EXPECT_CALL(plugin, destroyPolicyDescriptor(descriptor));
-
-        EXPECT_CALL(plugin, destroyHandle(handle));
-    }
-
-    // Execute in expected order
-    const auto h = plugin.createHandle();
-    const auto d = plugin.createPolicyDescriptor(h);
-    plugin.destroyPolicyDescriptor(d);
-    plugin.destroyHandle(h);
+    std::vector<int64_t> ids = {10, 20, 30};
+    EXPECT_THROW(HeuristicPlugin::validatePolicyIdsBuffer(3, 2, ids), HipdnnException);
 }
 
-// ========== Edge Cases Tests ==========
-
-TEST_F(TestHeuristicPlugin, MockPluginCanReturnNullHandle)
+TEST_F(TestHeuristicPlugin, ValidatePolicyIdsBufferRejectsIntraPluginDuplicateIds)
 {
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    EXPECT_CALL(plugin, createHandle()).WillOnce(Return(nullptr));
-
-    const auto handle = plugin.createHandle();
-    EXPECT_EQ(handle, nullptr);
+    std::vector<int64_t> ids = {42, 42};
+    EXPECT_THROW(HeuristicPlugin::validatePolicyIdsBuffer(2, 2, ids), HipdnnException);
 }
 
-TEST_F(TestHeuristicPlugin, MockPluginCanReturnNullDescriptor)
+TEST_F(TestHeuristicPlugin, ValidatePolicyIdsBufferAcceptsValidUniqueIdsAndSorts)
 {
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    const auto handle = makeFakeHandle(42);
-
-    EXPECT_CALL(plugin, createPolicyDescriptor(handle)).WillOnce(Return(nullptr));
-
-    const auto descriptor = plugin.createPolicyDescriptor(handle);
-    EXPECT_EQ(descriptor, nullptr);
+    std::vector<int64_t> ids = {30, 10, 20};
+    EXPECT_NO_THROW(HeuristicPlugin::validatePolicyIdsBuffer(3, 3, ids));
+    EXPECT_EQ(ids, (std::vector<int64_t>{10, 20, 30}));
 }
-
-// ========== Policy ID Caching Tests ==========
-
-TEST_F(TestHeuristicPlugin, MockPluginPolicyIdCanBeCached)
-{
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    const int64_t testPolicyId = 0xABCDEF;
-
-    // First call should query the mock
-    EXPECT_CALL(plugin, policyId()).Times(2).WillRepeatedly(Return(testPolicyId));
-
-    // Multiple calls
-    const int64_t id1 = plugin.policyId();
-    const int64_t id2 = plugin.policyId();
-
-    EXPECT_EQ(id1, testPolicyId);
-    EXPECT_EQ(id2, testPolicyId);
-}
-
-// ========== Policy Name Edge Cases ==========
-
-TEST_F(TestHeuristicPlugin, MockPluginEmptyPolicyNameIsValid)
-{
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    EXPECT_CALL(plugin, name()).WillOnce(Return(""));
-
-    const auto name = plugin.name();
-    EXPECT_TRUE(name.empty());
-}
-
-TEST_F(TestHeuristicPlugin, MockPluginLongPolicyNameIsValid)
-{
-    const NiceMock<MockHeuristicPlugin> plugin;
-
-    const std::string_view longName = "VeryLongPolicyNameThatExceedsTypicalLengthsButIsStillValid";
-    EXPECT_CALL(plugin, name()).WillOnce(Return(longName));
-
-    const auto name = plugin.name();
-    EXPECT_EQ(name, longName);
-}
-
-// Base class interface tests (name, version, type) are covered by loading tests
-// since they delegate to virtual methods that can't be effectively tested with mocks

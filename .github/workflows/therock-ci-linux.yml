@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ inputs.therock_ref }}
+          ref: e44b42bbcc7452328ccf12bcac319bda5ede4a6a # 2026-05-20 commit
 
       - name: Install python deps
         run: |
@@ -92,8 +92,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          # contains() matches the literal "=THEROCK_ENABLE_IREE_LIBS=ON" emitted by therock_matrix.py
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure Projects
         env:
