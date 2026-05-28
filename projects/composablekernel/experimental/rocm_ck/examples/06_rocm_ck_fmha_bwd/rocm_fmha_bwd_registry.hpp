@@ -48,10 +48,6 @@ static constexpr FmhaBwdOGradDotOVariant ALL_OGRAD_DOT_O_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}})},
-    {"fmha_bwd_ograd_dot_o_bf16_d128_group", makeSpec(FmhaBwdOGradDotOConfig{
-        .signature = {.dtype = DataType::BF16, .hdim_v = 128,
-                    .mode = FmhaMode::GROUP},
-        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}})},
     {"fmha_bwd_ograd_dot_o_fp16_d128_batch_npad", makeSpec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::FP16, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
@@ -147,11 +143,6 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
-         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
-    {"fmha_bwd_dqdkdv_bf16_d128_group", makeSpec(FmhaBwdDQDKDVConfig{
-         .signature = {.dtype = DataType::BF16,
-                    .hdim_q = 128, .hdim_v = 128,
-                    .mode = FmhaMode::GROUP},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch_ebias", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
