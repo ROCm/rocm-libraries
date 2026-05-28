@@ -29,94 +29,94 @@
 #include "rocsparse-functions.h"
 #include "rocsparse_clients_test_hip_debug.hpp"
 
-#define ROCSPARSE_CLIENTS_TEST_WRAP(NAME)                                                \
-    inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;                       \
-    struct rocsparse_wrap_##NAME##_t                                                     \
-    {                                                                                    \
-        template <typename... P>                                                         \
-        static inline rocsparse_status apply(rocsparse_handle handle, P... p)            \
-        {                                                                                \
-	  rocsparse_status status;					\
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
-	      {								\
-                status = rocsparse_hip_debug_start(handle,nullptr);		\
-                if(status != rocsparse_status_success)                                   \
-                    return status;                                                       \
-            }                                                                            \
-            status = rocsparse_real_##NAME##_ptr(handle, p...);                          \
-            if(status != rocsparse_status_success)                                       \
-                return status;                                                           \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
-            {                                                                            \
-                rocsparse_clients_test::hip_debug_check_api(handle, #NAME); \
-            }                                                                            \
-            return status;                                                               \
-        }                                                                                \
-        template <typename... P>                                                         \
-        inline rocsparse_status operator()(rocsparse_handle handle, P&&... p) const      \
-        {                                                                                \
-            rocsparse_status status;                                                     \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
-	      {								\
-                status = rocsparse_hip_debug_start(handle, nullptr);		\
-                if(status != rocsparse_status_success)                                   \
-                    return status;                                                       \
-            }                                                                            \
-            status = rocsparse_real_##NAME##_ptr(handle, p...);                          \
-            if(status != rocsparse_status_success)                                       \
-                return status;                                                           \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())             \
-            {                                                                            \
-                rocsparse_clients_test::hip_debug_check_api(handle, #NAME); \
-            }                                                                            \
-            return status;                                                               \
-        }                                                                                \
-    };                                                                                   \
+#define ROCSPARSE_CLIENTS_TEST_WRAP(NAME)                                           \
+    inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;                  \
+    struct rocsparse_wrap_##NAME##_t                                                \
+    {                                                                               \
+        template <typename... P>                                                    \
+        static inline rocsparse_status apply(rocsparse_handle handle, P... p)       \
+        {                                                                           \
+            rocsparse_status status;                                                \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())           \
+            {                                                                       \
+                status = rocsparse_hip_debug_start(handle, nullptr);                \
+                if(status != rocsparse_status_success)                              \
+                    return status;                                                  \
+            }                                                                       \
+            status = rocsparse_real_##NAME##_ptr(handle, p...);                     \
+            if(status != rocsparse_status_success)                                  \
+                return status;                                                      \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())           \
+            {                                                                       \
+                rocsparse_clients_test::hip_debug_check_api(handle, #NAME);         \
+            }                                                                       \
+            return status;                                                          \
+        }                                                                           \
+        template <typename... P>                                                    \
+        inline rocsparse_status operator()(rocsparse_handle handle, P&&... p) const \
+        {                                                                           \
+            rocsparse_status status;                                                \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())           \
+            {                                                                       \
+                status = rocsparse_hip_debug_start(handle, nullptr);                \
+                if(status != rocsparse_status_success)                              \
+                    return status;                                                  \
+            }                                                                       \
+            status = rocsparse_real_##NAME##_ptr(handle, p...);                     \
+            if(status != rocsparse_status_success)                                  \
+                return status;                                                      \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())           \
+            {                                                                       \
+                rocsparse_clients_test::hip_debug_check_api(handle, #NAME);         \
+            }                                                                       \
+            return status;                                                          \
+        }                                                                           \
+    };                                                                              \
     inline rocsparse_wrap_##NAME##_t rocsparse_test_wrap_##NAME
 
-#define ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(NAME)                                       \
-    inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;                        \
-    struct rocsparse_wrap_##NAME##_t                                                      \
-    {                                                                                     \
-        template <typename... P>                                                          \
-        static inline rocsparse_status apply(P... p)                                      \
-        {                                                                                 \
-            rocsparse_status status;                                                      \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
-            {                                                                             \
-	      status = rocsparse_hip_debug_start(nullptr, nullptr);		\
-                if(status != rocsparse_status_success)                                    \
-                    return status;                                                        \
-            }                                                                             \
-            status = rocsparse_real_##NAME##_ptr(p...);                                   \
-            if(status != rocsparse_status_success)                                        \
-                return status;                                                            \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
-            {                                                                             \
+#define ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(NAME)                          \
+    inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;           \
+    struct rocsparse_wrap_##NAME##_t                                         \
+    {                                                                        \
+        template <typename... P>                                             \
+        static inline rocsparse_status apply(P... p)                         \
+        {                                                                    \
+            rocsparse_status status;                                         \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())    \
+            {                                                                \
+                status = rocsparse_hip_debug_start(nullptr, nullptr);        \
+                if(status != rocsparse_status_success)                       \
+                    return status;                                           \
+            }                                                                \
+            status = rocsparse_real_##NAME##_ptr(p...);                      \
+            if(status != rocsparse_status_success)                           \
+                return status;                                               \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())    \
+            {                                                                \
                 rocsparse_clients_test::hip_debug_check_api(nullptr, #NAME); \
-            }                                                                             \
-            return status;                                                                \
-        }                                                                                 \
-        template <typename... P>                                                          \
-        inline rocsparse_status operator()(P&&... p) const                                \
-        {                                                                                 \
-            rocsparse_status status;                                                      \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
-            {                                                                             \
-	      status = rocsparse_hip_debug_start(nullptr, nullptr);		\
-                if(status != rocsparse_status_success)                                    \
-                    return status;                                                        \
-            }                                                                             \
-            status = rocsparse_real_##NAME##_ptr(p...);                                   \
-            if(status != rocsparse_status_success)                                        \
-                return status;                                                            \
-            if(rocsparse_clients_test::hip_debug_t::instance().enabled())              \
-            {                                                                             \
+            }                                                                \
+            return status;                                                   \
+        }                                                                    \
+        template <typename... P>                                             \
+        inline rocsparse_status operator()(P&&... p) const                   \
+        {                                                                    \
+            rocsparse_status status;                                         \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())    \
+            {                                                                \
+                status = rocsparse_hip_debug_start(nullptr, nullptr);        \
+                if(status != rocsparse_status_success)                       \
+                    return status;                                           \
+            }                                                                \
+            status = rocsparse_real_##NAME##_ptr(p...);                      \
+            if(status != rocsparse_status_success)                           \
+                return status;                                               \
+            if(rocsparse_clients_test::hip_debug_t::instance().enabled())    \
+            {                                                                \
                 rocsparse_clients_test::hip_debug_check_api(nullptr, #NAME); \
-            }                                                                             \
-            return status;                                                                \
-        }                                                                                 \
-    };                                                                                    \
+            }                                                                \
+            return status;                                                   \
+        }                                                                    \
+    };                                                                       \
     inline rocsparse_wrap_##NAME##_t rocsparse_test_wrap_##NAME
 
 ROCSPARSE_CLIENTS_TEST_WRAP(axpby);
@@ -807,7 +807,9 @@ ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_get_index_base);
 ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_get_values);
 ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_set_values);
 
+//
 // Redirect rocsparse C API names to test wrappers
+//
 #define rocsparse_axpby rocsparse_test_wrap_axpby
 #define rocsparse_bsrgeam_nnzb rocsparse_test_wrap_bsrgeam_nnzb
 #define rocsparse_bsrgemm_nnzb rocsparse_test_wrap_bsrgemm_nnzb

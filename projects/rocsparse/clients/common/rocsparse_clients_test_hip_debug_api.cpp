@@ -20,6 +20,10 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+
+//
+// Only for the testing framework.
+//
 #ifdef GOOGLE_TEST
 #include <cstring>
 
@@ -35,55 +39,46 @@
 
 namespace rocsparse_clients_test
 {
-  std::string hip_debug_api_t2string(int32_t value)
-  {
-    const char*   names[] =
-      {
-	"host",
-	"synchronous",
-	"partially_synchronous",
-	"asynchronous"
-      };
-    
-    const int32_t bits[] =
-      {
-	rocsparse_hip_debug_api_history_none,
-	rocsparse_hip_debug_api_history_sync,
-	rocsparse_hip_debug_api_history_psync,
-	rocsparse_hip_debug_api_history_async
-      };
-    
-    int         count = 0;
-    const char* first = nullptr;
-    std::string out;
-    for(int i = 0; i < 4; ++i)
-      {
-	if(value & bits[i])
-	  {
-	    if(count == 0)
-	      {
-		first = names[i];
-		out   = names[i];
-	      }
-	    else
-	      {
-		out += "_or_";
-		out += names[i];
-	      }
-	    ++count;
-	  }
-      }
+    std::string hip_debug_api_t2string(int32_t value)
+    {
+        const char* names[] = {"host", "synchronous", "partially_synchronous", "asynchronous"};
 
-    if(count == 0)
-      {
-	return std::string("unknown");
-      }
-    if ( (count == 1) && (value != rocsparse_hip_debug_api_history_none) )
-      {
-	return std::string(first) + "_only";
-      }
-    return out;
-  }
+        const int32_t bits[] = {rocsparse_hip_debug_api_history_none,
+                                rocsparse_hip_debug_api_history_sync,
+                                rocsparse_hip_debug_api_history_psync,
+                                rocsparse_hip_debug_api_history_async};
+
+        int         count = 0;
+        const char* first = nullptr;
+        std::string out;
+        for(int i = 0; i < 4; ++i)
+        {
+            if(value & bits[i])
+            {
+                if(count == 0)
+                {
+                    first = names[i];
+                    out   = names[i];
+                }
+                else
+                {
+                    out += "_or_";
+                    out += names[i];
+                }
+                ++count;
+            }
+        }
+
+        if(count == 0)
+        {
+            return std::string("unknown");
+        }
+        if((count == 1) && (value != rocsparse_hip_debug_api_history_none))
+        {
+            return std::string(first) + "_only";
+        }
+        return out;
+    }
 
     int32_t hip_debug_api_history_t::get_api_value() const
     {
@@ -118,22 +113,20 @@ namespace rocsparse_clients_test
     {
     }
 
-    hip_debug_api_history_t::hip_debug_api_history_t(
-        const hip_debug_api_history_t& other)
+    hip_debug_api_history_t::hip_debug_api_history_t(const hip_debug_api_history_t& other)
     {
         std::lock_guard<std::mutex> lock(other.m_mutex);
-        this->m_api_value = other.m_api_value;
-        this->m_ncalls              = other.m_ncalls;
-        this->m_histo_calls         = other.m_histo_calls;
+        this->m_api_value   = other.m_api_value;
+        this->m_ncalls      = other.m_ncalls;
+        this->m_histo_calls = other.m_histo_calls;
     }
 
-    hip_debug_api_history_t::hip_debug_api_history_t(
-        hip_debug_api_history_t&& other) noexcept
+    hip_debug_api_history_t::hip_debug_api_history_t(hip_debug_api_history_t&& other) noexcept
     {
         std::lock_guard<std::mutex> lock(other.m_mutex);
-        this->m_api_value = other.m_api_value;
-        this->m_ncalls              = other.m_ncalls;
-        this->m_histo_calls         = std::move(other.m_histo_calls);
+        this->m_api_value   = other.m_api_value;
+        this->m_ncalls      = other.m_ncalls;
+        this->m_histo_calls = std::move(other.m_histo_calls);
     }
 
     hip_debug_api_history_t&
@@ -144,23 +137,23 @@ namespace rocsparse_clients_test
         std::lock(this->m_mutex, other.m_mutex);
         std::lock_guard<std::mutex> lock_this(this->m_mutex, std::adopt_lock);
         std::lock_guard<std::mutex> lock_other(other.m_mutex, std::adopt_lock);
-        this->m_api_value = other.m_api_value;
-        this->m_ncalls              = other.m_ncalls;
-        this->m_histo_calls         = other.m_histo_calls;
+        this->m_api_value   = other.m_api_value;
+        this->m_ncalls      = other.m_ncalls;
+        this->m_histo_calls = other.m_histo_calls;
         return *this;
     }
 
-    hip_debug_api_history_t& hip_debug_api_history_t::operator=(
-        hip_debug_api_history_t&& other) noexcept
+    hip_debug_api_history_t&
+        hip_debug_api_history_t::operator=(hip_debug_api_history_t&& other) noexcept
     {
         if(this == &other)
             return *this;
         std::lock(this->m_mutex, other.m_mutex);
         std::lock_guard<std::mutex> lock_this(this->m_mutex, std::adopt_lock);
         std::lock_guard<std::mutex> lock_other(other.m_mutex, std::adopt_lock);
-        this->m_api_value = other.m_api_value;
-        this->m_ncalls              = other.m_ncalls;
-        this->m_histo_calls         = std::move(other.m_histo_calls);
+        this->m_api_value   = other.m_api_value;
+        this->m_ncalls      = other.m_ncalls;
+        this->m_histo_calls = std::move(other.m_histo_calls);
         return *this;
     }
 }

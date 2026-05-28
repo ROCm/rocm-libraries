@@ -22,9 +22,15 @@
  *
  * ************************************************************************ */
 #pragma once
+
+//
+// Only for the testing framework.
+//
 #ifdef GOOGLE_TEST
+
 #include "rocsparse_clients_test_hip_debug_api.hpp"
 #include <map>
+
 namespace rocsparse_clients_test
 {
     struct hip_debug_t
@@ -34,22 +40,21 @@ namespace rocsparse_clients_test
         std::string m_filename{};
         hip_debug_t();
         bool m_non_permissive{};
-      
+
     public:
         static std::map<std::string, hip_debug_api_history_t> s_map;
-        const std::string&                                              get_filename() const;
+        const std::string&                                    get_filename() const;
         hip_debug_api_history_t& get_hip_debug_api_history(const char* name);
-        bool                               get_non_permissive() const;
-        void                               set_non_permissive(bool);
-        rocsparse_status check(rocsparse_handle, bool non_permissive, std::ostream&) const;
+        bool                     get_non_permissive() const;
+        void                     set_non_permissive(bool);
+        rocsparse_status         check(rocsparse_handle, bool non_permissive, std::ostream&) const;
 
-        void                   report(rocsparse_handle, std::ostream&) const;
+        void                report(rocsparse_handle, std::ostream&) const;
         static hip_debug_t& instance();
-        bool                   enabled() const;
-        void                   enable();
-        void                   disable();
-        void                   set_sync_report_filename(const char* filename);
-
+        bool                enabled() const;
+        void                enable();
+        void                disable();
+        void                set_sync_report_filename(const char* filename);
     };
 }
 

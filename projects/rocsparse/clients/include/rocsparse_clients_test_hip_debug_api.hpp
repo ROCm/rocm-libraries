@@ -50,16 +50,14 @@ namespace rocsparse_clients_test
         void     add_call(int32_t);
         hip_debug_api_history_t(int32_t);
         hip_debug_api_history_t() = default;
-
+        // Note:
         // The mutex member is neither copyable nor movable. Provide explicit
         // copy/move operations that synchronize access to the source object
         // and leave the destination's mutex default-constructed.
         hip_debug_api_history_t(const hip_debug_api_history_t& other);
         hip_debug_api_history_t(hip_debug_api_history_t&& other) noexcept;
-        hip_debug_api_history_t&
-            operator=(const hip_debug_api_history_t& other);
-        hip_debug_api_history_t&
-            operator=(hip_debug_api_history_t&& other) noexcept;
+        hip_debug_api_history_t& operator=(const hip_debug_api_history_t& other);
+        hip_debug_api_history_t& operator=(hip_debug_api_history_t&& other) noexcept;
     };
 }
 
