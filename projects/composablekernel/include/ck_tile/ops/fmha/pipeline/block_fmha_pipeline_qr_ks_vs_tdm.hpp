@@ -73,13 +73,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                     !kHasLogitsSoftCap)) ||
                   (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
 
-    // qr_tdm has not yet implemented bias, dropout, or sink. The codegen
-    // restricts emitted instances to these settings; assert here so a future
-    // codegen change can't silently dispatch unsupported workloads.
+    // Sink is now supported (mirrors baseline qr_ks_vs logic).
+    // Bias and dropout are deferred to follow-up tasks.
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "qr_tdm pipeline does not yet support attention bias");
     static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
-    static_assert(!kHasSink, "qr_tdm pipeline does not yet support sink attention");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
@@ -157,7 +155,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         FmhaMask mask,
         PositionEncoding position_encoding,
         float scale_s,
-        void* smem_ptr) const
+        void* smem_ptr,
+        float sink_v) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -199,23 +198,57 @@ struct BlockFmhaPipelineQRKSVSTdm
         using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
-        // init M, L
+        // init M, L (sink-aware: when sink_v is finite, pre-seed m/l)
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
 
         clear_tile(o_acc);
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        if(__builtin_isinf_sign(sink_v) >= 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(kHasLogitsSoftCap)
+                set_tile(m, sink_v * scale_s * C_LOG2E);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
-        const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
-            mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+
+        // Sink-aware tile range: GetSinkTileRangeAlongX returns
+        // (sink_seq_end, seqlen_k_start, seqlen_k_end). For non-sink,
+        // sink_seq_end is always 0.
+        const auto tile_range_result = [&mask, &q_origin]() {
+            if constexpr(kHasSink)
+                return mask.GetSinkTileRangeAlongX(
+                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+            else
+            {
+                auto [start, end] =
+                    mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+                return ck_tile::make_tuple(0, start, end);
+            }
+        }();
+        const auto sink_seq_end           = tile_range_result.get(ck_tile::number<0>{});
+        const auto logical_seqlen_k_start = tile_range_result.get(ck_tile::number<1>{});
+        const auto logical_seqlen_k_end   = tile_range_result.get(ck_tile::number<2>{});
+
+        const auto num_sink_loop = integer_divide_ceil(sink_seq_end, kN0);
 
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
         {
             const index_t logical_num_total_loop =
-                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0);
+                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0) +
+                num_sink_loop;
             if(logical_num_total_loop <= 0)
             {
                 if constexpr(kStoreLSE)
@@ -223,7 +256,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    {
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    }
+                    else
+                    {
+                        set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    }
 
                     store_tile(lse_acc_dram_window_tmp, lse_acc);
                 }
@@ -288,13 +328,16 @@ struct BlockFmhaPipelineQRKSVSTdm
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
 
         // K tile in LDS
-        const index_t physical_seqlen_k_start         = logical_seqlen_k_start;
-        const index_t physical_seqlen_k_end           = logical_seqlen_k_end;
-        const index_t aligned_physical_seqlen_k_start = physical_seqlen_k_start;
+        // For sink: kv_load_start is 0 when there are sink tokens (we start
+        // reading from seq position 0), otherwise seqlen_k_start.
+        const auto kv_load_start =
+            (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
+        const index_t physical_seqlen_k_start = logical_seqlen_k_start;
+        const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
 
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
-                             {physical_seqlen_k_start, 0},
+                             {kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem>());
 
         // K LDS writer (TDM) and reader share plain row-major desc; see Q
@@ -333,7 +376,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         // async_load_tile compatibility).
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
-                             {physical_seqlen_k_start, 0},
+                             {kv_load_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
@@ -368,7 +411,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto q_tile = load_tile(q_lds_read_window);
 
         const index_t num_total_loop =
-            integer_divide_ceil(physical_seqlen_k_end - aligned_physical_seqlen_k_start, kN0);
+            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
+            num_sink_loop;
 
         index_t i_total_loops      = 0;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
@@ -425,12 +469,21 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
+            // Sink-aware k_origin: in sink phase, tiles start at 0;
+            // in normal phase, tiles start at physical_seqlen_k_start.
+            const auto k_origin = [&]() {
+                const bool in_sink_phase = (num_sink_loop > i_total_loops);
+                if(in_sink_phase)
+                    return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
+                else
+                    return make_tuple(
+                        kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+            }();
+
             if constexpr(kHasUnevenSplits)
             {
                 if(i_total_loops == (num_total_loop - 1))
                 {
-                    const auto k_origin =
-                        make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
@@ -445,8 +498,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                const auto k_origin = make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
-
                 bool need_perpixel_check =
                     mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
@@ -455,8 +506,22 @@ struct BlockFmhaPipelineQRKSVSTdm
                         s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                             const auto row = q_origin.at(I0) + tile_idx.at(I0);
                             const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                            return mask.IsOutOfBound(row, col);
+                            if constexpr(kHasSink)
+                                return mask.IsOutOfSinkBound(row, col);
+                            else
+                                return mask.IsOutOfBound(row, col);
                         });
+                }
+            }
+
+            // Sink→normal window jump: at the boundary between sink region
+            // and normal region, jump K/V dram windows forward.
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 1)
+                {
+                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                 }
             }
 
@@ -680,7 +745,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         void* __restrict__ smem_ptrk0,
         void* __restrict__ smem_ptrk1,
         void* __restrict__ smem_ptrv0,
-        void* __restrict__ smem_ptrv1) const
+        void* __restrict__ smem_ptrv1,
+        float sink_v) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -723,23 +789,54 @@ struct BlockFmhaPipelineQRKSVSTdm
         using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
-        // init M, L
+        // init M, L (sink-aware)
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
 
         clear_tile(o_acc);
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        if(__builtin_isinf_sign(sink_v) >= 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(kHasLogitsSoftCap)
+                set_tile(m, sink_v * scale_s * C_LOG2E);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
-        const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
-            mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+
+        const auto tile_range_result = [&mask, &q_origin]() {
+            if constexpr(kHasSink)
+                return mask.GetSinkTileRangeAlongX(
+                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+            else
+            {
+                auto [start, end] =
+                    mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+                return ck_tile::make_tuple(0, start, end);
+            }
+        }();
+        const auto sink_seq_end           = tile_range_result.get(ck_tile::number<0>{});
+        const auto logical_seqlen_k_start = tile_range_result.get(ck_tile::number<1>{});
+        const auto logical_seqlen_k_end   = tile_range_result.get(ck_tile::number<2>{});
+
+        const auto num_sink_loop = integer_divide_ceil(sink_seq_end, kN0);
 
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
         {
             const index_t logical_num_total_loop =
-                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0);
+                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0) +
+                num_sink_loop;
             if(logical_num_total_loop <= 0)
             {
                 if constexpr(kStoreLSE)
@@ -747,7 +844,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    {
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    }
+                    else
+                    {
+                        set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    }
 
                     store_tile(lse_acc_dram_window_tmp, lse_acc);
                 }
@@ -813,14 +917,15 @@ struct BlockFmhaPipelineQRKSVSTdm
         s_wait_tensorcnt_barrier<0>();
         auto q_tile = load_tile(q_lds_read_window);
 
-        // K tile in LDS
-        const index_t physical_seqlen_k_start         = logical_seqlen_k_start;
-        const index_t physical_seqlen_k_end           = logical_seqlen_k_end;
-        const index_t aligned_physical_seqlen_k_start = physical_seqlen_k_start;
+        // K tile in LDS (sink-aware start)
+        const auto kv_load_start =
+            (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
+        const index_t physical_seqlen_k_start = logical_seqlen_k_start;
+        const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
 
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
-                             {physical_seqlen_k_start, 0},
+                             {kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem, true>());
 
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
@@ -855,10 +960,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeSRegTileDistribution<Problem>());
 
-        // V tile in LDS
+        // V tile in LDS (sink-aware start)
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
-                             {physical_seqlen_k_start, 0},
+                             {kv_load_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
@@ -881,7 +986,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                              Policy::template MakeVRegTileDistribution<Problem>());
 
         const index_t num_total_loop =
-            integer_divide_ceil(physical_seqlen_k_end - aligned_physical_seqlen_k_start, kN0);
+            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
+            num_sink_loop;
 
         index_t i_total_loops      = 0;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
@@ -951,12 +1057,20 @@ struct BlockFmhaPipelineQRKSVSTdm
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
+            // Sink-aware k_origin (prefill path)
+            const auto k_origin = [&]() {
+                const bool in_sink_phase = (num_sink_loop > i_total_loops);
+                if(in_sink_phase)
+                    return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
+                else
+                    return make_tuple(
+                        kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+            }();
+
             if constexpr(kHasUnevenSplits)
             {
                 if(i_total_loops == (num_total_loop - 1))
                 {
-                    const auto k_origin =
-                        make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
@@ -971,8 +1085,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                const auto k_origin = make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
-
                 bool need_perpixel_check =
                     mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
@@ -981,8 +1093,21 @@ struct BlockFmhaPipelineQRKSVSTdm
                         s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                             const auto row = q_origin.at(I0) + tile_idx.at(I0);
                             const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                            return mask.IsOutOfBound(row, col);
+                            if constexpr(kHasSink)
+                                return mask.IsOutOfSinkBound(row, col);
+                            else
+                                return mask.IsOutOfBound(row, col);
                         });
+                }
+            }
+
+            // Sink→normal window jump (prefill path)
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 1)
+                {
+                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                 }
             }
 
@@ -1246,7 +1371,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         PositionEncoding position_encoding,
                                         float scale_s,
                                         void* smem_ptr,
-                                        float /*sink_v*/) const
+                                        float sink_v) const
     {
         if constexpr(kM0 > 64)
         {
@@ -1271,7 +1396,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                        smem_ptrk0,
                        smem_ptrk1,
                        smem_ptrv0,
-                       smem_ptrv1);
+                       smem_ptrv1,
+                       sink_v);
         }
         else
         {
@@ -1284,7 +1410,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                        mask,
                        position_encoding,
                        scale_s,
-                       smem_ptr);
+                       smem_ptr,
+                       sink_v);
         }
     }
 };
