@@ -7,3 +7,7 @@
 #Known bugs:
 #- { function: matmul, grouped_gemm: 1, known_bug_platforms: "gfx1100, gfx1101, gfx1102, gfx1200, gfx1201" }
 #- { function: matmul, gradient: 1, known_bug_platforms: "gfx1100, gfx1101, gfx1102, gfx1200, gfx1201" }
+
+Known bugs:
+  # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
+  - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: gfx950 }

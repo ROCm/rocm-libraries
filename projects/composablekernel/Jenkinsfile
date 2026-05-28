@@ -357,13 +357,7 @@ def getBaseDockerImageName(){
         img = "${params.USE_CUSTOM_DOCKER}"
     }
     else{
-        def ROCM_numeric = parseVersion("${params.ROCMVERSION}")
-        if ( ROCM_numeric.major <= 7 && ROCM_numeric.minor < 2 ){
-            img = "${env.CK_DOCKERHUB}:ck_ub24.04_rocm${params.ROCMVERSION}"
-            }
-        else{
-            img = "${env.CK_DOCKERHUB_PRIVATE}:ck_ub24.04_rocm${params.ROCMVERSION}"
-            }
+        img = "${env.CK_DOCKERHUB}:ck_ub24.04_rocm${params.ROCMVERSION}"
         }
     return img
 }
@@ -866,7 +860,7 @@ def cmake_build(Map conf=[:]){
                     if (params.RUN_ROCM_CK_TESTS) {
                         sh 'ninja check-rocm-ck'
                     }
-                    if(params.BUILD_PACKAGES){
+                    if(params.BUILD_PACKAGES || params.BUILD_INSTANCES_ONLY){
                         echo "Build ckProfiler packages"
                         sh 'ninja -j64 package'
                         sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.2.0_amd64_${arch_name}.deb"
@@ -1129,39 +1123,42 @@ def process_results(Map conf=[:]){
                         // unstash deb packages
                         try{
                             unstash "lib_package"
+                            sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                         }
                         catch(Exception err){
                             echo "could not locate lib_package."
                         }
-                        sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                     }
                     if (params.BUILD_PACKAGES){
                         // unstash deb packages
                         try{
                             unstash "profiler_package_gfx90a"
+                            sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-ckprofiler*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                         }
                         catch(Exception err){
                             echo "could not locate profiler_package_gfx90a."
                         }
                         try{
                             unstash "profiler_package_gfx942"
+                            sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-ckprofiler*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                         }
                         catch(Exception err){
                             echo "could not locate profiler_package_gfx942."
                         }
                         try{
                             unstash "profiler_package_gfx950"
+                            sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-ckprofiler*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                         }
                         catch(Exception err){
                             echo "could not locate profiler_package_gfx950."
                         }
                         try{
                             unstash "profiler_package_gfx12"
+                            sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-ckprofiler*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                         }
                         catch(Exception err){
                             echo "could not locate profiler_package_gfx12."
                         }
-                        sh "sshpass -p ${env.ck_deb_pw} scp -o StrictHostKeyChecking=no composablekernel-ckprofiler*.deb ${env.ck_deb_user}@${env.ck_deb_ip}:/var/www/html/composable_kernel/"
                     }
                     else{
                         // unstash perf files to master
@@ -1333,8 +1330,8 @@ pipeline {
             description: 'If you want to use a custom docker image, please specify it here (default: leave blank).')
         string(
             name: 'ROCMVERSION',
-            defaultValue: '7.1.1',
-            description: 'Specify which ROCM version to use: 7.1.1 (default).')
+            defaultValue: '7.13',
+            description: 'Specify which ROCM version to use: 7.13 (default).')
         string(
             name: 'COMPILER_VERSION',
             defaultValue: '',
@@ -1551,6 +1548,7 @@ pipeline {
                 stage('Docker /opt/rocm'){
                     agent{ label rocmnode("nogpu") }
                     steps{
+                        deleteDir()
                         buildDocker('/opt/rocm')
                         cleanWs()
                     }
@@ -1582,6 +1580,7 @@ pipeline {
                                 --file-filter=*.cpp --force --enable=all --output-file=ck_cppcheck.log"""
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, setup_cmd: "", build_cmd: "", execute_cmd: execute_cmd)
                         archiveArtifacts "build/ck_cppcheck.log"
                         cleanWs()
@@ -1601,6 +1600,7 @@ pipeline {
                                 xargs -P 8 -I{} sh -c 'clang-format-18 -style=file {} | diff -u - {} || (echo "ERROR: {} needs formatting" && exit 1)'"""
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, setup_cmd: "", build_cmd: "", execute_cmd: execute_cmd)
                         cleanWs()
                     }
@@ -1701,6 +1701,7 @@ pipeline {
                                            ./bin/test_grouped_convnd_fwd_tile"""
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1729,6 +1730,7 @@ pipeline {
                                            ./bin/test_grouped_convnd_fwd_large_cases && ./bin/test_grouped_convnd_bwd_data_large_cases && ./bin/test_grouped_convnd_fwd_bias_clamp_large_cases"""
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1769,6 +1771,7 @@ pipeline {
                                            ./bin/test_grouped_convnd_bwd_weight_dataset_xdl"""
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1795,6 +1798,7 @@ pipeline {
                         execute_args = build_and_run_fmha("gfx90a")
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1811,6 +1815,7 @@ pipeline {
                         execute_args = build_and_run_fmha("gfx942")
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1827,6 +1832,7 @@ pipeline {
                         execute_args = build_and_run_fmha("gfx950")
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1843,6 +1849,7 @@ pipeline {
                         execute_args = build_and_run_fmha("gfx1201")
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1960,6 +1967,7 @@ pipeline {
                                            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json """
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -1997,14 +2005,16 @@ pipeline {
                                             -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
                                             -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
                                             -D GROUPED_GEMM_DATATYPE="fp8;fp16" \
-                                            -D GROUPED_GEMM_LAYOUT="rcr;rrr;crr;ccr" .. && \
+                                            -D GROUPED_GEMM_LAYOUT="rcr;rrr;crr;ccr" \
+                                            -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all && \
-                                           python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
+                                           python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --group-counts 8 --warmup 5 --repeat 5 --verbose --json grouped_gemm_results.json """
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -2028,13 +2038,15 @@ pipeline {
                                             -D GEMM_MULTI_D_DATATYPE="fp16" \
                                             -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
                                             -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                                            -D GEMM_PRESHUFFLE_LAYOUT="rcr" .. && \
+                                            -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
+                                            -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json """
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -2054,11 +2066,13 @@ pipeline {
                                             -D CMAKE_BUILD_TYPE=Release \
                                             -D GPU_TARGETS="gfx1201" \
                                             -D GEMM_UNIVERSAL_DATATYPE="fp16" \
-                                            -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" .. && \
+                                            -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
+                                            -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json """
                     }
                     steps{
+                        deleteDir()
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
@@ -2086,6 +2100,7 @@ pipeline {
                         execute_args = build_client_examples("gfx942")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2102,6 +2117,7 @@ pipeline {
                         execute_args = build_client_examples("gfx950")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2119,6 +2135,7 @@ pipeline {
                         execute_args = build_client_examples("gfx908")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2136,6 +2153,7 @@ pipeline {
                         execute_args = build_client_examples_and_codegen_tests("gfx90a")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2147,15 +2165,17 @@ pipeline {
                         expression { params.BUILD_INSTANCES_ONLY.toBoolean() && !params.RUN_FULL_QA.toBoolean() }
                     }
                     agent{ label rocmnode("gfx942") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_args = """ cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                                            -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
+                                            -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" \
+                                            -DGPU_ARCHS="gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic" \
+                                            -D CMAKE_BUILD_TYPE=Release .. && ninja -j64 """
+                    }
                     steps{
-                        script {
-                            def execute_args = """ cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                                                -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
-                                                -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" \
-                                                -D CMAKE_BUILD_TYPE=Release .. && ninja -j64 """
-
-                            buildHipClangJobAndReboot(setup_cmd: "",  build_cmd: "", build_type: 'Release', execute_cmd: execute_args)
-                        }
+                        deleteDir()
+                        buildHipClangJobAndReboot(setup_args: setup_args,  build_cmd: "", build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
                 }
@@ -2172,6 +2192,7 @@ pipeline {
                         execute_args = build_client_examples("gfx10-1-generic")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2189,6 +2210,7 @@ pipeline {
                         execute_args = build_client_examples("gfx10-3-generic")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2205,6 +2227,7 @@ pipeline {
                         execute_args = build_client_examples("gfx11-generic")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2221,6 +2244,7 @@ pipeline {
                         execute_args = build_client_examples("gfx12-generic")
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, config_targets: "install", build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2236,6 +2260,7 @@ pipeline {
                         setup_args = """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="gfx1250" -DDISABLE_DL_KERNELS="ON" """
                     }
                     steps{
+                        deleteDir()
                         Build_CK_and_Reboot(setup_args: setup_args, docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest", config_targets: "install", no_reboot:true, build_type: 'Release', prefixpath: '/usr/local')
                         cleanWs()
                     }
@@ -2277,6 +2302,7 @@ pipeline {
                     }
                     agent { label 'mici' }
                     steps{
+                        deleteDir()
                         process_results()
                         cleanWs()
                     }
