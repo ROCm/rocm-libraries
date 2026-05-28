@@ -164,8 +164,9 @@ __device__ __forceinline__ void store_acc_f32(
     float* __restrict__ D, int D_stride, const AccTileV& acc,
     int m_tile_base, int n_tile_base)
 {
-    int m = m_tile_base + (threadIdx.x % 32);
-    int m_half = threadIdx.x / 32;
+    int lane = threadIdx.x % 64;
+    int m = m_tile_base + (lane % 32);
+    int m_half = lane / 32;
     float* row = &D[m * D_stride + n_tile_base];
 
     #pragma unroll
@@ -180,8 +181,9 @@ __device__ __forceinline__ void store_acc_f32(
     float* __restrict__ D, int D_stride, const AccTileA& acc,
     int m_tile_base, int n_tile_base)
 {
-    int m = m_tile_base + (threadIdx.x % 32);
-    int m_half = threadIdx.x / 32;
+    int lane = threadIdx.x % 64;
+    int m = m_tile_base + (lane % 32);
+    int m_half = lane / 32;
     float* row = &D[m * D_stride + n_tile_base];
 
     #pragma unroll

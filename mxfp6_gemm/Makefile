@@ -17,18 +17,22 @@ test_k_loop: test_k_loop.cpp $(HEADERS)
 test_accvgpr: test_accvgpr.cpp $(HEADERS)
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
+test_multitile: test_multitile.cpp $(HEADERS)
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
 bench_lds_shuffle: bench_lds_shuffle.cpp $(HEADERS)
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
 test_cpu: test_reference
 	./test_reference
 
-test_gpu: test_lds_shuffle test_k_loop test_accvgpr
+test_gpu: test_lds_shuffle test_k_loop test_accvgpr test_multitile
 	./test_lds_shuffle
 	./test_k_loop
 	./test_accvgpr
+	./test_multitile
 
 clean:
-	rm -f test_reference test_lds_shuffle test_k_loop test_accvgpr bench_lds_shuffle
+	rm -f test_reference test_lds_shuffle test_k_loop test_accvgpr test_multitile bench_lds_shuffle
 
 .PHONY: test_cpu test_gpu clean
