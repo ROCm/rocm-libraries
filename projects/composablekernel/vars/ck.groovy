@@ -21,7 +21,7 @@
 //    - Forces full build if dependency cache stale (>7 days)
 //    - Manual override: set DISABLE_SMART_BUILD=true
 //
-// Benefits: PR builds 5h → 30min (typical), nightly builds unchanged
+// Benefits: PR builds 5h -> 30min (typical), nightly builds unchanged
 // See: script/dependency-parser/README.md for details
 //
 
