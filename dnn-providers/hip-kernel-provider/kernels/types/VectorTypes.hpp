@@ -4,7 +4,9 @@
 #pragma once
 
 #include "Bfloat16Dev.hpp"
+#ifndef __HIPCC_RTC__
 #include <hip/hip_fp16.h>
+#endif
 #include <type_traits>
 
 namespace hip_kernel_provider
