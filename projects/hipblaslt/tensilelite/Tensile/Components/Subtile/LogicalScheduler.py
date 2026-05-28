@@ -383,7 +383,6 @@ class GRIncOp(BaseOp):
     """Pointer update + LDS swap for global reads on a specific tensor."""
     tensor: str = ""
     unrollId: int = 0
-    swap_only: bool = False
 
     def __post_init__(self):
         self.kind = 'gr_inc'
@@ -2252,15 +2251,10 @@ class LogicalScheduler:
                                       unrollId=uid))
         return result
 
-    def _make_depops_uid(self, cls, uid: int, last_uid_swap_only=False) -> List[BaseOp]:
+    def _make_depops_uid(self, cls, uid: int) -> List[BaseOp]:
         """Create a BaseOp subclass instance for a single uid across all tensors.
 
         Only emits for tensors where uid < numUnroll[tensor].
-        When last_uid_swap_only=True and uid is the tensor's last uid:
-        - nUnroll>1: GRIncOp gets swap_only=True (LDS swap to toggle back,
-          no SRD advance).
-        - nUnroll==1: GRIncOp is omitted entirely (no prior GR_inc moved the
-          write pointer, so no toggle-back is needed).
         """
         result = []
         for tensor in self.tensors:
@@ -2268,11 +2262,7 @@ class LogicalScheduler:
             if uid >= nUnroll:
                 continue
             if cls is GRIncOp:
-                is_last = last_uid_swap_only and (uid == nUnroll - 1)
-                if is_last and nUnroll == 1:
-                    continue
-                result.append(GRIncOp(tensor=tensor, unrollId=uid,
-                                      swap_only=(is_last and nUnroll > 1)))
+                result.append(GRIncOp(tensor=tensor, unrollId=uid))
             else:
                 result.append(cls(tensor=tensor))
         return result
