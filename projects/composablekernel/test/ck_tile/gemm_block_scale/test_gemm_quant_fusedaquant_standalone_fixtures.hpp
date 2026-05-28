@@ -275,36 +275,12 @@ class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
         const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
             K, k_batch, max_accumulated_value);
 
-        // const float rtol = rtol_atol.at(ck_tile::number<0>{});
-        // const float atol = rtol_atol.at(ck_tile::number<1>{});
-
         // Validate results
         bool pass = ck_tile::check_err(c_m_n_dev_result,
                                        c_m_n_host_ref,
                                        "Error: Incorrect results!",
                                        rtol_atol.at(ck_tile::number<0>{}),
                                        rtol_atol.at(ck_tile::number<1>{}));
-
-        // float max_abs_error   = 0.0f;
-        // float max_rel_error   = 0.0f;
-        // std::size_t bad_count = 0;
-
-        // for(std::size_t i = 0; i < c_m_n_dev_result.mData.size(); ++i)
-        // {
-        //     const float ref_v = ck_tile::type_convert<float>(c_m_n_host_ref.mData[i]);
-        //     const float got_v = ck_tile::type_convert<float>(c_m_n_dev_result.mData[i]);
-        //     const float abs_e = std::abs(got_v - ref_v);
-        //     const float rel_e = abs_e / (std::abs(ref_v) + 1e-6f);
-
-        //     max_abs_error = std::max(max_abs_error, abs_e);
-        //     max_rel_error = std::max(max_rel_error, rel_e);
-
-        //     if(!(abs_e <= atol || rel_e <= rtol))
-        //     {
-        //         pass = false;
-        //         ++bad_count;
-        //     }
-        // }
 
         EXPECT_TRUE(pass) << "FusedAQuantGrouped validation failed with M=" << M << ", N=" << N
                           << ", K=" << K;
