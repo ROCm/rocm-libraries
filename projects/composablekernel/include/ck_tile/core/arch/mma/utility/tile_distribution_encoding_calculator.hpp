@@ -62,7 +62,7 @@ struct TileDistrEncCalc
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize * kIter>>,
         tuple<sequence<2, 0, 1>>,
         tuple<sequence<1, 0, 0>>,
         sequence<2, 2>,
