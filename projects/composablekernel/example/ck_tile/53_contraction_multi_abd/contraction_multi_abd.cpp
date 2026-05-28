@@ -232,17 +232,17 @@ bool try_contraction_multi_abd_case(
     std::array<BDims, BsDataType_::size()> bs_strides_fixed{};
     std::array<EDims, DsDataType_::size()> ds_strides_fixed{};
 
-    for(ck_tile::index_t i = 0; i < AsDataType_::size(); ++i)
+    for(std::size_t i = 0; i < AsDataType_::size(); ++i)
     {
         as_dims_fixed[i]    = to_fixed_dims<NumDimG + NumDimM + NumDimK>(As_dims[i]);
         as_strides_fixed[i] = to_fixed_dims<NumDimG + NumDimM + NumDimK>(As_strides[i]);
     }
-    for(ck_tile::index_t i = 0; i < BsDataType_::size(); ++i)
+    for(std::size_t i = 0; i < BsDataType_::size(); ++i)
     {
         bs_dims_fixed[i]    = to_fixed_dims<NumDimG + NumDimN + NumDimK>(Bs_dims[i]);
         bs_strides_fixed[i] = to_fixed_dims<NumDimG + NumDimN + NumDimK>(Bs_strides[i]);
     }
-    for(ck_tile::index_t i = 0; i < DsDataType_::size(); ++i)
+    for(std::size_t i = 0; i < DsDataType_::size(); ++i)
     {
         ds_dims_fixed[i]    = to_fixed_dims<NumDimG + NumDimM + NumDimN>(Ds_dims[i]);
         ds_strides_fixed[i] = to_fixed_dims<NumDimG + NumDimM + NumDimN>(Ds_strides[i]);
