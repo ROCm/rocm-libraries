@@ -5,20 +5,25 @@
 
 #include <unordered_map>
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 /**
  * @brief Macro that returns and prints info log on passing provided condition.
  * Arguments after first are passed into std::format().
- * Requires a HIP_KERNEL_LOG_PREFIX in scope which will prefix the log
+ * Requires a HIP_KERNEL_LOG_PREFIX in scope which will prefix the log.
+ *
+ * `message` is intentionally substituted without enclosing parentheses so call
+ * sites can pass `+`-chained expressions like `"foo " + EnumName(...)` that
+ * rely on left-to-right associativity to fold into a std::string.
  */
 #define HIP_KERNEL_RETURN_FALSE_IF(condition, message)                            \
     do                                                                            \
     {                                                                             \
         if(condition)                                                             \
         {                                                                         \
+            /* NOLINTNEXTLINE(bugprone-macro-parentheses) */                      \
             HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + message); \
             return false;                                                         \
         }                                                                         \
@@ -50,17 +55,19 @@ struct ActivationParams
     double gamma;
 };
 
-ActivationParams parseActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs);
+ActivationParams
+    parseActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                             uint32_t numDeviceBuffers);
 
-const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
 
-bool isChannelLastLayout(const hipdnn_data_sdk::data_objects::TensorAttributes* tensor);
+bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor);
 
 }

@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "ExampleProviderContainer.hpp"
@@ -94,9 +94,15 @@ ExampleProviderContainer::ExampleProviderContainer()
     }
 }
 
-ExampleProviderContainer::~ExampleProviderContainer()
+ExampleProviderContainer::~ExampleProviderContainer() noexcept
 {
-    HIPDNN_PLUGIN_LOG_INFO("Destroying ExampleProviderContainer");
+    try
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Destroying ExampleProviderContainer");
+    }
+    catch(...) // NOLINT(bugprone-empty-catch)
+    {
+    }
 }
 
 hipdnn_plugin_sdk::

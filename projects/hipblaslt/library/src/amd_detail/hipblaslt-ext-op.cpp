@@ -144,7 +144,7 @@ namespace
         {
             const std::string archName = trimArchName(props.gcnArchName);
             auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path(archName) / "hipblasltExtOpLibrary.dat");
+                std::filesystem::path("hipblasltExtOpLibrary_" + archName + ".dat"));
             if(perArchPath)
                 return perArchPath->string();
         }
@@ -290,6 +290,7 @@ hipblasStatus_t hipblasltSoftmaxRun(hipDataType datatype,
     TensileLite::KernelInvocation invocation{kernelName,
                                              sol->getCodeObjectPath(),
                                              false,
+                                             {1, 1, 1},
                                              {WORKGROUP_SIZE, 1, 1},
                                              {numWorkgroups, 1, 1},
                                              {numWorkgroups * WORKGROUP_SIZE, 1, 1},
@@ -417,6 +418,9 @@ hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
     TensileLite::KernelInvocation invocation;
     invocation.kernelName      = kernelName;
     invocation.codeObjectFile  = sol->getCodeObjectPath();
+    invocation.clusterDim.x    = 1;
+    invocation.clusterDim.y    = 1;
+    invocation.clusterDim.z    = 1;
     invocation.workGroupSize.x = sol->getNumWorkitems();
     invocation.workGroupSize.y = 1;
     invocation.workGroupSize.z = 1;

@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 #include <memory>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -15,11 +15,11 @@
 
 using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestHipKernelEngine, ConstructorAndId)
 {
-    HipKernelEngine engine(42);
+    const HipKernelEngine engine(42);
     EXPECT_EQ(engine.id(), 42);
 }
 
@@ -29,11 +29,11 @@ TEST(TestHipKernelEngine, ConstructorAndId)
 
 TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
-    HipKernelEngine engine(1);
+    const HipKernelEngine engine(1);
 
-    HipKernelHandle dummyHandle;
-    MockGraph mockGraph;
-    MockEngineConfig mockConfig;
+    const HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const MockEngineConfig mockConfig;
 
     EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
 }
@@ -52,9 +52,9 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     HipKernelEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    HipKernelHandle dummyHandle;
-    MockGraph mockGraph;
-    MockEngineConfig mockConfig;
+    const HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const MockEngineConfig mockConfig;
 
     EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 1337u);
 }
@@ -84,9 +84,9 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    HipKernelHandle dummyHandle;
-    MockGraph mockGraph;
-    MockEngineConfig mockConfig;
+    const HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const MockEngineConfig mockConfig;
 
     EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 45000u);
 }
@@ -100,9 +100,9 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     HipKernelEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    HipKernelHandle dummyHandle;
-    MockGraph mockGraph;
-    MockEngineConfig mockConfig;
+    const HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const MockEngineConfig mockConfig;
 
     EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
 }
@@ -121,7 +121,7 @@ TEST(TestHipKernelEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     HipKernelEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -139,16 +139,16 @@ TEST(TestHipKernelEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
 TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 {
-    HipKernelEngine engine(0);
+    const HipKernelEngine engine(0);
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -162,7 +162,7 @@ TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     HipKernelEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -173,14 +173,14 @@ TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestHipKernelEngine, GetDetailsReturnsSerializedEngineDetails)
 {
-    HipKernelEngine engine(1);
+    const HipKernelEngine engine(1);
     HipKernelHandle dummyHandle;
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    const EngineDetailsWrapper engineDetails(result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
 }
 
@@ -190,14 +190,14 @@ TEST(TestHipKernelEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
     // Set up first plan builder to return a custom knob
-    hipdnn_data_sdk::data_objects::KnobT knob1;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knob1;
     knob1.knob_id = "custom.knob1";
     knob1.description = "First custom knob";
-    hipdnn_data_sdk::data_objects::IntValueT defaultValue1;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue1;
     defaultValue1.value = 1;
     knob1.default_value.Set(defaultValue1);
 
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> customKnobs1;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> customKnobs1;
     customKnobs1.push_back(knob1);
 
     EXPECT_CALL(*mockPlanBuilder1, getCustomKnobs(::testing::_, ::testing::_))
@@ -211,12 +211,12 @@ TEST(TestHipKernelEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     HipKernelHandle dummyHandle;
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    const EngineDetailsWrapper engineDetails(result.ptr, result.size);
 
     // Should have 1 knob: custom.knob1 (from first builder)
     ASSERT_EQ(engineDetails.knobCount(), 1u);
@@ -258,10 +258,10 @@ TEST(TestHipKernelEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const HipKernelHandle dummyHandle;
     HipKernelContext ctx;
-    MockEngineConfig mockConfig;
+    const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
@@ -294,10 +294,10 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const HipKernelHandle dummyHandle;
     HipKernelContext ctx;
-    MockEngineConfig mockConfig;
+    const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
@@ -329,10 +329,10 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppl
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    const MockGraph mockGraph;
+    const HipKernelHandle dummyHandle;
     HipKernelContext ctx;
-    MockEngineConfig mockConfig;
+    const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);

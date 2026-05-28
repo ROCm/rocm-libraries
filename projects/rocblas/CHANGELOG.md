@@ -3,10 +3,24 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## rocBLAS 5.5.0
+
 ## rocBLAS 5.4.0
 
+### Added
+
+* gfx1250 and gfx90c enabled.
+* Trace logging `ROCBLAS_LAYER=1` for `rocblas_gemm_ex_get_solutions`, `rocblas_gemm_batched_ex_get_solutions`, `rocblas_gemm_ex_get_solutions_by_type`, and `rocblas_gemm_batched_ex_get_solutions_by_type`.
+* Version and other properties to Windows `rocblas.dll`.
+* Support for `OpenBLAS` ILP64 API for host reference in clients.
+* Dockerfiles in `docker` directory to assist in setting up development.
+
 ### Optimized
-* Improved the performance of Level 3 geam for pure transpose scale use cases.
+* Improved the performance of Level 3 `geam` for pure transpose scale use cases.
+* Improved the performance of Level 2 `tpsv`.
+
+### Resolved issues
+* Fix for querying solutions when using `hipBLASLt` backend with `rocblas_gemm_batched_ex_get_solutions` if using null data pointers.
 
 ## rocBLAS 5.3.0
 

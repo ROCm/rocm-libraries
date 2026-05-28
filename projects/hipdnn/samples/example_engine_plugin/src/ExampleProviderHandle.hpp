@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -8,7 +8,6 @@
 
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <memory>
 #include <unordered_map>
@@ -25,7 +24,7 @@ class ExampleProviderContainer;
 // detached buffer lifetime methods are framework plumbing; no operation-specific changes are needed.
 // If your plugin requires additional per-session state, add members here.
 
-/// Handle for the example plugin.
+/// Handle for the plugin.
 ///
 /// Inherits from HipdnnEnginePluginHandle for opaque pointer compatibility.
 /// Manages the HIP stream, plugin container, and detached FlatBuffers buffers.
@@ -51,7 +50,7 @@ public:
     // Defined in ExampleProviderHandle.cpp to avoid circular dependency
     hipdnn_plugin_sdk::
         EngineManager<ExampleProviderHandle, ExampleProviderSettings, ExampleProviderContext>&
-        getEngineManager();
+        getEngineManager() const;
 
     // When requested by the user, engine details are serialized as a
     // FlatBuffer (ExampleProviderEngine::getDetails()) and a pointer to the heap
@@ -61,7 +60,7 @@ public:
     //
     // The storeEngineDetailsDetachedBuffer() and removeEngineDetailsDetachedBuffer()
     // functions below are provided to assist with managing the lifetime of these
-    // FlatBuffer engine detail objects. These fuctions can be copied/used as-is.
+    // FlatBuffer engine detail objects. These functions can be copied/used as-is.
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)
     {

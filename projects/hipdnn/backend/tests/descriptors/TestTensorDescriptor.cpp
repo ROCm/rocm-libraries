@@ -868,6 +868,50 @@ TEST_F(TestTensorDescriptor, SetAttributeValueInt64)
     ASSERT_EQ(stored->value(), 123456789012345LL);
 }
 
+TEST_F(TestTensorDescriptor, SetAttributeValueBoolean)
+{
+    auto desc = getDescriptor();
+    auto dataType = HIPDNN_DATA_BOOLEAN;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+    bool val = true;
+
+    ASSERT_NO_THROW(
+        desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(bool), &val));
+
+    auto* stored = desc->getData().value.AsBoolValue();
+    ASSERT_NE(stored, nullptr);
+    ASSERT_TRUE(stored->value());
+}
+
+TEST_F(TestTensorDescriptor, SetGetValueBoolean)
+{
+    auto desc = getDescriptor();
+    auto dataType = HIPDNN_DATA_BOOLEAN;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+
+    bool setVal = true;
+    ASSERT_NO_THROW(
+        desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(bool), &setVal));
+
+    auto* stored = desc->getData().value.AsBoolValue();
+    ASSERT_NE(stored, nullptr);
+    ASSERT_TRUE(stored->value());
+
+    // Round-trip through getAttribute
+    std::vector<int64_t> dims = {1, 3, 32, 32};
+    std::vector<int64_t> strides = {3072, 1024, 32, 1};
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 4, dims.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 4, strides.data());
+    desc->finalize();
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(bool), &elementCount, &retrieved));
+    ASSERT_TRUE(retrieved);
+    ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(bool)));
+}
+
 TEST_F(TestTensorDescriptor, SetAttributeValueFloat16)
 {
     auto desc = getDescriptor();
@@ -1059,6 +1103,29 @@ TEST_F(TestTensorDescriptor, GetAttributeValueInt64)
     ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(int64_t)));
 }
 
+TEST_F(TestTensorDescriptor, GetAttributeValueBoolean)
+{
+    auto desc = getDescriptor();
+    auto dataType = HIPDNN_DATA_BOOLEAN;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+    bool setVal = true;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(bool), &setVal);
+
+    std::vector<int64_t> dims = {1, 3, 32, 32};
+    std::vector<int64_t> strides = {3072, 1024, 32, 1};
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 4, dims.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 4, strides.data());
+    desc->finalize();
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(bool), &elementCount, &retrieved));
+
+    ASSERT_TRUE(retrieved);
+    ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(bool)));
+}
+
 TEST_F(TestTensorDescriptor, GetAttributeValueFloat16)
 {
     auto desc = getDescriptor();
@@ -1153,6 +1220,22 @@ TEST_F(TestTensorDescriptor, ToStringContainsExpectedInfo)
     ASSERT_NE(str.find("999"), std::string::npos);
 }
 
+TEST_F(TestTensorDescriptor, ToStringValueBool)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    auto dataType = HIPDNN_DATA_BOOLEAN;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+
+    bool valTrue = true;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(valTrue), &valTrue);
+    ASSERT_NE(desc->toString().find("value=true"), std::string::npos);
+
+    bool valFalse = false;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(valFalse), &valFalse);
+    ASSERT_NE(desc->toString().find("value=false"), std::string::npos);
+}
+
 TEST_F(TestTensorDescriptor, ToStringHandlesUnsetDataType)
 {
     auto desc = getDescriptor();
@@ -1233,7 +1316,8 @@ INSTANTIATE_TEST_SUITE_P(
                       DataTypeRoundTripParam{HIPDNN_DATA_BFLOAT16, DataType::BFLOAT16, "BFloat16"},
                       DataTypeRoundTripParam{HIPDNN_DATA_FP8_E4M3, DataType::FP8_E4M3, "Fp8E4M3"},
                       DataTypeRoundTripParam{HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2, "Fp8E5M2"},
-                      DataTypeRoundTripParam{HIPDNN_DATA_INT64, DataType::INT64, "Int64"}),
+                      DataTypeRoundTripParam{HIPDNN_DATA_INT64, DataType::INT64, "Int64"},
+                      DataTypeRoundTripParam{HIPDNN_DATA_BOOLEAN, DataType::BOOLEAN, "Boolean"}),
     [](const ::testing::TestParamInfo<DataTypeRoundTripParam>& info) { return info.param.name; });
 
 // =============================================================================

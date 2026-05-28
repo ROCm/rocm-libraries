@@ -80,4 +80,6 @@ endfunction()
 #
 # Note: template.cpp is not built as a sample - it's only a reference template
 
+add_community_sample(simple_gemm_swiglu ${CMAKE_CURRENT_SOURCE_DIR}/simple_gemm_swiglu.cpp)
+add_community_sample(simple_fusion_gemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_fusion_gemm.cpp)
 add_community_sample(simple_gemm_act ${CMAKE_CURRENT_SOURCE_DIR}/simple_gemm_act.cpp)

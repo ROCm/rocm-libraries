@@ -1,0 +1,982 @@
+/* ************************************************************************
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+// ----------------------------------------------------------------------------
+// StinkyWaitCntInsertionPass
+//
+// Inserts s_wait_* instructions so that asynchronous memory operations complete
+// before their results are consumed. Dependencies are resolved by walking
+// instruction-level def-use chains (not by tracking individual registers); PHI
+// nodes are flattened to their incoming values at lookup time.
+//
+// The pass covers three independent hardware counters:
+//   - DS      (dlcnt)  via s_wait_dscnt
+//   - buffer  (vlcnt)  via s_wait_loadcnt
+//   - tensor  (tlcnt)  via s_wait_tensorcnt
+//
+// Only basic blocks approved by PassContext::shouldProcessBasicBlock are
+// analyzed and modified; the companion StinkyRemoveWaitCntPass is expected to
+// have stripped stale waits beforehand so this pass owns every emitted wait.
+//
+// High-level flow (matches the "Pass Flow" diagram in the user doc):
+//
+//   buildUseDefChain          Setup: build instruction-level def-use chains
+//                             with PHIs preserved for flattening.
+//   Phase 1 buildBlockExitStates
+//                             Pre-scan every processed block once; populate
+//                             blockExitMemState with the DS / buffer / tensor
+//                             ops in flight at each block's exit.
+//   Phase 2 computeRequiredWaits   (per block, reverse post-order)
+//                             Seed the tensor queue from predecessors, walk
+//                             the block in program order, and produce a list
+//                             of (anchor, WaitCountSpec) pairs across all
+//                             three counters. Trims the refined exit state
+//                             back into blockExitMemState for successors.
+//   Phase 3 emitWaitInstructions   (per block, reverse post-order)
+//                             Insert one s_wait_* IR node per non-kUnused
+//                             field in each WaitCountSpec, immediately before
+//                             the anchor.
+//   Phase 4 removePHIs        Strip PHI pseudo-instructions from processed
+//                             blocks now that def-use chains have been
+//                             consumed.
+//
+// For the full algorithm walk-through (per-instruction logic, redundancy
+// elision, cross-block seeding, MemTokenData conservative fallbacks, etc.)
+// see docs/user/stinky-waitcnt-insertion-pass.md.
+// ----------------------------------------------------------------------------
+
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+
+#include <deque>
+#include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/BBIndexAnalysis.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/CFGTraversal.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+
+#define DEBUG_TYPE "StinkyWaitCntInsertionPass"
+
+namespace {
+using namespace stinkytofu;
+
+// ----------------------------------------------------------------------------
+// Free-standing helpers
+// ----------------------------------------------------------------------------
+
+/// Recursively collect register sources of @p inst, flattening PHI operands so
+/// the caller sees only the real memory ops behind each merge point. Non-PHI
+/// sources are inserted directly; each PHI is replaced by its incoming values
+/// (which are themselves recursively flattened). @p seenPhi tracks already-
+/// visited PHIs to avoid infinite recursion on cyclic PHI webs such as the
+/// loop-carried-dependency case described in the user doc's "Dependency
+/// Resolution: collectSources" section.
+static void collectSourcesRec(StinkyInstruction* inst,
+                              std::unordered_set<StinkyInstruction*>& seenPhi,
+                              std::unordered_set<StinkyInstruction*>& out,
+                              const std::function<bool(StinkyInstruction*)>& filter = nullptr) {
+    if (inst == nullptr) {
+        return;
+    }
+
+    if (inst->getUnifiedOpcode() == GFX::PHI) {
+        if (!seenPhi.insert(inst).second) {
+            return;
+        }
+    }
+
+    for (StinkyInstruction* src : inst->getSources()) {
+        if (src == nullptr) {
+            continue;
+        }
+        if (src->getUnifiedOpcode() == GFX::PHI) {
+            collectSourcesRec(src, seenPhi, out, filter);
+        } else {
+            if (filter == nullptr || filter(src)) {
+                out.insert(src);
+            }
+        }
+    }
+}
+
+/// Entry point for source collection. PHIs are flattened to their incoming
+/// values; an optional @p filter restricts which sources are kept (this pass
+/// uses it to retain only DS / buffer memory ops).
+std::unordered_set<StinkyInstruction*> collectSources(
+    StinkyInstruction* inst, const std::function<bool(StinkyInstruction*)>& filter = nullptr) {
+    std::unordered_set<StinkyInstruction*> sources;
+    std::unordered_set<StinkyInstruction*> seenPhi;
+    if (inst != nullptr) {
+        collectSourcesRec(inst, seenPhi, sources, filter);
+    }
+    return sources;
+}
+
+bool isDSMemoryOp(const StinkyInstruction& inst) {
+    return isDSRead(inst) || isDSWrite(inst);
+}
+
+bool isBufferMemoryOp(const StinkyInstruction& inst) {
+    return isGlobalMemLoad(inst) || isGlobalMemStore(inst);
+}
+
+/// Returns true if any element of @p a is also present in @p b. The basic
+/// MemTokenData primitive used by every token-based conflict check in this pass
+/// (barrier-vs-DS, WAR-on-LDS, tensor anchor).
+template <typename ContainerA, typename ContainerB>
+bool hasTokenOverlap(const ContainerA& a, const ContainerB& b) {
+    return std::any_of(a.begin(), a.end(),
+                       [&b](int token) { return std::find(b.begin(), b.end(), token) != b.end(); });
+}
+
+/// True for any LDS writer anchor (currently @c tensor_load_to_lds or
+/// @c ds_write). Identifies the writers structurally so the WAR-on-LDS scan in
+/// @c collectLdsWarDependencies runs unconditionally; the writer's
+/// @c MemTokenData (or lack thereof) only selects per-token vs. conservative
+/// behaviour inside the helper.
+bool isLdsWriterAnchor(const StinkyInstruction& inst) {
+    return isTensorLoad(inst) || isDSWrite(inst);
+}
+
+/// True for instructions that may consume tensor-load output via LDS and
+/// therefore need an @c s_wait_tensorcnt before they issue: barriers, DS reads,
+/// DS writes, and DS atomics. Tensor loads themselves are deliberately excluded
+/// because the hardware FIFO already orders them on the shared tlcnt counter.
+/// Mirrors the anchor set tagged by @c StinkyBuildImplicitDependencyPass.
+bool isTensorWaitAnchor(const StinkyInstruction& inst) {
+    return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+}
+
+/// True when @p a and @p b share the same hardware memory pipeline, so the
+/// hardware-side FIFO retirement orders them implicitly and no synthetic wait
+/// is required between them.
+///
+/// Today this only covers the DS (dlcnt) pipeline: ds_read, ds_write and
+/// ds_atomic all issue and retire FIFO on dlcnt. tensor_load_to_lds is NOT a
+/// DS op (it lives on tlcnt), so a tensor_load_to_lds / ds_read pair is not
+/// on the same pipeline.
+bool isOnSameDSPipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
+    return isDSMemoryOp(a) && isDSMemoryOp(b);
+}
+
+// ----------------------------------------------------------------------------
+// Data structures
+// ----------------------------------------------------------------------------
+
+/// Result of WAR-on-LDS dependency analysis for an LDS writer anchor.
+///
+/// When the writer carries MemTokenData and the per-token overlap path runs
+/// normally, @c deps holds the conflicting prior DS reads/atomics and
+/// @c forceDsDrain stays false. When the writer lacks MemTokenData, the pass
+/// cannot prove disjointness against any pending DS op, so @c forceDsDrain is
+/// set and @c deps is left empty: the caller emits @c s_wait_dscnt 0 instead
+/// of running the per-pair @c min(count - 1) computation.
+struct LdsWarResult {
+    std::unordered_set<StinkyInstruction*> deps;
+    bool forceDsDrain = false;
+};
+
+/// Result of tensor-wait dependency analysis for a tagged anchor (barrier / DS op).
+///
+/// When the anchor carries MemTokenData and the per-token overlap path runs
+/// normally, @c deps holds the conflicting prior tensor loads and
+/// @c forceTensorDrain stays false. When the anchor lacks MemTokenData, the
+/// pass cannot prove disjointness against any pending tensor load, so
+/// @c forceTensorDrain is set and @c deps is left empty: the caller emits
+/// @c s_wait_tensorcnt 0 instead of running the per-pair @c min(count - 1)
+/// computation.
+struct TensorWaitDepResult {
+    std::unordered_set<StinkyInstruction*> deps;
+    bool forceTensorDrain = false;
+};
+
+/// Descriptor for the wait counter immediate(s) to emit before an anchor instruction.
+/// Each field is either a non-negative count immediate or @c kUnused if not needed.
+struct WaitCountSpec {
+    /// Sentinel: this counter is not used for this wait record.
+    static constexpr int kUnused = -1;
+
+    /// Immediate for @c s_wait_dscnt (dlcnt); @c kUnused if omitted.
+    int dsCount;
+    /// Immediate for @c s_wait_loadcnt (vlcnt); @c kUnused if omitted.
+    int bufferCount;
+    /// Immediate for @c s_wait_tensorcnt (tlcnt); @c kUnused if omitted.
+    int tensorCount;
+
+    WaitCountSpec(int dsCount = kUnused, int bufferCount = kUnused, int tensorCount = kUnused)
+        : dsCount(dsCount), bufferCount(bufferCount), tensorCount(tensorCount) {}
+
+    bool isValid() const {
+        return dsCount != kUnused || bufferCount != kUnused || tensorCount != kUnused;
+    }
+};
+
+/// Tracks in-flight (not yet waited-on) memory operations as ordered queues,
+/// one queue per hardware counter (DS / buffer / tensor). Each processed basic
+/// block has an associated tracker that represents its exit state; the
+/// @c *CountFrom(inst) methods translate a queue position into the hardware
+/// wait-count immediate. See the user doc's "PendingMemOpTracker" section for
+/// the full field/method table.
+struct PendingMemOpTracker {
+    /// DS reads/writes in issue order.
+    std::deque<StinkyInstruction*> pendingDSOps;
+    /// MemTokenData tokens accumulated from pending DS ops (used for barrier conflict).
+    std::unordered_set<int> activeDSTokens;
+    /// Global loads/stores in issue order.
+    std::deque<StinkyInstruction*> pendingBufferOps;
+    /// Tensor loads (tensor_load_to_lds) in issue order, tracked on tlcnt.
+    std::deque<StinkyInstruction*> pendingTensorLoadOps;
+
+    int pendingDSCount() const {
+        return static_cast<int>(pendingDSOps.size());
+    }
+
+    int pendingBufferCount() const {
+        return static_cast<int>(pendingBufferOps.size());
+    }
+
+    int pendingTensorLoadCount() const {
+        return static_cast<int>(pendingTensorLoadOps.size());
+    }
+
+    /// Number of DS ops from @p inst (inclusive) to the end of the queue. Returns 0 if
+    /// @p inst is not in the queue. Maps directly to the hardware wait-count immediate.
+    int pendingDSCountFrom(StinkyInstruction* inst) const {
+        auto it = std::find(pendingDSOps.begin(), pendingDSOps.end(), inst);
+        if (it != pendingDSOps.end()) {
+            return static_cast<int>(std::distance(it, pendingDSOps.end()));
+        }
+        return 0;
+    }
+
+    /// Number of buffer ops from @p inst (inclusive) to the end of the queue. Returns 0
+    /// if @p inst is not in the queue.
+    int pendingBufferCountFrom(StinkyInstruction* inst) const {
+        auto it = std::find(pendingBufferOps.begin(), pendingBufferOps.end(), inst);
+        if (it != pendingBufferOps.end()) {
+            return static_cast<int>(std::distance(it, pendingBufferOps.end()));
+        }
+        return 0;
+    }
+
+    /// Number of tensor loads from @p inst (inclusive) to the end of the queue.
+    /// Returns 0 if @p inst is not in the queue.
+    int pendingTensorLoadCountFrom(StinkyInstruction* inst) const {
+        auto it = std::find(pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(), inst);
+        if (it != pendingTensorLoadOps.end()) {
+            return static_cast<int>(std::distance(it, pendingTensorLoadOps.end()));
+        }
+        return 0;
+    }
+
+    /// True iff any in-flight DS op lacks MemTokenData. Used by the conservative
+    /// barrier-vs-DS conflict path: an untagged pending DS op cannot be proven
+    /// disjoint from a barrier, so a tagged barrier must still drain.
+    bool hasUntaggedDSOp() const {
+        return std::any_of(
+            pendingDSOps.begin(), pendingDSOps.end(),
+            [](const StinkyInstruction* op) { return op->getModifier<MemTokenData>() == nullptr; });
+    }
+
+    /// True iff any in-flight tensor load lacks MemTokenData. Used by the conservative
+    /// tensor-wait path: an untagged pending tensor load cannot be proven disjoint
+    /// from a tagged anchor, so the anchor still drains.
+    bool hasUntaggedTensorLoadOp() const {
+        return std::any_of(
+            pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(),
+            [](const StinkyInstruction* op) { return op->getModifier<MemTokenData>() == nullptr; });
+    }
+
+    void clear() {
+        pendingDSOps.clear();
+        pendingBufferOps.clear();
+        pendingTensorLoadOps.clear();
+        activeDSTokens.clear();
+    }
+
+    /// Append @p inst to the DS queue (and collect its tokens). Returns true iff appended.
+    bool recordDSOperation(StinkyInstruction* inst) {
+        if (inst == nullptr || !isDSMemoryOp(*inst)) {
+            return false;
+        }
+
+        pendingDSOps.push_back(inst);
+        if (auto* memTokenData = inst->getModifier<MemTokenData>()) {
+            for (int token : memTokenData->tokens) {
+                activeDSTokens.emplace(token);
+            }
+        }
+        return true;
+    }
+
+    /// Append @p inst to the buffer queue. Returns true iff appended.
+    bool recordBufferOperation(StinkyInstruction* inst) {
+        if (inst == nullptr || !isBufferMemoryOp(*inst)) {
+            return false;
+        }
+
+        pendingBufferOps.push_back(inst);
+        return true;
+    }
+
+    /// Append @p inst to the tensor-load queue. Returns true iff appended.
+    bool recordTensorLoadOperation(StinkyInstruction* inst) {
+        if (inst == nullptr || !isTensorLoad(*inst)) {
+            return false;
+        }
+
+        pendingTensorLoadOps.push_back(inst);
+        return true;
+    }
+
+    /// Tensor-only merge used by @c computeRequiredWaits to seed @c localState
+    /// with cross-block tensor in-flight ops at block entry. Appends every
+    /// pending tensor load from @p other while skipping pointers already
+    /// present, so multiple converging CFG paths do not duplicate the same op.
+    ///
+    /// The tracker has no @c activeTensorTokens companion to @c activeDSTokens;
+    /// tensor token-overlap is computed per-op against each pending load's
+    /// @c MemTokenData modifier, so seeding the @c pendingTensorLoadOps deque
+    /// alone is sufficient for both the barrier and DS-op tensor-wait anchors.
+    void mergeTensorFrom(const PendingMemOpTracker& other) {
+        for (StinkyInstruction* op : other.pendingTensorLoadOps) {
+            if (std::find(pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(), op) ==
+                pendingTensorLoadOps.end()) {
+                pendingTensorLoadOps.push_back(op);
+            }
+        }
+    }
+
+    /// Trim @p queue so only the last @p lastWait ops remain. No-op when there is no
+    /// prior wait recorded (lastWait < 0) or it was 0 (the wait-0 emission paths
+    /// already clear the queue themselves).
+    void trimQueueToLastWait(std::deque<StinkyInstruction*>& queue, int lastWait) {
+        if (lastWait <= 0) {
+            return;
+        }
+        if (lastWait >= static_cast<int>(queue.size())) {
+            return;
+        }
+        queue.erase(queue.begin(), queue.end() - lastWait);
+    }
+};
+
+// ----------------------------------------------------------------------------
+// Pass class
+// ----------------------------------------------------------------------------
+
+class StinkyWaitCntInsertionPass : public StinkyInstPass {
+   public:
+    /// List of (anchor instruction, wait spec) pairs in emission order.
+    using WaitInsertionList = std::vector<std::pair<StinkyInstruction*, WaitCountSpec>>;
+
+    StinkyWaitCntInsertionPass() = default;
+
+    static char ID;
+
+    const char* getName() const override {
+        return "StinkyWaitCntInsertionPass";
+    }
+
+    PassID getPassID() const override {
+        return &StinkyWaitCntInsertionPass::ID;
+    }
+
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        GfxArchID arch =
+            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
+                         passCtx.getGemmTileConfig().arch[2]);
+
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, true);
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
+
+        buildBlockExitStates(func, passCtx);
+
+        for (auto* bb : rpo) {
+            if (!passCtx.shouldProcessBasicBlock(*bb)) {
+                continue;
+            }
+            WaitInsertionList waits = computeRequiredWaits(*bb);
+            emitWaitInstructions(*bb, arch, waits);
+        }
+
+        removePHIs(passCtx, rpo);
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    /// Per-counter bookkeeping during a single block walk. Tracks the last emitted wait
+    /// value and how many new ops have been issued since, enabling redundancy elision.
+    struct CounterWaitState {
+        int lastEmittedWait = WaitCountSpec::kUnused;
+        int opsSinceLastWait = 0;
+
+        void recordNewOp() {
+            ++opsSinceLastWait;
+        }
+
+        bool needsNewWait(int required) const {
+            return lastEmittedWait == WaitCountSpec::kUnused ||
+                   lastEmittedWait + opsSinceLastWait > required;
+        }
+
+        void recordEmittedWait(int value) {
+            lastEmittedWait = value;
+            opsSinceLastWait = 0;
+        }
+    };
+
+    /// Exit-state queues for each processed block (full block walk, program order).
+    /// Pre-populated by buildBlockExitStates and refined per block by computeRequiredWaits.
+    std::unordered_map<BasicBlock*, PendingMemOpTracker> blockExitMemState;
+
+    /// Phase 1: pre-scan every processed block once, recording DS / buffer /
+    /// tensor memory ops in program order. Populates @c blockExitMemState[bb]
+    /// with the full set of in-flight ops at each block's exit before any
+    /// waits are considered; Phase 2 later refines (trims) each entry.
+    void buildBlockExitStates(Function& func, PassContext& passCtx) {
+        for (BasicBlock& bb : func) {
+            if (passCtx.shouldProcessBasicBlock(bb)) {
+                blockExitMemState.emplace(&bb, PendingMemOpTracker());
+                scanBlockMemOps(bb);
+            }
+        }
+    }
+
+    /// Helper for buildBlockExitStates: record DS, buffer, and tensor-load ops
+    /// in @p bb in program order. Each @c record*Operation call is a no-op for
+    /// instructions that do not match the corresponding queue.
+    void scanBlockMemOps(BasicBlock& bb) {
+        PendingMemOpTracker& state = blockExitMemState[&bb];
+        state.clear();
+        for (IRBase& ir : bb) {
+            StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) {
+                continue;
+            }
+
+            state.recordDSOperation(inst);
+            state.recordBufferOperation(inst);
+            state.recordTensorLoadOperation(inst);
+        }
+    }
+
+    /// Compute the minimum wait-count value for a single counter (DS or buffer) given
+    /// the consumer's memory-op dependencies. The @p getCountFrom callback delegates to
+    /// either pendingDSCountFrom or pendingBufferCountFrom so the same algorithm covers
+    /// both counters. Returns (requiredWait, needsWait).
+    ///
+    /// See "Wait Value Computation: computeWaitValueForCounter" in the user docs.
+    std::pair<int, bool> computeWaitValueForCounter(
+        int initialPendingCount, const PendingMemOpTracker& localState,
+        const std::unordered_set<StinkyInstruction*>& memOpDependencies,
+        const CounterWaitState& counterState,
+        const std::function<int(const PendingMemOpTracker&, StinkyInstruction*)>& getCountFrom) {
+        int requiredWait = initialPendingCount;
+        bool needsWait = false;
+        std::vector<int> predecessorValues;
+
+        for (StinkyInstruction* src : memOpDependencies) {
+            int count = getCountFrom(localState, src);
+            if (count > 0) {
+                requiredWait = std::min(requiredWait, count - 1);
+                needsWait = true;
+            } else if (counterState.lastEmittedWait != 0) {
+                // Unprocessed predecessor blocks insert an empty state via operator[].
+                count = getCountFrom(blockExitMemState[src->getParent()], src);
+                if (count > 0) {
+                    predecessorValues.push_back(count - 1);
+                    needsWait = true;
+                }
+            }
+        }
+
+        if (!predecessorValues.empty()) {
+            requiredWait += *std::min_element(predecessorValues.begin(), predecessorValues.end());
+        }
+
+        return {requiredWait, needsWait};
+    }
+
+    /// Collect prior DS reads/atomics whose MemTokenData tokens overlap @p writer's.
+    /// Scans @p localState (current block) and each predecessor's exit state to
+    /// surface the WAR-on-LDS hazard that the SSA def-use chain does not encode.
+    ///
+    /// Per-pair pipeline filter: if a candidate reader is on the same hardware
+    /// memory pipeline as @p writer (see isOnSameDSPipeline), it is skipped --
+    /// the hardware FIFO-retires the pair on the shared counter, so no
+    /// synthetic wait is required. In practice this excludes all candidates
+    /// when @p writer is a ds_write (both writer and readers live on dlcnt),
+    /// while leaving tensor_load_to_lds writers (on tlcnt) fully covered.
+    ///
+    /// Conservative fallback (hybrid policy for missing MemTokenData):
+    ///   - Writer lacks MemTokenData: we cannot prove disjointness against any
+    ///     pending DS read/atomic on a different pipeline. Returns with
+    ///     @c forceDsDrain == true; the caller emits @c s_wait_dscnt 0.
+    ///   - Candidate reader lacks MemTokenData (writer has tokens): conservatively
+    ///     treat it as conflicting and add it to @c deps so the normal
+    ///     @c min(count - 1) algorithm computes the wait value.
+    LdsWarResult collectLdsWarDependencies(StinkyInstruction* writer, BasicBlock& bb,
+                                           const PendingMemOpTracker& localState) {
+        LdsWarResult result;
+        const MemTokenData* writerTokens = writer->getModifier<MemTokenData>();
+        const bool writerLacksTokens = (writerTokens == nullptr);
+
+        auto isCandidate = [&](StinkyInstruction* op) {
+            if (op == nullptr || op == writer) {
+                return false;
+            }
+            if (!isDSRead(*op) && !isDSAtomic(*op)) {
+                return false;
+            }
+            // Same-pipeline pairs are FIFO-ordered by hardware, so no synthetic
+            // WAR wait is needed. Today this matches ds_write writer paired
+            // with ds_read / ds_atomic readers on the DS (dlcnt) pipeline.
+            return !isOnSameDSPipeline(*writer, *op);
+        };
+
+        if (writerLacksTokens) {
+            // Conservative branch: check whether any non-same-pipeline candidate
+            // exists. If so, force a full DS drain; otherwise nothing to do.
+            auto anyCandidate = [&](const std::deque<StinkyInstruction*>& q) {
+                return std::any_of(q.begin(), q.end(), isCandidate);
+            };
+            if (anyCandidate(localState.pendingDSOps)) {
+                result.forceDsDrain = true;
+                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative DS drain: LDS writer "
+                                     << "lacks MemTokenData (" << writer->getHwInstDesc()->mnemonic
+                                     << ")\n");
+                return result;
+            }
+            for (BasicBlock* pred : bb.getPredecessors()) {
+                auto it = blockExitMemState.find(pred);
+                if (it == blockExitMemState.end()) {
+                    continue;
+                }
+                if (anyCandidate(it->second.pendingDSOps)) {
+                    result.forceDsDrain = true;
+                    PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative DS drain: LDS writer "
+                                         << "lacks MemTokenData ("
+                                         << writer->getHwInstDesc()->mnemonic
+                                         << "), candidate in predecessor block\n");
+                    return result;
+                }
+            }
+            return result;
+        }
+
+        // Writer has tokens: per-token overlap path with conservative widening
+        // for candidates that lack MemTokenData.
+        auto isConflictingRead = [&](StinkyInstruction* op) {
+            if (!isCandidate(op)) {
+                return false;
+            }
+            const MemTokenData* mt = op->getModifier<MemTokenData>();
+            if (mt == nullptr) {
+                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative WAR include: candidate "
+                                     << "lacks MemTokenData (" << op->getHwInstDesc()->mnemonic
+                                     << "), writer (" << writer->getHwInstDesc()->mnemonic
+                                     << ")\n");
+                return true;
+            }
+            return hasTokenOverlap(mt->tokens, writerTokens->tokens);
+        };
+
+        for (StinkyInstruction* op : localState.pendingDSOps) {
+            if (isConflictingRead(op)) {
+                result.deps.insert(op);
+            }
+        }
+
+        for (BasicBlock* pred : bb.getPredecessors()) {
+            auto it = blockExitMemState.find(pred);
+            if (it == blockExitMemState.end()) {
+                continue;
+            }
+            for (StinkyInstruction* op : it->second.pendingDSOps) {
+                if (isConflictingRead(op)) {
+                    result.deps.insert(op);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// Collect prior tensor loads whose MemTokenData tokens overlap @p anchor's.
+    /// Scans @p localState only -- @c computeRequiredWaits seeds @c localState
+    /// with every predecessor's pending tensor loads at block entry (via
+    /// @c PendingMemOpTracker::mergeTensorFrom), so the local queue already
+    /// reflects cross-block in-flight tensor state. Surfaces dependencies that
+    /// flow through LDS pseudo-registers rather than the SSA def-use chain.
+    ///
+    /// Anchors are barriers / DS reads / DS writes / DS atomics (see
+    /// @c isTensorWaitAnchor). Tensor loads themselves are excluded because
+    /// the hardware FIFO already orders them on the shared tlcnt counter, so
+    /// no synthetic pipeline filter is needed here.
+    ///
+    /// Conservative fallback (hybrid policy for missing MemTokenData):
+    ///   - Anchor lacks MemTokenData: we cannot prove disjointness against any
+    ///     pending tensor load. Returns with @c forceTensorDrain == true; the
+    ///     caller emits @c s_wait_tensorcnt 0.
+    ///   - Candidate tensor load lacks MemTokenData (anchor has tokens):
+    ///     conservatively treat it as conflicting and add it to @c deps so the
+    ///     normal @c min(count - 1) algorithm computes the wait value.
+    TensorWaitDepResult collectTensorLoadDependencies(StinkyInstruction* anchor, BasicBlock& bb,
+                                                      const PendingMemOpTracker& localState) {
+        (void)bb;
+        TensorWaitDepResult result;
+        const MemTokenData* anchorTokens = anchor->getModifier<MemTokenData>();
+        const bool anchorLacksTokens = (anchorTokens == nullptr);
+
+        auto isCandidate = [&](StinkyInstruction* op) {
+            if (op == nullptr || op == anchor) {
+                return false;
+            }
+            return isTensorLoad(*op);
+        };
+
+        if (anchorLacksTokens) {
+            // Conservative branch: any pending tensor load (seeded from preds +
+            // augmented locally) forces a full tlcnt drain.
+            auto anyCandidate = [&](const std::deque<StinkyInstruction*>& q) {
+                return std::any_of(q.begin(), q.end(), isCandidate);
+            };
+            if (anyCandidate(localState.pendingTensorLoadOps)) {
+                result.forceTensorDrain = true;
+                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor drain: anchor "
+                                     << "lacks MemTokenData (" << anchor->getHwInstDesc()->mnemonic
+                                     << ")\n");
+            }
+            return result;
+        }
+
+        // Anchor has tokens: per-token overlap path with conservative widening
+        // for candidates that lack MemTokenData.
+        auto isConflictingLoad = [&](StinkyInstruction* op) {
+            if (!isCandidate(op)) {
+                return false;
+            }
+            const MemTokenData* mt = op->getModifier<MemTokenData>();
+            if (mt == nullptr) {
+                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor include: candidate "
+                                     << "lacks MemTokenData (" << op->getHwInstDesc()->mnemonic
+                                     << "), anchor (" << anchor->getHwInstDesc()->mnemonic
+                                     << ")\n");
+                return true;
+            }
+            return hasTokenOverlap(mt->tokens, anchorTokens->tokens);
+        };
+
+        for (StinkyInstruction* op : localState.pendingTensorLoadOps) {
+            if (isConflictingLoad(op)) {
+                result.deps.insert(op);
+            }
+        }
+
+        return result;
+    }
+
+    /// Phase 2: walk @p bb in program order and return the list of
+    /// @c (anchor, WaitCountSpec) pairs that the emit phase will materialise.
+    ///
+    /// Outline (full per-step contract lives in the user doc, "Core Algorithm:
+    /// computeRequiredWaits"):
+    ///   0. Block entry -- seed @c localState.pendingTensorLoadOps from every
+    ///      predecessor's exit state via @c mergeTensorFrom. DS / buffer
+    ///      queues are intentionally NOT seeded here; their helpers walk
+    ///      predecessors explicitly.
+    ///   1. Tensor-wait anchor (barrier / DS read / DS write / DS atomic):
+    ///      run @c collectTensorLoadDependencies; emit @c s_wait_tensorcnt 0
+    ///      on @c forceTensorDrain, otherwise @c s_wait_tensorcnt min(count-1).
+    ///   2. Barrier vs. DS conflict: drain on token overlap, on a barrier that
+    ///      lacks @c MemTokenData, or on an untagged pending DS op.
+    ///   3. Collect this instruction's DS / buffer dependencies via
+    ///      @c collectSources (PHIs flattened, filtered to memory ops).
+    ///   4. WAR-on-LDS for @c isLdsWriterAnchor: run
+    ///      @c collectLdsWarDependencies; either widen the dependency set or
+    ///      set @c forceDsDrain when the writer lacks @c MemTokenData.
+    ///   5-6. Per-counter wait values via @c computeWaitValueForCounter, with
+    ///        redundancy elision via @c CounterWaitState::needsNewWait.
+    ///   7. Tail recording: only AFTER any wait is emitted, push @c inst onto
+    ///      the relevant queues so the wait's queue snapshot excludes its own
+    ///      consumer (matches hardware semantics).
+    ///   8-9. Trim each queue using its counter's @c lastEmittedWait and store
+    ///        the refined state into @c blockExitMemState for successors.
+    WaitInsertionList computeRequiredWaits(BasicBlock& bb) {
+        PendingMemOpTracker localState;
+        WaitInsertionList waits;
+        CounterWaitState dsState;
+        CounterWaitState bufferState;
+        CounterWaitState tensorState;
+
+        // Seed the tensor queue from every predecessor's exit state so the
+        // tensor-wait anchor branch and the tensor-counter computation see
+        // cross-block in-flight tensor loads via localState alone.
+        for (BasicBlock* pred : bb.getPredecessors()) {
+            auto it = blockExitMemState.find(pred);
+            if (it == blockExitMemState.end()) {
+                continue;
+            }
+            localState.mergeTensorFrom(it->second);
+        }
+
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr || inst->getUnifiedOpcode() == GFX::PHI) {
+                continue;
+            }
+
+            // tensor-wait check (token-based, independent counter).
+            if (isTensorWaitAnchor(*inst)) {
+                auto twResult = collectTensorLoadDependencies(inst, bb, localState);
+                if (twResult.forceTensorDrain) {
+                    if (tensorState.needsNewWait(0)) {
+                        waits.emplace_back(
+                            inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused, 0));
+                        tensorState.recordEmittedWait(0);
+                        localState.pendingTensorLoadOps.clear();
+                    }
+                } else if (!twResult.deps.empty()) {
+                    auto tResult = computeWaitValueForCounter(
+                        localState.pendingTensorLoadCount(), localState, twResult.deps, tensorState,
+                        [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
+                            return tracker.pendingTensorLoadCountFrom(src);
+                        });
+                    if (tResult.second && tensorState.needsNewWait(tResult.first)) {
+                        waits.emplace_back(
+                            inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused,
+                                                tResult.first));
+                        tensorState.recordEmittedWait(tResult.first);
+                    }
+                }
+            }
+
+            // Barrier-vs-DS conflict (see doc: section "Barrier token conflict handling").
+            // The original trigger fires on a tagged barrier whose tokens overlap with
+            // activeDSTokens. The conservative fallback adds two extra triggers for
+            // the missing-MemTokenData case:
+            //   * barrier lacks MemTokenData (anchor-missing-tokens branch)
+            //   * any pending DS op lacks MemTokenData (candidate-missing-tokens branch)
+            // In all cases the action is the same: drain via s_wait_dscnt 0 and clear
+            // DS state. Gated on !pendingDSOps.empty() so we never emit a no-op drain.
+            // Barriers are never DS / buffer ops, so the tail recording at the bottom
+            // of this loop body is a no-op for them; the explicit continue keeps the
+            // existing semantics.
+            if (isBarrier(*inst)) {
+                const auto* memTokenData = inst->getModifier<MemTokenData>();
+                const bool barrierLacksTokens = (memTokenData == nullptr);
+                const bool tokenOverlap =
+                    !barrierLacksTokens &&
+                    hasTokenOverlap(localState.activeDSTokens, memTokenData->tokens);
+                const bool untaggedPendingDSOp = localState.hasUntaggedDSOp();
+                const bool needsDrain = !localState.pendingDSOps.empty() &&
+                                        (tokenOverlap || barrierLacksTokens || untaggedPendingDSOp);
+                if (needsDrain) {
+                    if (barrierLacksTokens) {
+                        PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative barrier drain: "
+                                             << "barrier lacks MemTokenData (" << bb.getLabel()
+                                             << ")\n");
+                    } else if (untaggedPendingDSOp && !tokenOverlap) {
+                        PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative barrier drain: "
+                                             << "pending DS op lacks MemTokenData ("
+                                             << bb.getLabel() << ")\n");
+                    }
+                    waits.emplace_back(inst, WaitCountSpec(0, WaitCountSpec::kUnused));
+                    dsState.recordEmittedWait(0);
+                    localState.activeDSTokens.clear();
+                    localState.pendingDSOps.clear();
+                    continue;
+                }
+            }
+
+            auto memOpDependencies = collectSources(inst, [](StinkyInstruction* src) {
+                return isDSMemoryOp(*src) || isBufferMemoryOp(*src);
+            });
+
+            // WAR-on-LDS: an LDS writer (tensor_load_to_lds / ds_write) must wait
+            // for prior token-overlapping DS reads to drain. Run this before the
+            // tail recording so that the writer is not yet in pendingDSOps, which
+            // makes the count-based wait value match hardware semantics: the wait
+            // executes before the writer issues, so the queue at wait-time excludes
+            // the writer.
+            //
+            // Conservative branch: when the writer lacks MemTokenData,
+            // collectLdsWarDependencies returns @c forceDsDrain == true and we
+            // emit @c s_wait_dscnt 0 instead of merging deps. The buffer counter
+            // is still driven by the SSA dependencies the normal way.
+            bool ldsForceDsDrain = false;
+            if (isLdsWriterAnchor(*inst)) {
+                auto warResult = collectLdsWarDependencies(inst, bb, localState);
+                if (warResult.forceDsDrain) {
+                    ldsForceDsDrain = true;
+                } else {
+                    memOpDependencies.insert(warResult.deps.begin(), warResult.deps.end());
+                }
+            }
+
+            if (ldsForceDsDrain && dsState.needsNewWait(0)) {
+                waits.emplace_back(inst, WaitCountSpec(0, WaitCountSpec::kUnused));
+                dsState.recordEmittedWait(0);
+                localState.activeDSTokens.clear();
+                localState.pendingDSOps.clear();
+            }
+
+            if (!memOpDependencies.empty()) {
+                // Compute waits against the pre-consumer queue. For DS-op / buffer-op
+                // consumers, this gives the correct dlcnt / vlcnt because the wait
+                // executes before the consumer is issued.
+                if (!ldsForceDsDrain) {
+                    auto dsResult = computeWaitValueForCounter(
+                        localState.pendingDSCount(), localState, memOpDependencies, dsState,
+                        [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
+                            return tracker.pendingDSCountFrom(src);
+                        });
+                    if (dsResult.second && dsState.needsNewWait(dsResult.first)) {
+                        waits.emplace_back(inst,
+                                           WaitCountSpec(dsResult.first, WaitCountSpec::kUnused));
+                        dsState.recordEmittedWait(dsResult.first);
+                    }
+                }
+
+                auto bufferResult = computeWaitValueForCounter(
+                    localState.pendingBufferCount(), localState, memOpDependencies, bufferState,
+                    [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
+                        return tracker.pendingBufferCountFrom(src);
+                    });
+                if (bufferResult.second && bufferState.needsNewWait(bufferResult.first)) {
+                    waits.emplace_back(inst,
+                                       WaitCountSpec(WaitCountSpec::kUnused, bufferResult.first));
+                    bufferState.recordEmittedWait(bufferResult.first);
+                }
+            }
+
+            // Tail recording: after any wait for this instruction has been emitted,
+            // push inst onto the trackers so future iterations and the block exit
+            // state see it as in-flight.
+            if (localState.recordDSOperation(inst)) {
+                dsState.recordNewOp();
+            }
+            if (localState.recordBufferOperation(inst)) {
+                bufferState.recordNewOp();
+            }
+            if (localState.recordTensorLoadOperation(inst)) {
+                tensorState.recordNewOp();
+            }
+        }
+
+        // Trim exit-state queues using the last emitted wait so successor blocks see
+        // only ops still genuinely in flight.
+        localState.trimQueueToLastWait(localState.pendingDSOps, dsState.lastEmittedWait);
+        localState.trimQueueToLastWait(localState.pendingBufferOps, bufferState.lastEmittedWait);
+        localState.trimQueueToLastWait(localState.pendingTensorLoadOps,
+                                       tensorState.lastEmittedWait);
+
+        blockExitMemState[&bb] = localState;
+        return waits;
+    }
+
+    /// Phase 3: insert wait IR nodes immediately before each anchor. For every
+    /// non-@c kUnused field in a @c WaitCountSpec, one instruction is emitted
+    /// per the mapping in the user doc's "Emit Phase: emitWaitInstructions"
+    /// table:
+    ///   dsCount     -> s_wait_dscnt      (SWaitCntData.dlcnt)
+    ///   bufferCount -> s_wait_loadcnt    (SWaitCntData.vlcnt)
+    ///   tensorCount -> s_wait_tensorcnt  (SWaitTensorCntData.tlcnt)
+    void emitWaitInstructions(BasicBlock& bb, GfxArchID arch, const WaitInsertionList& waits) {
+        auto irBuilder = AsmIRBuilder(bb, arch);
+
+        for (const auto& entry : waits) {
+            StinkyInstruction* inst = entry.first;
+            const WaitCountSpec& waitSpec = entry.second;
+
+            if (waitSpec.dsCount != WaitCountSpec::kUnused) {
+                StinkyInstruction* waitInst =
+                    irBuilder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch), inst);
+                waitInst->addSrcReg(StinkyRegister(waitSpec.dsCount));
+
+                SWaitCntData waitCntData;
+                waitCntData.dlcnt = waitSpec.dsCount;
+                waitInst->addModifier<SWaitCntData>(waitCntData);
+            }
+
+            if (waitSpec.bufferCount != WaitCountSpec::kUnused) {
+                StinkyInstruction* waitInst =
+                    irBuilder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), inst);
+                waitInst->addSrcReg(StinkyRegister(waitSpec.bufferCount));
+
+                SWaitCntData waitCntData;
+                waitCntData.vlcnt = waitSpec.bufferCount;
+                waitInst->addModifier<SWaitCntData>(waitCntData);
+            }
+
+            if (waitSpec.tensorCount != WaitCountSpec::kUnused) {
+                StinkyInstruction* waitInst =
+                    irBuilder.create(getMCIDByUOp(GFX::s_wait_tensorcnt, arch), inst);
+                waitInst->addSrcReg(StinkyRegister(waitSpec.tensorCount));
+
+                SWaitTensorCntData waitCntData;
+                waitCntData.tlcnt = waitSpec.tensorCount;
+                waitInst->addModifier<SWaitTensorCntData>(waitCntData);
+            }
+        }
+    }
+
+    /// Phase 4: strip PHI pseudo-instructions from processed blocks now that
+    /// def-use chains have been fully consumed by Phases 1-3.
+    void removePHIs(PassContext& passCtx, const std::vector<BasicBlock*>& rpo) {
+        for (auto* bb : rpo) {
+            if (!passCtx.shouldProcessBasicBlock(*bb)) {
+                continue;
+            }
+
+            for (auto it = bb->begin(); it != bb->end();) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst && inst->getUnifiedOpcode() == GFX::PHI) {
+                    it = bb->eraseIR(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+    }
+};
+
+char StinkyWaitCntInsertionPass::ID = 0;
+}  // namespace
+
+namespace stinkytofu {
+std::unique_ptr<Pass> createStinkyWaitCntInsertionPass() {
+    return std::make_unique<StinkyWaitCntInsertionPass>();
+}
+}  // namespace stinkytofu

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <miopen/miopen.h>
 
 namespace miopen_plugin
@@ -12,10 +12,10 @@ namespace miopen_plugin
 class MiopenTensor
 {
 public:
-    MiopenTensor(const hipdnn_data_sdk::data_objects::TensorAttributes& tensor);
+    MiopenTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor);
 
     MiopenTensor(int64_t uid,
-                 hipdnn_data_sdk::data_objects::DataType dataType,
+                 hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                  const std::vector<int64_t>& inputDims,
                  const std::vector<int64_t>& inputStrides);
 

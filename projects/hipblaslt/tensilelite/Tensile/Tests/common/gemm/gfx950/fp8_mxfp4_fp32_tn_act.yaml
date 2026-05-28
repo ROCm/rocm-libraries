@@ -1,0 +1,133 @@
+TestParameters:
+  # need to skip for gfx950: TODO: re-enable this with subtile + MXScaleFormat=1
+  marks: [skip-gfx950, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx940, skip-gfx941]  # Only for gfx950
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 21
+  DataInitTypeB: 21
+  DataInitTypeC: 21
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  BoundsCheck: 2
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+  ########################################
+  # FP8 A + MXFP4 B -> FP32 C/D (TN (TransposeA=True, TransposeB=False))
+  # Mixed FP8+MXFP4, FP32 output, All tile sizes (64x64, 128x128, 256x256), with Activation
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DataTypeA: F8
+      DestDataType: s
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True   # TN configuration
+      TransposeB: False  # TN configuration
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 128, 1, 1, 4, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [32, 32, 64, 1, 1, 4, 4, 2, 2]
+          - [32, 32, 64, 1, 1, 8, 8, 2, 2]
+        #- DepthU: [32, 64, 128]
+        - DepthU: [256, 512]
+        - AssertFree0ElementMultiple: [1]
+        - AssertFree1ElementMultiple: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DirectToLds: [0]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [32]
+        - LocalReadVectorWidth: [32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - ClusterLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [4]
+        - InnerUnroll: [1]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [4]
+        - LdsPadB: [4]
+        - WorkGroupMapping: [64]
+        - StreamK: [0,3]
+        - UseSubtileImpl: [1] # TODO: enable subtile
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          ########################################
+          # 1. Small, Power-of-2 - to test optimized code path
+          ########################################
+          - Exact: [256, 256, 1, 256]
+
+          ########################################
+          # 2. Odd M - to test edge M
+          ########################################
+          - Exact: [63, 64, 1, 64]
+          - Exact: [255, 256, 1, 256]
+
+          ########################################
+          # 3. Odd N - to test edge N
+          ########################################
+          - Exact: [64, 63, 1, 64]
+          - Exact: [256, 255, 1, 256]
+
+          ########################################
+          # 4. Odd M and N - to test both edge dimensions
+          ########################################
+          - Exact: [63, 63, 1, 64]
+          - Exact: [255, 255, 1, 256]
+
+          ########################################
+          # 5. Odd K - to test tail loop
+          ########################################
+          - Exact: [64, 64, 1, 63]
+          - Exact: [256, 256, 1, 255]
+
+          ########################################
+          # 6. Small size with batch > 1
+          ########################################
+          - Exact: [32, 32, 8, 32]
+
+          ########################################
+          # 7. Medium size that doesn't divide evenly on CUs (stream-k)
+          ########################################
+          - Exact: [1000, 1000, 1, 256]
+          - Exact: [1500, 1500, 1, 512]
+          - Exact: [1024, 1024, 1, 333]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: gelu]
+          - [Enum: relu]
+          - [Enum: sigmoid]
+          - [Enum: Silu]
+          - [Enum: Clamp]

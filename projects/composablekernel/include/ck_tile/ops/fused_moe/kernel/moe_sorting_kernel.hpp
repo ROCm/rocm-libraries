@@ -10,6 +10,10 @@
 #include <string>
 #include <type_traits>
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 #if !defined(CK_TILE_HAS_ROW_NEWBCAST)
 // row_newbcast (DPP modifier 0x157) support by architecture:
 // - Not supported: gfx908 (MI100) and older
@@ -1682,7 +1686,7 @@ struct MoeSortingMultiPhaseKernel_P0_v1
                 IndexType eid = x[j.value]; // ext_vector_type must use int to []
                 uint32_t curr_token_id, curr_topk_id;
                 kargs.topk_mdiv.divmod(i * Problem::SubTokenTile + j, curr_token_id, curr_topk_id);
-                if(eid < kargs.num_experts)
+                if(eid < kargs.num_experts && eid >= 0)
                 {
                     if constexpr(Problem::LocalToken)
                     {
@@ -3125,3 +3129,7 @@ struct MoeSortingMultiPhaseKernel_P23
 #undef MOE_SORTING_MOCK_ID
 
 } // namespace ck_tile
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

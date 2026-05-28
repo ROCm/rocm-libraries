@@ -1451,23 +1451,14 @@ extern "C" miopenStatus_t miopenConvolutionBackwardBias(miopenHandle_t handle,
                                                         const miopenTensorDescriptor_t dbDesc,
                                                         void* db)
 {
-    MIOPEN_LOG_FUNCTION(handle, alpha, dyDesc, dy, beta, dbDesc, db);
-    // bfloat16 not supported for bias operation
-    if(miopen::deref(dyDesc).GetType() == miopenBFloat16 ||
-       miopen::deref(dbDesc).GetType() == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
-
-    return miopen::try_([&] {
-        ConvolutionBackwardBias(miopen::deref(handle),
-                                alpha,
-                                miopen::deref(dyDesc),
-                                DataCast(dy),
-                                beta,
-                                miopen::deref(dbDesc),
-                                DataCast(db));
-    });
+    std::ignore = handle;
+    std::ignore = alpha;
+    std::ignore = dyDesc;
+    std::ignore = dy;
+    std::ignore = beta;
+    std::ignore = dbDesc;
+    std::ignore = db;
+    return miopenStatusNotImplemented;
 }
 
 MIOPEN_EXPORT

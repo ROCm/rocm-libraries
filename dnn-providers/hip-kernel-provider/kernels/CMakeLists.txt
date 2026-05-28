@@ -76,6 +76,7 @@ endfunction()
 set(KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormFunctions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/DefaultConfiguration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp
@@ -83,6 +84,7 @@ set(KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/StaticUnroll.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hip/vector_add.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/FloatTypes.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/Bfloat16Dev.hpp

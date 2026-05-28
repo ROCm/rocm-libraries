@@ -3,7 +3,7 @@
 
 #include "HipblasltEngine.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 namespace hipblaslt_plugin
 {
@@ -20,7 +20,7 @@ int64_t HipblasltEngine::id() const
 
 bool HipblasltEngine::isApplicable(
     HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -38,7 +38,7 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
                                  hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id);
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -49,7 +49,7 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
 
 size_t HipblasltEngine::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
@@ -64,7 +64,7 @@ size_t HipblasltEngine::getWorkspaceSize(
 
 void HipblasltEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     for(const auto& planBuilder : _planBuilders)
