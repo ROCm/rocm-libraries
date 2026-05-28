@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/gemm_decode/kernel/gemm_decode_chiplet_swizzle.hpp"
 #include "ck_tile/ops/gemm_decode/kernel/gemm_decode_numeric.hpp"
 #include "ck_tile/ops/gemm_decode/pipeline/gemm_decode_problem.hpp"
 #include "ck_tile/ops/gemm_decode/pipeline/gemm_decode_policy.hpp"
@@ -260,8 +261,35 @@ struct GemmDecodeBlockscaleKernel : public GemmDecodeNumeric
     {
         constexpr index_t kTileN = get_warp_size() * kVector;
 
-        const index_t m       = static_cast<index_t>(blockIdx.x);
-        const index_t n_base  = static_cast<index_t>(blockIdx.y) * kNPerWarp;
+        // See `gemm_decode_universal_kernel.hpp` for a description of the
+        // chiplet-swizzle path. Identical (m, n_block) recovery: flatten
+        // the HW (blockIdx.x, blockIdx.y) pair, remap, then unflatten.
+        // `n_base` then drives the W-scale row index below, so the
+        // swizzle automatically applies to the LDS scale prefill too -
+        // each XCD's L2 sees a contiguous N-shard of both B and W scales.
+        index_t m;
+        index_t n_block;
+        if constexpr(Problem::kChipletSwizzle)
+        {
+            const index_t num_m_blocks = static_cast<index_t>(gridDim.x);
+            const index_t num_n_blocks = static_cast<index_t>(gridDim.y);
+            const index_t hw_wgid =
+                static_cast<index_t>(blockIdx.y) * num_m_blocks +
+                static_cast<index_t>(blockIdx.x);
+            const index_t logical_wgid =
+                GemmDecodeChipletSwizzle::remap_wgid(hw_wgid,
+                                                    num_m_blocks * num_n_blocks,
+                                                    Problem::kChipletNumXcds,
+                                                    Problem::kChipletChunkSize);
+            m       = logical_wgid % num_m_blocks;
+            n_block = logical_wgid / num_m_blocks;
+        }
+        else
+        {
+            m       = static_cast<index_t>(blockIdx.x);
+            n_block = static_cast<index_t>(blockIdx.y);
+        }
+        const index_t n_base  = n_block * kNPerWarp;
         const index_t k_id    = static_cast<index_t>(blockIdx.z);
         const index_t k_batch = kargs.k_batch;
 

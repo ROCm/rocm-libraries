@@ -110,7 +110,16 @@ template <typename ADataType_,
           // Reserved for the P4 wvSplitK-style row-interleaved B layout
           // ([N / YTILE, K, YTILE]) with kNPerWarp > 1 register cross-N reuse.
           // P0/P0b/P1 keep row-major B; both kernels static_assert this off.
-          bool kBPreshuffle_                      = false>
+          bool kBPreshuffle_                      = false,
+          // XCD-aware workgroup remap (MI300/MI355). When enabled, the
+          // kernel takes the HW (m, n_block) wgid, runs it through
+          // `GemmDecodeChipletSwizzle::remap_wgid`, and unflattens the
+          // result so that `kChipletChunkSize` consecutive logical wgids
+          // land on the same XCD. Defaults are off (no swizzle) and the
+          // gfx950 / MI355X chiplet count.
+          bool    kChipletSwizzle_                = false,
+          index_t kChipletNumXcds_                = 8,
+          index_t kChipletChunkSize_              = 8>
 struct GemmDecodeProblem
 {
     using ADataType        = remove_cvref_t<ADataType_>;
@@ -130,6 +139,10 @@ struct GemmDecodeProblem
     static constexpr GemmDecodeOutputAxis kOutputAxis = kOutputAxis_;
     static constexpr bool    kHasBias            = kHasBias_;
     static constexpr bool    kBPreshuffle        = kBPreshuffle_;
+
+    static constexpr bool    kChipletSwizzle     = kChipletSwizzle_;
+    static constexpr index_t kChipletNumXcds     = kChipletNumXcds_;
+    static constexpr index_t kChipletChunkSize   = kChipletChunkSize_;
 
     static constexpr index_t kWarpsPerBlock = kWarpsPerBlock_;
     static constexpr index_t kBlockSize     = kWarpsPerBlock * get_warp_size();

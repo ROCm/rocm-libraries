@@ -100,7 +100,10 @@ float AbsoluteTolerance(index_t K)
 template <typename ADataType,
           typename BDataType,
           typename CDataType,
-          bool kHasBias = false>
+          bool    kHasBias        = false,
+          bool    kChipletSwizzle = false,
+          index_t kChipletNumXcds = 8,
+          index_t kChipletChunk   = 8>
 ::testing::AssertionResult RunUnscaledCase(const std::string& test_name,
                                            const DecodeShape& shape,
                                            index_t            k_batch)
@@ -121,7 +124,11 @@ template <typename ADataType,
                                               /*kNPerWarp=*/1,
                                               GemmDecodeOutputAxis::SmallM,
                                               kHasBias,
-                                              /*kWarpsPerBlock=*/1>;
+                                              /*kWarpsPerBlock=*/1,
+                                              /*kBPreshuffle=*/false,
+                                              kChipletSwizzle,
+                                              kChipletNumXcds,
+                                              kChipletChunk>;
     using Kernel  = GemmDecodeUniversalKernel<Problem, GemmDecodePolicy>;
 
     HostTensor<ADataType> a({shape.M, shape.K});
@@ -516,6 +523,33 @@ TEST(GemmDecodeUniversalUnscaled, Bf16Bf16BiasMatrix)
 TEST(GemmDecodeUniversalUnscaled, Fp16Fp16BiasMatrix)
 {
     RunMatrix<fp16_t, fp16_t, fp16_t, /*kHasBias=*/true>("FP16/FP16+bias");
+}
+
+// XCD-aware workgroup swizzle: the kernel output must be bit-identical
+// (within tolerance) to the un-swizzled path, since the swizzle is a
+// pure permutation of which workgroup computes which (m, n) scalar.
+// We exercise four shapes that span num_n_blocks above and below the
+// chunk_size * num_xcds = 64 boundary, plus a multi-row M to stress
+// the (m, n_block) flatten/unflatten.
+TEST(GemmDecodeUniversalChipletSwizzle, Bf16Bf16Match)
+{
+    constexpr bool kSwizzle = true;
+    const std::vector<DecodeShape> shapes{
+        DecodeShape{1, 512,  7168},
+        DecodeShape{1, 4096, 7168},
+        DecodeShape{1, 8192, 7168},
+        DecodeShape{2, 4096, 7168},
+    };
+    for(const auto& s : shapes)
+    {
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t,
+                                     /*kHasBias=*/false,
+                                     kSwizzle>("BF16 swizzle", s, 1)));
+    }
+    EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t,
+                                 /*kHasBias=*/false,
+                                 kSwizzle>("BF16 swizzle split-K",
+                                           DecodeShape{1, 4096, 7168}, 2)));
 }
 
 #ifdef CK_TILE_USE_OCP_FP8
