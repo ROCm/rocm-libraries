@@ -7,6 +7,8 @@ namespace mxfp6 {
 // ---- Vector types ----
 
 using v3i  = __attribute__((__vector_size__(3 * 4))) int;
+using v4i  = __attribute__((__vector_size__(4 * 4))) int;
+using v6i  = __attribute__((__vector_size__(6 * 4))) int;
 using v8i  = __attribute__((__vector_size__(8 * 4))) int;
 using v16f = __attribute__((__vector_size__(16 * 4))) float;
 
@@ -49,12 +51,6 @@ __device__ __forceinline__ void async_load_lds_b128(
 // ---- DS_READ for FP6: read 24 bytes (32 FP6 values) ----
 //
 // Split into issue/complete so the caller can hide LDS latency.
-//
-//   v3i lo, hi;
-//   ds_read_fp6x32_issue(addr, lo, hi);
-//   // ... overlap other work ...
-//   wait_lgkmcnt(0);
-//   v8i reg = ds_read_fp6x32_complete(lo, hi);
 
 __device__ __forceinline__ void ds_read_fp6x32_issue(
     uint32_t lds_byte_offset, v3i& lo, v3i& hi)
@@ -80,7 +76,6 @@ __device__ __forceinline__ v8i ds_read_fp6x32_complete(v3i lo, v3i hi) {
     return v8i{d0, d1, d2, d3, d4, d5, 0, 0};
 }
 
-// Convenience wrapper (for simple tests only — stalls pipeline)
 __device__ __forceinline__ v8i ds_read_fp6x32(uint32_t lds_byte_offset) {
     v3i lo, hi;
     ds_read_fp6x32_issue(lds_byte_offset, lo, hi);
@@ -88,53 +83,101 @@ __device__ __forceinline__ v8i ds_read_fp6x32(uint32_t lds_byte_offset) {
     return ds_read_fp6x32_complete(lo, hi);
 }
 
+// ---- DS_WRITE: VGPR → LDS ----
+
+__device__ __forceinline__ void ds_write_b128(uint32_t lds_byte_offset, v4i data) {
+    asm volatile(
+        "ds_write_b128 %0, %1"
+        : : "v"(lds_byte_offset), "v"(data) : "memory"
+    );
+}
+
+// ---- v8i ↔ v6i conversion ----
+
+__device__ __forceinline__ v6i to_v6i(v8i x) {
+    return v6i{x[0], x[1], x[2], x[3], x[4], x[5]};
+}
+
 // ---- MFMA ----
 //
 // V_MFMA_SCALE_F32_32x32x64_F8F6F4  (FP6 E2M3 × FP6 E2M3)
 //
-// BYTE_SEL: which byte of the scale VGPR to use (0-3).
-// scale_a/b MUST be in VGPR with only the selected byte meaningful.
-
-struct alignas(64) AccTile { v16f vec; };
-
-__device__ __forceinline__ void clear_acc(AccTile& acc) { acc.vec = v16f{}; }
-
-// TransposeC variant: swap src0/src1 so output layout has each lane
-// holding 1 M-row × 16 N-columns, enabling vectorized stores.
+// TransposeC: src0=B, src1=A → each lane holds 1 M-row × 16 N-cols.
+// cbsz=2 (FP6 for src0=B), blgp=2 (FP6 for src1=A).
 //
-// Calling mfma(B, A, ...) computes D_out[n][m] = C[m][n] = A*B.
-// The output is C transposed, but the store maps it back correctly.
+// Accumulator tile types:
+//   AccTileV — accumulator in Arch VGPR  (ACC_CD=0)
+//   AccTileA — accumulator in AccVGPR    (ACC_CD=1)
 //
-// For FP6 × FP6: cbsz=2 for src0(=B), blgp=2 for src1(=A).
-// scale_a in the builtin → src0 scale = B's scale.
-// scale_b in the builtin → src1 scale = A's scale.
+// On gfx950, src0/src1 (A/B) can be VGPR or AccVGPR (ACC bit).
+// src2/vdst (C/D) can be VGPR or AccVGPR (ACC_CD bit).
+// Data loads (global_load, ds_read) write to Arch VGPR.
+// Data stores (global_store) can read from either register file.
+// → No explicit cross-file moves needed in the data path.
+
+struct alignas(64) AccTileV { v16f vec; };
+struct alignas(64) AccTileA { v16f vec; };
+
+using AccTile = AccTileV;
+
+__device__ __forceinline__ void clear_acc(AccTileV& acc) { acc.vec = v16f{}; }
+__device__ __forceinline__ void clear_acc(AccTileA& acc) { acc.vec = v16f{}; }
+
+// MFMA: A/B in Arch VGPR, accumulator in Arch VGPR
 template <int BYTE_SEL>
 __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
-    AccTile& acc, v8i a, v8i b, int scale_a, int scale_b)
+    AccTileV& acc, v8i a, v8i b, int scale_a, int scale_b)
 {
-    static_assert(BYTE_SEL >= 0 && BYTE_SEL <= 3, "byte_sel must be 0-3");
-    acc.vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-        b, a, acc.vec,
-        /*cbsz=*/2, /*blgp=*/2,
-        /*opsel_a=*/BYTE_SEL, scale_b,
-        /*opsel_b=*/BYTE_SEL, scale_a);
+    static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
+    v6i b6 = to_v6i(b), a6 = to_v6i(a);
+    asm volatile(
+        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+        : "+v"(acc.vec)
+        : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a)
+    );
+}
+
+// MFMA: A/B in Arch VGPR, accumulator in AccVGPR
+template <int BYTE_SEL>
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
+    AccTileA& acc, v8i a, v8i b, int scale_a, int scale_b)
+{
+    static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
+    v6i b6 = to_v6i(b), a6 = to_v6i(a);
+    asm volatile(
+        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+        : "+a"(acc.vec)
+        : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a)
+    );
 }
 
 // ---- Epilogue: store 32×32 AccTile to global ----
 //
-// With TransposeC (src0=B, src1=A), each lane holds:
-//   m = tid % 32 (one M-row)
-//   16 acc values spanning N columns
+// With TransposeC, each lane holds 1 M-row × 16 N-columns.
+// N mapping: acc[p] → N = (p%4) + (p/4)*8 + m_half*4
+// Groups of 4 consecutive acc → 4 consecutive N → global_store_dwordx4.
 //
-// N mapping per acc item:
-//   m_half=0 (lanes 0-31):  acc[p] → N = (p%4) + (p/4)*8
-//   m_half=1 (lanes 32-63): acc[p] → N = (p%4) + (p/4)*8 + 4
-//
-// Groups of 4 consecutive acc values map to 4 consecutive N positions
-// → enables global_store_dwordx4 (4 stores instead of 16).
+// On gfx950, global_store can read directly from AccVGPR,
+// so both AccTileV and AccTileA use the same store logic.
 
 __device__ __forceinline__ void store_acc_f32(
-    float* __restrict__ D, int D_stride, const AccTile& acc,
+    float* __restrict__ D, int D_stride, const AccTileV& acc,
+    int m_tile_base, int n_tile_base)
+{
+    int m = m_tile_base + (threadIdx.x % 32);
+    int m_half = threadIdx.x / 32;
+    float* row = &D[m * D_stride + n_tile_base];
+
+    #pragma unroll
+    for (int g = 0; g < 4; g++) {
+        int n = g * 8 + m_half * 4;
+        *reinterpret_cast<float4*>(&row[n]) =
+            make_float4(acc.vec[g*4], acc.vec[g*4+1], acc.vec[g*4+2], acc.vec[g*4+3]);
+    }
+}
+
+__device__ __forceinline__ void store_acc_f32(
+    float* __restrict__ D, int D_stride, const AccTileA& acc,
     int m_tile_base, int n_tile_base)
 {
     int m = m_tile_base + (threadIdx.x % 32);
