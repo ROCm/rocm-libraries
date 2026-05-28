@@ -56,7 +56,7 @@ template<bool Scrambled, class Engine, class Constant>
 __forceinline__ __host__ __device__
 Engine create_engine(const Constant*           vectors,
                      [[maybe_unused]] Constant scramble_constant,
-                     const unsigned int        offset)
+                     const unsigned long long  offset)
 {
     if constexpr(Scrambled)
     {
@@ -100,12 +100,12 @@ template<unsigned int OutputPerThread,
          class Distribution,
          int block_size>
 __global__ __launch_bounds__(block_size)
-void generate_sobol_kernel(T*                 data,
-                           const size_t       n,
-                           const Constant*    direction_vectors,
-                           const Constant*    scramble_constants,
-                           const unsigned int offset,
-                           Distribution       distribution)
+void generate_sobol_kernel(T*                       data,
+                           const size_t             n,
+                           const Constant*          direction_vectors,
+                           const Constant*          scramble_constants,
+                           const unsigned long long offset,
+                           Distribution             distribution)
 #else
 template<unsigned int OutputPerThread,
          bool         Scrambled,
@@ -116,7 +116,7 @@ template<unsigned int OutputPerThread,
          int block_size>
 __global__ __launch_bounds__(block_size)
 void generate_sobol_kernel(
-    T*, const size_t, const Constant*, const Constant*, const unsigned int, Distribution)
+    T*, const size_t, const Constant*, const Constant*, const unsigned long long, Distribution)
 {}
 
 template<unsigned int OutputPerThread,
@@ -128,16 +128,16 @@ template<unsigned int OutputPerThread,
 struct generate_sobol_host
 {
     template<host::target_arch Arch = host::target_arch::unknown>
-    static void generate(dim3               block_idx,
-                         dim3               thread_idx,
-                         dim3               grid_dim,
-                         dim3               block_dim,
-                         T*                 data,
-                         const size_t       n,
-                         const Constant*    direction_vectors,
-                         const Constant*    scramble_constants,
-                         const unsigned int offset,
-                         Distribution       distribution)
+    static void generate(dim3                     block_idx,
+                         dim3                     thread_idx,
+                         dim3                     grid_dim,
+                         dim3                     block_dim,
+                         T*                       data,
+                         const size_t             n,
+                         const Constant*          direction_vectors,
+                         const Constant*          scramble_constants,
+                         const unsigned long long offset,
+                         Distribution             distribution)
 #endif
 {
 #ifdef __HIP_DEVICE_COMPILE__
@@ -644,7 +644,7 @@ public:
             return status;
         }
 
-        m_current_offset = static_cast<unsigned int>(m_offset);
+        m_current_offset = m_offset;
         m_initialized    = true;
 
         return ROCRAND_STATUS_SUCCESS;
@@ -811,7 +811,7 @@ private:
 
     bool                 m_initialized        = false;
     unsigned int         m_dimensions         = 1;
-    unsigned int         m_current_offset     = 0;
+    unsigned long long   m_current_offset     = 0;
     const constant_type* m_direction_vectors  = nullptr;
     const constant_type* m_scramble_constants = nullptr;
 
