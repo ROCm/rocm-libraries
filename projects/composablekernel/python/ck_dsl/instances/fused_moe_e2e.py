@@ -101,6 +101,7 @@ from .batched_gemm import (
     build_batched_gemm,
 )
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
 )
@@ -192,12 +193,32 @@ def _large_batch_gemm_tile() -> TileSpec:
     )
 
 
+def _bf16_gemm_tile(base: TileSpec) -> TileSpec:
+    """Use BF16-supported MFMA atoms while preserving the tile shape."""
+    return TileSpec(
+        tile_m=base.tile_m,
+        tile_n=base.tile_n,
+        tile_k=base.tile_k,
+        warp_m=base.warp_m,
+        warp_n=base.warp_n,
+        warp_k=base.warp_k,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+    )
+
+
 def _gemm_dtype_to_universal(dtype: str) -> str:
     if dtype in ("f16", "fp16"):
         return "fp16"
     if dtype == "bf16":
         return "bf16"
     raise ValueError(f"unsupported gemm dtype {dtype!r}; expected f16 / bf16")
+
+
+def _gemm_data_for(dtype: str) -> DataSpec:
+    gemm_dtype = _gemm_dtype_to_universal(dtype)
+    return DataSpec(dtype_a=gemm_dtype, dtype_b=gemm_dtype, dtype_c=gemm_dtype)
 
 
 def _torch_dtype_for(dtype: str) -> Any:
@@ -337,6 +358,7 @@ class FusedMoeForwardSpec:
             name=f"{self.name}_{name_suffix}",
             tile=self.gemm_tile,
             trait=trait,
+            data=_gemm_data_for(self.dtype),
         )
 
     def to_batched_gemm_spec(self) -> BatchedGemmSpec:
@@ -377,6 +399,7 @@ class FusedMoeForwardSpec:
             name=f"{self.name}_batched_gemm",
             tile=self.gemm_tile,
             trait=trait,
+            data=_gemm_data_for(self.dtype),
         )
 
 
@@ -405,6 +428,8 @@ class FusedMoeForward:
             and spec.tokens >= 32
         ):
             spec.gemm_tile = _large_batch_gemm_tile()
+        if spec.dtype == "bf16":
+            spec.gemm_tile = _bf16_gemm_tile(spec.gemm_tile)
         self.spec = spec
         self._sort_launcher = MoeSortingLauncher(spec.to_sort_spec())
         self._fused_moe_launcher = FusedMoeLauncher(spec.to_fused_moe_spec())
@@ -550,6 +575,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                data=_gemm_data_for(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_gate_up_silu_gemm(spec), capture_ir_text=False
@@ -569,6 +595,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_interleaved_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                data=_gemm_data_for(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_interleaved_gate_up_silu_gemm(spec),
@@ -589,6 +616,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_down_reduce",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                data=_gemm_data_for(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_down_reduce_gemm(spec), capture_ir_text=False
@@ -1527,6 +1555,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                data=_gemm_data_for(s.dtype),
             )
             # True CK Tile-style gate+up fusion: one MFMA kernel keeps
             # gate and up accumulators in registers and writes
@@ -1561,6 +1590,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_interleaved_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                data=_gemm_data_for(s.dtype),
             )
             gate_stage_callables = [
                 make_kernel(
@@ -1632,6 +1662,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_down_reduce",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                data=_gemm_data_for(s.dtype),
             )
             down_stage_callables = [
                 make_kernel(

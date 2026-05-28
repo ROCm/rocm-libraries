@@ -213,6 +213,7 @@ class UniversalGemmSpec:
         tr = self.trait
         return kernel_name_join(
             self.name,
+            self.data.dtype_a,
             f"t{t.tile_m}x{t.tile_n}x{t.tile_k}",
             f"w{t.warp_m}x{t.warp_n}x{t.warp_k}",
             f"wt{t.warp_tile_m}x{t.warp_tile_n}x{t.warp_tile_k}",

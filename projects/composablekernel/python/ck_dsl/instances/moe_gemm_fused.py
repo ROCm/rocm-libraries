@@ -39,6 +39,7 @@ from ..helpers.tensor_view import (
     make_tile_window,
 )
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -96,6 +97,7 @@ class FusedGateUpSiluGemmSpec:
     name: str
     tile: TileSpec
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
+    data: DataSpec = field(default_factory=DataSpec)
     wave_size: int = 64
     block_size: int = 0
 
@@ -117,6 +119,7 @@ class FusedGateUpSiluGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self.data,
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -572,10 +575,10 @@ def moe_gate_up_silu_gemm_signature(spec: FusedGateUpSiluGemmSpec):
 
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("WGate", "f16")
-        .ptr("WUp", "f16")
-        .ptr("Hidden", "f16")
+        .ptr("A", spec.data.dtype_a)
+        .ptr("WGate", spec.data.dtype_b)
+        .ptr("WUp", spec.data.dtype_b)
+        .ptr("Hidden", spec.data.dtype_c)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
@@ -618,6 +621,7 @@ class FusedInterleavedGateUpSiluGemmSpec:
     name: str
     tile: TileSpec
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
+    data: DataSpec = field(default_factory=DataSpec)
     wave_size: int = 64
     block_size: int = 0
 
@@ -635,6 +639,7 @@ class FusedInterleavedGateUpSiluGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self.data,
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -1053,9 +1058,9 @@ def moe_interleaved_gate_up_silu_gemm_signature(
 
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("WGateUp", "f16")
-        .ptr("Hidden", "f16")
+        .ptr("A", spec.data.dtype_a)
+        .ptr("WGateUp", spec.data.dtype_b)
+        .ptr("Hidden", spec.data.dtype_c)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
@@ -1095,6 +1100,7 @@ class FusedDownReduceGemmSpec:
     name: str
     tile: TileSpec
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
+    data: DataSpec = field(default_factory=DataSpec)
     wave_size: int = 64
     block_size: int = 0
 
@@ -1112,6 +1118,7 @@ class FusedDownReduceGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self.data,
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -1487,8 +1494,8 @@ def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
 
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("WDown", "f16")
+        .ptr("A", spec.data.dtype_a)
+        .ptr("WDown", spec.data.dtype_b)
         .ptr("SortedTokenIds", "i32")
         .ptr("SortedWeights", "f32")
         .ptr("Y", "f32")
@@ -1531,6 +1538,7 @@ class FusedDownSiluReduceGemmSpec:
     name: str
     tile: TileSpec
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
+    data: DataSpec = field(default_factory=DataSpec)
     wave_size: int = 64
     block_size: int = 0
 
@@ -1548,6 +1556,7 @@ class FusedDownSiluReduceGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self.data,
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -1577,6 +1586,7 @@ def build_moe_down_silu_reduce_gemm(
             name=spec.name,
             tile=spec.tile,
             trait=spec.trait,
+            data=spec.data,
             wave_size=spec.wave_size,
             block_size=spec.block_size,
         )
