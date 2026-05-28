@@ -63,14 +63,10 @@ class TheRockMatrixTest(unittest.TestCase):
         therock_matrix.collect_projects_to_run(
             ["projects/miopen", "projects/hipblaslt"]
         )
-        therock_matrix.collect_projects_to_run(
-            ["projects/miopen", "projects/rocwmma"]
-        )
+        therock_matrix.collect_projects_to_run(["projects/miopen", "projects/rocwmma"])
 
         self.assertEqual(therock_matrix.project_map, project_map_before)
-        self.assertEqual(
-            therock_matrix.additional_options, additional_options_before
-        )
+        self.assertEqual(therock_matrix.additional_options, additional_options_before)
 
 
 if __name__ == "__main__":
