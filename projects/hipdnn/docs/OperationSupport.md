@@ -22,11 +22,6 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
 
-- **[Fusilli IREE Plugin](https://github.com/iree-org/fusilli)** - IREE backed plugin for JIT compiling ML operations (with fusions) for AMD GPUs, supporting efficient codegenerated kernels
-  - Convolution (Forward, Dgrad, Wgrad)
-  - GEMM
-  - Batchnorm (Training, Inference)
-
 ### Reference Implementation
 
 - **[CPU Reference Implementation](./OperationSupport-ReferenceImpl.md)** - CPU-based reference implementation for validation and testing
