@@ -1,62 +1,138 @@
-"""pytest configuration and CLI options for store-D unit tests."""
-
+"""Shared pytest fixtures for unit tests"""
 import pytest
+from unittest.mock import Mock
+from types import SimpleNamespace
+from Tensile.Common.DataType import DataType
 
 
-@pytest.fixture(autouse=True)
-def skip_parametrized_if_cli(request):
-    """Skip all tests except test_storeD_cli when CLI options (--mn) are provided."""
-    if (request.config.getoption("--mn", default=None) is not None
-            and request.function.__name__ != "test_storeD_cli"):
-        pytest.skip("--mn specified: only test_storeD_cli runs")
+class SgprAllocator:
+    """Helper to allocate sequential sgpr register numbers for test setup.
+
+    Usage:
+        sgprs = SgprAllocator()
+        sgprIndex = sgprs.alloc()  # 5
+        sgprGridY = sgprs.alloc()  # 6
+        sgprGridX = sgprs.alloc()  # 7
+    """
+    def __init__(self, start=5):
+        self._current = start
+
+    def alloc(self):
+        """Allocate and return next sequential sgpr number"""
+        val = self._current
+        self._current += 1
+        return val
+
+    def alloc_many(self, count):
+        """Allocate multiple sequential sgprs and return as list"""
+        return [self.alloc() for _ in range(count)]
 
 
-def pytest_addoption(parser):
-    parser.addoption(
-        "--mn", nargs="+", metavar="M,N",
-        help="List of M,N pairs to test, e.g. --mn 23,17 32,32 16,16",
-    )
-    parser.addoption(
-        "--mt", nargs="+", metavar="MT0,MT1",
-        help="List of MacroTile pairs to test, e.g. --mt 16,16 32,32",
-    )
-    parser.addoption(
-        "--wave-config", nargs="+", metavar="WG0,WG1",
-        help="List of MIWaveGroup pairs to test, e.g. --wave-config 1,1 2,2",
-    )
-    parser.addoption(
-        "--dump-asm", action="store_true", default=False,
-        help="Dump generated assembly and store module text for each test case",
-    )
-    parser.addoption(
-        "--dump-store-insts", action="store_true", default=False,
-        help="Print only the buffer_store_* instructions emitted by the store-D path, "
-             "one per line with the preceding comment for context",
-    )
-    parser.addoption(
-        "--asm-output-dir", default=None, metavar="DIR",
-        help="Write the full assembled kernel source (.s file) for each CLI test case "
-             "to DIR/test_<label>.s for offline inspection",
-    )
-    parser.addoption(
-        "--print-ref", action="store_true", default=False,
-        help="Print the reference C matrix alongside the D output (only applies to "
-             "random init mode where a reference matrix is available)",
-    )
-    parser.addoption(
-        "--subtile-map", action="store_true", default=False,
-        help="Print one value per MMA subtile (0,0) instead of the full matrix — "
-             "useful for large tiles where the full print is unwieldy",
-    )
-    parser.addoption(
-        "--init-mode", default="matrix", choices=["matrix", "wave_id", "random"],
-        help="Accvgpr initialisation mode for the CLI test: "
-             "'matrix' (default) loads a full M×N host matrix; "
-             "'wave_id' writes float(wave_id) to every accvgpr (no verification); "
-             "'random' loads uniform random values in [-9, 9] per thread per accvgpr (no verification).",
-    )
-    parser.addoption(
-        "--dtype", default="fp32", choices=["fp32", "bf16"],
-        help="Output destination data type for the CLI test: "
-             "'fp32' (default) or 'bf16' (uses HighPrecisionAccumulate with bf16 conversion).",
-    )
+@pytest.fixture
+def basic_kernel():
+    """Basic kernel configuration for WorkGroupMappingAlgos tests"""
+    return {"WavefrontSize": 64}
+
+
+@pytest.fixture
+def sgpr_alloc():
+    """Fixture that provides an SgprAllocator for sequential sgpr allocation"""
+    return SgprAllocator(start=5)
+
+
+@pytest.fixture
+def basic_state():
+    """Create a basic state configuration shared across all KernelWriterBetaOnly tests"""
+    return {
+        "ProblemType": {
+            "ComputeDataType": DataType('s'),
+            "DestDataType": DataType('s'),
+            "DataType": DataType('s'),  # Needed for some tests
+            "Index0": 0,
+            "Index1": 1,
+            "NumIndicesC": 2,
+            "StridedBatched": True,
+            "GroupedGemm": False,
+            "BetaOnlyUseBias": False,
+            "UseInitialStridesCD": False,
+            "HighPrecisionAccumulate": False,  # Needed for some tests
+        },
+        "_GlobalAccumulation": False,
+    }
+
+
+def create_mock_writer(add_alloc_tmp_sgpr=False, add_alloc_tmp_sgpr_list=False,
+                       add_labels=False, label_prefix="TestPrefix", label_name_inc=None,
+                       add_full_writer=False):
+    """Create a mock writer object with configurable components.
+
+    This is a shared helper to avoid duplicating mock writer creation across test classes.
+
+    Args:
+        add_alloc_tmp_sgpr: Add allocTmpSgpr context manager mock
+        add_alloc_tmp_sgpr_list: Add allocTmpSgprList context manager mock
+        add_labels: Add labels mock with getUniqueNamePrefix and getNameInc
+        label_prefix: Return value for getUniqueNamePrefix (default: "TestPrefix")
+        label_name_inc: Return value for getNameInc, can be a callable (default: "TestLabel")
+        add_full_writer: Add full writer capabilities (sgprs dict, states, addSgprVarToPool, etc.)
+
+    Returns:
+        Mock writer object with requested components
+    """
+    writer = Mock()
+
+    # Base pools - always present
+    writer.sgprPool = Mock()
+    writer.sgprPool.checkOut = Mock(return_value=10)
+    writer.sgprPool.checkOutAligned = Mock(return_value=10)
+    writer.sgprPool.checkIn = Mock()
+    writer.vgprPool = Mock()
+    writer.vgprPool.checkOut = Mock(return_value=20)
+    writer.vgprPool.checkOutAligned = Mock(return_value=20)
+    writer.vgprPool.checkIn = Mock()
+
+    # Optional: allocTmpSgpr context manager
+    if add_alloc_tmp_sgpr:
+        writer.allocTmpSgpr = Mock()
+        writer.allocTmpSgpr.return_value.__enter__ = Mock(return_value=SimpleNamespace(idx=5))
+        writer.allocTmpSgpr.return_value.__exit__ = Mock(return_value=False)
+
+    # Optional: allocTmpSgprList context manager
+    if add_alloc_tmp_sgpr_list:
+        writer.allocTmpSgprList = Mock()
+        writer.allocTmpSgprList.return_value.__enter__ = Mock(return_value=[
+            SimpleNamespace(idx=5),
+            SimpleNamespace(idx=7),
+            SimpleNamespace(idx=8),
+        ])
+        writer.allocTmpSgprList.return_value.__exit__ = Mock(return_value=False)
+
+    # Optional: labels
+    if add_labels:
+        writer.labels = Mock()
+        writer.labels.getUniqueNamePrefix = Mock(return_value=label_prefix)
+        if label_name_inc is None:
+            writer.labels.getNameInc = Mock(return_value="TestLabel")
+        else:
+            writer.labels.getNameInc = Mock(side_effect=label_name_inc)
+
+    # Optional: full writer capabilities for complex tests
+    if add_full_writer:
+        writer.addSgprVarToPool = Mock()
+        writer.removeSgprVarFromPool = Mock()
+        writer.sgprs = {
+            "NumWorkGroups0": 1,
+            "NumWorkGroups1": 2,
+            "Alpha": 3,
+            "Beta": 4,
+            "WorkGroup2": 5,
+            "StreamKLocalStart": 6,
+            "StreamKIterEnd": 7,
+            "LoopCounterL": 8,
+            "OrigLoopCounterL": 9,
+            "SizesSum": 10
+        }
+        writer.states = Mock()
+        writer.states.WGMTransformLevels = 1
+
+    return writer

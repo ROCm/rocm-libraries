@@ -246,10 +246,9 @@ class SumUnroll(Component):
     def storeSumLDS(self, writer, kernel, tP):
         pass
 
-class ShiftVectorComponents(Component):
-    """
-    Shift vector components block.
-    """
+# ShiftVectorComponents base class moved to Components/ShiftVectorComponents.py
+# to avoid circular import (that module needs to import Component, and Component
+# imports all Components/* modules for auto-registry)
 
 class ComputeStoreVgprs(Component):
     """

@@ -33,87 +33,58 @@ from Tensile.Common.DataType import DataType
 class TestKernelWriterBetaOnlyInit:
     """Tests for KernelWriterBetaOnly initialization"""
 
-    def create_basic_state(self):
-        """Create a basic state configuration"""
-        return {
-            "ProblemType": {
-                "ComputeDataType": DataType('s'),
-                "DestDataType": DataType('s'),
-                "Index0": 0,
-                "Index1": 1,
-                "NumIndicesC": 2,
-                "StridedBatched": True,
-                "GroupedGemm": False,
-                "BetaOnlyUseBias": False,
-                "UseInitialStridesCD": False,
-            },
-            "_GlobalAccumulation": False,
-        }
-
-    def test_init_basic(self):
+    def test_init_basic(self, basic_state):
         """Test basic initialization"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         assert writer.language == "HIP"
         assert writer.kernelName is not None
         assert len(writer.indexChars) > 0
 
-    def test_init_with_bias(self):
+    def test_init_with_bias(self, basic_state):
         """Test initialization with bias enabled"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 1
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 1
 
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         assert writer.kernelName is not None
 
-    def test_init_global_accumulation(self):
+    def test_init_global_accumulation(self, basic_state):
         """Test initialization with global accumulation"""
-        state = self.create_basic_state()
-        state["_GlobalAccumulation"] = True
+        basic_state["_GlobalAccumulation"] = True
 
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         assert writer.state["_GlobalAccumulation"] == True
 
-    def test_init_float8_ocp(self):
+    def test_init_float8_ocp(self, basic_state):
         """Test initialization with float8 OCP type"""
-        state = self.create_basic_state()
 
         # Use real DataType for float8
-        state["ProblemType"]["DestDataType"] = DataType('f8')
-        state["ProblemType"]["ComputeDataType"] = DataType('s')
+        basic_state["ProblemType"]["DestDataType"] = DataType('f8')
+        basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
 
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         assert writer.f8MacroGuardStart == "\n#if HIP_FP8_TYPE_OCP\n"
         assert writer.f8MacroGuardEnd == "\n#endif // F8 macro guard\n"
 
-    def test_init_float8_fnuz(self):
-        """Test initialization with float8 FNUZ type"""
-        # Skip this test - DataType doesn't have a simple code for float8_fnuz
-        # and creating a proper mock is complex. The float8 OCP test covers the guard logic.
-        pytest.skip("DataType code for float8_fnuz not straightforward to mock")
-
-    def test_init_bfloat8_ocp(self):
+    def test_init_bfloat8_ocp(self, basic_state):
         """Test initialization with bfloat8 OCP type"""
-        state = self.create_basic_state()
 
         # Use real DataType for bfloat8
-        state["ProblemType"]["DestDataType"] = DataType('b8')
-        state["ProblemType"]["ComputeDataType"] = DataType('s')
+        basic_state["ProblemType"]["DestDataType"] = DataType('b8')
+        basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
 
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         assert writer.f8MacroGuardStart == "\n#if HIP_FP8_TYPE_OCP\n"
 
-    def test_index_chars_assignment(self):
+    def test_index_chars_assignment(self, basic_state):
         """Test index chars are correctly assigned"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         assert writer.tileChar0 is not None
         assert writer.tileChar1 is not None
@@ -125,27 +96,10 @@ class TestKernelWriterBetaOnlyInit:
 class TestKernelWriterBetaOnlyFunctionSignature:
     """Tests for function signature generation"""
 
-    def create_basic_state(self):
-        """Create a basic state configuration"""
-        return {
-            "ProblemType": {
-                "ComputeDataType": DataType('s'),
-                "DestDataType": DataType('s'),
-                "Index0": 0,
-                "Index1": 1,
-                "NumIndicesC": 2,
-                "StridedBatched": True,
-                "GroupedGemm": False,
-                "BetaOnlyUseBias": False,
-                "UseInitialStridesCD": False,
-            },
-            "_GlobalAccumulation": False,
-        }
 
-    def test_function_signature_basic(self):
+    def test_function_signature_basic(self, basic_state):
         """Test basic function signature generation"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         sig = writer.functionSignature()
 
@@ -154,59 +108,54 @@ class TestKernelWriterBetaOnlyFunctionSignature:
         assert writer.kernelName in sig
         assert "beta)" in sig
 
-    def test_function_signature_strided_batched(self):
+    def test_function_signature_strided_batched(self, basic_state):
         """Test function signature with strided batched"""
-        state = self.create_basic_state()
-        state["ProblemType"]["StridedBatched"] = True
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["StridedBatched"] = True
+        writer = KernelWriterBetaOnly(basic_state)
 
         sig = writer.functionSignature()
 
         assert "* D," in sig
         assert "* C," in sig
 
-    def test_function_signature_non_strided(self):
+    def test_function_signature_non_strided(self, basic_state):
         """Test function signature without strided batched"""
-        state = self.create_basic_state()
-        state["ProblemType"]["StridedBatched"] = False
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["StridedBatched"] = False
+        writer = KernelWriterBetaOnly(basic_state)
 
         sig = writer.functionSignature()
 
         assert "BatchD," in sig or "* BatchD," in sig
         assert "BatchC," in sig or "* BatchC," in sig
 
-    def test_function_signature_with_bias(self):
+    def test_function_signature_with_bias(self, basic_state):
         """Test function signature with bias"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 1
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 1
+        writer = KernelWriterBetaOnly(basic_state)
 
         sig = writer.functionSignature()
 
         assert "Bias," in sig
         assert "strideBias" in sig
 
-    def test_function_signature_bias_mode_3(self):
+    def test_function_signature_bias_mode_3(self, basic_state):
         """Test function signature with bias mode 3"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 3
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 3
+        writer = KernelWriterBetaOnly(basic_state)
 
         sig = writer.functionSignature()
 
         assert "Bias," in sig
         assert "factorDim" in sig
 
-    def test_function_signature_global_accumulation(self):
+    def test_function_signature_global_accumulation(self, basic_state):
         """Test function signature with global accumulation"""
-        state = self.create_basic_state()
-        state["_GlobalAccumulation"] = True
-        writer = KernelWriterBetaOnly(state)
+        basic_state["_GlobalAccumulation"] = True
+        writer = KernelWriterBetaOnly(basic_state)
 
         sig = writer.functionSignature()
 
@@ -218,29 +167,10 @@ class TestKernelWriterBetaOnlyFunctionSignature:
 class TestKernelWriterBetaOnlyKernelBody:
     """Tests for kernel body generation"""
 
-    def create_basic_state(self):
-        """Create a basic state configuration"""
-        return {
-            "ProblemType": {
-                "ComputeDataType": DataType('s'),
-                "DestDataType": DataType('s'),
-                "DataType": DataType('s'),
-                "Index0": 0,
-                "Index1": 1,
-                "NumIndicesC": 2,
-                "StridedBatched": True,
-                "GroupedGemm": False,
-                "BetaOnlyUseBias": False,
-                "UseInitialStridesCD": False,
-                "HighPrecisionAccumulate": False,
-            },
-            "_GlobalAccumulation": False,
-        }
 
-    def test_kernel_body_basic(self):
+    def test_kernel_body_basic(self, basic_state):
         """Test basic kernel body generation"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
@@ -250,83 +180,76 @@ class TestKernelWriterBetaOnlyKernelBody:
         assert "idxD" in body
         assert "idxC" in body
 
-    def test_kernel_body_with_bias(self):
+    def test_kernel_body_with_bias(self, basic_state):
         """Test kernel body with bias"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 1
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 1
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
         assert "Bias" in body
 
-    def test_kernel_body_bias_3d(self):
+    def test_kernel_body_bias_3d(self, basic_state):
         """Test kernel body with bias and 3+ dimensions"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 1
-        state["ProblemType"]["NumIndicesC"] = 3
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 1
+        basic_state["ProblemType"]["NumIndicesC"] = 3
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
         assert "GLOBAL_BIAS" in body
 
-    def test_kernel_body_bias_mode_2(self):
+    def test_kernel_body_bias_mode_2(self, basic_state):
         """Test kernel body with bias mode 2"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 2
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 2
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
         assert "id1" in body
 
-    def test_kernel_body_bias_mode_3(self):
+    def test_kernel_body_bias_mode_3(self, basic_state):
         """Test kernel body with bias mode 3"""
-        state = self.create_basic_state()
-        state["ProblemType"]["BetaOnlyUseBias"] = True
-        state["ProblemType"]["BiasDataType"] = DataType('s')
-        state["ProblemType"]["UseBias"] = 3
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["BetaOnlyUseBias"] = True
+        basic_state["ProblemType"]["BiasDataType"] = DataType('s')
+        basic_state["ProblemType"]["UseBias"] = 3
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
         assert "idb" in body or "factorDim" in body
 
-    def test_kernel_body_non_strided_batched(self):
+    def test_kernel_body_non_strided_batched(self, basic_state):
         """Test kernel body without strided batched"""
-        state = self.create_basic_state()
-        state["ProblemType"]["StridedBatched"] = False
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["StridedBatched"] = False
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
         assert "wg" in body
         assert "BatchC" in body
 
-    def test_kernel_body_global_accumulation(self):
+    def test_kernel_body_global_accumulation(self, basic_state):
         """Test kernel body with global accumulation"""
-        state = self.create_basic_state()
-        state["_GlobalAccumulation"] = True
-        writer = KernelWriterBetaOnly(state)
+        basic_state["_GlobalAccumulation"] = True
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
         assert "GLOBAL_D" in body
 
-    def test_kernel_body_high_precision_accumulate(self):
+    def test_kernel_body_high_precision_accumulate(self, basic_state):
         """Test kernel body with high precision accumulate"""
-        state = self.create_basic_state()
-        state["ProblemType"]["DataType"] = DataType('h')
-        state["ProblemType"]["HighPrecisionAccumulate"] = True
-        state["_GlobalAccumulation"] = True
-        writer = KernelWriterBetaOnly(state)
+        basic_state["ProblemType"]["DataType"] = DataType('h')
+        basic_state["ProblemType"]["HighPrecisionAccumulate"] = True
+        basic_state["_GlobalAccumulation"] = True
+        writer = KernelWriterBetaOnly(basic_state)
 
         body = writer.kernelBodyBetaOnly()
 
@@ -353,7 +276,7 @@ class TestKernelWriterBetaOnlyKernelName:
         }
         return solution
 
-    def test_kernel_name_basic(self):
+    def test_kernel_name_basic(self, basic_state):
         """Test basic kernel name generation"""
         solution = self.create_basic_solution()
         name = KernelWriterBetaOnly.kernelName(solution)
@@ -361,7 +284,7 @@ class TestKernelWriterBetaOnlyKernelName:
         assert "C" in name
         assert "S" in name  # Single precision (uppercase)
 
-    def test_kernel_name_strided_batched(self):
+    def test_kernel_name_strided_batched(self, basic_state):
         """Test kernel name with strided batched"""
         solution = self.create_basic_solution()
         solution._state["ProblemType"]["StridedBatched"] = True
@@ -370,7 +293,7 @@ class TestKernelWriterBetaOnlyKernelName:
         # Should NOT contain _GB (general batch)
         assert "_GB" not in name
 
-    def test_kernel_name_general_batch(self):
+    def test_kernel_name_general_batch(self, basic_state):
         """Test kernel name with general batch"""
         solution = self.create_basic_solution()
         solution._state["ProblemType"]["StridedBatched"] = False
@@ -378,7 +301,7 @@ class TestKernelWriterBetaOnlyKernelName:
 
         assert "_GB" in name
 
-    def test_kernel_name_grouped_gemm(self):
+    def test_kernel_name_grouped_gemm(self, basic_state):
         """Test kernel name with grouped GEMM"""
         solution = self.create_basic_solution()
         solution._state["ProblemType"]["GroupedGemm"] = True
@@ -386,7 +309,7 @@ class TestKernelWriterBetaOnlyKernelName:
 
         assert "_GG" in name
 
-    def test_kernel_name_global_accumulation(self):
+    def test_kernel_name_global_accumulation(self, basic_state):
         """Test kernel name with global accumulation"""
         solution = self.create_basic_solution()
         solution._state["_GlobalAccumulation"] = True
@@ -394,7 +317,7 @@ class TestKernelWriterBetaOnlyKernelName:
 
         assert "_GA" in name
 
-    def test_kernel_name_with_bias(self):
+    def test_kernel_name_with_bias(self, basic_state):
         """Test kernel name with bias"""
         solution = self.create_basic_solution()
         solution._state["ProblemType"]["BetaOnlyUseBias"] = True
@@ -405,7 +328,7 @@ class TestKernelWriterBetaOnlyKernelName:
 
         assert "_Bias" in name
 
-    def test_kernel_name_different_datatypes(self):
+    def test_kernel_name_different_datatypes(self, basic_state):
         """Test kernel name with different data types"""
         solution = self.create_basic_solution()
 
@@ -424,29 +347,10 @@ class TestKernelWriterBetaOnlyKernelName:
 class TestKernelWriterBetaOnlyFileGeneration:
     """Tests for source and header file generation"""
 
-    def create_basic_state(self):
-        """Create a basic state configuration"""
-        return {
-            "ProblemType": {
-                "ComputeDataType": DataType('s'),
-                "DestDataType": DataType('s'),
-                "DataType": DataType('s'),
-                "Index0": 0,
-                "Index1": 1,
-                "NumIndicesC": 2,
-                "StridedBatched": True,
-                "GroupedGemm": False,
-                "BetaOnlyUseBias": False,
-                "UseInitialStridesCD": False,
-                "HighPrecisionAccumulate": False,
-            },
-            "_GlobalAccumulation": False,
-        }
 
-    def test_get_source_file_string(self):
+    def test_get_source_file_string(self, basic_state):
         """Test source file string generation"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         error_code, source = writer.getSourceFileString()
 
@@ -455,10 +359,9 @@ class TestKernelWriterBetaOnlyFileGeneration:
         assert "extern \"C\"" in source
         assert "__global__" in source
 
-    def test_get_header_file_string(self):
+    def test_get_header_file_string(self, basic_state):
         """Test header file string generation"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         header = writer.getHeaderFileString()
 
@@ -468,10 +371,9 @@ class TestKernelWriterBetaOnlyFileGeneration:
         # Header should end with semicolon
         assert ";" in header
 
-    def test_source_file_grouped_gemm_toggle(self):
+    def test_source_file_grouped_gemm_toggle(self, basic_state):
         """Test source file generation toggles GroupedGemm"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         _, source = writer.getSourceFileString()
 
@@ -479,25 +381,23 @@ class TestKernelWriterBetaOnlyFileGeneration:
         # Check that it's reasonably long (contains both versions)
         assert len(source) > 200
 
-    def test_header_file_grouped_gemm_toggle(self):
+    def test_header_file_grouped_gemm_toggle(self, basic_state):
         """Test header file generation toggles GroupedGemm"""
-        state = self.create_basic_state()
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
 
         header = writer.getHeaderFileString()
 
         # Should generate both GroupedGemm true and false versions
         assert len(header) > 100
 
-    def test_source_file_with_f8_guards(self):
+    def test_source_file_with_f8_guards(self, basic_state):
         """Test source file generation with F8 macro guards"""
-        state = self.create_basic_state()
 
         # Use real DataType for float8
-        state["ProblemType"]["DestDataType"] = DataType('f8')
-        state["ProblemType"]["ComputeDataType"] = DataType('s')
+        basic_state["ProblemType"]["DestDataType"] = DataType('f8')
+        basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
 
-        writer = KernelWriterBetaOnly(state)
+        writer = KernelWriterBetaOnly(basic_state)
         _, source = writer.getSourceFileString()
 
         assert "#if HIP_FP8_TYPE_OCP" in source
