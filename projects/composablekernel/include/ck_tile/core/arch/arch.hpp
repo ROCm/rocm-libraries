@@ -403,11 +403,11 @@ constexpr auto get_compiler_target()
         return make_amdgcn_spirv_target();
     }
     else
-    // Return HOST by default
-    if constexpr(amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE)
-    {
-        return amdgcn_target<>{};
-    }
+        // Return HOST by default
+        if constexpr(amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE)
+        {
+            return amdgcn_target<>{};
+        }
 }
 
 // Cleanup
