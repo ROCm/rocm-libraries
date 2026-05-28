@@ -285,7 +285,7 @@ class LogicFileError(Exception):
         super().__init__(self.message)
 
 
-def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
+def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> ArchInfo:
     """
     Extracts architecture predicate information from a given logic file.
 
@@ -297,6 +297,8 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
 
     Args:
         file: Path to a logic file.
+        validateDeviceIds: Whether to validate Device IDs against the supported
+            chip-ID tables while parsing.
     Returns:
         ArchInfo: An object containing the extracted architecture predicates.
     Raises:
@@ -304,7 +306,7 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     """
 
     def l0(line: str):
-        if not re.match(r"- \{MinimumRequiredVersion", line):
+        if not re.match(r"- (?:\{MinimumRequiredVersion|MinimumRequiredVersion:)", line):
             raise LogicFileError(
                 f"Expected minimum required version:\n  line: {line}  file: {file}"
             )
@@ -328,7 +330,10 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     def l3(line: str):
         if re.match(r"- \[Device", line):
             devIds = re.findall(r"Device (\w+)", line)
-            return set(f"id={id}" for id in devIds)
+            # Normalize to lowercase so downstream consumers (predicate
+            # tables, fallback maps, chip-ID directory matchers) all agree
+            # on the canonical form.
+            return set(f"id={id.lower()}" for id in devIds)
         else:
             raise LogicFileError(f"No device IDs found: line: {line}")
 
@@ -338,11 +343,12 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
         gfx, cu = l2(f.readline())
         deviceIds = l3(f.readline())
 
-    try:
-        for id in deviceIds:
-            _verifyPredicate(id, gfx)
-    except ValueError as e:
-        raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+    if validateDeviceIds:
+        try:
+            for id in deviceIds:
+                _verifyPredicate(id, gfx)
+        except ValueError as e:
+            raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
 
     return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 

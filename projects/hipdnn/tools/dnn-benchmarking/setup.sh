@@ -109,6 +109,22 @@ echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
 pip install --pre torch --index-url "$INDEX_URL"
 pip install -e "$SCRIPT_DIR"
 
+# 2b. Install amdsmi Python bindings if present in the ROCm install.
+# amdsmi is not on PyPI — it ships under /opt/rocm/share/amd_smi/. The
+# always-on GPU snapshot in metrics/gpu_smi.py uses it; if absent the
+# snapshot fields stay None (warn-once), so this install is best-effort.
+AMDSMI_DIR="$INSTALL_DIR/share/amd_smi"
+if ! python -c "import amdsmi" >/dev/null 2>&1; then
+    if [ -f "$AMDSMI_DIR/setup.py" ] || [ -f "$AMDSMI_DIR/pyproject.toml" ]; then
+        echo "Installing amdsmi Python bindings from $AMDSMI_DIR..."
+        if ! pip install "$AMDSMI_DIR"; then
+            echo "Warning: amdsmi install failed; GPU SMI snapshot will be disabled." >&2
+        fi
+    else
+        echo "Warning: amdsmi not found at $AMDSMI_DIR; GPU SMI snapshot will be disabled." >&2
+    fi
+fi
+
 # 3. Build and install hipDNN + MIOpen
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
