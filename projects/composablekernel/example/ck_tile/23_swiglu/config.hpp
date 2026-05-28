@@ -1,13 +1,10 @@
 #pragma once
 
-#include "ck_tile/core/numeric/float8.hpp"
-#include "ck_tile/core/numeric/half.hpp"
-#include "ck_tile/core/numeric/pk_int4.hpp"
+#include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_v3.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_v4.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_mem.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipelines.hpp"
 
 namespace ck_tile::swiglu_example {
 template <typename Layout>
