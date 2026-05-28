@@ -15,7 +15,13 @@ The generated JSON graphs are consumed by [`dnn-benchmark`](../dnn-benchmarking/
 
 ## Installation
 
+A virtual environment is recommended to isolate the tool from system Python packages.
+
 ```bash
+# Create and activate a venv
+python3 -m venv .venv
+source .venv/bin/activate
+
 # Standard install
 pip install .
 
