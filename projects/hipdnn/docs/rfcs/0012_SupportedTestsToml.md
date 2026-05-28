@@ -345,7 +345,7 @@ Earlier drafts used `patterns = ["*ConvFwd*"]` matched against GTest test names 
 | Risk | Mitigation |
 |------|------------|
 | A pattern accidentally over-matches and CI fails on every run. | The auto-gen tool's safety check (§7) prevents this for generated matchers. For hand-edited matchers, the failure is immediate and the report names the specific triple. |
-| `describeGraph` output format changes, breaking existing `op_chain` strings. | `describeGraph` becomes a stability contract once this RFC ships. Any format change is a `[meta] version` bump and a coordinated sidecar regen. |
+| `describeGraph` output format changes, breaking existing `op_chain` strings. | `describeGraph` and its dependencies become a stability contract once this RFC ships. The `op_chain` string depends on `graph.visit()` traversal order, `to_string(NodeType)` mappings, and the Pointwise/Reduction mode appendix; any change to graph flattening, node visit order, enum-to-string mapping, or mode formatting is a `[meta] version` bump plus a coordinated sidecar regen. |
 | `[[test_skips]]` over-broad filter silently shadows a `[[supported]]` matcher. | Load-time warning when any matcher's cross-product is fully covered by a same-arch `[[test_skips]]` filter. |
 | Test-naming-convention drift breaking the matcher. | Structured matchers don't depend on test naming — they match on `describeGraph` output. Naming convention is irrelevant to the verifier. |
 | Auto-gen wholesale-replace blows away hand-curated content. | Sidecar split (§5): hand-curated `[[supported]]` blocks belong in the main file. The tool only touches the sidecar. |
