@@ -65,6 +65,7 @@ struct kernel_attr_for_helper<ArchTag>
 template <typename ArchTag, typename... Attrs>
 using kernel_attr_for = typename detail::kernel_attr_for_helper<ArchTag, Attrs...>::type;
 
+#ifdef __HIPCC__
 #if CK_TILE_USE_LAUNCH_BOUNDS
 #define KENTRY_LAUNCH_BOUNDS __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 #else
@@ -101,6 +102,7 @@ KENTRY_LAUNCH_BOUNDS KENTRY_ATTR_NO_PACKED_FP32_OPS __global__ //
 #undef KENTRY_LAUNCH_BOUNDS
 #undef KENTRY_BODY
 #undef KENTRY_ATTR_NO_PACKED_FP32_OPS
+#endif // __HIPCC__
 
 //
 // return a anonymous functor(lambda) to be called later
@@ -113,6 +115,7 @@ KENTRY_LAUNCH_BOUNDS KENTRY_ATTR_NO_PACKED_FP32_OPS __global__ //
 // different architectures. In this case each object file has to use a different tag (gfx9_t,
 // gfx12_t etc.), so the kernel will have different symbols for each architecture. It can also be
 // used to pass some compile-time attributes to the kernel.
+#ifdef __HIPCC__
 template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU,
           typename Attr     = void,
           typename KernelImpl,
@@ -133,6 +136,7 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
         kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
     };
 }
+#endif // __HIPCC__
 
 //
 // overload of make_kernel: Cluster launch version of make_kernel

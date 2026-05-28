@@ -12,6 +12,7 @@ namespace ck_tile {
 // 16x s_nop:    Wait cycles (~16 cycles) to ensure cache invalidation completes before kernel
 //               exits. Without these NOPs, the flush may not finish, leading to inconsistent
 //               timing measurements where some instructions remain cached.
+#ifdef __HIPCC__
 static __global__ void flush_cache()
 {
     asm __volatile__("s_icache_inv \n\t"
@@ -33,4 +34,5 @@ static __global__ void flush_cache()
                      "s_nop 0 \n\t" ::
                          :);
 }
+#endif // __HIPCC__
 } // namespace ck_tile

@@ -118,6 +118,7 @@ struct RotatingMemWrapper
 };
 inline void flush_icache()
 {
+#ifdef __HIPCC__
     hipDeviceProp_t deviceProps;
     HIP_CHECK_ERROR(hipGetDeviceProperties(&deviceProps, 0));
 
@@ -129,5 +130,6 @@ inline void flush_icache()
 
     ck_tile::flush_cache<<<dim3(gpu_block3), dim3(64), 0, nullptr>>>();
     HIP_CHECK_ERROR(hipGetLastError());
+#endif // __HIPCC__
 }
 } // namespace ck_tile

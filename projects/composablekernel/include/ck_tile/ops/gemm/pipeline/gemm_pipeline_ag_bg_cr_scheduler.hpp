@@ -6,7 +6,7 @@
 #include <ostream>
 #include <sstream>
 
-#include "ck_tile/core.hpp"
+#include <ck_common/pipeline_scheduler.hpp>
 
 namespace ck_tile {
 
@@ -16,12 +16,8 @@ enum struct CastPolicy
     AfterLDSRead,
 };
 
-enum struct GemmPipelineScheduler
-{
-    Default,
-    Intrawave,
-    Interwave,
-};
+/// Backward-compatible alias — canonical definition is ck_common::PipelineScheduler.
+using GemmPipelineScheduler = ck_common::PipelineScheduler;
 
 enum struct TailNumber
 {
