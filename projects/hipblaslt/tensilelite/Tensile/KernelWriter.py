@@ -9469,11 +9469,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("StridesMetadata", self.states.m.numSgprStrides)
 
     # Batch offset support for general batched GEMM (pointer array mode)
-    if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
-      self.defineSgpr("BatchOffsetD", 2)  # 64-bit offset requires 2 SGPRs
-      self.defineSgpr("BatchOffsetC", 2)  # 64-bit offset requires 2 SGPRs
-      self.defineSgpr("BatchOffsetA", 2)  # 64-bit offset requires 2 SGPRs
-      self.defineSgpr("BatchOffsetB", 2)  # 64-bit offset requires 2 SGPRs
+    # Offsets are loaded on-demand from kernel arguments to avoid using persistent SGPRs
+    # No SGPR allocation here - offsets loaded directly when applying to addresses
 
     # for packed batches without stride restrictions need to do something different here
     assert sorted(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]) == \

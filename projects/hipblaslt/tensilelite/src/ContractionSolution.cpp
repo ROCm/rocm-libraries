@@ -721,12 +721,6 @@ namespace TensileLite
         {
             args.template append<void const* const*>("batchD", inputs.batchD);
             args.template append<void const* const*>("batchC", inputs.batchC);
-
-            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-            {
-                args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
-                args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
-            }
         }
 
         if(problemType.stridedBatched)
@@ -744,12 +738,6 @@ namespace TensileLite
         {
             args.template append<void const* const*>("batchA", inputs.batchA);
             args.template append<void const* const*>("batchB", inputs.batchB);
-
-            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-            {
-                args.template append<int64_t>("batchOffsetA", inputs.batchOffsetA);
-                args.template append<int64_t>("batchOffsetB", inputs.batchOffsetB);
-            }
         }
 
         if(problemType.sparse)
@@ -1107,6 +1095,16 @@ namespace TensileLite
                                           autoStaggerUStrideShift,
                                           autoGsuVal,
                                           ntab);
+
+        // Batch offset support for General Batched GEMM (SupportUserArgs kernels)
+        // Placed after core GEMM args (strides, alpha/beta, StreamK) to match kernel signature
+        if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
+        {
+            args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+            args.template append<int64_t>("batchOffsetA", inputs.batchOffsetA);
+            args.template append<int64_t>("batchOffsetB", inputs.batchOffsetB);
+        }
 
 	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
 	//       Mixing is not supported.
@@ -1991,11 +1989,12 @@ namespace TensileLite
             rv.args.append<void const*>("dstD", inputs.d);
             // MBSK: synchronizer address, MB: null address
             rv.args.append<void const*>("Synchronizer",
-                                        gsuSettings.globalAccumulation == 3 
-                                        ? inputs.Synchronizer 
+                                        gsuSettings.globalAccumulation == 3
+                                        ? inputs.Synchronizer
                                         : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
         }
+
 
         if(problemType.stochasticRounding)
         {
@@ -2269,19 +2268,18 @@ namespace TensileLite
         else if(problemType.stridedBatched)
             rv.args.append<void*>("D", inputs.d);
         else
-        {
             rv.args.append<void const* const*>("batchD", inputs.batchD);
-            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-                rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
-        }
 
         if(problemType.stridedBatched)
             rv.args.append<void const*>("C", inputs.c);
         else
-        {
             rv.args.append<void const* const*>("batchC", inputs.batchC);
-            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-                rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+
+        // Pass batch offsets when kernel expects them (SupportUserArgs=true, not GroupedGemm)
+        if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
+        {
+            rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
         }
 
         if(problemType.useBias && sizeMapping.globalAccumulation == 0 && (!problemType.useGradient))
@@ -2467,21 +2465,20 @@ namespace TensileLite
         if(problemType.stridedBatched)
             args.template append<void*>("D", inputs.d);
         else
-        {
             args.template append<void const* const*>("batchD", inputs.batchD);
-            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-                args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
-        }
 
         args.template append<void*>("WS", (uint8_t*)inputs.ws + workspaceOffsetInByte);
 
         if(problemType.stridedBatched)
             args.template append<void const*>("C", inputs.c);
         else
-        {
             args.template append<void const* const*>("batchC", inputs.batchC);
-            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-                args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+
+        // Pass batch offsets when kernel expects them (SupportUserArgs=true, not GroupedGemm)
+        if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
+        {
+            args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
         }
 
         bool useBias = false;

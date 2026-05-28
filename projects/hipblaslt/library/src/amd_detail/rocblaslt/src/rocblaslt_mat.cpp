@@ -131,6 +131,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     hipDataType        scale_type    = matmul_descr->scale_type;
 
     // Others
+    // Use strided_batch=true for kernel selection (StridedBatched=true kernels with SupportUserArgs)
+    // The actual batch mode is tracked via problem.batchMode() for argument passing
     bool strided_batch = true;
     bool grouped_gemm  = false;
 
@@ -346,6 +348,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     void*              amaxD         = matmul_descr->amaxD;
 
     // Others
+    // Use strided_batch=true for kernel selection (StridedBatched=true kernels with SupportUserArgs)
+    // The actual batch mode is tracked via problem.batchMode() for argument passing
     bool strided_batch = true;
     bool grouped_gemm  = false;
 
