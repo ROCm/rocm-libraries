@@ -194,7 +194,7 @@ Schema versioning: `[meta] version = 1`. Unknown keys are logged-and-ignored for
 ### 6.1 The five rules
 
 - **Rule A — claim broken.** Claimed test with empty `engineIds` → **FAIL**.
-- **Rule B — issue before test runs.** Walk `UnitTest::GetInstance` post-`RUN_ALL_TESTS`; any registered, non-skipped test with no `recordGraphSupport` entry → **FAIL**. Requires moving `recordGraphSupport` to the first statement of `verifyGraph` so crashes after that point still produce records.
+- **Rule B — issue before test runs.** Walk `UnitTest::GetInstance` post-`RUN_ALL_TESTS`; any test that uses `IntegrationGraphVerificationHarness`, is non-skipped, and has no `recordGraphSupport` entry → **FAIL**. The harness self-registers each test in its `SetUp()` (before any `ASSERT_*`) so the verifier can distinguish "expected to record but didn't" from utility tests that legitimately never call `verifyGraph`. Requires moving `recordGraphSupport` to the first statement of `verifyGraph` so crashes after that point still produce records.
 - **Rule C — zero-coverage matcher.** Matcher with no observed tests in its cross-product → **FAIL** in full unfiltered CI runs; informational otherwise (§6.2).
 - **Rule D — engine over-claim** *(note on existing test failure, not a new failure)*. Failed test + engine returned support + no matcher → annotate the test failure to point at `get_ranked_engine_ids`.
 - **Rule E — unclaimed gain** *(warning, not a failure)*. Passing test + engine returned support + no matcher → log "claimed support != actual support" with fix steps.
