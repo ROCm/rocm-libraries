@@ -39,14 +39,6 @@ bool IsTestSupportedForDevice()
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 } // namespace
 
 template <typename T>
@@ -66,14 +58,13 @@ TEST_P(GPU_Conv2d_regression_mi100_FP32, TestFloat)
     if(IsTestSupportedForDevice())
     {
         // Regression test for SWDEV-305815 (issue 1206)
-        std::vector<std::string> env_vars{"MIOPEN_DEBUG_CONV_WINOGRAD = false",
-                                          "MIOPEN_DEBUG_CONV_FFT = false",
-                                          "MIOPEN_DEBUG_CONV_DIRECT = false",
-                                          "MIOPEN_DEBUG_CONV_GEMM = false",
-                                          "MIOPEN_DEBUG_CONV_IMPLICIT_GEMM = false",
-                                          "MIOPEN_LOG_LEVEL = 1"};
+        ScopedEnvironment<bool> debug_conv_wino_grad(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+        ScopedEnvironment<bool> debug_conv_fft(MIOPEN_DEBUG_CONV_FFT, false);
+        ScopedEnvironment<bool> debug_conv_direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+        ScopedEnvironment<bool> debug_conv_gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+        ScopedEnvironment<bool> debug_conv_implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, false);
+        ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 1);
 
-        SetEnvVars(env_vars);
         run();
     }
     else

@@ -49,14 +49,6 @@ bool IsTestSupportedForDevice()
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 } // namespace
 
 template <typename T>
@@ -88,10 +80,10 @@ TEST_P(GPU_Conv2dIGemmBwdMLIRTest_FP16, TestBwdFloat16)
 {
     if(IsTestSupportedForDevice())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmBwd"};
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                    "ConvMlirIgemmBwd");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -104,10 +96,10 @@ TEST_P(GPU_Conv2dIGemmWrWMLIRTest_FP16, TestWrWFloat16)
 {
     if(IsTestSupportedForDevice())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmWrw"};
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                    "ConvMlirIgemmWrw");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -120,10 +112,10 @@ TEST_P(GPU_Conv2dIGemmBwdMLIRTest_FP32, TestBwdFloat32)
 {
     if(IsTestSupportedForDevice())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmBwd"};
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                    "ConvMlirIgemmBwd");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -136,10 +128,10 @@ TEST_P(GPU_Conv2dIGemmWrWMLIRTest_FP32, TestWrWFloat32)
 {
     if(IsTestSupportedForDevice())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmWrw"};
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                    "ConvMlirIgemmWrw");
 
-        SetEnvVars(env_vars);
         run();
     }
     else

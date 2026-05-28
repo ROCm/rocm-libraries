@@ -4,6 +4,8 @@
 #include "conv2d_gtest.hpp"
 #include "gtest_common.hpp"
 
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS)
+
 namespace {
 
 using TestCase = Conv2DBaseTestCase<NamedContainer<std::vector<size_t>>, // input_dims
@@ -39,14 +41,6 @@ bool IsTestSupportedForDevice()
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 } // namespace
 
 template <typename T>
@@ -68,12 +62,12 @@ TEST_P(GPU_Conv2dSingleAsmBwdWrw_FP32, TestFloat32)
 {
     if(IsTestSupportedForDevice() && !get_handle_xnack())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE",
-                                          "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5",
-                                          "MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmBwdWrW1x1"};
+        ScopedEnvironment<std::string> find_enforce(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
+        ScopedEnvironment<int> tuning_iterations_max(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 5);
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                        "ConvAsmBwdWrW1x1");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -86,12 +80,12 @@ TEST_P(GPU_Conv2dSingleAsmBwdWrw_FP16, TestFloat16)
 {
     if(IsTestSupportedForDevice() && !get_handle_xnack())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE",
-                                          "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5",
-                                          "MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmBwdWrW1x1"};
+        ScopedEnvironment<std::string> find_enforce(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
+        ScopedEnvironment<int> tuning_iterations_max(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 5);
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                        "ConvAsmBwdWrW1x1");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -104,12 +98,12 @@ TEST_P(GPU_Conv2dSingleAsmBwdWrw_BFP16, TestBFloat16)
 {
     if(IsTestSupportedForDevice() && !get_handle_xnack())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE",
-                                          "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5",
-                                          "MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmBwdWrW1x1"};
+        ScopedEnvironment<std::string> find_enforce(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
+        ScopedEnvironment<int> tuning_iterations_max(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 5);
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                        "ConvAsmBwdWrW1x1");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -122,14 +116,14 @@ TEST_P(GPU_Conv2dSingleAsmBwdWrw_CompilerRegression_FP32, TestCompRegrFloat32)
 {
     if(IsTestSupportedForDevice() && !get_handle_xnack())
     {
-        std::vector<std::string> env_vars{
-            "MIOPEN_FIND_ENFORCE=SEARCH",
-            "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=1",
-            "MIOPEN_FIND_MODE=normal",
-            "MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS=2,8,4,2,4,2,2,4,0,2",
-            "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmBwdWrW1x1"};
+        ScopedEnvironment<std::string> find_enforce(MIOPEN_FIND_ENFORCE, "SEARCH");
+        ScopedEnvironment<int> tuning_iterations_max(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 1);
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> conv_direct_perf_vals(
+            MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS, "2,8,4,2,4,2,2,4,0,2");
+        ScopedEnvironment<std::string> find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                        "ConvAsmBwdWrW1x1");
 
-        SetEnvVars(env_vars);
         run();
     }
     else

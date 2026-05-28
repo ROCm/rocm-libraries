@@ -49,14 +49,6 @@ bool IsTestSupportedForDevice()
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 } // namespace
 
 template <typename T>
@@ -77,13 +69,13 @@ TEST_P(GPU_Conv2dTuningDynamicFwdDlops_FP16, TestFloat16)
 {
     if(IsTestSupportedForDevice() && !get_handle_xnack())
     {
-        std::vector<std::string> env_vars{
-            "MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE",
-            "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5",
-            "MIOPEN_FIND_MODE=normal",
-            "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC"};
+        ScopedEnvironment<std::string> find_enforce(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
+        ScopedEnvironment<int> debug_tuning_iterations_max(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX,
+                                                           5);
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_find_only_solver(
+            MIOPEN_DEBUG_FIND_ONLY_SOLVER, "ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC");
 
-        SetEnvVars(env_vars);
         run();
     }
     else

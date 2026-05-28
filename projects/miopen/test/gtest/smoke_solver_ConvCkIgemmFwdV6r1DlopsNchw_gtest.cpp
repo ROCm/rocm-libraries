@@ -41,14 +41,6 @@ bool IsTestSupportedForDevice()
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 } // namespace
 
 template <typename T>
@@ -70,14 +62,14 @@ TEST_P(GPU_Conv2dTuningV6R1_FP16, TestFloat16)
         // MIOPEN_DEBUG_TUNING_ITERATIONS_MAX is set to 2 because kernels are very slow to build.
         // MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW is explicitly enabled due to the kernel is
         // disabled by default via #2306
-        std::vector<std::string> env_vars{
-            "MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE",
-            "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=2",
-            "MIOPEN_FIND_MODE=normal",
-            "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvCkIgemmFwdV6r1DlopsNchw",
-            "MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW=true"};
+        ScopedEnvironment<std::string> find_enforce(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
+        ScopedEnvironment<int> tuning_iterations_max(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 2);
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                        "ConvCkIgemmFwdV6r1DlopsNchw");
+        ScopedEnvironment<bool> conv_ck_igemm_fwd_v6r1_dlops_nchw(
+            MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW, true);
 
-        SetEnvVars(env_vars);
         run();
     }
     else

@@ -47,14 +47,6 @@ bool IsTestSupportedForDevice()
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 } // namespace
 
 template <typename T>
@@ -74,10 +66,10 @@ TEST_P(GPU_Conv2dMLIRTestIGemmXDLopsFwd_FP32, TestFloat32)
 {
     if(IsTestSupportedForDevice())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmFwdXdlops"};
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                              "ConvMlirIgemmFwdXdlops");
 
-        SetEnvVars(env_vars);
         run();
     }
     else
@@ -90,10 +82,10 @@ TEST_P(GPU_Conv2dMLIRTestIGemmXDLopsFwd_I8, TestInt8)
 {
     if(IsTestSupportedForDevice())
     {
-        std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                          "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmFwdXdlops"};
+        ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+        ScopedEnvironment<std::string> debug_find_only_solver(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                                              "ConvMlirIgemmFwdXdlops");
 
-        SetEnvVars(env_vars);
         run();
     }
     else

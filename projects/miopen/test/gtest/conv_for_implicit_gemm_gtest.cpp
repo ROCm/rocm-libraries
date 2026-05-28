@@ -24,14 +24,6 @@ bool IsTestSupportedForDevice(const miopen::Handle& handle)
             miopen::StartsWith(devName, "gfx110") || miopen::StartsWith(devName, "gfx115"));
 }
 
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-
 template <typename T>
 auto GenCases(bool smoke_test,
               std::vector<size_t> input_dims,
@@ -78,14 +70,13 @@ TEST_P(GPU_ConvImplicitGemm_BFP16, TestBFloat16)
             << "IMPLICITGEMM_TESTING_ENV environment variable is not enabled. Skipping the test.";
     }
 
-    std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                      "MIOPEN_DEBUG_CONV_WINOGRAD=0",
-                                      "MIOPEN_DEBUG_CONV_GEMM=0",
-                                      "MIOPEN_DEBUG_CONV_DIRECT=0",
-                                      "MIOPEN_DEBUG_CONV_IMPLICIT_GEMM=1",
-                                      "MIOPEN_DEBUG_CONV_FFT=0"};
+    ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+    ScopedEnvironment<bool> winograd(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+    ScopedEnvironment<bool> gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    ScopedEnvironment<bool> direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+    ScopedEnvironment<bool> implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, true);
+    ScopedEnvironment<bool> fft(MIOPEN_DEBUG_CONV_FFT, false);
 
-    SetEnvVars(env_vars);
     testing::internal::CaptureStderr();
     run();
     const auto capture = testing::internal::GetCapturedStderr();
@@ -105,14 +96,13 @@ TEST_P(GPU_ConvImplicitGemm_FP16, TestFloat16)
             << "IMPLICITGEMM_TESTING_ENV environment variable is not enabled. Skipping the test.";
     }
 
-    std::vector<std::string> env_vars{"MIOPEN_FIND_MODE=normal",
-                                      "MIOPEN_DEBUG_CONV_WINOGRAD=0",
-                                      "MIOPEN_DEBUG_CONV_GEMM=0",
-                                      "MIOPEN_DEBUG_CONV_DIRECT=0",
-                                      "MIOPEN_DEBUG_CONV_IMPLICIT_GEMM=1",
-                                      "MIOPEN_DEBUG_CONV_FFT=0"};
+    ScopedEnvironment<std::string> find_mode(MIOPEN_FIND_MODE, "normal");
+    ScopedEnvironment<bool> winograd(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+    ScopedEnvironment<bool> gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    ScopedEnvironment<bool> direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+    ScopedEnvironment<bool> implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, true);
+    ScopedEnvironment<bool> fft(MIOPEN_DEBUG_CONV_FFT, false);
 
-    SetEnvVars(env_vars);
     testing::internal::CaptureStderr();
     run();
     const auto capture = testing::internal::GetCapturedStderr();
