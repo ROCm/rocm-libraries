@@ -171,21 +171,23 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
         else
 #endif
         {
-            return operator_impl_decode(q_dram_block_window_tmp,
-                                        k_dram_block_window_tmp,
-                                        v_dram_block_window_tmp,
-                                        bias_dram_block_window_tmp,
-                                        lse_acc_dram_window_tmp,
-                                        mask,
-                                        position_encoding,
-                                        scale_s,
-                                        smem_ptr,
-                                        sink_v);
+            return operator_impl_decode<kHasBlockMask>(q_dram_block_window_tmp,
+                                                       k_dram_block_window_tmp,
+                                                       v_dram_block_window_tmp,
+                                                       bias_dram_block_window_tmp,
+                                                       lse_acc_dram_window_tmp,
+                                                       mask,
+                                                       position_encoding,
+                                                       scale_s,
+                                                       smem_ptr,
+                                                       sink_v,
+                                                       block_mask_row_ptr);
         }
     }
 
     // Decode implementation - single buffer, hdim < 256
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -201,7 +203,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                          PositionEncoding position_encoding,
                          float scale_s,
                          void* smem_ptr,
-                         float sink_v) const
+                         float sink_v,
+                         const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -718,7 +721,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             constexpr auto i_idx = make_tuple(idx0);
             const auto tmp       = [&]() {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             FmhaMask::IsMasking)
+                             FmhaMask::IsMasking || kHasBlockMask)
                 {
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }

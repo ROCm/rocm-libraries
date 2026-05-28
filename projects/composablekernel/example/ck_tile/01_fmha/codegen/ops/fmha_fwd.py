@@ -399,7 +399,8 @@ class FmhaFwdApiTrait:
 
     @property
     def block_mask_check(self) -> str:
-        if self.bm0 == 128:
+        # hdim=256 + trload dispatches to operator_impl_hdim256 which lacks block sparsity skip
+        if self.bm0 == 128 and not (int(self.hdim) == 256 and self.tr_load == "t"):
             return "true"
         return "a.block_mask_ptr == nullptr"
 
