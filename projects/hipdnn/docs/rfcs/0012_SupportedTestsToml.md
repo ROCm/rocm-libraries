@@ -252,7 +252,7 @@ The verifier refuses `--enforce-support-claims` if any of:
 - `--gtest_repeat` is set with N > 1 (record dedup conflict).
 - The build is debug (`PrintToStringParamName` is non-deterministic in some cases; auto-gen and verifier must agree on param strings).
 
-A `TestEventListener` for the verifier registers **before** any other listener so it owns `OnTestProgramEnd` when later listeners short-circuit. Synthetic `EXPECT_FAIL` entries are emitted for xUnit fidelity.
+A `TestEventListener` for the verifier registers **before** any other listener so it owns `OnTestProgramEnd` when later listeners short-circuit.
 
 ## 7. Condensation Heuristic
 
@@ -300,7 +300,7 @@ Refuses to run if any of:
 
 ### 8.4 Build integration
 
-`--write-support-claims` is a CLI flag on the integration test binary; a CMake/ctest target per provider (`ninja miopen-provider-write-support-claims`) wraps it with the right `--test-config` baked in. CI never runs the tool — engineer-driven only; auto-applying it would silently rewrite the contract.
+`--write-support-claims` is a CLI flag on the `hipdnn_integration_tests` binary. CI never runs the tool — engineer-driven only; auto-applying it would silently rewrite the contract.
 
 ## 9. Sharding
 
@@ -308,15 +308,15 @@ This RFC does not solve sharding in v1. GoogleTest sharding (`GTEST_TOTAL_SHARDS
 
 v1 refuses `--enforce-support-claims` when any sharding env var is detected, with a clear stderr message. CI configurations that want enforcement run an unsharded job.
 
-Intended v2 path: each shard writes its `SupportMatrixCollector` records to `support_records_shard_<N>.json`; a single `hipdnn_integration_tests --verify-claims-from <dir>` reads all shards, unions them, and runs the verifier once. The reduce phase can promote Rule C's zero-coverage warning to a hard error because in the union of all shards every matcher should have coverage. The full Full-tier integration suite eventually needs sharding for CI wall-clock; documenting the deferred path is the honest v1 stance.
+Intended v2 path: each shard writes its `SupportMatrixCollector` records to `support_records_shard_<N>.json`; a single `hipdnn_integration_tests --verify-claims-from <dir>` reads all shards, unions them, and runs the verifier once. The reduce phase can promote Rule C's zero-coverage warning to a hard error because in the union of all shards every matcher should have coverage. The full Full-tier integration suite eventually needs sharding for CI wall-clock;
 
 ## 10. Workflow and CI
 
 **Day-to-day**: CI runs `--enforce-support-claims` on pre-submit (Smoke) and post-submit (Standard/Comprehensive/Full) on each target asic, unsharded. A claim-broken failure surfaces in the standard test report; the engineer either fixes the code, narrows the matcher, regenerates via `--write-support-claims`, or adds a `[[test_skips]]` entry with a reason.
 
-**Bootstrap (new engine or new asic)**: engineer runs `ninja <provider>-write-support-claims` on the target hardware (Full tier, no filter, no sharding, release build), reviews the resulting sidecar diff, stages both files, and commits.
+**Bootstrap (new engine or new asic)**: engineer runs `./hipdnn_integration_tests --test-config <path-to-engine-toml> --write-support-claims` on the target hardware (Full tier, no filter, no sharding, release build), reviews the resulting sidecar diff, stages both files, and commits.
 
-**Staged rollout for existing engines**: ship the loader and verifier with enforcement OFF by default → per-provider PRs add `[meta] engine` and a sidecar asynchronously → flip enforcement ON by default in a coordinated PR. `.gitattributes` pins `*.supported.toml` to LF. A CI lint rejects PRs that stage `<E>.toml` or `<E>.supported.toml` without the other when both are needed.
+**Staged rollout for existing engines**: ship the loader and verifier with enforcement OFF by default → per-provider PRs add `[meta] engine` and a sidecar asynchronously → flip enforcement ON by default in a coordinated PR.
 
 ## 11. Alternatives Considered
 
