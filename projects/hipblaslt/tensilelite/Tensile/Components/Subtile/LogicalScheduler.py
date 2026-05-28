@@ -1400,13 +1400,18 @@ class LogicalScheduler:
         # Forward distance from dep (exclusive) to consumer (inclusive) =
         #   wraps_needed full iterations + (consumer_flat - dep_flat) slots.
         # Walking backward covers the same count of slots.
-        # Always >= 1 for wraps_needed >= 1 (since consumer_flat - dep_flat >= -(flat_len-1)).
+        # When wraps_needed==0 and dep_flat >= consumer_flat, the dep GR is at or
+        # after the consumer in the same iteration — nothing is inflight yet.
+        # When wraps_needed >= 1, total_steps is always >= 1 by construction
+        # (wraps_needed*flat_len >= flat_len > flat_len-1 >= dep_flat-consumer_flat).
         total_steps = wraps_needed * flat_len + consumer_flat - dep_flat
-        assert total_steps >= 1, (
-            f"_compute_inflight_loads: total_steps={total_steps} < 1 "
-            f"(wraps_needed={wraps_needed}, consumer_flat={consumer_flat}, dep_flat={dep_flat}); "
-            "dep GR is at or after the consumer in the same iteration — invalid forward dependency"
-        )
+        if total_steps <= 0:
+            assert wraps_needed == 0, (
+                f"_compute_inflight_loads: total_steps={total_steps} < 1 "
+                f"(wraps_needed={wraps_needed}, consumer_flat={consumer_flat}, dep_flat={dep_flat}); "
+                "unexpected negative total_steps with wraps_needed >= 1"
+            )
+            return WaitGRCounts()
 
         counts = WaitGRCounts()
         pos = consumer_flat
