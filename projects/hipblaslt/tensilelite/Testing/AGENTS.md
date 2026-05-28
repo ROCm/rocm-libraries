@@ -2,19 +2,31 @@
 
 Read `README.md` first for what these tools do and how to drive them. This file covers what's load-bearing about the design and what you should not break.
 
+## Two separate tools with different dependency surfaces
+
+This is the first thing to keep clear when editing here:
+
+- **`okl.py`** drives `hipblaslt-bench` and reads the shipped `.co` files. It **requires a full hipBLASLt install** (the bench binary + the device library + the LLVM tools to unbundle and read kernel metadata).
+- **`okl_run.cpp`** loads a `kernel.conf` + `kernel.co` package and runs the kernel. It **requires only the HIP runtime** (`libamdhip64` + `libhsa-runtime64`). No hipBLASLt, no Tensile, no shipped device library. It is the kernel-launching equivalent of how a third-party harness (cuBLAS comparison, custom kernel framework) would drive a hipBLASLt-tuned kernel.
+
+The package (`kernel.conf` + `kernel.co`) is the only contract between them. Any edit that quietly tightens that contract on the C++ side — adding a runtime call into hipBLASLt, requiring the shipped device library, etc. — collapses the two tools into one and defeats the design.
+
 ## What lives here
 
-| File | Contract |
-|---|---|
-| `okl.py` | Python wrapper around `hipblaslt-bench`. Two modes: query-only (prints JSON) and `--package OUT_DIR` (also writes a `kernel.conf` + copy of the `.co`). |
-| `okl_run.cpp` | Standalone HIP runner. Takes a `kernel.conf`, links **only** against the HIP runtime, runs the kernel with bench-style timing. |
-| `kernel-packaging-research.md` | Reference doc (~1900 lines). Sections §1–§9 cover everything from on-disk `.co` layout to the metadata-driven argument-feeding design. Always check the relevant section before changing either tool. |
+| File | Role | Hard deps |
+|---|---|---|
+| `okl.py` | Driver: query hipBLASLt heuristic, optionally package the chosen kernel | hipBLASLt install (`hipblaslt-bench` + shipped device library), `clang-offload-bundler`, `llvm-readobj`, Python 3 |
+| `okl_run.cpp` | Standalone runner: load a package, launch the kernel, time it | Build: `hipcc`. Run: `libamdhip64` + `libhsa-runtime64`. **NOT** hipBLASLt, **NOT** Tensile. |
+| `package_examples.py` | Convenience: drive `okl.py --package` for several canonical shapes | Same as `okl.py` |
+| `compare_okl_vs_bench.py` | Run both runners on each package and write a comparison file | Both stacks |
+| `packages/` | Output of `package_examples.py` (one subdir per packaged kernel) and of `compare_okl_vs_bench.py` (`comparison.json` / `comparison.md`) | — |
+| `kernel-packaging-research.md` | Reference doc (~1900 lines). Sections §1–§9 cover everything from on-disk `.co` layout to the metadata-driven argument-feeding design. Always check the relevant section before changing either tool. | — |
 
 ## Load-bearing invariants
 
 These are the design choices that hold the system together. Don't undo them without a deliberate refactor.
 
-1. **`okl_run.cpp` links only against `libamdhip64` / `libhsa-runtime64`.** No Tensile, no hipBLASLt. The whole point of the standalone exe is to be the kernel-launching equivalent of how a third party (cuBLAS comparison, custom kernel) would run things. Adding a `#include <Tensile/...>` or a `-lhipblaslt` defeats the project.
+1. **`okl_run.cpp` links only against `libamdhip64` / `libhsa-runtime64`.** No Tensile, no hipBLASLt, no shipped device library. The whole point of the standalone exe is to be the kernel-launching equivalent of how a third party (cuBLAS comparison, custom kernel) would run things — and to be usable on machines that don't have hipBLASLt installed at all. Adding a `#include <Tensile/...>`, a `-lhipblaslt`, or a runtime dependency on `HIPBLASLT_TENSILE_LIBPATH` would collapse the two tools into one and defeat the project. Verify with `ldd okl_run` after any change to the build line.
 
 2. **No kernel-specific constants in the C++.** Every kernel-dependent value (kernarg offsets, `internalArgs` bit-packing, MT/WG sizes, buffer roles, alpha/beta encoding) lives in `kernel.conf`, populated by `okl.py` from either the runtime `TENSILE_DB=0x40` dump or the `.co`'s `amdhsa.kernels[*].args` ELF metadata. If you're about to hardcode `0x20080001` or `put_u32(96, alpha)` somewhere, you're walking back the metadata-driven design from §9.
 
