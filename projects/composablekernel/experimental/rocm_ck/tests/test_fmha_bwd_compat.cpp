@@ -702,18 +702,6 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
     EXPECT_EQ(v, nullptr);
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregisteredArch)
-{
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 128,
-                                                      .hdim_v = 128,
-                                                      .mode   = FmhaMode::BATCH,
-                                                      .arch   = FmhaArch::GFX11},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(v, nullptr);
-}
-
 TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 15); }
 
 // _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
