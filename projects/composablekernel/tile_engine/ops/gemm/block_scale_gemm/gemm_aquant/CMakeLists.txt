@@ -143,6 +143,19 @@ function(build_individual_gemm_aquant_targets datatype layout)
 
     message(VERBOSE "Generating individual AQuant kernels for ${datatype} ${layout} using ${num_workers} workers...")
 
+    # Build sampling arguments
+    set(extra_list_args "")
+    if(NOT "${GEMM_AQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_AQUANT_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # List kernels
     message(VERBOSE "  Listing AQuant kernel configurations for ${datatype} ${layout}...")
     execute_process(
@@ -153,6 +166,7 @@ function(build_individual_gemm_aquant_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target "${GEMM_AQUANT_GPU_TARGETS_INDIVIDUAL}"
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -263,6 +277,19 @@ else()
     foreach(scheduler IN LISTS GEMM_AQUANT_SCHEDULERS)
         add_custom_target(benchmark_gemm_aquant_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap.
+    if(NOT "${GEMM_AQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_AQUANT_DATATYPE _aq_n_dt)
+        list(LENGTH GEMM_AQUANT_LAYOUT _aq_n_lay)
+        math(EXPR _aq_n_combos "${_aq_n_dt} * ${_aq_n_lay}")
+        if(_aq_n_combos GREATER 0)
+            math(EXPR GEMM_AQUANT_MAX_INSTANCES
+                "${GEMM_AQUANT_MAX_INSTANCES} / ${_aq_n_combos}")
+            message(STATUS "  gemm_aquant: per-combo budget = ${GEMM_AQUANT_MAX_INSTANCES} (${_aq_n_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_AQUANT_DATATYPE)
