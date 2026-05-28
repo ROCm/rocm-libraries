@@ -133,7 +133,7 @@ elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" S
   if(NOT DEFINED AMDGPU_TARGETS)
     set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
   else()
-      set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
   endif()
   set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
 
