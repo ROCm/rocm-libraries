@@ -443,73 +443,240 @@ largest gains come from the GEMM layers (QKV + O-proj) which together are
 
 ---
 
-## Bug Fixes Made During This Work
-
-These bugs were discovered and fixed while building these examples.
-The fixes are committed to the CK DSL library.
-
-### Bug 1: BF16 → FP16 dtype mismatch in BatchedGemmSpec
-
-**File**: `ck_dsl/instances/batched_gemm.py`, `moe_gemm_fused.py`
-
-`BatchedGemmSpec.to_universal_spec()` constructed `DataSpec()` with no
-arguments, defaulting to `dtype_a=dtype_b=dtype_c="fp16"`.  When passed BF16
-tensors, the kernel read BF16 bit patterns as FP16 bit patterns.  A BF16
-value like `0x3F80` (= 1.0 in BF16) is `~3.05×10^{-5}` in FP16, and a value
-like `0x7F00` (≈ 49152 in BF16) is `+Inf` in FP16 — but many BF16 values
-map to large finite FP16 values, so the output was finite garbage (~1e36)
-that passed `not (nan or inf)` checks silently.
-
-**Fix**: Added `dtype: str` field to all 5 GEMM spec classes; `_data_spec()`
-returns `DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)`.
-
-### Bug 2: BF16 MFMA atom incompatibility
-
-**File**: `ck_dsl/instances/fused_moe_e2e.py`
-
-The default `gemm_tile` used `warp_tile_m=32, warp_tile_n=32, warp_tile_k=16`
-— which selects the `(32,32,16)` MFMA atom.  On gfx950 this atom is only
-available for FP16; BF16 silently used an incompatible instruction sequence,
-producing garbage output even after Bug 1 was fixed.
-
-**Fix**: `_default_bf16_gemm_tile()` selects `warp_tile=(16,16,32)` with
-`warp_m=2, warp_n=2` → block_size=256.  The check
-`tile_m * tile_k / load_vec >= block_size` is satisfied: `(32*32)/2 = 512 >= 256`.
-
-### Bug 3: `global_load_vN: 1` compilation error
-
-An earlier BF16 tile attempt used `warp_m=1, warp_n=8` (block_size=512).
-This gave `a_vecs = (tile_m * tile_k) / load_vec = (16*32)/2 = 256 < 512`
-— insufficient A-tile vectors per thread, forcing `load_vec=1` which is
-rejected by the code generator with `global_load_vN: 1 is not supported`.
-
-**Fix**: `warp_m=2, warp_n=2, block_size=256` satisfies all constraints.
-
----
-
 ## ATOM Integration
 
-The optimizations from these examples are wired into the ATOM inference engine
-behind environment-variable gates.  Both paths fall back to AITER on error.
+The DSL kernels are wired into ATOM behind environment-variable gates so the
+existing AITER path remains the default and DSL is opt-in per deployment.
 
-```bash
-# Enable DSL GEMM for BF16 decode shapes (M ≤ 8)
-ATOM_USE_DSL_GEMM=1 python -m atom.serve ...
+### Step 1 — Add env-var flags: `atom/utils/envs.py`
 
-# Enable DSL decode attention (3D split-KV, num_sms=60)
-ATOM_USE_DSL_ATTENTION=1 python -m atom.serve ...
+Register new entries in the `_ENV_VARS` dict:
 
-# Both together
-ATOM_USE_DSL_GEMM=1 ATOM_USE_DSL_ATTENTION=1 python -m atom.serve ...
+```python
+"ATOM_USE_DSL_GEMM":     lambda: os.getenv("ATOM_USE_DSL_GEMM", "0") == "1",
+"ATOM_USE_DSL_ATTENTION": lambda: os.getenv("ATOM_USE_DSL_ATTENTION", "0") == "1",
+"ATOM_DSL_GEMM_MAX_M":   lambda: int(os.getenv("ATOM_DSL_GEMM_MAX_M", "8")),
+"ATOM_DSL_GEMM_DEBUG":   lambda: os.getenv("ATOM_DSL_GEMM_DEBUG", "0") == "1",
 ```
 
-**Files modified in ATOM**:
+`ATOM_DSL_GEMM_MAX_M=8` covers all decode batch sizes up to 8 — the range
+where the skinny GEMM tiling is faster than rocBLAS.
 
-| File | Change |
-|------|--------|
-| `atom/utils/envs.py` | Added `ATOM_USE_DSL_GEMM`, `ATOM_USE_DSL_ATTENTION`, `ATOM_DSL_GEMM_MAX_M` |
-| `atom/model_ops/linear.py` | `_dsl_gemm_forward()` with DTLA+chiplet tile; dispatch in `LinearBase.forward()` |
-| `atom/model_ops/attention_mha.py` | `paged_attention_dsl()` via `run_unified_attention_torch`; dispatch in `dispatch_backend()` |
+### Step 2 — Register DSL GEMM as a torch custom op: `atom/model_ops/linear.py`
+
+**Critical requirement**: the DSL kernel must be registered as a
+`torch.library` custom op, not as a plain Python function.  ATOM uses
+`@support_torch_compile` (Dynamo tracing) + CUDAGraph capture at level 3.
+A plain `@torch._dynamo.disable` function causes a Dynamo graph break —
+the op is not recorded in the CUDAGraph and never executes at decode time.
+A `torch.library` custom op is opaque to Dynamo, traced through without a
+graph break, and the HIP launch is recorded on the capture stream.
+
+```python
+import struct, torch
+_dsl_gemm_cache: dict = {}
+
+# ---- compilation helper (called once per unique M,N,K shape) ----
+def _dsl_compile_gemm(M, N, K, device):
+    from ck_dsl.instances.gemm_universal import (
+        UniversalGemmSpec, TileSpec, TraitSpec, DataSpec, build_universal_gemm,
+    )
+    from ck_dsl.helpers import compile_kernel
+    from ck_dsl.runtime.hip_module import Runtime
+
+    key = (M, N, K)
+    if key in _dsl_gemm_cache:
+        return _dsl_gemm_cache[key]
+
+    spec = UniversalGemmSpec(
+        name=f"atom_dsl_gemm_m{M}n{N}k{K}",
+        tile=TileSpec(tile_m=16, tile_n=16, tile_k=512,
+                      warp_m=1, warp_n=1, warp_k=1,
+                      warp_tile_m=16, warp_tile_n=16, warp_tile_k=32),
+        trait=TraitSpec(pipeline="mem", scheduler="interwave",
+                        epilogue="cshuffle", pad_m=True, pad_n=True, pad_k=True,
+                        direct_to_lds=True, dtl_cache_a=0, dtl_cache_b=0,
+                        chiplet_swizzle=True, chiplet_wgm=4,
+                        chiplet_num_xcds=8, chiplet_chunk_size=64),
+        data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16",
+                      dtype_acc="fp32", layout="RCR"),
+        wave_size=64, block_size=0, batched=False,
+    )
+    art = compile_kernel(build_universal_gemm(spec),
+                         isa="amdgcn-amd-amdhsa--gfx950")
+    tile_m, tile_n = 16, 16
+    grid  = ((N + tile_n - 1) // tile_n, (M + tile_m - 1) // tile_m, 1)
+    block = (spec.block_size, 1, 1)
+    rt  = Runtime()
+    mod = rt.load_module(art.hsaco)
+    fn  = mod.get_function(art.kernel_name)
+    c   = torch.empty((M, N), dtype=torch.bfloat16, device=device)
+
+    def run(Ap, Bp, Cp, stream):
+        rt.launch(fn, grid, block,
+                  struct.pack("<QQQiii", Ap, Bp, Cp, M, N, K), stream=stream)
+
+    _dsl_gemm_cache[key] = (run, c)
+    return run, c
+
+# ---- register as torch custom op ----
+_dsl_gemm_lib = torch.library.Library("atom_dsl", "DEF")
+_dsl_gemm_lib.define("gemm(Tensor x, Tensor weight) -> Tensor")
+
+@torch.library.impl("atom_dsl::gemm", "cuda")
+def _dsl_gemm_impl(x, weight):
+    x2 = x.reshape(-1, x.shape[-1]).contiguous()
+    M, K = x2.shape
+    N = weight.shape[0]
+    run, c = _dsl_compile_gemm(M, N, K, x2.device)
+    run(int(x2.data_ptr()), int(weight.contiguous().data_ptr()),
+        int(c.data_ptr()), torch.cuda.current_stream().cuda_stream)
+    return c.reshape(*x.shape[:-1], N)
+
+@torch.library.impl_abstract("atom_dsl::gemm")
+def _dsl_gemm_abstract(x, weight):
+    return x.new_empty((*x.shape[:-1], weight.shape[0]))
+```
+
+In `LinearBase.forward()`, dispatch before the existing `tgemm.mm` call:
+
+```python
+if (
+    self._is_no_quant
+    and envs.ATOM_USE_DSL_GEMM
+    and otype == dtypes.bf16
+    and x.dtype == torch.bfloat16
+    and self.weight.dtype == torch.bfloat16
+    and x.reshape(-1, x.shape[-1]).shape[0] <= envs.ATOM_DSL_GEMM_MAX_M
+    and self.bias is None
+):
+    y = torch.ops.atom_dsl.gemm(x, self.weight)
+else:
+    y = tgemm.mm(x, self.weight, self.bias, otype=otype)
+```
+
+The custom op is compiled once per unique (M, N, K) shape during CUDAGraph
+warmup and cached.  At decode time the CUDAGraph replay replays the recorded
+HIP launch — no Python executes.  All CUDAGraph batch sizes (1, 2, 4, 8, ...)
+each get their own compiled kernel automatically.
+
+**Verifying dispatch**: set `ATOM_DSL_GEMM_DEBUG=1` and run in eager mode
+(`--level 0`).  The ModelRunner subprocess will log a line per GEMM call:
+
+```
+[atom] WARNING [DSL] GEMM kernel compiled  M=2 N=5120 K=2048  (cache size: 1 shapes)
+[atom] WARNING [DSL] GEMM call #1  M=2 N=5120 K=2048
+...
+```
+
+In CUDAGraph mode (`--level 3`) only the compile-time log appears (once per
+shape at warmup).  No per-call logging fires during replay — that is expected:
+CUDAGraph replay is pure GPU with no Python execution.
+
+### Step 3 — Wire DSL attention into decode: `atom/model_ops/attention_mha.py`
+
+Add a `paged_attention_dsl` method that wraps `run_unified_attention_torch`:
+
+```python
+def paged_attention_dsl(self, query, key_cache, value_cache,
+                        cu_seqlens_q, seqused_k, block_table, output, ...):
+    from ck_dsl.instances import UnifiedAttentionProblem, run_unified_attention_torch
+    prob = UnifiedAttentionProblem(
+        total_q=query.shape[0],
+        num_seqs=query.shape[0],
+        num_query_heads=self.num_heads,
+        num_kv_heads=self.num_kv_heads,
+        head_size=self.head_size,
+        block_size=self.block_size,
+        max_seqlen_q=1,
+        max_seqlen_k=int(seqused_k.max()),
+        dtype="bf16",
+        num_sms=60,
+    )
+    run_unified_attention_torch(
+        problem=prob, q=query, k=key_cache, v=value_cache, out=output,
+        cu_seqlens_q=cu_seqlens_q, seqused_k=seqused_k,
+        softmax_scale=self.scale, block_table=block_table,
+        softcap=0.0, stream=torch.cuda.current_stream().cuda_stream,
+    )
+    return output
+```
+
+Gate it in `dispatch_backend()` before the existing Triton/ASM branches:
+
+```python
+if envs.ATOM_USE_DSL_ATTENTION and self.use_flash_layout:
+    return self.paged_attention_dsl
+```
+
+**Note**: on A3B (GQA-8, head_dim=64) the DSL attention reaches parity with
+AITER Triton but does not surpass it — see Open Gaps.  `ATOM_USE_DSL_ATTENTION`
+should not be enabled in production for this config until a kernel tuned for
+small head_dim is available.
+
+### Benchmarking end-to-end serving latency
+
+`bench_atom.py` measures wall-clock decode step latency for one backend
+configuration per invocation (configs share no process state).  For a fair
+comparison across configs, use `bench_atom_sweep.py` which runs all three
+in interleaved round-robin order so each round experiences the same GPU
+power/thermal state.
+
+```bash
+export PYTHONPATH=/path/to/composablekernel/python
+PYTHON=/path/to/venv/bin/python3
+
+# Single config — 30 reps, mean ± stdev
+$PYTHON bench_atom.py --model <model> --config baseline
+$PYTHON bench_atom.py --model <model> --config dsl_gemm
+$PYTHON bench_atom.py --model <model> --config dsl_all
+
+# Interleaved sweep — recommended for fair comparison
+$PYTHON bench_atom_sweep.py --model <model> --rounds 30
+```
+
+**Measured results** (MI355X, Qwen3-30B-A3B, random weights, bs=2,
+input=512, output=200 tok, level=3 CUDAGraph, kv_cache_dtype=bf16,
+30 interleaved rounds):
+
+```
+  Config              Step (µs)
+  baseline (rocBLAS)  4654 ± 117
+  dsl_gemm (DSL GEMM) 4605 ± 131   (−1.1% vs baseline, within 1σ — not significant)
+  dsl_all  (GEMM+ATT) 4631 ± 141   (−0.5% vs baseline, within 1σ — not significant)
+```
+
+All three configs are statistically indistinguishable.  The ±120–140 µs
+run-to-run stdev from GPU power state variation is itself larger than the
+kernel savings (~50–100 µs GPU time saved by DSL).
+
+**Why the kernel speedup does not appear at the serving layer**:
+
+The ATOM engine loop — Python IPC between the main process and the ModelRunner
+subprocess, plus scheduler and sampler overhead — contributes approximately
+4200 µs per decode step on top of the ~200–300 µs of actual GPU kernel time.
+DSL saves ~50–100 µs of GPU time, which is under 1% of the total 4500 µs step
+and below the measurement noise floor.
+
+The true GPU-level speedup (1.28×, ~209 µs → ~163 µs) is confirmed by the
+per-kernel benchmarks in `07_full_decode_step.py`.  Exposing it end-to-end
+requires reducing the ATOM engine loop overhead from ~4200 µs to below ~500 µs.
+
+### Production env-var reference
+
+```bash
+# Enable DSL GEMM for decode-shape linear projections (M ≤ 8 by default)
+ATOM_USE_DSL_GEMM=1 python -m atom.serve --model <model> ...
+
+# Raise the M threshold (e.g. to cover bs=32 prefill chunks)
+ATOM_DSL_GEMM_MAX_M=32 ATOM_USE_DSL_GEMM=1 python -m atom.serve --model <model> ...
+
+# Log every DSL GEMM dispatch (eager mode only; silent during CUDAGraph replay)
+ATOM_DSL_GEMM_DEBUG=1 ATOM_USE_DSL_GEMM=1 python -m atom.serve --model <model> ...
+
+# DSL attention — not recommended for A3B (GQA-8 / head_dim=64) until tuned
+ATOM_USE_DSL_ATTENTION=1 python -m atom.serve --model <model> ...
+```
 
 ---
 
@@ -527,13 +694,15 @@ ATOM_USE_DSL_GEMM=1 ATOM_USE_DSL_ATTENTION=1 python -m atom.serve ...
 
 ```
 qwen3_30b_a3b/
-├── README.md              ← this file
-├── _common.py             ← shared constants, timing, GEMM builder
-├── 01_gemm_skinny.py      ← QKV/O-proj: DTLA + tile_k + chiplet swizzle
-├── 02_rmsnorm.py          ← add_rmsnorm2d: CUDA graph capture
-├── 03_decode_attention.py ← paged decode: 3D split-KV + num_sms sweep
-├── 04_topk_softmax.py     ← router topK: fused kernel + CUDA graph
-├── 05_moe_sorting.py      ← token sort: 3-kernel chain vs AITER fused
-├── 06_moe_e2e.py          ← full MoE fwd: all 6 optimizations + graph
-└── 07_full_decode_step.py ← Amdahl table: all layers → 1.28× end-to-end
+├── README.md               ← this file
+├── _common.py              ← shared constants, timing, GEMM builder
+├── 01_gemm_skinny.py       ← QKV/O-proj: DTLA + tile_k + chiplet swizzle
+├── 02_rmsnorm.py           ← add_rmsnorm2d: CUDA graph capture
+├── 03_decode_attention.py  ← paged decode: 3D split-KV + num_sms sweep
+├── 04_topk_softmax.py      ← router topK: fused kernel + CUDA graph
+├── 05_moe_sorting.py       ← token sort: 3-kernel chain vs AITER fused
+├── 06_moe_e2e.py           ← full MoE fwd: all 6 optimizations + graph
+├── 07_full_decode_step.py  ← Amdahl table: all layers → 1.28× end-to-end
+├── bench_atom.py           ← single-config ATOM wall-clock latency benchmark
+└── bench_atom_sweep.py     ← interleaved multi-config sweep (fair comparison)
 ```
