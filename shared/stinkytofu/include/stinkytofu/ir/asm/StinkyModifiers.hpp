@@ -171,6 +171,17 @@ enum class DppCtrl : uint16_t {
     // clang-format on
 };
 
+// All asm-form key names for DPP `dpp_ctrl` (no `:N` suffix). Keep in sync with DppCtrl above.
+// clang-format off
+inline constexpr std::array<std::string_view, 13> kDppCtrlKeys{
+    "quad_perm",
+    "row_shl",    "row_shr",    "row_ror",
+    "wave_shl",   "wave_shr",   "wave_rol",   "wave_ror",
+    "row_bcast",  "row_share",  "row_xmask",
+    "row_mirror", "row_half_mirror",
+};
+// clang-format on
+
 // Classify a DppCtrl value into a human-readable assembly string.
 // E.g. DppCtrl(0x113) -> "row_shr:3", DppCtrl(0x140) -> "row_mirror".
 STINKYTOFU_EXPORT std::string dppCtrlToAsmStr(DppCtrl ctrl);
@@ -184,6 +195,7 @@ struct Modifier {
         FLAT,
         GLOBAL,
         MUBUF,
+        CACHE_SCOPE,
         SMEM,
         SDWA,
         DPP,
@@ -320,6 +332,19 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    MUBUFScope scope;
+};
+
+// Carries just the cache scope token for SOPP-format memory fences such as
+// global_wb / global_inv on gfx1250+. These instructions are not buffer ops
+// and do not need offen/glc/slc/lds/etc., so they cannot reuse MUBUFModifiers
+// without coupling to fields that may diverge in future MUBUF refactors.
+struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::CACHE_SCOPE;
+
+    CacheScopeModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+        : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
+
     MUBUFScope scope;
 };
 
