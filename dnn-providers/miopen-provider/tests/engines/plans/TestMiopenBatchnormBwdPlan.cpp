@@ -98,6 +98,7 @@ TEST(TestBatchnormBwdParams, InitializesFusedActivationBiasWithAllTensors)
     // Optional fusion-specific tensors should be present
     EXPECT_TRUE(params.optActivation().has_value());
     EXPECT_TRUE(params.optBias().has_value());
+    EXPECT_EQ(params.dy().uid(), pointwiseAttrs->in_0_tensor_uid());
 
     // Optional mean/variance should be present if provided
     EXPECT_TRUE(params.optMean().has_value());
