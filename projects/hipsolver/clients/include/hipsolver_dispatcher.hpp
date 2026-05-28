@@ -28,6 +28,7 @@
 #include <string>
 
 #include "testing_gebrd.hpp"
+#include "testing_geev.hpp"
 #include "testing_gels.hpp"
 #include "testing_geqrf.hpp"
 #include "testing_gesv.hpp"
@@ -53,6 +54,7 @@
 #include "testing_sygvj_hegvj.hpp"
 #include "testing_sytrd_hetrd.hpp"
 #include "testing_sytrf.hpp"
+#include "testing_sytrs.hpp"
 
 #ifdef HAVE_HIPSPARSE
 #include "testing_csrlsvchol.hpp"
@@ -79,6 +81,7 @@ class hipsolver_dispatcher
         // Map for functions that support all precisions
         static const func_map map = {
             {"gebrd", testing_gebrd<API_NORMAL, false, false, T>},
+            {"geev_64", testing_geev<API_COMPAT, false, false, T, T, int64_t, size_t>},
             {"gels", testing_gels<API_NORMAL, false, false, false, T>},
             {"geqrf", testing_geqrf<API_NORMAL, false, false, T, int, int>},
             {"geqrf_64", testing_geqrf<API_COMPAT, false, false, T, int64_t, size_t>},
@@ -97,6 +100,7 @@ class hipsolver_dispatcher
             {"potrs", testing_potrs<API_NORMAL, false, false, T>},
             {"potrs_batched", testing_potrs<API_NORMAL, true, false, T>},
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
+            {"sytrs_64", testing_sytrs<API_COMPAT, false, false, T, int64_t, size_t>},
         };
 
         // Grab function from the map and execute

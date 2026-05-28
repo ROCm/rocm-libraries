@@ -69,17 +69,17 @@ bool SdpaBwdPlanBuilder::isApplicable(
     const auto& tensorMap = opGraph.getTensorMap();
 
     // Required input tensor UIDs
-    int64_t qUid = attrs.q_tensor_uid();
-    int64_t kUid = attrs.k_tensor_uid();
-    int64_t vUid = attrs.v_tensor_uid();
-    int64_t oUid = attrs.o_tensor_uid();
-    int64_t doUid = attrs.do_tensor_uid();
-    int64_t statsUid = attrs.stats_tensor_uid();
+    const int64_t qUid = attrs.q_tensor_uid();
+    const int64_t kUid = attrs.k_tensor_uid();
+    const int64_t vUid = attrs.v_tensor_uid();
+    const int64_t oUid = attrs.o_tensor_uid();
+    const int64_t doUid = attrs.do_tensor_uid();
+    const int64_t statsUid = attrs.stats_tensor_uid();
 
     // Required output tensor UIDs
-    int64_t dqUid = attrs.dq_tensor_uid();
-    int64_t dkUid = attrs.dk_tensor_uid();
-    int64_t dvUid = attrs.dv_tensor_uid();
+    const int64_t dqUid = attrs.dq_tensor_uid();
+    const int64_t dkUid = attrs.dk_tensor_uid();
+    const int64_t dvUid = attrs.dv_tensor_uid();
 
     // Q tensor: BF16, rank-4, head dim 128
     auto* qTensor = tensorMap.at(qUid);
@@ -183,11 +183,11 @@ void SdpaBwdPlanBuilder::buildPlan(
     // -------------------------------------------------------------------------
     // 1. Load 3 kernel modules and get kernel functions from modules
     // -------------------------------------------------------------------------
-    std::string odoCoPath
+    const std::string odoCoPath
         = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_bwd/MI300/bwd_hd128_odo_bf16.co");
-    std::string dqdkdvCoPath = asm_kernels::getAsmKernelPath(
+    const std::string dqdkdvCoPath = asm_kernels::getAsmKernelPath(
         "gfx942/fmha_v3_bwd/MI300/bwd_hd128_bf16_a32_rtne_psskddv.co");
-    std::string postCoPath = asm_kernels::getAsmKernelPath(
+    const std::string postCoPath = asm_kernels::getAsmKernelPath(
         "gfx942/fmha_v3_bwd/MI300/bwd_hd128_dq_convert_bf16_rtne.co");
 
     auto odoKernel = loadKernelModule(odoCoPath, "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
@@ -219,15 +219,15 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto& tensorMap = opGraph.getTensorMap();
 
     // Tensor UIDs
-    int64_t qUid = sdpaAttrs.q_tensor_uid();
-    int64_t kUid = sdpaAttrs.k_tensor_uid();
-    int64_t vUid = sdpaAttrs.v_tensor_uid();
-    int64_t oUid = sdpaAttrs.o_tensor_uid();
-    int64_t doUid = sdpaAttrs.do_tensor_uid();
-    int64_t statsUid = sdpaAttrs.stats_tensor_uid();
-    int64_t dqUid = sdpaAttrs.dq_tensor_uid();
-    int64_t dkUid = sdpaAttrs.dk_tensor_uid();
-    int64_t dvUid = sdpaAttrs.dv_tensor_uid();
+    const int64_t qUid = sdpaAttrs.q_tensor_uid();
+    const int64_t kUid = sdpaAttrs.k_tensor_uid();
+    const int64_t vUid = sdpaAttrs.v_tensor_uid();
+    const int64_t oUid = sdpaAttrs.o_tensor_uid();
+    const int64_t doUid = sdpaAttrs.do_tensor_uid();
+    const int64_t statsUid = sdpaAttrs.stats_tensor_uid();
+    const int64_t dqUid = sdpaAttrs.dq_tensor_uid();
+    const int64_t dkUid = sdpaAttrs.dk_tensor_uid();
+    const int64_t dvUid = sdpaAttrs.dv_tensor_uid();
 
     // Tensor objects
     auto* qTensor = tensorMap.at(qUid);

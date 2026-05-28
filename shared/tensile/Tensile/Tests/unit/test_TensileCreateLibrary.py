@@ -1137,3 +1137,103 @@ def sanityCheck_oldLogic(sourceLibPaths, asmLibPaths, codeObjectFiles, genSource
     assert len(sanityCheck0) == 0, "Unexpected code object files: {}".format(sanityCheck0)
     if not genSourcesAndExit:
         assert len(sanityCheck1) == 0, "Missing expected code object files: {}".format(sanityCheck1)
+
+
+###############################################################################
+# Discrimination tests for renameFallbacksPerArch (kpack-collision regression).
+#
+# Each test below must FAIL under code that lacks renameFallbacksPerArch and
+# its idempotent consumer counterpart. They prove the rename actually
+# de-collides per-arch fallback file references — not just incidentally.
+###############################################################################
+
+
+def _makeMasterWithFallbackPlaceholder(prefix: str) -> SolutionLibrary.MasterSolutionLibrary:
+    """Build a tiny master containing one PlaceholderLibrary in 'fallback' shape."""
+    ph = SolutionLibrary.PlaceholderLibrary(prefix)
+    pml = SolutionLibrary.ProblemMapLibrary(mappingProperty=None, mapping={"opId": ph})
+    pl = SolutionLibrary.PredicateLibrary(tag="Hardware", rows=[{"predicate": "p", "library": pml}])
+    fakeLazy = SolutionLibrary.MasterSolutionLibrary({}, None)
+    m = SolutionLibrary.MasterSolutionLibrary({}, pl)
+    m.lazyLibraries = {prefix: fakeLazy}
+    return m
+
+
+def test_renameFallbacksPerArch_perArchKeysDiverge():
+    """
+    Discrimination: under buggy/legacy producer (no rename), the per-arch
+    masters share the SAME lazyLibraries key (..._fallback) and would
+    serialize as a single shared *_fallback.dat. The patched producer must
+    emit distinct per-arch keys so each arch gets its own file.
+    """
+    base = "TensileLibrary_lazy_Bjlk_fallback"
+    m_alias = _makeMasterWithFallbackPlaceholder(base)
+    masters = {"gfx1100": m_alias, "gfx1101": m_alias}  # alias case from addFallback
+    tcl.renameFallbacksPerArch(masters)
+
+    keys_1100 = set(masters["gfx1100"].lazyLibraries.keys())
+    keys_1101 = set(masters["gfx1101"].lazyLibraries.keys())
+    # Buggy code (no rename) leaves both as {base}; patched code must
+    # produce {base + "_<arch>"} per arch with no overlap.
+    assert keys_1100 == {
+        base + "_gfx1100"
+    }, "gfx1100 lazy key not arch-suffixed; legacy unrouted name still present"
+    assert keys_1101 == {
+        base + "_gfx1101"
+    }, "gfx1101 lazy key not arch-suffixed; legacy unrouted name still present"
+    assert keys_1100.isdisjoint(
+        keys_1101
+    ), "per-arch lazy keys must not collide on a shared fallback filename"
+
+
+def test_renameFallbacksPerArch_placeholderInTreeMatchesLazyKey():
+    """
+    Discrimination: the C++ loader builds the .dat path from the
+    PlaceholderLibrary's filenamePrefix embedded in the master library tree.
+    If only the lazyLibraries dict key is renamed but the in-tree placeholder
+    is not, the runtime would attempt to load the OLD shared name and the
+    serialized master would be inconsistent with the on-disk file. The patch
+    must keep both in sync.
+    """
+    base = "TensileLibrary_lazy_Bjlk_fallback"
+    masters = {"gfx1100": _makeMasterWithFallbackPlaceholder(base)}
+    tcl.renameFallbacksPerArch(masters)
+
+    placeholder = masters["gfx1100"].library.rows[0]["library"].mapping["opId"]
+    lazyKey = next(iter(masters["gfx1100"].lazyLibraries.keys()))
+    assert placeholder.filenamePrefix == base + "_gfx1100", (
+        "placeholder filenamePrefix not arch-suffixed — runtime would load "
+        "the legacy shared *_fallback.dat path"
+    )
+    assert placeholder.filenamePrefix == lazyKey, (
+        "placeholder filenamePrefix and lazyLibraries key drifted; "
+        "serialized master would point at a file the writer never produced"
+    )
+
+
+def test_renameFallbacksPerArch_aliasedFallbackIsDeepCopied():
+    """
+    Discrimination: addFallback() aliases the same MasterSolutionLibrary
+    across multiple arch keys when an arch lacks tuned logic
+    (masterLibraries[archName] = masterLibraries["fallback"]). A naive
+    in-place rename would mutate the SAME object twice, leaving both arch
+    masters pointing at whichever rename ran last. Patched code must
+    deep-copy so the per-arch trees are independent.
+    """
+    base = "TensileLibrary_lazy_Bjlk_fallback"
+    shared = _makeMasterWithFallbackPlaceholder(base)
+    masters = {"gfx1100": shared, "gfx1101": shared}
+    tcl.renameFallbacksPerArch(masters)
+
+    assert (
+        masters["gfx1100"] is not masters["gfx1101"]
+    ), "per-arch masters still alias the same object — rename leaks across arches"
+    # Each placeholder must hold its own arch's name.
+    ph_1100 = masters["gfx1100"].library.rows[0]["library"].mapping["opId"]
+    ph_1101 = masters["gfx1101"].library.rows[0]["library"].mapping["opId"]
+    assert ph_1100.filenamePrefix.endswith(
+        "_gfx1100"
+    ), "gfx1100 placeholder not arch-correct after rename"
+    assert ph_1101.filenamePrefix.endswith(
+        "_gfx1101"
+    ), "gfx1101 placeholder not arch-correct after rename"

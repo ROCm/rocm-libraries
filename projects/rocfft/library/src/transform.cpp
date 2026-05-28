@@ -68,8 +68,6 @@ rocfft_status rocfft_execution_info_set_work_buffer(rocfft_execution_info info,
 try
 {
     log_trace(__func__, "info", info, "work_buffer", work_buffer, "size_in_bytes", size_in_bytes);
-    if(!work_buffer)
-        return rocfft_status_invalid_work_buffer;
 
     if(!info)
         return rocfft_status_invalid_arg_value;
@@ -79,7 +77,18 @@ try
     if(hipGetDevice(&deviceid) != hipSuccess)
         return rocfft_status_failure;
 
-    info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
+    if(size_in_bytes)
+    {
+        if(!work_buffer)
+            return rocfft_status_invalid_work_buffer;
+
+        info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
+    }
+    else
+    {
+        // clear out any buffer that was set
+        info->workBuffers[deviceid] = {};
+    }
 
     return rocfft_status_success;
 }
@@ -429,8 +438,7 @@ try
 
     try
     {
-        rocfft_execution_info_internal info_internal(info);
-        info_internal.ensure_work_buffer_size(plan->WorkBufBytesPerDevice());
+        rocfft_execution_info_internal info_internal(info, *plan);
         plan->Execute(in_buffer, out_buffer, info_internal);
     }
     catch(std::exception& e)
@@ -483,7 +491,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
 
         // if input/output are overridden, override now
         if(inputPtr)
-            in_buffer_copy[0] = inputPtr.get(in_buffer, out_buffer, local_comm_rank);
+            in_buffer_copy[0] = inputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
 
         if(rootPlan->placement == rocfft_placement_notinplace)
         {
@@ -492,7 +500,8 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
                             plan->desc.outFields, plan->desc.outArrayType, local_comm_rank),
                         std::back_inserter(out_buffer_copy));
             if(outputPtr)
-                out_buffer_copy[0] = outputPtr.get(in_buffer, out_buffer, local_comm_rank);
+                out_buffer_copy[0]
+                    = outputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
         }
     }
 

@@ -138,22 +138,26 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionBackwardWeightsAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     {
-        std::lock_guard<std::mutex> lock(_algorithmMutex);
+        const std::lock_guard<std::mutex> lock(_algorithmMutex);
 
         if(!_algorithm.has_value())
         {
             HIPDNN_PLUGIN_LOG_INFO(
                 "Convolution Wrw: Performing algorithm selection (first execution)");
 
-            bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
-            int requestCount = traceEnabled ? 10 : 1;
+            const bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
+            // Find dedupes by algorithm class (ShrinkToFind10Results in
+            // projects/miopen/src/ocl/convolutionocl.cpp:238), so it returns at most one
+            // entry per value of miopenConvBwdWeightsAlgorithm_t (4 enumerators).
+            const int requestCount = traceEnabled ? 4 : 1;
 
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;

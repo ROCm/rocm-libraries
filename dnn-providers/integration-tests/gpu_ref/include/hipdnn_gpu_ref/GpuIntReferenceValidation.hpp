@@ -12,7 +12,7 @@ namespace hipdnn_gpu_ref
 
 // GPU-based integer tensor validator implementing IReferenceValidation.
 // Requires exact equality between reference and implementation tensors.
-// Only supports packed (contiguous) tensors.
+// Supports both packed and strided tensors.
 template <class T>
 class GpuIntReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
@@ -20,6 +20,7 @@ public:
     GpuIntReferenceValidation() = default;
     ~GpuIntReferenceValidation() override = default;
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function) - explicit instantiation in .cpp
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override;
 
