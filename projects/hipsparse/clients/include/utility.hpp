@@ -594,16 +594,6 @@ static inline double testing_abs(hipDoubleComplex x)
 
 /* ============================================================================================ */
 /*! \brief conj */
-static inline float testing_conj(float x)
-{
-    return x;
-}
-
-static inline double testing_conj(double x)
-{
-    return x;
-}
-
 static inline int8_t testing_conj(int8_t x)
 {
     return x;
@@ -620,6 +610,16 @@ static inline hipsparseFloat16 testing_conj(hipsparseFloat16 x)
 }
 
 static inline hipsparseBfloat16 testing_conj(hipsparseBfloat16 x)
+{
+    return x;
+}
+
+static inline float testing_conj(float x)
+{
+    return x;
+}
+
+static inline double testing_conj(double x)
 {
     return x;
 }
@@ -7622,11 +7622,11 @@ void host_coomv_aos(I                    m,
 
 /* ============================================================================================ */
 /*! \brief  Host spvv (sparse vector-vector dot product) */
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void host_spvv(I                    nnz,
-               const T*             x_val,
+               const X*             x_val,
                const I*             x_ind,
-               const T*             y,
+               const Y*             y,
                T*                   result,
                hipsparseOperation_t op,
                hipsparseIndexBase_t idx_base)
@@ -7637,14 +7637,18 @@ void host_spvv(I                    nnz,
     {
         for(I i = 0; i < nnz; ++i)
         {
-            *result = *result + testing_mult(testing_conj(x_val[i]), y[x_ind[i] - idx_base]);
+            *result = *result
+                      + testing_mult(static_cast<T>(testing_conj(x_val[i])),
+                                     static_cast<T>(y[x_ind[i] - idx_base]));
         }
     }
     else
     {
         for(I i = 0; i < nnz; ++i)
         {
-            *result = *result + testing_mult(x_val[i], y[x_ind[i] - idx_base]);
+            *result
+                = *result
+                  + testing_mult(static_cast<T>(x_val[i]), static_cast<T>(y[x_ind[i] - idx_base]));
         }
     }
 }
