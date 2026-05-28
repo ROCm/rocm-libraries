@@ -5,7 +5,7 @@ An implementation of the
 
 > **Current status**
 >
-> - Data type: **fp32 only**.  bf16 / fp16 support is planned.
+> - Data types: **fp32, fp16, bf16** (GEMM inputs use the requested type; accumulation stays fp32).
 > - Features: `HAS_D=true`, `D_HAS_HDIM=true`, `HAS_Z=true` (optional).
 > - Plan to use grouped gemm to replace batched gemm.
 ---
@@ -240,7 +240,7 @@ Fstate[d, n] = InterBMM1[C-1, n, d] + exp(last[C-1]) * State[C-1, n, d]
 ## File Structure
 
 ```
-52_ssd/
+53_ssd/
 ├── CMakeLists.txt          CMake build (part of CK build tree)
 ├── ssd_problem.hpp         Problem definition: SsdHostArgs, SsdTileConfig
 ├── ssd_kernels.hpp         Custom HIP kernels (cumsum, segsum, state propagation, epilogue)
@@ -310,6 +310,7 @@ ninja -C build
 | `-E` | 2 | Expansion factor |
 | `-H` | 2 | Heads per group |
 | `-Z` | 0 | 0 = no Z gating, 1 = enable HAS_Z (`Y * silu(Z)`) |
+| `-prec` | `fp32` | Precision: `fp32`, `fp16`, or `bf16` |
 | `-v` | 1 | 0 = skip verification, 1 = verify against CPU reference |
 | `-warmup` | 3 | GPU warmup iterations |
 | `-repeat` | 10 | Benchmark iterations |
@@ -349,6 +350,6 @@ Fixed dimensions (not configurable): `C=8, L=128, D=64, N=128`.
 ## Roadmap
 
 - [x] `HAS_Z` support (output gating: `Y = Y * silu(Z)`)
-- [ ] bf16 / fp16 data types with fp32 accumulation
+- [x] bf16 / fp16 data types with fp32 accumulation
 - [ ] Fused multi-chunk GEMM launch to reduce kernel launch overhead
 - [ ] Support for `G > 1` (multiple groups)

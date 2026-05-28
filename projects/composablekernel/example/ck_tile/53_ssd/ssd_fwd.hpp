@@ -111,7 +111,7 @@ struct SsdPipelineTraits<GemmPipeline::COMPUTE_V3>
 // A @ M^T (the column-major read transposes the row-major data).
 // To compute A @ M, store M^T in B (pre-transpose to cancel the implicit one).
 // ---------------------------------------------------------------------------
-template <typename GemmCfg>
+template <typename GemmCfg, typename InputType = float>
 inline float launch_batched_gemm(const void* a_ptr,
                                  index_t stride_a,
                                  index_t batch_stride_a,
@@ -127,8 +127,8 @@ inline float launch_batched_gemm(const void* a_ptr,
                                  index_t batch_count,
                                  hipStream_t stream)
 {
-    using ADataType   = float;
-    using BDataType   = float;
+    using ADataType   = InputType;
+    using BDataType   = InputType;
     using AccDataType = float;
     using CDataType   = float;
     using ALayout     = tensor_layout::gemm::RowMajor;
@@ -242,19 +242,20 @@ inline float launch_batched_gemm(const void* a_ptr,
 // Also supports transpose: if do_transpose, output is [cols, rows].
 // Grid: (1,1,1)  Block: (256,1,1)  — simple, for small matrices.
 // ---------------------------------------------------------------------------
-__global__ void pack_matrix_kernel(const float* __restrict__ src,
-                                   float* __restrict__ dst,
+template <typename DataType>
+__global__ void pack_matrix_kernel(const DataType* __restrict__ src,
+                                   DataType* __restrict__ dst,
                                    int rows,
                                    int cols,
                                    int src_stride,
                                    bool do_transpose)
 {
-    int total = rows * cols;
+    const int total = rows * cols;
     for(int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < total; idx += blockDim.x * gridDim.x)
     {
-        int r     = idx / cols;
-        int c     = idx % cols;
-        float val = src[r * src_stride + c];
+        const int r        = idx / cols;
+        const int c        = idx % cols;
+        const DataType val = src[r * src_stride + c];
         if(do_transpose)
             dst[c * rows + r] = val; // [cols, rows] row-major
         else
@@ -270,6 +271,7 @@ __global__ void pack_matrix_kernel(const float* __restrict__ src,
 //   2) Batched pack kernels — one launch packs all (beh, ci) slices at once.
 //   3) Batched GEMM — batch_count = BEH*C instead of serial loops with 1.
 // ---------------------------------------------------------------------------
+template <typename DataType>
 inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
 {
     const int B   = args.batch;
@@ -284,64 +286,73 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
     const int BC  = BEH * C; // total batch count for GEMM
 
     // --- Single workspace allocation ---
+    // Float buffers (GEMM outputs, cumsum, state)
     const size_t sz_cumsum = static_cast<size_t>(BEH) * C * L;
     const size_t sz_ibmm1  = static_cast<size_t>(BEH) * C * L * L;
-    const size_t sz_pi2    = static_cast<size_t>(BEH) * C * L * L;
     const size_t sz_abmm2  = static_cast<size_t>(BEH) * C * L * D;
-    const size_t sz_pi1    = static_cast<size_t>(BEH) * C * N * L;
     const size_t sz_rbmm1  = static_cast<size_t>(BEH) * C * N * D;
     const size_t sz_state  = static_cast<size_t>(BEH) * C * N * D;
     const size_t sz_rbmm2  = static_cast<size_t>(BEH) * C * L * D;
     const size_t sz_ce     = static_cast<size_t>(BEH) * C * L;
     const size_t sz_lv     = static_cast<size_t>(BEH) * C;
+
+    // DataType buffers (GEMM inputs — fp16/bf16 for mixed-precision MFMA)
+    const size_t sz_pi2 = static_cast<size_t>(BEH) * C * L * L;
+    const size_t sz_pi1 = static_cast<size_t>(BEH) * C * N * L;
     const size_t sz_pack_a =
         static_cast<size_t>(BC) * std::max(static_cast<size_t>(N * L), static_cast<size_t>(D * L));
     const size_t sz_pack_b =
         static_cast<size_t>(BC) * std::max(static_cast<size_t>(N * L), static_cast<size_t>(D * N));
 
-    const size_t total_floats = sz_cumsum + sz_ibmm1 + sz_pi2 + sz_abmm2 + sz_pi1 + sz_rbmm1 +
-                                sz_state + sz_rbmm2 + sz_ce + sz_lv + sz_pack_a + sz_pack_b;
-    DeviceMem d_workspace(total_floats * sizeof(float));
-    float* ws = static_cast<float*>(d_workspace.GetDeviceBuffer());
+    const size_t total_float_elems =
+        sz_cumsum + sz_ibmm1 + sz_abmm2 + sz_rbmm1 + sz_state + sz_rbmm2 + sz_ce + sz_lv;
+    const size_t total_dt_elems = sz_pi2 + sz_pi1 + sz_pack_a + sz_pack_b;
+    const size_t total_bytes =
+        total_float_elems * sizeof(float) + total_dt_elems * sizeof(DataType);
+    DeviceMem d_workspace(total_bytes);
 
-    // Carve up workspace
-    float* cum = ws;
-    ws += sz_cumsum;
-    float* ibmm1 = ws;
-    ws += sz_ibmm1;
-    float* pi2 = ws;
-    ws += sz_pi2;
-    float* abmm2 = ws;
-    ws += sz_abmm2;
-    float* pi1 = ws;
-    ws += sz_pi1;
-    float* rbmm1 = ws;
-    ws += sz_rbmm1;
-    float* st = ws;
-    ws += sz_state;
-    float* rbmm2 = ws;
-    ws += sz_rbmm2;
-    float* ce = ws;
-    ws += sz_ce;
-    float* lv = ws;
-    ws += sz_lv;
-    float* pa = ws;
-    ws += sz_pack_a;
-    float* pb = ws;
-    ws += sz_pack_b;
+    // Carve float section (GEMM outputs, cumsum, state)
+    float* ws_f = static_cast<float*>(d_workspace.GetDeviceBuffer());
+    float* cum  = ws_f;
+    ws_f += sz_cumsum;
+    float* ibmm1 = ws_f;
+    ws_f += sz_ibmm1;
+    float* abmm2 = ws_f;
+    ws_f += sz_abmm2;
+    float* rbmm1 = ws_f;
+    ws_f += sz_rbmm1;
+    float* st = ws_f;
+    ws_f += sz_state;
+    float* rbmm2 = ws_f;
+    ws_f += sz_rbmm2;
+    float* ce = ws_f;
+    ws_f += sz_ce;
+    float* lv = ws_f;
+    ws_f += sz_lv;
+
+    // Carve DataType section (GEMM inputs)
+    DataType* ws_d = reinterpret_cast<DataType*>(ws_f);
+    DataType* pi2  = ws_d;
+    ws_d += sz_pi2;
+    DataType* pi1 = ws_d;
+    ws_d += sz_pi1;
+    DataType* pa = ws_d;
+    ws_d += sz_pack_a;
+    DataType* pb = ws_d;
+    ws_d += sz_pack_b;
 
     // Zero entire workspace (async, on the same stream)
-    (void)hipMemsetAsync(d_workspace.GetDeviceBuffer(), 0, total_floats * sizeof(float), stream);
+    (void)hipMemsetAsync(d_workspace.GetDeviceBuffer(), 0, total_bytes, stream);
 
-    const float* p_x   = static_cast<const float*>(args.p_x);
-    const float* p_da  = static_cast<const float*>(args.p_delta_a);
-    const float* p_dlt = static_cast<const float*>(args.p_delta);
-    const float* p_bm  = static_cast<const float*>(args.p_b_mat);
-    const float* p_cm  = static_cast<const float*>(args.p_c_mat);
-    const float* p_dp  = static_cast<const float*>(args.p_d_param);
-    const float* p_z   = static_cast<const float*>(args.p_z);
-    float* p_y         = static_cast<float*>(args.p_y);
-    float* p_fs        = static_cast<float*>(args.p_fstate);
+    const DataType* p_x   = static_cast<const DataType*>(args.p_x);
+    const DataType* p_da  = static_cast<const DataType*>(args.p_delta_a);
+    const DataType* p_dlt = static_cast<const DataType*>(args.p_delta);
+    const DataType* p_bm  = static_cast<const DataType*>(args.p_b_mat);
+    const DataType* p_cm  = static_cast<const DataType*>(args.p_c_mat);
+    const DataType* p_dp  = static_cast<const DataType*>(args.p_d_param);
+    const DataType* p_z   = static_cast<const DataType*>(args.p_z);
+    DataType* p_y         = static_cast<DataType*>(args.p_y);
+    DataType* p_fs        = static_cast<DataType*>(args.p_fstate);
 
     // ====== Step 1: Cumsum ======
     ssd_cumsum_kernel<<<BEH, C, 0, stream>>>(p_da, cum, C, L);
@@ -361,7 +372,7 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
             p_bm, pb, EH, G, grp, N, C, L, /*transpose=*/true);
 
         // Batched GEMM: Out[L,L] = pa(Row)[L,N] @ pb(Col)[L,N]
-        launch_batched_gemm<SsdGemmConfigSquare>(
+        launch_batched_gemm<SsdGemmConfigSquare, DataType>(
             pa,
             N,
             static_cast<index_t>(L * N), // A: [L,N], batch_stride=L*N
@@ -391,7 +402,7 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
         pack_x_batched_kernel<<<dim3(dl_blocks, BC), 256, 0, stream>>>(p_x, pa, D, C, L);
 
         // Batched GEMM: Out[L,D] = PI2(Row)[L,L] @ pa(Col)[D,L]
-        launch_batched_gemm<SsdGemmConfig>(
+        launch_batched_gemm<SsdGemmConfig, DataType>(
             pi2,
             L,
             static_cast<index_t>(L * L), // A: [L,L], batch_stride=L*L
@@ -420,7 +431,7 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
         pack_x_batched_kernel<<<dim3(dl_blocks, BC), 256, 0, stream>>>(p_x, pa, D, C, L);
 
         // Batched GEMM: Out[N,D] = PI1(Row)[N,L] @ pa(Col)[D,L]
-        launch_batched_gemm<SsdGemmConfig>(
+        launch_batched_gemm<SsdGemmConfig, DataType>(
             pi1,
             L,
             static_cast<index_t>(N * L), // A: [N,L], batch_stride=N*L
@@ -451,10 +462,10 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
 
         // Pack State[N,D] -> transpose -> pb[BC, D, N] (ld=N)
         // ColumnMajor B implicitly transposes pb back to State.
-        pack_state_batched_kernel<<<dim3(nd_blocks, BC), 256, 0, stream>>>(st, pb, N, D);
+        pack_state_batched_kernel<DataType><<<dim3(nd_blocks, BC), 256, 0, stream>>>(st, pb, N, D);
 
         // Batched GEMM: Out[L,D] = pa(Row)[L,N] @ pb(Col)[D,N]
-        launch_batched_gemm<SsdGemmConfig>(
+        launch_batched_gemm<SsdGemmConfig, DataType>(
             pa,
             N,
             static_cast<index_t>(L * N), // A: [L,N], batch_stride=L*N

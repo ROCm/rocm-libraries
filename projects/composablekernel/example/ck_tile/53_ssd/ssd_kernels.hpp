@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cmath>
+#include "ck_tile/core.hpp"
 
 namespace ck_tile {
 
@@ -16,22 +17,23 @@ namespace ck_tile {
 // Output: Cumsum [BEH, C, L]  where Cumsum[c,l] = sum_{i=0}^{l} DeltaA[c,i]
 // Grid:   (BEH, 1, 1)  Block: (C, 1, 1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void
-ssd_cumsum_kernel(const float* __restrict__ delta_a, float* __restrict__ cumsum, int C, int L)
+ssd_cumsum_kernel(const DataType* __restrict__ delta_a, float* __restrict__ cumsum, int C, int L)
 {
     const int beh = blockIdx.x;
     const int ci  = threadIdx.x;
     if(ci >= C)
         return;
 
-    const float* in = delta_a + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
-    float* out      = cumsum + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    const DataType* in = delta_a + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    float* out         = cumsum + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
 
     float acc = 0.0f;
     for(int l = 0; l < L; ++l)
     {
-        acc += in[l];
-        out[l] = acc;
+        acc += static_cast<float>(in[l]);
+        out[l] = static_cast<DataType>(acc);
     }
 }
 
@@ -42,10 +44,11 @@ ssd_cumsum_kernel(const float* __restrict__ delta_a, float* __restrict__ cumsum,
 // where segsum(i,j) = exp(cumsum[i]-cumsum[j]) if j<i, 1 if j==i, 0 if j>i.
 // Grid:   (BEH, C, 1)  Block: (256, 1, 1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void ssd_segsum_pre_intra2_kernel(const float* __restrict__ cumsum,
-                                             const float* __restrict__ delta,
+                                             const DataType* __restrict__ delta,
                                              const float* __restrict__ intra_bmm1,
-                                             float* __restrict__ pre_intra2,
+                                             DataType* __restrict__ pre_intra2,
                                              int C,
                                              int L)
 {
@@ -53,10 +56,10 @@ __global__ void ssd_segsum_pre_intra2_kernel(const float* __restrict__ cumsum,
     const int ci    = blockIdx.y;
     const int total = L * L;
 
-    const float* cum  = cumsum + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
-    const float* dlt  = delta + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
-    const float* bmm1 = intra_bmm1 + (static_cast<size_t>(beh) * C + ci) * L * L;
-    float* out        = pre_intra2 + (static_cast<size_t>(beh) * C + ci) * L * L;
+    const float* cum    = cumsum + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    const DataType* dlt = delta + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    const float* bmm1   = intra_bmm1 + (static_cast<size_t>(beh) * C + ci) * L * L;
+    DataType* out       = pre_intra2 + (static_cast<size_t>(beh) * C + ci) * L * L;
 
     for(int idx = threadIdx.x; idx < total; idx += blockDim.x)
     {
@@ -71,7 +74,7 @@ __global__ void ssd_segsum_pre_intra2_kernel(const float* __restrict__ cumsum,
         else
             seg = 0.0f;
 
-        out[idx] = seg * dlt[j] * bmm1[idx];
+        out[idx] = static_cast<DataType>(seg * static_cast<float>(dlt[j]) * bmm1[idx]);
     }
 }
 
@@ -83,12 +86,13 @@ __global__ void ssd_segsum_pre_intra2_kernel(const float* __restrict__ cumsum,
 //   last_vals[ci]    = cumsum[L-1]
 // Grid:   (BEH, C, 1)  Block: (256, 1, 1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void ssd_pre_inter1_kernel(const float* __restrict__ cumsum,
-                                      const float* __restrict__ delta,
-                                      const float* __restrict__ b_mat, // [B*G, N, C, L]
-                                      float* __restrict__ pre_inter1,  // [BEH, C, N, L]
-                                      float* __restrict__ cumsum_exp,  // [BEH, C, L]
-                                      float* __restrict__ last_vals,   // [BEH, C]
+                                      const DataType* __restrict__ delta,
+                                      const DataType* __restrict__ b_mat, // [B*G, N, C, L]
+                                      DataType* __restrict__ pre_inter1,  // [BEH, C, N, L]
+                                      float* __restrict__ cumsum_exp,     // [BEH, C, L]
+                                      float* __restrict__ last_vals,      // [BEH, C]
                                       int C,
                                       int L,
                                       int N,
@@ -102,12 +106,12 @@ __global__ void ssd_pre_inter1_kernel(const float* __restrict__ cumsum,
     const int g   = eh / grp_ratio;
     const int bg  = b * G + g;
 
-    const float* cum = cumsum + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
-    const float* dlt = delta + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
-    float* ce        = cumsum_exp + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
-    float* pi1       = pre_inter1 + (static_cast<size_t>(beh) * C + ci) * N * L;
+    const float* cum    = cumsum + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    const DataType* dlt = delta + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    float* ce     = cumsum_exp + static_cast<size_t>(beh) * C * L + static_cast<size_t>(ci) * L;
+    DataType* pi1 = pre_inter1 + (static_cast<size_t>(beh) * C + ci) * N * L;
 
-    const float last = cum[L - 1];
+    const auto last = cum[L - 1];
     if(threadIdx.x == 0)
         last_vals[beh * C + ci] = last;
 
@@ -116,11 +120,11 @@ __global__ void ssd_pre_inter1_kernel(const float* __restrict__ cumsum,
 
     for(int idx = threadIdx.x; idx < N * L; idx += blockDim.x)
     {
-        const int n = idx / L;
-        const int l = idx % L;
-        float bv =
-            b_mat[(static_cast<size_t>(bg) * N + n) * C * L + static_cast<size_t>(ci) * L + l];
-        pi1[idx] = expf(last - cum[l]) * dlt[l] * bv;
+        const int n   = idx / L;
+        const int l   = idx % L;
+        const auto bv = static_cast<float>(
+            b_mat[(static_cast<size_t>(bg) * N + n) * C * L + static_cast<size_t>(ci) * L + l]);
+        pi1[idx] = static_cast<DataType>(expf(last - cum[l]) * static_cast<float>(dlt[l]) * bv);
     }
 }
 
@@ -149,7 +153,7 @@ __global__ void ssd_state_propagation_kernel(const float* __restrict__ inter_bmm
 
     for(int ci = 1; ci < C; ++ci)
     {
-        float el = expf(lv[ci - 1]);
+        const float el = expf(lv[ci - 1]);
         for(int idx = threadIdx.x; idx < ND; idx += blockDim.x)
             st[ci * ND + idx] = bmm[(ci - 1) * ND + idx] + el * st[(ci - 1) * ND + idx];
         __syncthreads();
@@ -163,13 +167,14 @@ __global__ void ssd_state_propagation_kernel(const float* __restrict__ inter_bmm
 //               + D_param[d] * X[d, ci, l]
 // Grid:   (BEH, C, 1)  Block: (256, 1, 1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void ssd_epilogue_kernel(const float* __restrict__ inter_bmm2,
                                     const float* __restrict__ intra_bmm2,
                                     const float* __restrict__ cumsum_exp,
-                                    const float* __restrict__ x,
-                                    const float* __restrict__ d_param,
-                                    const float* __restrict__ z,
-                                    float* __restrict__ y,
+                                    const DataType* __restrict__ x,
+                                    const DataType* __restrict__ d_param,
+                                    const DataType* __restrict__ z,
+                                    DataType* __restrict__ y,
                                     int C,
                                     int L,
                                     int D,
@@ -186,20 +191,20 @@ __global__ void ssd_epilogue_kernel(const float* __restrict__ inter_bmm2,
 
     for(int idx = threadIdx.x; idx < total; idx += blockDim.x)
     {
-        const int l   = idx / D;
-        const int d   = idx % D;
-        float val     = ce[l] * i2[l * D + d] + a2[l * D + d];
-        float dp      = d_param[eh * D + d];
-        size_t xz_off = static_cast<size_t>(beh) * D * C * L + static_cast<size_t>(d) * C * L +
-                        static_cast<size_t>(ci) * L + l;
-        float xv = x[xz_off];
+        const int l         = idx / D;
+        const int d         = idx % D;
+        float val           = ce[l] * i2[l * D + d] + a2[l * D + d];
+        const float dp      = d_param[eh * D + d];
+        const size_t xz_off = static_cast<size_t>(beh) * D * C * L +
+                              static_cast<size_t>(d) * C * L + static_cast<size_t>(ci) * L + l;
+        const float xv = x[xz_off];
         val += dp * xv;
         if(z != nullptr)
         {
-            float zv = z[xz_off];
+            const auto zv = static_cast<float>(z[xz_off]);
             val *= zv * (1.0f / (1.0f + expf(-zv))); // Y * silu(Z)
         }
-        y[xz_off] = val;
+        y[xz_off] = static_cast<DataType>(val);
     }
 }
 
@@ -208,10 +213,11 @@ __global__ void ssd_epilogue_kernel(const float* __restrict__ inter_bmm2,
 //   F[d, n] = inter_bmm1[C-1, n, d] + exp(last[C-1]) * state[C-1, n, d]
 // Grid:   (BEH, 1, 1)  Block: (256, 1, 1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void ssd_final_state_kernel(const float* __restrict__ inter_bmm1,
                                        const float* __restrict__ state,
                                        const float* __restrict__ last_vals,
-                                       float* __restrict__ fstate,
+                                       DataType* __restrict__ fstate,
                                        int C,
                                        int N,
                                        int D)
@@ -220,14 +226,14 @@ __global__ void ssd_final_state_kernel(const float* __restrict__ inter_bmm1,
     const int ND     = N * D;
     const float* bmm = inter_bmm1 + static_cast<size_t>(beh) * C * ND + (C - 1) * ND;
     const float* st  = state + static_cast<size_t>(beh) * C * ND + (C - 1) * ND;
-    float el         = expf(last_vals[beh * C + C - 1]);
+    const float el   = expf(last_vals[beh * C + C - 1]);
 
     for(int idx = threadIdx.x; idx < ND; idx += blockDim.x)
     {
-        int n = idx / D;
-        int d = idx % D;
+        const int n = idx / D;
+        const int d = idx % D;
         fstate[static_cast<size_t>(beh) * D * N + static_cast<size_t>(d) * N + n] =
-            bmm[idx] + el * st[idx];
+            static_cast<DataType>(bmm[idx] + el * st[idx]);
     }
 }
 
@@ -237,8 +243,9 @@ __global__ void ssd_final_state_kernel(const float* __restrict__ inter_bmm1,
 // contiguous [L,N] (transpose=true) or [N,L] (transpose=false).
 // Grid: (elem_blocks, BEH*C)  Block: (256,1,1)
 // ---------------------------------------------------------------------------
-__global__ void pack_bcmat_batched_kernel(const float* __restrict__ src_base,
-                                          float* __restrict__ dst,
+template <typename DataType>
+__global__ void pack_bcmat_batched_kernel(const DataType* __restrict__ src_base,
+                                          DataType* __restrict__ dst,
                                           int EH,
                                           int G,
                                           int grp,
@@ -255,15 +262,16 @@ __global__ void pack_bcmat_batched_kernel(const float* __restrict__ src_base,
     const int g         = eh / grp;
     const int bg        = b * G + g;
 
-    const int total  = N * L;
-    const float* src = src_base + static_cast<size_t>(bg) * N * C * L + static_cast<size_t>(ci) * L;
-    float* out       = dst + static_cast<size_t>(batch_idx) * N * L;
+    const int total = N * L;
+    const DataType* src =
+        src_base + static_cast<size_t>(bg) * N * C * L + static_cast<size_t>(ci) * L;
+    DataType* out = dst + static_cast<size_t>(batch_idx) * N * L;
 
     for(int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < total; idx += blockDim.x * gridDim.x)
     {
-        const int r = idx / L;
-        const int c = idx % L;
-        float val   = src[r * (C * L) + c];
+        const int r    = idx / L;
+        const int c    = idx % L;
+        const auto val = src[r * (C * L) + c];
         if(do_transpose)
             out[c * N + r] = val;
         else
@@ -276,17 +284,18 @@ __global__ void pack_bcmat_batched_kernel(const float* __restrict__ src_base,
 // src_base: [BEH, D, C, L], packs each [D,L] (stride C*L) -> [D,L] contig.
 // Grid: (elem_blocks, BEH*C)  Block: (256,1,1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void pack_x_batched_kernel(
-    const float* __restrict__ src_base, float* __restrict__ dst, int D, int C, int L)
+    const DataType* __restrict__ src_base, DataType* __restrict__ dst, int D, int C, int L)
 {
     const int batch_idx = blockIdx.y;
     const int beh       = batch_idx / C;
     const int ci        = batch_idx % C;
     const int total     = D * L;
 
-    const float* src =
+    const DataType* src =
         src_base + static_cast<size_t>(beh) * D * C * L + static_cast<size_t>(ci) * L;
-    float* out = dst + static_cast<size_t>(batch_idx) * D * L;
+    DataType* out = dst + static_cast<size_t>(batch_idx) * D * L;
 
     for(int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < total; idx += blockDim.x * gridDim.x)
     {
@@ -301,19 +310,20 @@ __global__ void pack_x_batched_kernel(
 // src: [total_batches, N, D] contiguous  ->  dst: [total_batches, D, N]
 // Grid: (elem_blocks, total_batches)  Block: (256,1,1)
 // ---------------------------------------------------------------------------
+template <typename DataType>
 __global__ void
-pack_state_batched_kernel(const float* __restrict__ src, float* __restrict__ dst, int N, int D)
+pack_state_batched_kernel(const float* __restrict__ src, DataType* __restrict__ dst, int N, int D)
 {
     const int batch_idx = blockIdx.y;
     const int total     = N * D;
     const float* in     = src + static_cast<size_t>(batch_idx) * N * D;
-    float* out          = dst + static_cast<size_t>(batch_idx) * D * N;
+    DataType* out       = dst + static_cast<size_t>(batch_idx) * D * N;
 
     for(int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < total; idx += blockDim.x * gridDim.x)
     {
         const int r    = idx / D;
         const int c    = idx % D;
-        out[c * N + r] = in[r * D + c];
+        out[c * N + r] = static_cast<DataType>(in[r * D + c]);
     }
 }
 
