@@ -194,10 +194,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
         template <typename ADramWindow>
         CK_TILE_DEVICE static auto MakeAReduceDramWindow(const ADramWindow& a_dram_window)
         {
-            // FIXME: Fix tests to not attempt ColMajor
-            // static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
-            //               "Grouped fused A quantization currently supports RowMajor A only.");
-
             const auto& a_tensor_view = a_dram_window.get_bottom_tensor_view();
             const auto& a_desc        = a_tensor_view.get_tensor_descriptor();
 
@@ -239,8 +235,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             static_distributed_tensor<AQDataType, AQDstStaticTileDistribution>& aq_block_tile,
             const ADramWindow& a_dram_window)
         {
-            static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
 
+            static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
+                          "Grouped fused A quantization currently supports RowMajor A only.");
+            static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
             // ADstStaticTileDist{} -> AReduceTileDist
             // Modify the window and match the temp tensor
             auto a_reduce =
@@ -355,6 +353,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                    index_t num_loop,
                    void* p_smem) const
         {
+
             static_assert(std::is_same_v<ADataType, bf16_t>, "Only BF16 input is supported!");
             static_assert(is_null_tile_window<AQDramBlockWindowTmp>,
                           "AQ Dram Block window is not used with FusedAQuant!");

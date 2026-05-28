@@ -21,12 +21,11 @@ using GroupSize2D128N = ck_tile::QuantGroupShape<ck_tile::sequence<1, 128, 128>>
 
 // clang-format off
 using FusedAQuantStandaloneTypes = ::testing::Types<
+    // ColumnMajor A is not supported, test only RowMajor
     std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, BF16, FP8, float, Half, ABQuantGrouped, GemmConfigFuseAQuant, GroupSize, GroupSize, ColumnMajor>,
-    std::tuple<ColumnMajor, RowMajor, RowMajor, RowMajor, BF16, FP8, float, Half, ABQuantGrouped, GemmConfigFuseAQuant, GroupSize, GroupSize, ColumnMajor>,
     std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF16, FP8, float, Half, ABQuantGrouped, GemmConfigFuseAQuant, GroupSize, GroupSize, ColumnMajor>,
 
     std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, BF16, FP8, float, Half, ABQuantGrouped, GemmConfigFuseAQuantTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
-    std::tuple<ColumnMajor, RowMajor, RowMajor, RowMajor, BF16, FP8, float, Half, ABQuantGrouped, GemmConfigFuseAQuantTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
     std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF16, FP8, float, Half, ABQuantGrouped, GemmConfigFuseAQuantTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>
 >;
 // clang-format on
