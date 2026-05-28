@@ -53,6 +53,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <numeric>
 #include <omp.h>
 #include <set>
@@ -3975,6 +3976,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
         {
+            std::string rawTimingSamplesLine;
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 for(int i = 0; i < gemm_count; i++)
@@ -4076,9 +4078,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                             float windowMs = 0.0f;
                             CHECK_HIP_ERROR(hipEventElapsedTime(
                                 &windowMs, event_gpu_time_start, event_gpu_time_end));
-                            hotWindowSamples.push_back(
-                                (static_cast<double>(windowMs) * 1000.0) / enqueuesPerWindow);
+                            const double rawSampleUs
+                                = (static_cast<double>(windowMs) * 1000.0) / enqueuesPerWindow;
+                            hotWindowSamples.push_back(rawSampleUs);
                         }
+
+                        std::ostringstream rawTimingSamples;
+                        rawTimingSamples << "hipblaslt-bench raw timing samples solution=" << sol
+                                         << " raw_us=[";
+                        for(size_t sampleIdx = 0; sampleIdx < hotWindowSamples.size(); ++sampleIdx)
+                        {
+                            if(sampleIdx != 0)
+                                rawTimingSamples << ',';
+                            rawTimingSamples << hotWindowSamples[sampleIdx];
+                        }
+                        rawTimingSamples << ']';
+                        rawTimingSamplesLine = rawTimingSamples.str();
 
                         gpu_time_used = TensileLite::ModifiedZ::removeOutliersAndGetMean(
                                             hotWindowSamples, 2.0)
@@ -4493,6 +4508,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_atol,
                     hipblaslt_rtol);
             }
+            if(!rawTimingSamplesLine.empty())
+                hipblaslt_cout << rawTimingSamplesLine << std::endl;
+
             if(best_gpu_time > gpu_time_used)
             {
                 best_sol      = sol;

@@ -37,7 +37,9 @@
 #include <algorithm>
 #include <csignal>
 #include <cstddef>
+#include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -209,6 +211,20 @@ namespace TensileLite
                 {
                     if(!m_hotWindowTimeSamplesUS.empty())
                     {
+                        std::ostringstream rawTimingSamples;
+                        rawTimingSamples << "tensilelite-client raw timing samples problem="
+                                         << m_currProblemIdx << " solution=" << m_currSolutionIdx
+                                         << " raw_us=[";
+                        for(size_t sampleIdx = 0; sampleIdx < m_hotWindowTimeSamplesUS.size();
+                            ++sampleIdx)
+                        {
+                            if(sampleIdx != 0)
+                                rawTimingSamples << ',';
+                            rawTimingSamples << m_hotWindowTimeSamplesUS[sampleIdx];
+                        }
+                        rawTimingSamples << ']';
+                        std::cerr << rawTimingSamples.str() << '\n';
+
                         timePerEnqueue_us = ModifiedZ::removeOutliersAndGetMean(
                                                 m_hotWindowTimeSamplesUS, 2.0)
                                             - m_flushTimeUs;
@@ -445,21 +461,22 @@ namespace TensileLite
                     HIP_CHECK_EXC(hipEventElapsedTime(
                         &eventMs, iterationStarts.front(), iterationStops.back()));
                     totalTime += double_millis(eventMs);
-                    m_hotWindowTimeSamplesUS.push_back(
-                        (static_cast<double>(eventMs) * 1000.0) / m_curNumEnqueuesPerSync);
+                    const double rawSampleUs
+                        = (static_cast<double>(eventMs) * 1000.0) / m_curNumEnqueuesPerSync;
+                    m_hotWindowTimeSamplesUS.push_back(rawSampleUs);
                 }
             }
             else
             {
                 totalTime = double_millis(m_endTime - m_startTime);
-                m_hotWindowTimeSamplesUS.push_back(
-                    double_micros(totalTime).count() / m_curNumEnqueuesPerSync);
+                const double rawSampleUs = double_micros(totalTime).count() / m_curNumEnqueuesPerSync;
+                m_hotWindowTimeSamplesUS.push_back(rawSampleUs);
             }
 
             m_timeInSolution += totalTime;
             m_numEnqueuesInSolution += static_cast<int>(m_curNumEnqueuesPerSync);
 
-            reportTiming("gpu_kernel_execution", totalTime.count());
+            // reportTiming("gpu_kernel_execution", totalTime.count());
 
             if(m_sleepPercent > 0)
             {
