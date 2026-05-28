@@ -20,6 +20,10 @@
 
 #include "rocfft/rocfft.h"
 
+extern "C" {
+#include "rocfft_c.h"
+}
+
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
@@ -1260,4 +1264,10 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     {
         GTEST_SKIP() << e.what();
     }
+}
+
+// Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
+TEST(rocfft, cApi)
+{
+    EXPECT_EQ(rocfft_c(), 0);
 }

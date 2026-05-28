@@ -12,6 +12,7 @@
 
 #include "ck_tile/host.hpp"
 #include "mx_gemm.hpp"
+#include "mx_gemm_arch_traits.hpp"
 #include "mx_gemm_instance.hpp"
 
 template <typename Layout>
@@ -93,8 +94,9 @@ float invoke_mx_gemm(ck_tile::DeviceMem& a_dev_buf,
 
     std::cout << "Run " << ck_tile::gemm_prec_str<ADataType, BDataType>() << " MX GEMM kernel " //
               << " M = " << M << " N = " << N << " K = " << K << " StrideA = " << stride_A
-              << " StrideB = " << stride_B << " StrideC = " << stride_C << " : " << ave_time
-              << " ms, " << tflops << " TFlops, " << gb_per_sec << " GB/s, " << std::endl;
+              << " StrideB = " << stride_B << " StrideC = " << stride_C
+              << " Preshuffle = " << GemmConfig::Preshuffle << " : " << ave_time << " ms, "
+              << tflops << " TFlops, " << gb_per_sec << " GB/s, " << std::endl;
 
     return ave_time;
 }
@@ -102,9 +104,9 @@ float invoke_mx_gemm(ck_tile::DeviceMem& a_dev_buf,
 auto create_args(int argc, char* argv[])
 {
     ck_tile::ArgParser arg_parser;
-    arg_parser.insert("m", "4096", "m dimension")
-        .insert("n", "4096", "n dimension")
-        .insert("k", "4096", "k dimension")
+    arg_parser.insert("m", "1024", "m dimension")
+        .insert("n", "1024", "n dimension")
+        .insert("k", "2048", "k dimension")
         .insert("a_layout", "R", "A tensor data layout - Row by default")
         .insert("b_layout", "C", "B tensor data layout - Row by default")
         .insert("c_layout", "R", "C tensor data layout - Row by default")
@@ -117,6 +119,7 @@ auto create_args(int argc, char* argv[])
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")
+        .insert("preshuffle", "0", "0: regular path, 1: preshuffled-B path")
         .insert("split_k", "1", "splitK value")
         .insert("init", "0", "0:random, 1:constant(1)");
     bool result = arg_parser.parse(argc, argv);
@@ -125,4 +128,4 @@ auto create_args(int argc, char* argv[])
 
 #include "run_mx_gemm.inc"
 
-int main(int argc, char* argv[]) { return run_mx_gemm_example(argc, argv); }
+int main(int argc, char* argv[]) { return run_mx_gemm_example<MX_GemmConfig16>(argc, argv); }

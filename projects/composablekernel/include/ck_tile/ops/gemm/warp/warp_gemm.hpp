@@ -390,6 +390,9 @@ using WarpGemmMfma_f32_16x16x32_fp8_fp8_CTransposed =
 using WarpGemmMfma_f32_16x16x32_bf8_bf8 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_bf8<WGAttrCtlEnum::Default_>>>;
 
+using WarpGemmMfma_f32_16x16x32_bf8_fp8 = WarpGemmImpl<
+    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_fp8<WGAttrCtlEnum::Default_>>>;
+
 using WarpGemmMfma_f32_16x16x32_bf8_bf8_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_bf8<WGAttrCtlEnum::Default_>>>;
@@ -416,12 +419,6 @@ template <typename A, typename B, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumA
 using WarpGemmMfma_f32_16x16x128_f8f6f4_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<A, B>,
-        AttrNumAccess>>;
-
-template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
-using WarpGemmMfma_f32_16x16x128_fp4_fp4_CTransposed =
-    WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
-        WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<pk_fp4_t, pk_fp4_t>,
         AttrNumAccess>>;
 
 template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
@@ -472,6 +469,12 @@ template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfma_f32_32x32x64_fp4_fp4_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImpl_f32_32x32x64_f8f6f4<pk_fp4_t, pk_fp4_t>,
+        AttrNumAccess>>;
+
+template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+using WarpGemmMfma_f32_32x32x64_fp4_fp6_CTransposed =
+    WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
+        WarpGemmAttributeMfmaImpl_f32_32x32x64_f8f6f4<pk_fp4_t, pk_fp6x16_t>,
         AttrNumAccess>>;
 
 using WarpGemmMfma_f32_32x32x16_fp8_fp8_CTransposed =
