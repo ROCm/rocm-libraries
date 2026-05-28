@@ -75,6 +75,10 @@ void Backend::configurePassManager(PassManager& pm) {
     }
 
     pm.setAsmCapsConfig(asmCapsConfig);
+
+    if (opts.EnableRemarks) {
+        pm.getPassContext().setRemarksEnabled(true);
+    }
 }
 
 }  // namespace stinkytofu
