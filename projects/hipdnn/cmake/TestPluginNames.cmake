@@ -33,6 +33,14 @@ set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
 set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
 
+# Override-execute fake plugin names
+set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET "test_override_implementing_plugin")
+set(HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET "test_override_omitting_plugin")
+set(HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET "test_version_liar_plugin")
+set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET "test_second_override_plugin")
+set(HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET "test_malformed_version_plugin")
+set(HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET "test_version_zero_plugin")
+
 # Heuristic plugin test names
 set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "test_good_heuristic_plugin")
 set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "test_incomplete_heuristic_api_plugin")

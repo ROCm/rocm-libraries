@@ -330,6 +330,7 @@ class TestSuiteResult:
             error_combinations=0,
             rocm_version="6.0",
             gpu_model="MI300X",
+            gpu_arch="gfx942",
             python_version="3.12.3",
             hipdnn_version="0.1.0",
         )
@@ -374,6 +375,7 @@ class TestSuiteResult:
         assert meta_d["error_combinations"] == 0
         assert meta_d["rocm_version"] == "6.0"
         assert meta_d["gpu_model"] == "MI300X"
+        assert meta_d["gpu_arch"] == "gfx942"
         assert meta_d["python_version"] == "3.12.3"
         assert meta_d["hipdnn_version"] == "0.1.0"
 
@@ -437,3 +439,15 @@ class TestCollectEnvironmentInfo:
         # Should be x.y.z format
         parts = info["python_version"].split(".")
         assert len(parts) == 3
+
+    def test_includes_gpu_arch_from_detect_arch(self, monkeypatch):
+        """gpu_arch is sourced from metrics.arch.detect_arch so the
+        JSON output and the rocprof_pmc PMC keying agree on the
+        gfx target. Patch the binding in suite_results (where the name
+        is now bound at import time), not in arch_mod — patching the
+        source module after the name has been imported wouldn't take."""
+        from dnn_benchmarking.reporting import suite_results as sr_mod
+
+        monkeypatch.setattr(sr_mod, "detect_arch", lambda: "gfx942")
+        info = collect_environment_info()
+        assert info["gpu_arch"] == "gfx942"
