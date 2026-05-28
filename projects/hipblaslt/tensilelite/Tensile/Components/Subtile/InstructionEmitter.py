@@ -110,10 +110,12 @@ class InstructionEmitter:
                     scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
                     scaleAVgpr = next(iter(scaleATile))
                     scaleBVgpr = next(iter(scaleBTile))
+                    mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
+                    mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
                     kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
                     kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                    sAsel = (a % 2) + 2 * (subIterK % kShapeA)
-                    sBsel = (b % 2) + 2 * (subIterK % kShapeB)
+                    sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
+                    sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
                 else:
                     scaleAVgpr = scaleBVgpr = -1
                     sAsel = sBsel = 0
