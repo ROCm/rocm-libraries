@@ -1027,7 +1027,10 @@ validParameters = { # we need to make sure this matches develop
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Enable cluster barrier.
-    "ClusterBarrier": [False, True],
+    # -1: auto-detect, apply clusterbarrier for cluster kernel and disable clusterBarrier for non-cluster kernel.
+    #  0: force disable
+    #  1: force enable
+    "ClusterBarrier": [1, 0, -1],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,

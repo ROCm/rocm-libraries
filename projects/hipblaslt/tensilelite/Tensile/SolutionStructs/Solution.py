@@ -885,25 +885,34 @@ class Solution(collections.abc.Mapping):
         reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
         return
 
-    state["Multicast"] = False
-    if state["ClusterDim"] != [1, 1]:
-      state["Multicast"] = True
-    else:
-      if state["ClusterBarrier"] == True:
-        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
+    state["Multicast"] = state["ClusterDim"] != [1, 1]
+
+    if state["ClusterBarrier"] == 1 and state["ClusterDim"] == [1, 1]:
+      reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
 
     # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
     # when TDM is enabled.
-    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
+    if state["ClusterBarrier"] == 1 and state["TDMInst"] == 0:
       reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
 
     # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
     # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
-    # falls back to code -1 and produces incorrect cluster-scope synchronization.
-    if state["ClusterBarrier"] == True \
+    # falls back to code s_barrier_wait -1 and produces incorrect cluster-scope synchronization.
+    if state["ClusterBarrier"] == 1 \
        and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
       reject(state, printRejectionReason,
              "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
+
+    # -1 (auto) -> enable iff cluster kernel + TDM + asm cap, else silently off
+    if state["ClusterBarrier"] == -1:
+      state["ClusterBarrier"] = (
+        state["ClusterDim"] != [1, 1]
+        and state["TDMInst"] != 0
+        and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False)
+      )
+    else:
+      # True/False = bool(1/0)
+      state["ClusterBarrier"] = bool(state["ClusterBarrier"])
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
