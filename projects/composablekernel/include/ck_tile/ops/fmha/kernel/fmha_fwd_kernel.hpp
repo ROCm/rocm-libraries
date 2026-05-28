@@ -1540,10 +1540,18 @@ struct FmhaFwdKernel
             long_index_t batch_offset_q_descale = 0;
             long_index_t batch_offset_k_descale = 0;
             long_index_t batch_offset_v_descale = 0;
-            const float sink_value =
-                kargs.sink_ptr != nullptr
-                    ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
-                    : -numeric<float>::infinity();
+            float sink_value                    = -numeric<float>::infinity();
+            if constexpr(kHasMask && !kHasSink)
+            {
+                sink_value = -numeric<float>::infinity();
+            }
+            else
+            {
+                sink_value =
+                    kargs.sink_ptr != nullptr
+                        ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
+                        : -numeric<float>::infinity();
+            }
 
             if constexpr(kIsGroupMode)
             {
@@ -2394,7 +2402,8 @@ struct FmhaFwdKernel
             //     2. use more LDS, as we want better memory latency hiding
             // If SplitKV off, we don't expect Q data reused by different ThreadGroups, bypass the
             // cache
-            constexpr bool PrefillCase = FmhaPipeline::kM0 > 64;
+            constexpr bool PrefillCase =
+                FmhaPipeline::kM0 > 64 && FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256;
             // divide problem
             const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
             const float sink_value =
@@ -2748,8 +2757,7 @@ struct FmhaFwdKernel
                         k_dram_pad,
                         make_tuple(make_pass_through_transform(height),
                                    make_unmerge_transform(
-                                       make_tuple(number<FmhaPipeline::kQKHeaddim / kDramTileK /
-                                                         FmhaPipeline::kAlignmentK>{},
+                                       make_tuple(number<FmhaPipeline::kQKHeaddim / kDramTileK>{},
                                                   number<kDramTileK / FmhaPipeline::kAlignmentK>{},
                                                   number<FmhaPipeline::kAlignmentK>{}))),
                         make_tuple(sequence<0>{}, sequence<1>{}),
@@ -2761,8 +2769,7 @@ struct FmhaFwdKernel
                             make_xor_transform(make_tuple(
                                 height, number<kDramTileK / FmhaPipeline::kAlignmentK>{})),
                             make_pass_through_transform(
-                                number<FmhaPipeline::kQKHeaddim / kDramTileK /
-                                       FmhaPipeline::kAlignmentK>{}),
+                                number<FmhaPipeline::kQKHeaddim / kDramTileK>{}),
                             make_pass_through_transform(number<FmhaPipeline::kAlignmentK>{})),
                         make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}),
                         make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}));
@@ -2771,8 +2778,7 @@ struct FmhaFwdKernel
                         k_dram_permuted,
                         make_tuple(make_pass_through_transform(height),
                                    make_merge_transform_v3_division_mod(
-                                       make_tuple(number<FmhaPipeline::kQKHeaddim / kDramTileK /
-                                                         FmhaPipeline::kAlignmentK>{},
+                                       make_tuple(number<FmhaPipeline::kQKHeaddim / kDramTileK>{},
                                                   number<kDramTileK / FmhaPipeline::kAlignmentK>{},
                                                   number<FmhaPipeline::kAlignmentK>{}))),
                         make_tuple(sequence<0>{}, sequence<1, 2, 3>{}),

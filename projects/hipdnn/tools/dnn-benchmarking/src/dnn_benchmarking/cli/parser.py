@@ -76,20 +76,27 @@ A/B Testing:
   dnn-benchmark -g ./graph.json --APath /path/pluginA --AId 1 --BPath /path/pluginB --BId 2
 
 Suite Mode (multiple graphs):
+  dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
   dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100
   dnn-benchmark --graph 'graphs/*.json' -o results.json
   dnn-benchmark --graph 'graphs/*.json' -v           # rich block per (graph, engine)
+
+Tarball Input:
+  dnn-benchmark --graph graphs.tar.gz
+  dnn-benchmark --graph graphs.tgz -o results.json
         """,
     )
 
     parser.add_argument(
         "--graph",
         "-g",
-        type=str,
+        nargs="+",
         required=True,
         metavar="PATH",
-        help="Path to JSON graph file, or glob pattern for suite mode "
-        "(e.g., 'graphs/*.json')",
+        help="One or more paths, directories, glob patterns (e.g., 'graphs/*.json'), or "
+        "tarballs (.tar, .tar.gz, .tgz) containing JSON graph files. "
+        "A directory is searched recursively for .json files. "
+        "Shell expansion (e.g., Workloads/BNorm/*) is accepted directly.",
     )
 
     parser.add_argument(
@@ -149,12 +156,6 @@ Suite Mode (multiple graphs):
         default=None,
         metavar="PATH",
         help="Export benchmark results to JSON file for offline comparison",
-    )
-    output_group.add_argument(
-        "--no-kernel-timing",
-        action="store_true",
-        default=False,
-        help="Disable GPU kernel timing (E2E wall-clock only)",
     )
     output_group.add_argument(
         "-v",
@@ -232,6 +233,137 @@ Suite Mode (multiple graphs):
         default=None,
         metavar="DIR",
         help="Path to directory containing hipDNN engine plugin .so files",
+    )
+
+    # Metrics options
+    metrics_group = parser.add_argument_group("Metrics")
+    metrics_group.add_argument(
+        "--metrics-tier",
+        type=str,
+        choices=["basic", "off"],
+        default="basic",
+        metavar="TIER",
+        help=(
+            "Always-on metric tier (default: basic). 'basic' adds "
+            "analytical FLOPs/IO, workspace size, host CPU rusage + RAM, "
+            "amdsmi GPU snapshot, and machine metadata at zero extra "
+            "runtime cost. 'off' disables all extra metric collection."
+        ),
+    )
+    metrics_group.add_argument(
+        "--emit-trace",
+        type=str,
+        choices=["pftrace", "kineto"],
+        default=None,
+        metavar="FORMAT",
+        help=(
+            "Re-run benchmark under rocprofv3 and export a kernel + "
+            "memory-copy trace in the given format. 'kineto' falls back "
+            "to pftrace when the rocpd Python module is not importable. "
+            "Adds ~1 extra workload run (~5%% kernel-time overhead)."
+        ),
+    )
+    metrics_group.add_argument(
+        "--pmc",
+        type=str,
+        choices=["basic", "memory", "flops", "all"],
+        default=None,
+        metavar="SET",
+        help=(
+            "Re-run benchmark under rocprofv3 with the named PMC counter "
+            "set. Per-kernel aggregates land in extra_metrics['pmc']. "
+            "'all' requires --pmc-allow-multipass. Adds ~1 extra workload "
+            "run (~30%% wallclock overhead)."
+        ),
+    )
+    metrics_group.add_argument(
+        "--pmc-allow-multipass",
+        action="store_true",
+        default=False,
+        help=(
+            "Required to use --pmc all. The unioned counter set exceeds "
+            "the single-pass replay budget on most arches and rocprofv3 "
+            "falls back to multi-pass replay, which has been observed to "
+            "hang for minutes on sub-second workloads."
+        ),
+    )
+    metrics_group.add_argument(
+        "--perf",
+        action="store_true",
+        default=False,
+        help=(
+            "Wrap re-run in 'perf stat -x,' to collect CPU cycles, "
+            "instructions, IPC, and task-clock. Kernel-space events drop "
+            "silently when /proc/sys/kernel/perf_event_paranoid > 1. "
+            "Adds ~1 extra workload run."
+        ),
+    )
+    metrics_group.add_argument(
+        "--roofline",
+        action="store_true",
+        default=False,
+        help=(
+            "Re-run under 'rocprof-compute profile --roof-only' to "
+            "capture HBM/compute ceilings. The CSV artefacts "
+            "(roofline.csv, sysinfo.csv) and the workload directory "
+            "path land in extra_metrics['roofline'] — render the PDF "
+            "post-hoc via 'rocprof-compute analyze --path <workload>'. "
+            "Adds ~3 extra workload runs."
+        ),
+    )
+    # --roofline-data-type intentionally absent: rocprof-compute only
+    # accepts it under `analyze`, not `profile`. The profile run captures
+    # ceilings at the tool's default datatype (FP32); rendering FP16/
+    # BF16/etc. PDFs is a post-processing step the user runs themselves
+    # against extra_metrics["roofline"]["workload_path"]:
+    #   rocprof-compute analyze --path <workload_path> --roofline-data-type FP16
+    metrics_group.add_argument(
+        "--profiling-output-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Root directory for profiling artefacts (rocpd dbs, "
+            "pftraces, perf CSVs, roofline CSVs). Default: "
+            "./profiling-output/<utc-timestamp>/."
+        ),
+    )
+    metrics_group.add_argument(
+        "--profiling-timeout",
+        type=int,
+        default=600,
+        metavar="SECONDS",
+        help=(
+            "Wall-clock budget for each external profiler subprocess "
+            "(rocprofv3, perf, rocprof-compute, rocpd convert). Default "
+            "600 s. A wedged child surfaces as 'timed out after Ns' in "
+            "extra_metrics['<source>']['skipped'] instead of hanging the "
+            "suite. Bump for known-long workloads (heavy graph under "
+            "multi-pass PMC replay). Pass 0 to disable the timeout."
+        ),
+    )
+
+    # Hidden re-exec sub-mode: when an opt-in profiling source is
+    # requested, the parent process shells out to a fresh CLI invocation
+    # under the profiler. The child process picks up these flags to
+    # short-circuit setup and run a single (graph, engine) workload.
+    parser.add_argument(
+        "--internal-profiling-run",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--internal-profiling-engine",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--internal-profiling-graph",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
     )
 
     return parser

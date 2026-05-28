@@ -2,48 +2,124 @@
 
 Two Dockerfiles are provided, both targeting Ubuntu 24.04:
 
-| File | Description |
-|------|-------------|
-| `Dockerfile.ubuntu24.prebuilt` | Downloads a prebuilt ROCm nightly tarball |
-| `Dockerfile.ubuntu24.fullbuild` | Clones and builds ROCm from source (TheRock) |
+| File                              | Description                                                    |
+|-----------------------------------|----------------------------------------------------------------|
+| `Dockerfile.ubuntu24.prebuilt`    | Downloads a prebuilt ROCm tarball (nightly, stable, or latest) |
+| `Dockerfile.ubuntu24.fullbuild`   | Clones and builds ROCm from source (TheRock)                   |
 
 ---
 
 ## Prebuilt
 
-Downloads a prebuilt ROCm tarball from `rocm.nightlies.amd.com`. Faster to build; suitable for day-to-day development.
+Downloads a prebuilt ROCm tarball from a configurable source (`THEROCK_URL_BASE`). Faster to build; suitable for day-to-day development.
 
-**Default build** (gfx94X, tag pinned in Dockerfile):
+**Default build** (gfx94X, latest available nightly):
 ```bash
 docker build -f Dockerfile.ubuntu24.prebuilt -t rocblas:prebuilt .
 ```
 
-**Specify a different ASIC and nightly tag** (format: `<version>a<YYYYMMDD>`):
+`THEROCK_GIT_TAG` defaults to `latest`, which queries `THEROCK_URL_BASE` at build time, finds all tarballs matching the ASIC prefix, and downloads the highest version. ADHOCBUILD tarballs are excluded.
+
+**Select another ASIC**:
 ```bash
 docker build -f Dockerfile.ubuntu24.prebuilt \
-  --build-arg THEROCK_ASIC=gfx90a \
+  --build-arg THEROCK_ASIC=gfx950 \
+  -t rocblas:prebuilt .
+```
+
+**Pin to a specific nightly** (format: `<version>a<YYYYMMDD>`):
+```bash
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_ASIC=gfx950 \
   --build-arg THEROCK_GIT_TAG=7.13.0a20260401 \
   -t rocblas:prebuilt .
 ```
 
-**Override the full tarball filename and source:**
+**Use stable releases instead of nightlies:**
 ```bash
 docker build -f Dockerfile.ubuntu24.prebuilt \
-  --build-arg THEROCK_TARBALL=therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz \
+  --build-arg THEROCK_GIT_TAG=latest \
+  --build-arg THEROCK_URL_BASE=https://repo.amd.com/rocm/tarball/ \
+  -t rocblas:prebuilt .
+```
+
+**Pin to a specific stable release** (format: `<version>`):
+```bash
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_GIT_TAG=7.12.0 \
   --build-arg THEROCK_URL_BASE=https://repo.amd.com/rocm/tarball/ \
   -t rocblas:prebuilt .
 ```
 
 **Available tarball sources** (`THEROCK_URL_BASE`):
 
-| Source | URL |
-|--------|-----|
-| Nightly builds (default) | `https://rocm.nightlies.amd.com/tarball/` |
-| Stable releases | `https://repo.amd.com/rocm/tarball/` |
-| Prereleases (QA) | `https://rocm.prereleases.amd.com/tarball/` |
-| Dev builds | `https://rocm.devreleases.amd.com/tarball/` |
+| Source                   | URL                                           |
+|--------------------------|-----------------------------------------------|
+| Nightly builds (default) | `https://rocm.nightlies.amd.com/tarball/`     |
+| Stable releases          | `https://repo.amd.com/rocm/tarball/`          |
+| Prereleases (QA)         | `https://rocm.prereleases.amd.com/tarball/`   |
+| Dev builds               | `https://rocm.devreleases.amd.com/tarball/`   |
 
 See the [TheRock releases page](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#browsing-release-tarballs) for details.
+
+### ASIC suffix note
+
+The tarball suffix (`-dcgpu`, `-dgpu`, `-all`, or none) is derived automatically from `THEROCK_ASIC`:
+
+| ASIC(s)                                                            | Auto-selected suffix |
+|--------------------------------------------------------------------|----------------------|
+| `gfx94X`, `gfx90X`, `gfx950`                                       | `-dcgpu`             |
+| `gfx101X`, `gfx103X`                                               | `-dgpu`              |
+| `gfx110X`, `gfx120X`                                               | `-all`               |
+| `gfx900`, `gfx906`, `gfx908`, `gfx90a`, `gfx1150`–`gfx1153`        | _(none)_             |
+
+Use `THEROCK_PREBUILT_ID` only if you need a non-default suffix (e.g. `gfx110X-dgpu` instead of `gfx110X-all`):
+
+```bash
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_PREBUILT_ID=gfx110X-dgpu \
+  -t rocblas:prebuilt .
+```
+
+### Providing a full tarball URL or local path
+
+If the tarball source uses a non-standard naming convention, bypass all auto-detection by providing the complete download URL via `THEROCK_TARBALL_URL`. All other `THEROCK_*` arguments are ignored when this is set:
+
+```bash
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz \
+  -t rocblas:prebuilt .
+```
+
+`THEROCK_TARBALL_URL` also accepts local paths resolved relative to the Docker build context. Use a `file:///` prefix for an absolute path within the build context, or a plain relative path:
+
+```bash
+# Absolute path within the build context
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_TARBALL_URL=file:///therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz \
+  -t rocblas:prebuilt .
+
+# Relative path within the build context
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_TARBALL_URL=tarballs/therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz \
+  -t rocblas:prebuilt .
+```
+
+The build context is the directory passed to `docker build` (`.` by default). The tarball must be inside it — Docker cannot access files outside the build context, and passing a large directory as the context will cause Docker to transfer its entire contents to the daemon before the build starts.
+
+If the tarball lives outside the current directory, use a temporary build context containing only the tarball:
+
+```bash
+TARBALL=/path/to/therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz
+CTX=$(mktemp -d)
+cp "$TARBALL" "$CTX/"
+docker build \
+  -f "$(pwd)/Dockerfile.ubuntu24.prebuilt" \
+  --build-arg THEROCK_TARBALL_URL=$(basename "$TARBALL") \
+  -t rocblas:prebuilt \
+  "$CTX"
+rm -rf "$CTX"
+```
 
 ---
 
@@ -82,11 +158,11 @@ docker build -f Dockerfile.ubuntu24.fullbuild \
 
 **Build mode options** (`THEROCK_BUILD_MODE`):
 
-| Mode | Description |
-|------|-------------|
-| `Release` (default) | Standard optimized build |
-| `Debug` | Debug symbols, no optimization |
-| `Preset` | Use a named TheRock CMake preset (`THEROCK_BUILD_PRESET`) |
+| Mode                | Description                                               |
+|---------------------|-----------------------------------------------------------|
+| `Release` (default) | Standard optimized build                                  |
+| `Debug`             | Debug symbols, no optimization                            |
+| `Preset`            | Use a named TheRock CMake preset (`THEROCK_BUILD_PRESET`) |
 
 ---
 

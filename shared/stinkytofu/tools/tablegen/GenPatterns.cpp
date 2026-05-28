@@ -88,13 +88,13 @@ namespace stinkytofu {
 namespace hlir_patterns {
 
 // Helper to check if a register is a constant
-inline bool isConstant(const StinkyRegister& reg) {
+static inline bool isConstant(const StinkyRegister& reg) {
     return reg.dataType == StinkyRegister::Type::LiteralDouble ||
            reg.dataType == StinkyRegister::Type::LiteralInt;
 }
 
 // Helper to get constant value
-inline double getConstantValue(const StinkyRegister& reg) {
+static inline double getConstantValue(const StinkyRegister& reg) {
     if (reg.dataType == StinkyRegister::Type::LiteralDouble) {
         return reg.literalDouble;
     } else if (reg.dataType == StinkyRegister::Type::LiteralInt) {
@@ -104,10 +104,10 @@ inline double getConstantValue(const StinkyRegister& reg) {
 }
 
 // Built-in constant folding functions
-inline double AddConstants(double a, double b) { return a + b; }
-inline double SubConstants(double a, double b) { return a - b; }
-inline double MulConstants(double a, double b) { return a * b; }
-inline double NegateConstant(double a) { return -a; }
+static inline double AddConstants(double a, double b) { return a + b; }
+static inline double SubConstants(double a, double b) { return a - b; }
+static inline double MulConstants(double a, double b) { return a * b; }
+static inline double NegateConstant(double a) { return -a; }
 
 //===----------------------------------------------------------------------===//
 // High-Level IR Pattern Matcher Interface
@@ -166,13 +166,13 @@ namespace stinkytofu {
 namespace patterns {
 
 // Helper to check if a register is a constant
-inline bool isConstant(const StinkyRegister& reg) {
+static inline bool isConstant(const StinkyRegister& reg) {
     return reg.dataType == StinkyRegister::Type::LiteralDouble ||
            reg.dataType == StinkyRegister::Type::LiteralInt;
 }
 
 // Helper to get constant value
-inline double getConstantValue(const StinkyRegister& reg) {
+static inline double getConstantValue(const StinkyRegister& reg) {
     if (reg.dataType == StinkyRegister::Type::LiteralDouble) {
         return reg.literalDouble;
     } else if (reg.dataType == StinkyRegister::Type::LiteralInt) {
@@ -182,10 +182,10 @@ inline double getConstantValue(const StinkyRegister& reg) {
 }
 
 // Built-in constant folding functions
-inline double AddConstants(double a, double b) { return a + b; }
-inline double SubConstants(double a, double b) { return a - b; }
-inline double MulConstants(double a, double b) { return a * b; }
-inline double NegateConstant(double a) { return -a; }
+static inline double AddConstants(double a, double b) { return a + b; }
+static inline double SubConstants(double a, double b) { return a - b; }
+static inline double MulConstants(double a, double b) { return a * b; }
+static inline double NegateConstant(double a) { return -a; }
 
 //===----------------------------------------------------------------------===//
 // Uniform Pattern Matcher Interface
@@ -236,7 +236,7 @@ std::string PatternCodeGen::generateFooter(const std::vector<Pattern>& patterns,
 
     oss << "/// Create all pattern matchers\n";
     oss << "/// Patterns are applied in the order they appear here\n";
-    oss << "inline std::vector<std::unique_ptr<PatternMatcher>> createAllPatterns() {\n";
+    oss << "static inline std::vector<std::unique_ptr<PatternMatcher>> createAllPatterns() {\n";
     oss << "    std::vector<std::unique_ptr<PatternMatcher>> patterns;\n";
 
     for (const auto& pattern : patterns) {

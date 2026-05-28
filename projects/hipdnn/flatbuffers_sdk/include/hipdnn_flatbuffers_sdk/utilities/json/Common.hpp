@@ -106,6 +106,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::FP6_E2M3, "fp6_e2m3"},
                                  {DataType::FP6_E3M2, "fp6_e3m2"},
                                  {DataType::INT64, "int64"},
+                                 {DataType::BOOLEAN, "boolean"},
+                                 {DataType::FP8_E4M3_FNUZ, "fp8_e4m3_fnuz"},
+                                 {DataType::FP8_E5M2_FNUZ, "fp8_e5m2_fnuz"},
                              }
 
 )
@@ -120,6 +123,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
                                  {TensorValue::Int32Value, "Int32Value"},
                                  {TensorValue::Int64Value, "Int64Value"},
                                  {TensorValue::Float64Value, "Float64Value"},
+                                 {TensorValue::BoolValue, "BoolValue"},
                              }
 
 )

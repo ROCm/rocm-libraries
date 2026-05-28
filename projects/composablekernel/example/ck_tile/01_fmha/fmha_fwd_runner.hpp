@@ -28,6 +28,10 @@
 #error "we should enable fmha_fwd_splitkv() api in order to cooperate with fmha_fwd_appendkv()"
 #endif
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 enum class fwd_result
 {
     success,
@@ -925,12 +929,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
         gen_scales(q_descale_host, QDataType{}, 3);
         gen_scales(k_descale_host, KDataType{}, 3);
         // When P is fp4, only 8 values (0, 0.5, 1, 1.5, 2, 3, 4, 6) are used to quantize P.
+        // When P is fp6, only 32 values (0 .. 7.5) are used.
         // Too large V values can create rare error outliers between host (no quantization) and
         // device ("running" FA softmax + quantization), here we reduce max value by using smaller
         // range of V scales.
         gen_scales(v_descale_host,
                    VDataType{},
-                   std::is_same_v<typename TypeConfig::PDataType, ck_tile::pk_fp4_t> ? 1 : 3);
+                   ck_tile::is_any_of<typename TypeConfig::PDataType,
+                                      ck_tile::pk_fp4_t,
+                                      ck_tile::pk_fp6x16_t>::value
+                       ? 1
+                       : 3);
     }
     else if(qscale.type == quant_scale_enum::pertensor)
     {
@@ -1165,7 +1174,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
             traits.has_logits_soft_cap = 0.f < logits_soft_cap;
             traits.mask_type           = mask.type;
             traits.bias_type           = bias.type;
-            traits.has_sink            = mask.sink > 0 ? true : false;
+            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
             traits.has_lse             = lse;
 
             if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
@@ -2555,3 +2564,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     return pass ? fwd_result::success : fwd_result::failure;
 }
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

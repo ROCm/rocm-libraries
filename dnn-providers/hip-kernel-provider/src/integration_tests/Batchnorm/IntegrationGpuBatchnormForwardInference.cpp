@@ -68,7 +68,7 @@ protected:
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
-        graph::BatchnormInferenceAttributes bnAttrs;
+        const graph::BatchnormInferenceAttributes bnAttrs;
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,
