@@ -27,6 +27,7 @@
 #include <cctype>
 #include <climits>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -40,6 +41,7 @@
 
 #define DEBUG_TYPE "RawAsmParser"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 
@@ -52,27 +54,30 @@ namespace {
 
 using SymbolTable = std::unordered_map<std::string, int>;
 
-/// Evaluate a simple arithmetic expression composed of symbol names, integers,
-/// and +/- operators (no precedence beyond left-to-right, no parens needed for
-/// the patterns TensileLite emits). Returns nullopt if any token is unresolvable.
+/// Evaluate a simple arithmetic expression composed of integer literals,
+/// symbol names (resolved via \p syms), unary +/-, and binary + - * /.
+/// Multiplicative operators bind tighter than additive (standard precedence);
+/// no parentheses are supported (TensileLite never emits them in offsets).
+/// Returns nullopt if any token is unresolvable or the expression is malformed.
+///
+/// Grammar:
+///   expr   ::= term  (('+' | '-') term  )*
+///   term   ::= factor (('*' | '/') factor)*
+///   factor ::= ('+' | '-')? (NUMBER | IDENTIFIER)
 std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
-    // Tokenize on +/- boundaries (keeping sign attached to numbers)
-    int result = 0;
-    int sign = 1;
     size_t i = 0;
-    size_t n = expr.size();
+    const size_t n = expr.size();
 
     auto skipWS = [&]() {
         while (i < n && (expr[i] == ' ' || expr[i] == '\t')) ++i;
     };
 
-    while (i < n) {
+    // Parse a single factor (signed atom: number or identifier).
+    auto parseFactor = [&]() -> std::optional<int> {
         skipWS();
-        if (i >= n) break;
-
-        // Optional leading sign for first token is handled by sign = 1/−1
+        if (i >= n) return std::nullopt;
+        int sign = 1;
         if (expr[i] == '+') {
-            sign = 1;
             ++i;
             skipWS();
         } else if (expr[i] == '-') {
@@ -80,31 +85,56 @@ std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
             ++i;
             skipWS();
         }
-
         if (i >= n) return std::nullopt;
-
-        // Read token: digits or identifier characters
-        size_t start = i;
+        const size_t start = i;
         if (std::isdigit(static_cast<unsigned char>(expr[i]))) {
             while (i < n && std::isdigit(static_cast<unsigned char>(expr[i]))) ++i;
-            int val = std::stoi(expr.substr(start, i - start));
-            result += sign * val;
-        } else if (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '_') {
+            return sign * std::stoi(expr.substr(start, i - start));
+        }
+        if (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '_') {
             while (i < n && (std::isalnum(static_cast<unsigned char>(expr[i])) || expr[i] == '_'))
                 ++i;
             std::string name = expr.substr(start, i - start);
             auto it = syms.find(name);
             if (it == syms.end()) return std::nullopt;
-            result += sign * it->second;
-        } else {
-            return std::nullopt;
+            return sign * it->second;
         }
-        sign = 1;  // default next sign is positive unless we see +/-
+        return std::nullopt;
+    };
+
+    // Parse a term: factor (('*' | '/') factor)*
+    std::function<std::optional<int>()> parseTerm = [&]() -> std::optional<int> {
+        auto lhs = parseFactor();
+        if (!lhs) return std::nullopt;
+        while (true) {
+            skipWS();
+            if (i >= n || (expr[i] != '*' && expr[i] != '/')) break;
+            char op = expr[i++];
+            auto rhs = parseFactor();
+            if (!rhs) return std::nullopt;
+            if (op == '*') {
+                lhs = *lhs * *rhs;
+            } else {
+                if (*rhs == 0) return std::nullopt;  // div by zero
+                lhs = *lhs / *rhs;
+            }
+        }
+        return lhs;
+    };
+
+    // Parse the full expression: term (('+' | '-') term)*
+    auto lhs = parseTerm();
+    if (!lhs) return std::nullopt;
+    while (true) {
         skipWS();
-        // Next must be + or - or end
-        if (i < n && expr[i] != '+' && expr[i] != '-') return std::nullopt;
+        if (i >= n) break;
+        if (expr[i] != '+' && expr[i] != '-') return std::nullopt;
+        char op = expr[i++];
+        auto rhs = parseTerm();
+        if (!rhs) return std::nullopt;
+        lhs = (op == '+') ? *lhs + *rhs : *lhs - *rhs;
     }
-    return result;
+    return lhs;
 }
 
 /// Trim leading and trailing whitespace from a string in-place.
@@ -401,8 +431,192 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 }
 
 //----------------------------------------------------------------------
+// FieldType helpers
+//----------------------------------------------------------------------
+
+/// Returns true if the given FieldType uses custom textual syntax that
+/// parseOneRegister cannot handle. These operands are dispatched to
+/// dedicated parsers in the per-field operand loop.
+bool hasCustomOperandSyntax(FieldType ft) {
+    switch (ft) {
+        case FieldType::delay:
+        case FieldType::wait_alu:
+        case FieldType::hwreg:
+            return true;
+        default:
+            return false;
+    }
+}
+
+//----------------------------------------------------------------------
+// Custom operand parsers
+//----------------------------------------------------------------------
+
+/// Parse s_delay_alu instid0/instskip/instid1 syntax into mod.delayalu fields.
+bool parseDelayAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
+    auto parseInstId = [](const std::string& s) -> std::pair<std::string, int> {
+        if (s.find("VALU_DEP_") == 0) return {"VALU", std::stoi(s.substr(9))};
+        if (s.find("TRANS32_DEP_") == 0) return {"TRANS", std::stoi(s.substr(12))};
+        if (s.find("SALU_CYCLE_") == 0) return {"SALU", std::stoi(s.substr(11))};
+        return {"NO_DEP", 0};
+    };
+    auto parseSkip = [](const std::string& s) -> int {
+        if (s == "SAME") return 0;
+        if (s == "NEXT") return 1;
+        if (s.find("SKIP_") == 0) return std::stoi(s.substr(5)) + 1;
+        return 0;
+    };
+    auto& fields = inst.modifiers["mod.delayalu"];
+    while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
+           lexer.peek().kind != TokenKind::Newline) {
+        if (lexer.peek().kind != TokenKind::Identifier) {
+            lexer.consume();
+            continue;
+        }
+        std::string key(lexer.consume().text);
+        std::string val;
+        if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::LeftParen) {
+            lexer.consume();
+            if (!lexer.isAtEnd()) val = std::string(lexer.consume().text);
+            if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+        }
+        if (key == "instid0") {
+            auto [type, dist] = parseInstId(val);
+            fields["instid0Type"] = type;
+            fields["instid0Distance"] = std::to_string(dist);
+        } else if (key == "instskip") {
+            fields["instSkip"] = std::to_string(parseSkip(val));
+        } else if (key == "instid1") {
+            auto [type, dist] = parseInstId(val);
+            fields["instid1Type"] = type;
+            fields["instid1Distance"] = std::to_string(dist);
+        }
+    }
+    if (fields.find("instid0Type") == fields.end()) {
+        fields["instid0Type"] = "NO_DEP";
+        fields["instid0Distance"] = "0";
+    }
+    return true;
+}
+
+/// Parse s_wait_alu depctr_*() syntax into mod.waitalu fields.
+bool parseWaitAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
+    auto& fields = inst.modifiers["mod.waitalu"];
+    while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
+           lexer.peek().kind != TokenKind::Newline) {
+        if (lexer.peek().kind != TokenKind::Identifier) {
+            lexer.consume();
+            continue;
+        }
+        std::string key(lexer.consume().text);
+        std::string val;
+        if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::LeftParen) {
+            lexer.consume();
+            if (!lexer.isAtEnd()) val = std::string(lexer.consume().text);
+            if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+        }
+        if (key.find("depctr_") == 0) key = key.substr(7);
+        if (!key.empty() && !val.empty()) fields[key] = val;
+    }
+    return true;
+}
+
+/// Parse hwreg(id, offset, width) syntax and store as a LiteralString
+/// register on the instruction for verbatim round-trip emission.
+void parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
+                       const HwInstDesc::OperandFieldDesc& field) {
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::Identifier) return;
+    std::string text(lexer.peek().text);
+    if (text != "hwreg") return;
+    lexer.consume();
+
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::LeftParen) {
+        StinkyRegister reg(text);
+        if (field.isDest)
+            inst.destRegs.push_back(reg);
+        else
+            inst.srcRegs.push_back(reg);
+        return;
+    }
+    text += '(';
+    lexer.consume();
+
+    int depth = 1;
+    while (!lexer.isAtEnd() && depth > 0) {
+        const auto& tok = lexer.consume();
+        if (tok.kind == TokenKind::LeftParen) depth++;
+        if (tok.kind == TokenKind::RightParen) depth--;
+        if (depth > 0) text += std::string(tok.text);
+    }
+    text += ')';
+
+    StinkyRegister reg(text);
+    if (field.isDest)
+        inst.destRegs.push_back(reg);
+    else
+        inst.srcRegs.push_back(reg);
+}
+
+/// Dispatch a custom-syntax operand to its dedicated parser based on FieldType.
+void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
+                        const HwInstDesc::OperandFieldDesc& field) {
+    switch (field.fieldType) {
+        case FieldType::delay:
+            parseDelayAluSyntax(lexer, inst);
+            break;
+        case FieldType::wait_alu:
+            parseWaitAluSyntax(lexer, inst);
+            break;
+        case FieldType::hwreg:
+            parseHwregOperand(lexer, inst, field);
+            break;
+        default:
+            break;
+    }
+}
+
+//----------------------------------------------------------------------
 // Modifier parsing
 //----------------------------------------------------------------------
+
+/// Generic key→value map used while collecting modifier tokens before they
+/// are dispatched to a modifier namespace.
+using FieldMap = std::unordered_map<std::string, std::string>;
+
+/// True when \p fields holds any matrix-format modifier keys produced by the
+/// `v_wmma_scale_*` family. Used by inferModKeyFromFields() to assign
+/// `mod.matrix_fmt` when the microcode-based switch did not (matrix_fmt
+/// rides on top of generic VOP3PX2/3 encodings, so the encoding alone is
+/// not a reliable indicator).
+bool hasMatrixFmtFields(const FieldMap& fields) {
+    return fields.count("matrix_a_fmt") || fields.count("matrix_b_fmt") ||
+           fields.count("matrix_a_scale_fmt") || fields.count("matrix_b_scale_fmt") ||
+           fields.count("matrix_a_reuse") || fields.count("matrix_b_reuse");
+}
+
+/// True when \p fields holds any DPP-related modifier key. DPP is an add-on
+/// encoding variant layered on top of many VOP formats; the assembler picks
+/// the wider DPP encoding whenever such a token is present. Detection is
+/// field-based rather than microcode-based because the same VOP* encoding
+/// may or may not carry DPP depending on the opcode/usage.
+bool hasDPPFields(const FieldMap& fields) {
+    for (std::string_view k : kDppCtrlKeys)
+        if (fields.count(std::string(k))) return true;
+    // Encoding-side fields that accompany DPP regardless of the dpp_ctrl mode.
+    return fields.count("bound_ctrl") || fields.count("row_mask") || fields.count("bank_mask") ||
+           fields.count("fi");
+}
+
+/// Single decision point for "this generic field set looks like which modKey?".
+/// Used after field collection, only when the microcode-based switch did not
+/// already assign a modKey. Modifier kinds that ride on top of generic
+/// encoding shapes (matrix_fmt on VOP3PX2/3, DPP on many VOP*) are detected
+/// here by field presence rather than by microcode format.
+std::string inferModKeyFromFields(const FieldMap& fields) {
+    if (hasMatrixFmtFields(fields)) return "mod.matrix_fmt";
+    if (hasDPPFields(fields)) return "mod.dpp";
+    return {};
+}
 
 /// Parse trailing modifier tokens into inst.modifiers.
 /// modifier_key is determined by hwInstDesc->microcode and the instruction mnemonic.
@@ -416,12 +630,10 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 /// uses this signal to bail out to TEXTBLOCK pass-through so the entire
 /// line round-trips verbatim instead of silently dropping the unmodelled
 /// modifier.
-bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
-    using FieldMap = std::unordered_map<std::string, std::string>;
-
+bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc,
+                    const SymbolTable& syms) {
     const std::string& mnemonic = inst.opcodeStr;
     bool isWaitcnt = (mnemonic == "s_waitcnt");
-    bool isDelayAlu = (mnemonic == "s_delay_alu");
 
     // Determine modifier namespace from microcode format
     std::string modKey;
@@ -457,15 +669,6 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             inst.modifiers["mod.swaitcnt"]["dscnt"] = "0";
             return true;
         }
-    }
-
-    // s_delay_alu: store the entire remainder as a TEXTBLOCK (complex syntax)
-    // The instruction will still be created with correct timing; modifiers won't
-    // be decoded but that's acceptable for a round-trip parser.
-    if (isDelayAlu) {
-        // Leave modifiers empty; the passes that need delay_alu data (e.g. wait-cnt
-        // insertion) will re-insert the correct modifier after scheduling.
-        return true;
     }
 
     // Collect key→value / key(value) / boolean-flag tokens
@@ -506,25 +709,38 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                 // value via `atoi` (see ModifierSerializer's `getInt`),
                 // which would silently truncate to the first integer.
                 // Drain the remainder of the expression so the lexer
-                // stays in sync, mark the line as unrepresentable, and
-                // let the caller fall back to TEXTBLOCK so the source
-                // expression round-trips verbatim. (gatherArithExprSuffix
-                // is a no-op when the next token is not an operator or
-                // signed-literal continuation, so simple `offset:0` /
-                // `offset:32` are unaffected.)
+                // stays in sync, then evaluate it to a single integer
+                // using the symbol table (handles literal-only chains
+                // like `8704*2` and symbol-bearing chains like
+                // `vgprBase+0`). On evaluation failure, mark the line
+                // unrepresentable and let the caller fall back to
+                // TEXTBLOCK so the source expression round-trips
+                // verbatim. (gatherArithExprSuffix is a no-op when the
+                // next token is not an operator or signed-literal
+                // continuation, so simple `offset:0` / `offset:32` are
+                // unaffected.)
                 std::string folded = gatherArithExprSuffix(lexer, val);
-                if (folded != val) sawUnrepresentable = true;
-                fields[tok] = std::move(folded);
+                if (folded != val) {
+                    if (auto evaluated = evalExpr(folded, syms)) {
+                        fields[tok] = std::to_string(*evaluated);
+                    } else {
+                        sawUnrepresentable = true;
+                        fields[tok] = std::move(folded);
+                    }
+                } else {
+                    fields[tok] = std::move(folded);
+                }
                 sawAnyModifier = true;
             } else if (vk == TokenKind::Identifier) {
-                // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`, `matrix_a_fmt:MATRIX_FMT_FP8`,
-                // etc. — gfx12+ memory-hint / matrix-format syntax. Not
-                // modelled by any of the existing modifier structs, so
-                // consume the rhs to keep the lexer in sync but signal
-                // that the line cannot be losslessly round-tripped via
-                // inst.modifiers; the caller will route to TEXTBLOCK.
-                lexer.consume();
-                sawUnrepresentable = true;
+                // `key:Identifier` modifiers (e.g. `matrix_a_fmt:MATRIX_FMT_FP8`,
+                // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`). Store the value in the
+                // generic fields collection; the per-modKey dispatch below
+                // decides which ones are recognized. Fields with no consumer
+                // are silently dropped — same outcome as any other unhandled
+                // modifier token. Formats with no modKey at all are still
+                // caught by the existing `modKey.empty() && sawAnyModifier`
+                // check below and routed to TEXTBLOCK.
+                fields[tok] = std::string(lexer.consume().text);
                 sawAnyModifier = true;
             }
         } else if (lexer.peek().kind == TokenKind::LeftParen) {
@@ -556,6 +772,13 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             sawAnyModifier = true;
         }
     }
+
+    // Post-hoc: if the microcode-based switch did not assign a modKey, infer
+    // one from the collected field names. Modifier kinds that ride on top of
+    // generic encoding shapes (matrix_fmt on VOP3PX2/3, DPP on many VOP*)
+    // can't be detected from the microcode format alone — only some opcodes
+    // within those encodings carry the modifier.
+    if (modKey.empty()) modKey = inferModKeyFromFields(fields);
 
     // Modifier-bearing instruction with no modKey to put them into (e.g.
     // TENSOR-format `tensor_load_to_lds offset:0`). Anything in `fields`
@@ -602,6 +825,46 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
         if (fields.contains("glc")) modFields["glc"] = "true";
         if (fields.contains("nv")) modFields["nv"] = "true";
+
+    } else if (modKey == "mod.dpp") {
+        // Reconstruct the asm-form dpp_ctrl token from the parsed fields and
+        // run it through parseDppCtrlFromAsm() so the deserializer receives
+        // the integer DppCtrl enum value it expects (the deserializer reads
+        // `dppCtrl` as an int via getInt).
+        DppCtrl ctrl = DppCtrl::NONE;
+        for (std::string_view k : kDppCtrlKeys) {
+            auto it = fields.find(std::string(k));
+            if (it == fields.end()) continue;
+            // Boolean flags (`row_mirror`, `row_half_mirror`) are stored as
+            // "true"; their asm form is just the bare key. Everything else
+            // is `key:value`.
+            std::string token =
+                (it->second == "true") ? std::string(k) : std::string(k) + ":" + it->second;
+            ctrl = parseDppCtrlFromAsm(token);
+            if (ctrl != DppCtrl::NONE) break;
+        }
+        if (ctrl != DppCtrl::NONE) modFields["dppCtrl"] = std::to_string(static_cast<int>(ctrl));
+        // Encoding-side DPP fields. Map asm-form names to deserializer names.
+        if (fields.count("bound_ctrl")) modFields["boundCtrl"] = fields["bound_ctrl"];
+        if (fields.count("row_mask")) modFields["rowMask"] = fields["row_mask"];
+        if (fields.count("bank_mask")) modFields["bankMask"] = fields["bank_mask"];
+        if (fields.count("fi")) modFields["fi"] = fields["fi"];
+
+    } else if (modKey == "mod.matrix_fmt") {
+        // Map asm-form keys to the field names the mod.matrix_fmt deserializer
+        // expects (parseMatrixFmt / parseMatrixScaleFmt accept the asm symbolic
+        // form like "MATRIX_FMT_FP8" directly).
+        if (fields.contains("matrix_a_fmt")) modFields["fmtA"] = fields["matrix_a_fmt"];
+        if (fields.contains("matrix_b_fmt")) modFields["fmtB"] = fields["matrix_b_fmt"];
+        if (fields.contains("matrix_a_scale_fmt"))
+            modFields["scaleFmtA"] = fields["matrix_a_scale_fmt"];
+        if (fields.contains("matrix_b_scale_fmt"))
+            modFields["scaleFmtB"] = fields["matrix_b_scale_fmt"];
+        // matrix_a_reuse / matrix_b_reuse live on MFMAModifiers, not
+        // MatrixFmtModifiers — write them to a separate dict entry so the
+        // deserializer creates both modifier types.
+        if (fields.contains("matrix_a_reuse")) inst.modifiers["mod.mfma"]["reuseA"] = "true";
+        if (fields.contains("matrix_b_reuse")) inst.modifiers["mod.mfma"]["reuseB"] = "true";
     }
 
     return !sawUnrepresentable;
@@ -641,38 +904,36 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     inst->issueCycles = hwInstDesc->issue;
     inst->latencyCycles = hwInstDesc->latency;
 
-    // Count dest/src split from operandFields.
-    // When operandFields is empty the instruction has no explicit register operands
-    // (e.g. s_endpgm, s_waitcnt, s_delay_alu) so skip register parsing entirely.
-    int numDest = 0;
-    bool hasOperandFields = !hwInstDesc->operandFields.empty();
-    if (hasOperandFields) {
-        for (const auto& f : hwInstDesc->operandFields)
-            if (f.isDest) numDest++;
-    }
-
-    if (hasOperandFields) {
-        // Parse comma-separated register operands.
-        // Stop when: (a) no comma follows, or (b) next token is not a register.
-        int opIdx = 0;
+    // Per-field operand dispatch: iterate operandFields and dispatch each
+    // to the appropriate parser based on FieldType. Custom-syntax fields
+    // (delay, wait_alu) are parsed by dedicated parsers here.
+    // Register/immediate fields are parsed by parseOneRegister.
+    if (!hwInstDesc->operandFields.empty()) {
         bool firstOp = true;
+        int regOpIdx = 0;
 
-        while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
-               lexer.peek().kind != TokenKind::Newline) {
+        for (size_t fi = 0; fi < hwInstDesc->operandFields.size(); fi++) {
+            if (lexer.isAtEnd() || lexer.peek().kind == TokenKind::Eof ||
+                lexer.peek().kind == TokenKind::Newline)
+                break;
+
+            const auto& field = hwInstDesc->operandFields[fi];
+
             if (!firstOp) {
                 if (lexer.peek().kind != TokenKind::Comma) break;
                 lexer.consume();  // eat ','
             }
             firstOp = false;
 
+            // Custom-syntax operand: dispatch to dedicated parser.
+            if (hasCustomOperandSyntax(field.fieldType)) {
+                parseCustomOperand(lexer, *inst, field);
+                continue;
+            }
+
             // Snapshot the lookahead so we can recover an unrecognised
-            // identifier as a LiteralString if parseOneRegister fails on a
-            // non-first operand (see recovery block below). For first
-            // operands we still want to fall through to TEXTBLOCK pass-
-            // through so instructions with custom textual syntax (e.g.
-            // `s_delay_alu instid0(VALU_DEP_2)`, `s_wait_alu depctr_va_vdst(0)`)
-            // round-trip verbatim instead of being half-parsed and then
-            // tripping the SDelayAluData/SWaitAluData asserts in the emitter.
+            // identifier as a LiteralString if parseOneRegister fails on
+            // a non-first operand (see recovery block below).
             TokenKind preKind = lexer.isAtEnd() ? TokenKind::Eof : lexer.peek().kind;
             std::string preText =
                 preKind == TokenKind::Identifier ? std::string(lexer.peek().text) : std::string();
@@ -680,12 +941,10 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
 
             auto reg = parseOneRegister(lexer, syms, preserveSymbolicNames);
             if (!reg) {
-                if (opIdx == 0) {
-                    // First operand failed (e.g. symbolic expression like
-                    // v[sym-768:sym-765] or a custom-syntax mnemonic such as
-                    // s_delay_alu / s_wait_alu). parseOneRegister may have
-                    // consumed tokens; safest to preserve the entire line
-                    // verbatim via TEXTBLOCK pass-through.
+                if (regOpIdx == 0) {
+                    // First register operand failed (e.g. unresolvable symbolic
+                    // expression like v[sym-768:sym-765]). parseOneRegister may
+                    // have consumed tokens; preserve the line as TEXTBLOCK.
                     return nullptr;
                 }
                 // Non-first operand recovery: a `.set` symbol (or any other
@@ -707,22 +966,22 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
                     // as the IntegerLiteral path in parseOneRegister.
                     std::string text = gatherArithExprSuffix(lexer, preText);
                     StinkyRegister litReg(text);
-                    if (opIdx < numDest)
+                    if (field.isDest)
                         inst->destRegs.push_back(litReg);
                     else
                         inst->srcRegs.push_back(litReg);
-                    opIdx++;
+                    regOpIdx++;
                     continue;
                 }
                 // Later operand failed → stop operand parsing, proceed to modifiers.
                 break;
             }
 
-            if (opIdx < numDest)
+            if (field.isDest)
                 inst->destRegs.push_back(*reg);
             else
                 inst->srcRegs.push_back(*reg);
-            opIdx++;
+            regOpIdx++;
         }
     }
 
@@ -732,7 +991,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     // modifier on a microcode format that has no namespace mapped above),
     // bail to TEXTBLOCK pass-through so the line round-trips verbatim
     // instead of dropping the unmodelled modifier on emission.
-    if (!parseModifiers(lexer, *inst, hwInstDesc)) {
+    if (!parseModifiers(lexer, *inst, hwInstDesc, syms)) {
         return nullptr;
     }
 
