@@ -85,6 +85,7 @@ public:
 
         // SECTION 2: Validate Parameter Dimensions
         // Required parameters ( x, y, scale, bias and epsilon) must have valid dimensions.
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
 
