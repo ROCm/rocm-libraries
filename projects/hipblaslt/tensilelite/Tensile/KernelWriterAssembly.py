@@ -4518,7 +4518,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # delta_bytes = delta_K * bpe_K_byteStride (handles bpe=0.5 via SShr 1)
       module.add(scalarMultiplyBpe(stmp, stmp, bpeForLimit,
-                                   comment="delta_bytes (multiple bpe)"))
+                                   comment="delta_bytes"))
       for tc in tcs:
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
                            src1=sgpr(stmp),

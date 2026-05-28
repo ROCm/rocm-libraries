@@ -436,10 +436,16 @@ class GRIncOp(BaseOp):
 
 @dataclass
 class SkipOp(BaseOp):
-    """Skip guard: compare LoopCounter and branch."""
+    """Skip guard: compare LoopCounter and branch.
+
+    target is normally a short name (e.g. 'NLL'); the emitter prefixes 'SkipTo'.
+    Set rawLabel=True to pass the label name through verbatim
+    (e.g. 'SkipTailLoopL'). branchComment overrides the default."""
     compare: str = ""
     value: int = 0
     target: str = ""
+    rawLabel: bool = False
+    branchComment: str = ""
 
     def __post_init__(self):
         self.kind = 'skip'
@@ -2103,6 +2109,7 @@ class LogicalScheduler:
         
 
         # Loop over partitions to re-use vgpr tile maps.
+        miK = int(self._kernel["MatrixInstK"])
         all_partitions = []
         for pi in range(cfg.numPartitions):
             groups = []
@@ -2131,6 +2138,19 @@ class LogicalScheduler:
                 mfma = MFMAPlacement(subIterK=k, tileA=mfma_tileA, tileB=mfma_tileB)
                 mfma.vgpr_tile_maps = copy.deepcopy(tile_maps[pi])
                 ops.append(mfma)
+                # Early-exit: after subIterK=k completes on the LAST partition,
+                # if LoopCounterL <= MIK*(k+1) then no further valid K remains
+                # for any partition (all partitions share the K dimension), so
+                # branch to SkipTailLoopL. Earlier partitions must still finish
+                # subIterKs 0..k for their MN tiles, so no early-exit there.
+                # No skip on the very last group (nothing left to skip).
+                isLastPartition = (pi == cfg.numPartitions - 1)
+                isLastGroup = isLastPartition and (k == numK - 1)
+                if isLastPartition and not isLastGroup:
+                    ops.append(SkipOp(
+                        compare='LE', value=miK * (k + 1),
+                        target='SkipTailLoopL', rawLabel=True,
+                        branchComment=f"early-exit tail after subIterK={k} (no valid K left)"))
                 groups.append(self._to_emitted(ops))
             all_partitions.append(groups)
 

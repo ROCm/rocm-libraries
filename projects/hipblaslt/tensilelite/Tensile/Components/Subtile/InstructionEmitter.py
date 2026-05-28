@@ -247,14 +247,29 @@ class InstructionEmitter:
 
     def emit_skip(self, source):
         """Emit skip guard: compare LoopCounterL and branch."""
-        skipLabel = Label(f"SkipTo{source.target}", "")
+        labelName = source.target if source.rawLabel else f"SkipTo{source.target}"
+        skipLabel = Label(labelName, "")
         cmpMap = {"EQ": SCmpEQU32, "LE": SCmpLeU32}
-        return [
-            cmpMap[source.compare](src0=sgpr("LoopCounterL"), src1=source.value,
-                                   comment=f"LoopCounter {source.compare} {source.value}?"),
-            SCBranchSCC1(labelName=skipLabel.getLabelName(),
-                         comment=f"skip to {source.target}"),
-        ]
+        cmpCls = cmpMap[source.compare]
+        module = Module()
+        # SCMP inline range is -16..64 (signed); stage non-inline via scratch sgpr.
+        if -16 <= source.value <= 64:
+            module.add(cmpCls(
+                src0=sgpr("LoopCounterL"), src1=source.value,
+                comment=f"LoopCounter {source.compare} {source.value}?"))
+        else:
+            with self.writer.allocTmpSgpr(1) as litSgprInfo:
+                litSgpr = litSgprInfo.idx
+                module.add(SMovB32(
+                    dst=sgpr(litSgpr), src=hex(source.value),
+                    comment=f"stage literal {source.value} (non-inline) for cmp src1"))
+                module.add(cmpCls(
+                    src0=sgpr("LoopCounterL"), src1=sgpr(litSgpr),
+                    comment=f"LoopCounter {source.compare} {source.value}?"))
+        module.add(SCBranchSCC1(
+            labelName=skipLabel.getLabelName(),
+            comment=source.branchComment or f"skip to {source.target}"))
+        return list(module.flatitems())
 
     def _mfma_K_constants(self):
         """Constants used by both mask emitters.
