@@ -1,32 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -664,9 +642,12 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 #endif
 
     result.invoker_factory =
-        [ck_args_     = CKArgsType{problem},
+        [kernel_id_   = kernel_id,
+         ck_args_     = CKArgsType{problem},
          sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
-            return [ck_args2 = std::move(ck_args_), sh_conv_ptr2 = std::move(sh_conv_ptr_)](
+            return [kernel_id2   = std::move(kernel_id_),
+                    ck_args2     = std::move(ck_args_),
+                    sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
                 auto argument_ptr    = ck_args2.MakeArgPtr(sh_conv_ptr2, data_ctx);
@@ -678,6 +659,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
                 if(handle.IsProfilingEnabled())
                 {
                     float elapsed_time = handle.GetKernelTime();
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed_time, false);
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed_time);
                 }
@@ -1045,6 +1027,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             if(handle.IsProfilingEnabled())
             {
                 elapsed += handle.GetKernelTime();
+
+                // Kernel logging for CK kernels
+                if(IsLoggingKernel())
+                {
+                    AddKernelToJsonAccumulator(*kernel_id2, elapsed, false);
+                }
                 handle.ResetKernelTime();
                 handle.AccumKernelTime(elapsed);
             }
@@ -1156,6 +1144,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if(handle.IsProfilingEnabled())
                 {
                     elapsed += handle.GetKernelTime();
+
+                    // Kernel logging for CK kernels
+                    if(IsLoggingKernel())
+                    {
+                        AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                    }
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed);
                 }
@@ -1211,6 +1205,13 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if(handle.IsProfilingEnabled())
                 {
                     elapsed += handle.GetKernelTime();
+
+                    // Kernel logging for CK kernels
+                    if(IsLoggingKernel())
+                    {
+                        AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                    }
+
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed);
                 }
