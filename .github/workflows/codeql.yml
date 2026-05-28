@@ -18,9 +18,6 @@ on:
       - hipblaslt_common_cms_phase2
       - "release**/therock*"
       - "release/rocm-rel-*"
-  # Run every Saturday at 10:00 UTC.
-  schedule:
-    - cron: "0 10 * * 6"
   workflow_dispatch:
 
 concurrency:
