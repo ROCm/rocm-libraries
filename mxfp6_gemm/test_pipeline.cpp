@@ -66,17 +66,20 @@ __global__ void mxfp6_gemm_pipeline(
     for (int ki = 0; ki < k_iters; ki++) {
         int cur_buf = (ki & 1) * LDS_BUF;
 
-        // ---- Read A from current buffer ----
-        uint32_t off0 = cur_buf
-            + ((wave_m * M_PER_WAVE + 0) * 32 + dim) * LDS_ROW_BYTES
-            + khalf * 24;
-        uint32_t off1 = cur_buf
-            + ((wave_m * M_PER_WAVE + 1) * 32 + dim) * LDS_ROW_BYTES
-            + khalf * 24;
-        v8i a0 = ds_read_fp6x32(off0);
-        v8i a1 = ds_read_fp6x32(off1);
+        // ---- Issue A ds_reads from current buffer (async) ----
+        v3i a0_lo, a0_hi, a1_lo, a1_hi;
+        {
+            uint32_t off0 = cur_buf
+                + ((wave_m * M_PER_WAVE + 0) * 32 + dim) * LDS_ROW_BYTES
+                + khalf * 24;
+            uint32_t off1 = cur_buf
+                + ((wave_m * M_PER_WAVE + 1) * 32 + dim) * LDS_ROW_BYTES
+                + khalf * 24;
+            ds_read_fp6x32_issue(off0, a0_lo, a0_hi);
+            ds_read_fp6x32_issue(off1, a1_lo, a1_hi);
+        }
 
-        // ---- Load B + scale from VMEM ----
+        // ---- Issue B + scale VMEM loads (overlap with ds_reads) ----
         v8i b_reg[N_PER_WAVE];
         #pragma unroll
         for (int ni = 0; ni < N_PER_WAVE; ni++) {
@@ -105,6 +108,12 @@ __global__ void mxfp6_gemm_pipeline(
             asm volatile("v_and_b32 %0, 0xFF, %0" : "+v"(sb[ni]));
         }
 
+        // ---- Wait for A reads ----
+        wait_lgkmcnt(0);
+        v8i a0 = ds_read_fp6x32_complete(a0_lo, a0_hi);
+        v8i a1 = ds_read_fp6x32_complete(a1_lo, a1_hi);
+
+        // ---- Wait for B + scale ----
         wait_vmcnt(0);
 
         // ---- Prefetch next A to other buffer (overlaps with MFMA) ----

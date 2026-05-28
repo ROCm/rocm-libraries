@@ -69,9 +69,10 @@ __device__ __forceinline__ v8i ds_read_fp6x32_complete(v3i lo, v3i hi) {
     asm volatile(
         "v_mov_b32 %0, %6\n v_mov_b32 %1, %7\n v_mov_b32 %2, %8\n"
         "v_mov_b32 %3, %9\n v_mov_b32 %4, %10\n v_mov_b32 %5, %11"
-        : "=v"(d0), "=v"(d1), "=v"(d2), "=v"(d3), "=v"(d4), "=v"(d5)
+        : "=&v"(d0), "=&v"(d1), "=&v"(d2), "=&v"(d3), "=&v"(d4), "=&v"(d5)
         : "v"(lo[0]), "v"(lo[1]), "v"(lo[2]),
           "v"(hi[0]), "v"(hi[1]), "v"(hi[2])
+        : "memory"
     );
     return v8i{d0, d1, d2, d3, d4, d5, 0, 0};
 }
