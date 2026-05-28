@@ -198,6 +198,17 @@ VARIANTS = [
         "block_size": 256,
     },
     {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_group_ebias_dbias",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "group",
+        "bias_type": "elementwise",
+        "has_bias_grad": True,
+        "block_size": 256,
+    },
+    {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch_ebias",
         "family": "dqdkdv",
         "dtype": "fp16",
