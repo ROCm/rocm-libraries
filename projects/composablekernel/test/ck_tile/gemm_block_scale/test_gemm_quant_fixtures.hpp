@@ -29,6 +29,7 @@ struct GemmConfigBase
     static constexpr bool PreshuffleB               = false;
     static constexpr bool DoubleSmemBuffer          = false;
     static constexpr bool TiledMMAPermuteN          = false;
+    static constexpr bool FuseAQuant                = false;
 
     // Default GEMM tile sizes for tests
     static constexpr ck_tile::index_t M_Tile = 16;
@@ -195,6 +196,16 @@ struct GemmConfigEightWaves : public GemmConfigBase
 struct GemmConfigEightWaves_PreshuffleB : public GemmConfigEightWaves
 {
     static constexpr bool PreshuffleB = true;
+};
+
+struct GemmConfigFuseAQuant : public GemmConfigBase
+{
+    static constexpr bool FuseAQuant = true;
+};
+
+struct GemmConfigFuseAQuantTransposeC : public GemmConfigTransposeC
+{
+    static constexpr bool FuseAQuant = true;
 };
 
 template <typename Tuple>
@@ -1014,6 +1025,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
     static constexpr auto QuantType        = Base::QuantType;
     static constexpr auto PreshuffleB      = Base::PreshuffleB;
     static constexpr auto TiledMMAPermuteN = Base::TiledMMAPermuteN;
+    static constexpr auto FuseAQuant       = Base::FuseAQuant;
 
     protected:
     void SetUpQuantTypeSpecific() {}
@@ -1287,9 +1299,13 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             using GemmPipeline = std::conditional_t<
                 eight_waves,
                 ck_tile::ABQuantGemmPipelineAgBgCrEightWaves<PipelineProblem>,
-                std::conditional_t<PreshuffleB,
-                                   ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
-                                   ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
+                std::conditional_t<
+                    PreshuffleB,
+                    ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
+                    std::conditional_t<
+                        FuseAQuant,
+                        ck_tile::FusedAQuantBQuantGemmPipelineAgBgCrCompV3<PipelineProblem>,
+                        ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>>;
 
             using GemmEpilogue = std::conditional_t<
                 TiledMMAPermuteN,

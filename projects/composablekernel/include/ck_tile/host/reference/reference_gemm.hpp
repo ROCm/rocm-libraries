@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include <algorithm>
+#include <cmath>
 
 #include <cstdlib>
 #include <thread>
@@ -249,6 +251,81 @@ CK_TILE_HOST void reference_gemm_abquant(const HostTensor<ADataType>& a_m_k,
     };
 
     make_ParallelTensorFunctor(f_mn, M, N)(std::thread::hardware_concurrency());
+}
+
+template <typename ADataType,
+          typename AQDataType,
+          typename BDataType,
+          typename BQDataType,
+          typename AccDataType,
+          typename CDataType,
+          typename AQuantGroupSize,
+          typename BQuantGroupSize,
+          typename AElementOp   = ck_tile::identity,
+          typename BElementOp   = ck_tile::identity,
+          typename ACCElementOp = ck_tile::identity>
+CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k,
+                                              const HostTensor<BDataType>& b_k_n,
+                                              const HostTensor<BQDataType>& b_q,
+                                              HostTensor<CDataType>& c_m_n,
+                                              const AElementOp& a_element_op     = {},
+                                              const BElementOp& b_element_op     = {},
+                                              const ACCElementOp& acc_element_op = {})
+{
+    const std::size_t M = a_m_k.get_length(0);
+    const std::size_t K = a_m_k.get_length(1);
+
+    const std::size_t AQM = ck_tile::integer_divide_ceil(M, AQuantGroupSize::kM);
+    const std::size_t AQK = ck_tile::integer_divide_ceil(K, AQuantGroupSize::kK);
+
+    HostTensor<AQDataType> aq_m_aqk(
+        ck_tile::host_tensor_descriptor(AQM, AQK, AQK, ck_tile::bool_constant<true>{}));
+
+    const AQDataType fp8_range = type_convert<AQDataType>(numeric<fp8_t>::max()) -
+                                 type_convert<AQDataType>(numeric<fp8_t>::min());
+
+    for(std::size_t m_group = 0; m_group < AQM; ++m_group)
+    {
+        const std::size_t m_begin = m_group * AQuantGroupSize::kM;
+        const std::size_t m_end   = std::min<std::size_t>(m_begin + AQuantGroupSize::kM, M);
+
+        for(std::size_t k_group = 0; k_group < AQK; ++k_group)
+        {
+            const std::size_t k_begin = k_group * AQuantGroupSize::kK;
+            const std::size_t k_end   = std::min<std::size_t>(k_begin + AQuantGroupSize::kK, K);
+
+            float max_abs = 0.0f;
+
+            for(std::size_t m = m_begin; m < m_end; ++m)
+            {
+                for(std::size_t k = k_begin; k < k_end; ++k)
+                {
+                    const float v = ck_tile::type_convert<float>(a_element_op(a_m_k(m, k)));
+                    max_abs       = std::max(max_abs, std::abs(v));
+                }
+            }
+
+            if(max_abs == 0.0f)
+            {
+                max_abs = 1.0f;
+            }
+
+            aq_m_aqk(m_group, k_group) = ck_tile::type_convert<AQDataType>(max_abs) / fp8_range;
+        }
+    }
+
+    reference_gemm_abquant<ADataType,
+                           AQDataType,
+                           BDataType,
+                           BQDataType,
+                           AccDataType,
+                           CDataType,
+                           AQuantGroupSize,
+                           BQuantGroupSize,
+                           AElementOp,
+                           BElementOp,
+                           ACCElementOp>(
+        a_m_k, aq_m_aqk, b_k_n, b_q, c_m_n, a_element_op, b_element_op, acc_element_op);
 }
 
 template <typename ADataType,

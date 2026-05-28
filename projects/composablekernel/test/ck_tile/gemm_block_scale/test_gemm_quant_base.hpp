@@ -103,6 +103,7 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     static constexpr bool PreshuffleB      = GemmConfig::PreshuffleB;
     static constexpr bool TiledMMAPermuteN = GemmConfig::TiledMMAPermuteN;
     static constexpr bool DoubleSmemBuffer = GemmConfig::DoubleSmemBuffer;
+    static constexpr bool FuseAQuant       = GemmConfig::FuseAQuant;
 
     static constexpr bool kPadM = GemmConfig::kPadM;
     static constexpr bool kPadN = GemmConfig::kPadN;
@@ -146,7 +147,8 @@ class TestCkTileGemmQuantBase : public ::testing::Test
                                                                GemmConfig::TransposeC,
                                                                DoubleSmemBuffer,
                                                                false,
-                                                               VectorSize>;
+                                                               VectorSize,
+                                                               FuseAQuant>;
 
         // Let the derived class create the appropriate pipeline and epilogue
         static_cast<Derived*>(this)
