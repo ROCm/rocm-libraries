@@ -508,6 +508,9 @@ rocblas_status rocsolver_larft_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
+// Computes F = T, for triangular factor T of a block Householder reflector
+// H of order n, which is defined as a product of k elementary reflectors.
+//
 template <typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larft_template(rocblas_handle handle,
                                         const rocblas_direct direct,
@@ -834,6 +837,16 @@ void rocsolver_larft_inverse_getMemorySize(const rocblas_int n,
         *size_workArr = 0;
 }
 
+// Computes F = inv(T), for triangular factor T of a block Householder reflector
+// H of order n, which is defined as a product of k elementary reflectors.
+// This requires all tau_j != 0, contrary to LAPACK's larfg convention of
+// tau_j == 0 for H_j = Identity.
+//
+// References:
+// Puglisi, Modification of the Householder method based on the compact WY
+// representation, 1992.
+// Joffrain, et al., Accumulating Householder Transformations, Revisited, 2006.
+//
 template <typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
                                                 const rocblas_direct direct,
