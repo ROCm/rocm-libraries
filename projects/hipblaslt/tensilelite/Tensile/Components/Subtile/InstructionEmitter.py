@@ -480,46 +480,25 @@ class InstructionEmitter:
                             dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
                             comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
-            # MX scale mask: each scale vgpr packs 4 bytes covering lrSA.k
-            # pairs of subIterK (bytes 0..1 → subIterK=base, bytes 2..3 →
-            # subIterK=base+1). K_rem is always a multiple of MXBlock=32, so
-            # the per-lane decision is byte-binary on eff_diff = diff - kBase:
-            #   eff_diff <= 0           → mask = 0           (drop both bytes)
-            #   eff_diff <= MatrixInstK → mask = 0x0000FFFF  (drop subIterK=+1)
-            #   else                    → mask = 0xFFFFFFFF  (keep both)
-            # Recomputed at the start of each scale group (subIterK %
-            # lrSA.k == 0) since the scale LR reloads the vgpr at that
-            # boundary. Live tiles only — vgprTilesSA/SB still contain the
-            # dead PGR≥1 prefetch slots returned to the pool by
-            # _release_unused_tail_tiles.
+            # MX scale mask (FP4 only): reuse the A/B mask we just built.
+            # The A/B mask for subIterK=base is binary per-lane:
+            #   laneK_base >= rem → 0   (zero A/B[base]; also OK to zero scale
+            #                            for both byte-pairs — see below)
+            #   else              → -1  (keep)
+            # Scale vgpr packs lrSA.k subIterK pairs (bytes 0..1 → base,
+            # bytes 2..3 → base+1). Applying the base mask to the scale:
+            #   • lane fails at base → scale zeroed → MFMAs at base, base+1
+            #     see scale=0; A/B[base]=0 by the same mask, and A/B[base+1]
+            #     is masked by its own emit_mask_k → both products = 0. ✓
+            #   • lane passes at base, fails at base+1 → scale bytes 2..3 left
+            #     stale, but A/B[base+1] is masked to 0 by its own emit_mask_k
+            #     call → product = 0 regardless of scale value. ✓
+            # So a single VAnd with maskVgprs[0] suffices per scale-group
+            # boundary; no separate compute or scratch vgpr needed.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
-            if self.hasScale and (self.vgprTilesSA or self.vgprTilesSB) \
+            if (not isBF16) and self.hasScale \
+                    and (self.vgprTilesSA or self.vgprTilesSB) \
                     and scaleStride > 0 and (subIterK % scaleStride == 0):
-                miK = kernel["MatrixInstK"]
-                scaleMaskVgpr = writer.vgprPool.checkOut(
-                    1, f"tail_scaleMask_k{subIterK}")
-                scaleLowMaskVgpr = writer.vgprPool.checkOut(
-                    1, f"tail_scaleLowMask_k{subIterK}")
-                module.add(VMovB32(
-                    dst=vgpr(scaleMaskVgpr), src=-1,
-                    comment="scale mask init = 0xFFFFFFFF (keep both bytes)"))
-                module.add(VMovB32(
-                    dst=vgpr(scaleLowMaskVgpr), src="0x0000FFFF",
-                    comment="scale low-half mask = 0x0000FFFF (keep low byte-pair)"))
-                _emit_cmp(VCmpLeI32, kBaseConst + miK,
-                          f"scale: eff_diff <= MatrixInstK ({miK}) ? drop high bytes")
-                module.add(VCndMaskB32(
-                    dst=vgpr(scaleMaskVgpr),
-                    src0=vgpr(scaleMaskVgpr), src1=vgpr(scaleLowMaskVgpr),
-                    src2=sgpr(maskSgpr, laneSGPRCount),
-                    comment="scale mask = (eff_diff<=MIK) ? 0x0000FFFF : -1"))
-                _emit_cmp(VCmpLeI32, kBaseConst,
-                          "scale: eff_diff <= 0 ? drop both bytes")
-                module.add(VCndMaskB32(
-                    dst=vgpr(scaleMaskVgpr),
-                    src0=vgpr(scaleMaskVgpr), src1=0,
-                    src2=sgpr(maskSgpr, laneSGPRCount),
-                    comment="scale mask = (eff_diff<=0) ? 0 : prev"))
                 for tensor, tilesList in (('SA', self.vgprTilesSA),
                                           ('SB', self.vgprTilesSB)):
                     liveIds = sorted(set(
@@ -528,10 +507,8 @@ class InstructionEmitter:
                         for v in list(tilesList[tid]):
                             module.add(VAndB32(
                                 dst=vgpr(v), src0=vgpr(v),
-                                src1=vgpr(scaleMaskVgpr),
-                                comment=f"mask scale vgpr (subIterK={subIterK})"))
-                writer.vgprPool.checkIn(scaleMaskVgpr)
-                writer.vgprPool.checkIn(scaleLowMaskVgpr)
+                                src1=vgpr(maskVgprs[0]),
+                                comment=f"mask scale vgpr (reuse A/B mask, subIterK={subIterK})"))
 
         for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)
