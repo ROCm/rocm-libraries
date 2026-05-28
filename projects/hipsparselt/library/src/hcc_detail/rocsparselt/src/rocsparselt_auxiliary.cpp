@@ -1186,6 +1186,7 @@ rocsparselt_status
                 status = findTopConfigs<int8_t, int32_t, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
                 break;                
+#if HIP_FP8_TYPE_OCP
             case MATMUL_DATATYPE_E4M3_S_S:
                 status = findTopConfigs<__hip_fp8_e4m3, float, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
@@ -1194,6 +1195,17 @@ rocsparselt_status
                 status = findTopConfigs<__hip_fp8_e5m2, float, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
                 break;
+#endif
+#if HIP_FP8_TYPE_FNUZ
+            case MATMUL_DATATYPE_E4M3_FNUZ_S_S:
+                status = findTopConfigs<__hip_fp8_e4m3_fnuz, float, float>(
+                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                break;
+            case MATMUL_DATATYPE_E5M2_FNUZ_S_S:
+                status = findTopConfigs<__hip_fp8_e5m2_fnuz, float, float>(
+                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                break;
+#endif
             default:
                 status = rocsparselt_status_not_implemented;
             }
