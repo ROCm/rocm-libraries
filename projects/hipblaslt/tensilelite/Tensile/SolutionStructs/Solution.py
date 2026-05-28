@@ -2606,15 +2606,13 @@ class Solution(collections.abc.Mapping):
         mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
         if mxBlock:
           dataDU = depthU * state["MatrixInstK"] // swizzleSize1
-          if dataDU < depthU:
+          if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
             depthUA = dataDU
             depthUB = dataDU
             if state["PrefetchGlobalRead"] > 1:
               reject(state, printRejectionReason,
-                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) already "
-                     f"prefetches {depthU // dataDU}x data DU ahead; "
-                     f"PrefetchGlobalRead={state['PrefetchGlobalRead']} would overwrite "
-                     f"LDS buffers that haven't been consumed yet")
+                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
+                     f"with PrefetchGlobalRead={state['PrefetchGlobalRead']}")
 
       state["_DepthU"] = depthU
       state["DepthU"] = depthU

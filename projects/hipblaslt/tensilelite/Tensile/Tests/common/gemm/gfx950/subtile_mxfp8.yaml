@@ -136,9 +136,100 @@ BenchmarkProblems:
           - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
 
   ########################################
-  # FP8 TN — PGR=1, multi-DU (auto-detected), MT 256x256
+  # FP8 TN — PGR=0, multi-DU (auto-detected), MT 256x256
   # HostPreSwizzle + MXFP8: data SRD advances at dataDU=128
   # while scales iterate at DepthU=256.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]                 # loop DU; dataDU=128 auto-detected
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*DepthU
+          - Exact: [256, 256, 1, 512]   # K = 2*DepthU
+          - Exact: [256, 256, 1, 1024]  # K = 4*DepthU
+
+  ########################################
+  # FP8 TN — PGR=1, multi-DU (auto-detected), MT 256x256
+  # Covers WG permutations [2,2], [1,4], [4,1] (cf. bnemanich review #9).
+  # MIWaveTile compensates to keep MT 256x256:
+  #   WG [2,2] → MIWT  8x 8
+  #   WG [1,4] → MIWT 16x 4
+  #   WG [4,1] → MIWT  4x16
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8,  8,  2, 2]  # MT 256x256, WG 2x2 (baseline)
+          - [16, 16, 128, 1,  1, 16,  4,  1, 4]  # MT 256x256, WG 1x4
+          - [16, 16, 128, 1,  1,  4, 16,  4, 1]  # MT 256x256, WG 4x1
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                 # loop DU; dataDU=128 auto-detected
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*DepthU — single iter
+          - Exact: [256, 256, 1, 512]   # K = 2*DepthU
+          - Exact: [256, 256, 1, 1024]  # K = 4*DepthU
+          - Exact: [256, 256, 1, 4096]  # K = 16*DepthU — many iters, StreamK partial tiles
+
+  ########################################
+  # FP8 TN — PGR=1, multi-DU, MT 256x256 — StreamK correctness regression
+  # Regression test for StreamK partial-tile data SRD pre-advance bug:
+  # _depthUForTc returned dataDU=128 for data tensors instead of DepthU=256,
+  # causing StreamKLocalStart to under-advance data SRDs by 2x.  Manifests
+  # at large K (many iters per tile → partial-tile splits) and large M/N
+  # (many tiles → more partial-tile boundaries).
   ########################################
   -
     - # ProblemType
@@ -172,5 +263,12 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 256]   # K = 1*DepthU
-          - Exact: [256, 256, 1, 512]   # K = 2*DepthU
+          # Large K — exercises many mainloop iters and StreamK partial tiles
+          - Exact: [256, 256, 1, 4096]    # K = 16*DepthU, single tile
+          - Exact: [256, 256, 1, 8192]    # K = 32*DepthU
+          # Large M/N — many tiles, most CUs hit partial-tile boundaries
+          - Exact: [4096, 4096, 1, 4096]  # 256 tiles, 16 iters each
+          - Exact: [4096, 4096, 1, 8192]  # 256 tiles, 32 iters each
+          # Asymmetric — exercises non-square tile grids
+          - Exact: [4992, 6016, 1, 7168]  # from bnemanich regression (28*DU)
+          - Exact: [6528, 6528, 1, 4352]  # from bnemanich regression (17*DU)
