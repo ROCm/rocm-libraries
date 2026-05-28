@@ -124,13 +124,20 @@ def _mxScaleLabel(dtValue):
 
 def _mxEnumValue(field):
     """Resolve a ProblemType field that may be a ``DataType`` instance, a raw
-    ``DataTypeEnum``, or ``None`` to its underlying enum value (or ``None``).
-    Solution.py is called both before and after Problem.cleanupProblemTypeForLogging
-    flattens the type, so the helper has to handle both shapes."""
+    ``DataTypeEnum``, or ``None`` to its underlying integer enum value (or
+    ``None``).
+
+    Two shapes are produced upstream depending on where in the pipeline
+    Solution.py is called from: ``DataType`` wrappers (typical during
+    ``assignDerivedParameters``) and raw ``DataTypeEnum`` values (e.g.,
+    states that have already been serialized/flattened by callers that
+    unwrap to the enum). Both must be accepted."""
     if field is None:
         return None
-    # DataType wraps a DataTypeEnum and exposes .value (a DataTypeEnum). Plain
-    # DataTypeEnum values have a .value too (the underlying int).
+    # ``DataType.value`` is the underlying *int* (see Tensile.Common.DataType);
+    # ``DataTypeEnum.X.value`` is also an int. So the first getattr unwraps
+    # DataType -> int, and the second is a no-op for ints / unwraps a raw
+    # DataTypeEnum -> int.
     value = getattr(field, "value", field)
     return getattr(value, "value", value)
 
@@ -144,9 +151,14 @@ def _isLegalMXScaleForMatrix(matrixVal, scaleVal):
     return scaleVal in _E8_ONLY  # FP8/BF8/FP6/BF6
 
 
-def _validateMXScaleFormatCombination(state, printRejectionReason):
+def _validateMXScaleFormatCombination(state, asmCaps, printRejectionReason):
     """Reject candidate solutions whose joint MX scale-format tuple is not
-    legal on gfx1250.
+    legal on gfx1250's ``v_wmma_scale_f32_16x16x128_f8f6f4``.
+
+    The rules below describe the gfx1250 ``HasWMMA_V3`` MX path only. Other
+    architectures use different MX instructions whose joint constraints are
+    not the same, so the helper short-circuits to ``True`` whenever
+    ``asmCaps["HasWMMA_V3"]`` is false.
 
     Rules enforced (per the ISA / table-valid-combinations.txt):
 
@@ -156,13 +168,16 @@ def _validateMXScaleFormatCombination(state, printRejectionReason):
     * When both A and B are FP4 the two scales must match.
 
     Sides whose ``MXBlock`` is 0 carry no MX scale and are skipped: the
-    helper short-circuits to ``True`` when neither side has MX scaling.
+    helper also short-circuits to ``True`` when neither side has MX scaling.
 
     Args:
         state: Solution state dict. Reads
             ``state["ProblemType"]["DataType{A,B}"]`` (matrix dtype),
             ``state["ProblemType"]["DataTypeMXS{A,B}"]`` (scale dtype),
             ``state["ProblemType"]["MXBlock{A,B}"]`` (int).
+        asmCaps: Mapping with at least ``"HasWMMA_V3"`` (bool). Used to
+            gate the gfx1250-specific rule set; non-gfx1250 candidates
+            are passed through untouched.
         printRejectionReason: Forwarded to :func:`reject`.
 
     Returns:
@@ -170,6 +185,12 @@ def _validateMXScaleFormatCombination(state, printRejectionReason):
         reject was emitted, in which case ``state["Valid"]`` is also
         ``False`` and the caller should propagate the early return upstream.
     """
+    # gfx1250 WMMA_V3 MX path only. On other arches the joint constraints
+    # come from different instructions (MFMA on gfx9*, older WMMA on
+    # gfx10/11/12) and over-rejecting here would discard legitimate kernels.
+    if not asmCaps.get("HasWMMA_V3", False):
+        return True
+
     pt = state["ProblemType"]
     mxBlockA = pt.get("MXBlockA", 0)
     mxBlockB = pt.get("MXBlockB", 0)
@@ -2330,9 +2351,14 @@ class Solution(collections.abc.Mapping):
       return
 
     # MX scale-format combination validation. Rejects candidates whose joint
-    # (A type, A scale, B type, B scale) tuple is not legal on gfx1250 (see
-    # _validateMXScaleFormatCombination / ROCm/llvm-project#2634).
-    if not _validateMXScaleFormatCombination(state, printRejectionReason):
+    # (A type, A scale, B type, B scale) tuple is not legal on gfx1250's
+    # WMMA_V3 MX path (see _validateMXScaleFormatCombination /
+    # ROCm/llvm-project#2634). Gated on HasWMMA_V3 so non-gfx1250 arches
+    # are unaffected.
+    if not _validateMXScaleFormatCombination(
+        state,
+        isaInfoMap[isa].asmCaps,
+        printRejectionReason):
       return
 
     tdmInst: int = state["TDMInst"]

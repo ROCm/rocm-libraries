@@ -70,6 +70,14 @@ E5M3      = DataTypeEnum.E5M3
 E4M3      = DataTypeEnum.Float8
 
 
+# The validator is gated on ``asmCaps["HasWMMA_V3"]`` so the gfx1250 MX rules
+# only fire for gfx1250 candidates. Tests that exercise the rule set use
+# ``_GFX1250_CAPS``; the off-arch ``_NON_GFX1250_CAPS`` is used by the gating
+# tests to confirm we don't over-reject on other architectures.
+_GFX1250_CAPS     = {"HasWMMA_V3": True}
+_NON_GFX1250_CAPS = {"HasWMMA_V3": False}
+
+
 def _state(*, dtA, dtB, dtSA=E8, dtSB=E8, mxBlockA=32, mxBlockB=32):
     """Build the smallest Solution state dict the validator reads.
 
@@ -89,9 +97,52 @@ def _state(*, dtA, dtB, dtSA=E8, dtSB=E8, mxBlockA=32, mxBlockB=32):
     }
 
 
-def _call(state):
-    """Invoke the helper with rejection-reason printing off (test noise)."""
-    return _validateMXScaleFormatCombination(state, printRejectionReason=False)
+def _call(state, asmCaps=_GFX1250_CAPS):
+    """Invoke the helper with rejection-reason printing off (test noise).
+
+    Defaults to a gfx1250 (``HasWMMA_V3=True``) asmCaps mapping so the rule
+    set fires; gating tests pass ``_NON_GFX1250_CAPS`` explicitly.
+    """
+    return _validateMXScaleFormatCombination(
+        state, asmCaps=asmCaps, printRejectionReason=False)
+
+
+# ============================================================================
+# 0. Architecture gate: the rule set only applies on gfx1250 (HasWMMA_V3).
+# ============================================================================
+class TestArchitectureGate:
+    """The joint MX scale-format rules described in ``table-valid-combinations.txt``
+    are specific to gfx1250's ``v_wmma_scale_f32_16x16x128_f8f6f4``. Older
+    architectures use different MX instructions whose constraints differ,
+    so the validator must no-op (return True, leave ``state["Valid"]``
+    untouched) whenever ``asmCaps["HasWMMA_V3"]`` is false - even for tuples
+    that *would* be illegal on gfx1250."""
+
+    @pytest.mark.parametrize("asmCaps", [
+        {},                      # caps mapping missing the key entirely
+        {"HasWMMA_V3": False},   # cap explicitly false
+    ], ids=["missing-cap", "cap-false"])
+    def test_non_gfx1250_passes_through_illegal_combo(self, asmCaps):
+        # FP8 x FP8 with E5M3 scale - illegal on gfx1250, but on a non-WMMA_V3
+        # arch the validator must not touch it.
+        st = _state(dtA=FP8, dtB=FP8, dtSA=E5M3, dtSB=E8)
+        assert _call(st, asmCaps=asmCaps) is True
+        assert "Valid" not in st
+
+    def test_non_gfx1250_passes_through_fp4_mismatched_scales(self):
+        # FP4 x FP4 with mismatched scales - illegal on gfx1250 by the joint
+        # rule, but on a non-WMMA_V3 arch the joint rule does not exist.
+        st = _state(dtA=FP4, dtB=FP4, dtSA=E5M3, dtSB=E4M3)
+        assert _call(st, asmCaps=_NON_GFX1250_CAPS) is True
+        assert "Valid" not in st
+
+    def test_gfx1250_still_rejects_the_same_combo(self):
+        # Sanity check: the same illegal combo IS rejected once HasWMMA_V3
+        # is true, confirming the gate is the only thing suppressing the
+        # rejection above.
+        st = _state(dtA=FP4, dtB=FP4, dtSA=E5M3, dtSB=E4M3)
+        assert _call(st, asmCaps=_GFX1250_CAPS) is False
+        assert st["Valid"] is False
 
 
 # ============================================================================
@@ -180,7 +231,7 @@ class TestFP4xFP4ScalesMustMatch:
         (E5M3, E4M3),
         (E4M3, E8),
         (E4M3, E5M3),
-    ], ids=lambda e: e.name)
+    ])
     def test_mismatched_scales_are_rejected(self, scaleA, scaleB):
         st = _state(dtA=FP4, dtB=FP4, dtSA=scaleA, dtSB=scaleB)
         assert _call(st) is False
@@ -280,7 +331,8 @@ class TestErrorMessageShape:
     def _captured_reject(self, st, capsys):
         # printRejectionReason=True so reject() emits the diagnostic to
         # stdout, then capsys captures it for assertion.
-        assert _validateMXScaleFormatCombination(st, printRejectionReason=True) is False
+        assert _validateMXScaleFormatCombination(
+            st, asmCaps=_GFX1250_CAPS, printRejectionReason=True) is False
         return capsys.readouterr().out
 
     def test_per_side_message_contains_dtype_and_scale(self, capsys):
@@ -335,8 +387,10 @@ class TestEveryLegalCombinationFromSpec:
     above: instead of asserting what gets rejected, we assert that the
     full positive set passes."""
 
-    @pytest.mark.parametrize("dtA, scaleA, dtB, scaleB", VALID_COMBOS,
-                             ids=lambda e: e.name)
+    @pytest.mark.parametrize(
+        "dtA, scaleA, dtB, scaleB", VALID_COMBOS,
+        ids=[f"{a.name}-{sa.name}_x_{b.name}-{sb.name}"
+             for (a, sa, b, sb) in VALID_COMBOS])
     def test_combo_is_accepted(self, dtA, scaleA, dtB, scaleB):
         st = _state(dtA=dtA, dtB=dtB, dtSA=scaleA, dtSB=scaleB)
         assert _call(st) is True, (
@@ -348,9 +402,10 @@ class TestEveryLegalCombinationFromSpec:
 # 9. Field-shape compatibility: helper accepts both DataType and raw enum
 # ============================================================================
 class TestFieldShapeCompatibility:
-    """ProblemType fields can arrive as ``DataType`` wrappers (during
-    ``assignDerivedParameters``) or as raw ``DataTypeEnum`` values (after
-    ``cleanupProblemTypeForLogging``). The helper must handle both."""
+    """ProblemType fields can arrive as ``DataType`` wrappers (typical during
+    ``assignDerivedParameters``) or as raw ``DataTypeEnum`` values (when
+    callers have already unwrapped to the enum). The helper must handle
+    both shapes."""
 
     def test_raw_enum_fields_are_accepted(self):
         st = {"ProblemType": {
