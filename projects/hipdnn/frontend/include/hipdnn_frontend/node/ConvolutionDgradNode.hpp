@@ -3,9 +3,9 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradPacker.hpp>
@@ -259,9 +259,15 @@ public:
 
             dxDims[0] = dyDims[0]; // N (batch) matches dy
 
-            // Impossible to infer group count without dx dimensions.
-            // Therefore, assume groups = 1.
-            dxDims[1] = wDims[1]; // C (input channels)
+            // Group count cannot be inferred from dy and w alone, so the
+            // inferred dx[1] uses w[1] (i.e. assumes groups = 1). For
+            // grouped convolutions, callers should set dx dimensions
+            // explicitly to avoid an incorrect channel count on the
+            // inferred input-gradient tensor.
+            HIPDNN_FE_LOG_WARN("ConvolutionDgradNode: inferring dx dimensions without an "
+                               "explicit dx shape; assuming groups=1. For grouped "
+                               "convolutions, set dx dimensions explicitly.");
+            dxDims[1] = wDims[1]; // C (input channels), assuming groups=1
 
             // We calculate spatial dimensions (i_2, ..., i_n)
             for(size_t i = 2; i < dyDims.size(); ++i)
@@ -349,17 +355,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

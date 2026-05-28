@@ -14,8 +14,9 @@ namespace miopen_plugin
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
@@ -30,10 +31,11 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
         inferenceAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
     , _y(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
@@ -119,12 +121,13 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnMiopenHandle& ha
                                                     [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
-    double epsilon = _inferenceParams.epsilonValue();
+    const double epsilon = _inferenceParams.epsilonValue();
 
     auto xBuffer = miopen_utils::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);

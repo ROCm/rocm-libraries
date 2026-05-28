@@ -32,9 +32,12 @@ from Tensile.Common import printExit, printWarning, print2, \
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
+from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
-from typing import NamedTuple, List, Dict
+from typing import IO, NamedTuple, List, Dict, Optional
+from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+import io
 import os
 import sys
 import subprocess
@@ -75,15 +78,127 @@ except ImportError:
 
 try:
     import msgpack
-    _msgpack_available = True
 except ImportError:
-    _msgpack_available = False
     print("Message pack python library not detected. Must use YAML backend instead.")
+
 
 
 ###################
 # Writing functions
 ###################
+
+# YAML keywords that need quoting when used as string values
+_YAML_BOOL_KEYWORDS = frozenset({
+    'true', 'false', 'yes', 'no', 'on', 'off',
+    'True', 'False', 'Yes', 'No', 'On', 'Off',
+    'TRUE', 'FALSE', 'YES', 'NO', 'ON', 'OFF',
+})
+_YAML_NULL_KEYWORDS = frozenset({'null', 'Null', 'NULL', '~'})
+_YAML_SPECIAL_STARTS = frozenset('-?:,[]{}#&*!|>\'"%%@`')
+
+def _fast_yaml_scalar(v):
+    """Format a Python value as an inline YAML scalar."""
+    if v is None:
+        return 'null'
+    if isinstance(v, bool):
+        return 'true' if v else 'false'
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, str):
+        return _fast_yaml_str(v)
+    if isinstance(v, list):
+        return _fast_yaml_flow_list(v)
+    return repr(v)
+
+def _fast_yaml_str(s):
+    """Format a Python string as a YAML scalar, quoting only when necessary."""
+    if not s or s in _YAML_BOOL_KEYWORDS or s in _YAML_NULL_KEYWORDS:
+        return f"'{s}'"
+    escaped = s.replace("'", "''")
+    if s[0] in _YAML_SPECIAL_STARTS or s[0] == ' ' or s[-1] == ' ':
+        return f"'{escaped}'"
+    if ': ' in s or ' #' in s or s.endswith(':') or '\n' in s:
+        return f"'{escaped}'"
+    # Check if it looks like a number
+    c = s[0]
+    if c.isdigit() or (c in '+-.' and len(s) > 1):
+        try:
+            float(s)
+            return f"'{s}'"
+        except ValueError:
+            pass
+    return s
+
+def _fast_yaml_flow_list(lst):
+    """Format a Python list as a YAML flow sequence: [a, b, c]."""
+    if not lst:
+        return '[]'
+    return f"[{', '.join(_fast_yaml_scalar(item) for item in lst)}]"
+
+def fast_yaml_dump(solutionStates, f):
+    """
+    Write a list of solution dicts as YAML, optimized for speed.
+
+    Produces output compatible with yaml.load(f, CSafeLoader).
+    Only handles the plain Python types found in solution state dicts:
+    int, bool, str, float, None, list, and dict (one level of nesting).
+
+    Limitations versus CSafeDumper:
+
+    Structural:
+      - Only one level of dict nesting. Sub-dicts whose values are themselves
+        dicts fall through to repr() via _yamlScalar.
+      - Lists of dicts are not supported. _yamlFlowList calls _yamlScalar on
+        each item, which has no dict case and falls through to repr().
+      - No block style for complex structures; everything is written
+        inline/flow.
+      - No YAML anchors/aliases. Shared references (e.g. the same ProblemType
+        dict in multiple solutions) are duplicated in the output.
+
+    Type handling:
+      - Float special values (inf, -inf, nan) are written via repr(), which
+        produces Python syntax rather than the YAML-spec forms (.inf, -.inf,
+        .nan).
+      - Tuples, sets, bytes, and datetime objects all fall through to repr(),
+        producing Python-syntax output that is not valid YAML. CSafeDumper
+        converts tuples to sequences, datetimes to timestamps, etc.
+
+    String quoting:
+      - Dict keys are never quoted. Keys that are YAML keywords (true, yes,
+        null, etc.) or contain special characters are written bare.
+      - No detection of YAML timestamp-like strings. Values such as
+        "2024-01-01" or "12:30:00" are written unquoted and may be parsed
+        back as dates or times by the loader.
+      - Octal/hex-like strings (e.g. "0x1F", "0o17") may pass through
+        unquoted and be misinterpreted as numbers by some YAML loaders.
+      - Multiline strings (containing literal newlines) are single-quoted
+        with the newline embedded directly, which can produce broken output.
+        CSafeDumper uses block scalars (|) or double-quoted strings with
+        escaped newlines.
+
+    These limitations are acceptable because this writer targets the specific
+    shape of solution state dicts (flat dicts with occasional one-level-deep
+    sub-dicts of simple scalars). The validation in writeSolutions() catches
+    any mismatch against yaml.dump output at runtime.
+    """
+    for sol in solutionStates:
+        first = True
+        for k in sorted(sol.keys()):
+            v = sol[k]
+            if first:
+                prefix = '- '
+                first = False
+            else:
+                prefix = '  '
+            if isinstance(v, dict):
+                f.write(f'{prefix}{k}:\n')
+                for k2 in sorted(v.keys()):
+                    f.write(f'    {k2}: {_fast_yaml_scalar(v[k2])}\n')
+            else:
+                f.write(f'{prefix}{k}: {_fast_yaml_scalar(v)}\n')
+
 def write(filename_noExt, data, format="yaml"):
     """Writes data to file with specified format; extension is appended based on format."""
     if format == "yaml":
@@ -120,70 +235,80 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
-def _solutionsCacheFilename(yamlFilename):
-    """Return path to the msgpack cache file for a solutions YAML."""
-    base, _ = os.path.splitext(yamlFilename)
-    return base + ".solcache.dat"
+def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
+    """Write the YAML header (version, problem sizes, bias/activation args)."""
+    f.write("- MinimumRequiredVersion: {}\n".format(__version__))
+    f.write("- ProblemSizes:\n")
+    if problemSizes:
+        for sizeRange in problemSizes.ranges:
+            f.write("  - Range: {}\n".format(sizeRange))
+        for problemExact in problemSizes.exacts:
+            #FIXME-problem, this ignores strides:
+            f.write("  - Exact: {}\n".format(problemExact))
+    if biasTypeArgs:
+        f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
+    if activationArgs:
+        f.write("- ActivationArgs:\n")
+        for setting in activationArgs.settingList:
+            f.write("  - [Enum: %s]\n"%(setting.activationEnum))
 
-def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
+def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
+    """Find the character offset where solution entries begin, skipping the header."""
+    with open(filename, "r") as f:
+        while True:
+            pos = f.tell()
+            line = f.readline()
+            if not line:
+                return pos
+            if line.startswith("- "):
+                key = line[2:].split(":")[0].strip()
+                if key not in headerKeys:
+                    return pos
+
+def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, cache: bool = False) -> None:
     """Writes solution YAML file."""
-    def load_solution_states_from_cache(filename) -> list[dict]:
-        """Try loading from msgpack cache, falling back to YAML."""
-        cachePath = _solutionsCacheFilename(filename)
-        # Try msgpack cache if available and the cache file exists
-        if _msgpack_available and os.path.exists(cachePath):
-            # If the YAML is newer than the cache, don't use the cache; assume it's stale
-            if os.path.getmtime(cachePath) >= os.path.getmtime(filename):
-                try:
-                    with open(cachePath, "rb") as cf:
-                        return msgpack.unpack(cf, raw=False)
-                except Exception as e:
-                    printWarning("Failed to load solution cache: {}".format(e))
-        # Fall back to YAML
-        solYaml = read(filename)
-        if biasTypeArgs and activationArgs:
-            return solYaml[4:]
-        elif biasTypeArgs or activationArgs:
-            return solYaml[3:]
-        else:
-            return solYaml[2:]
+
+    if cache:
+        # Solutions unchanged; rewrite only the header in place
+        with timing_context("python_wsol_prepare"):
+            with timing_context("python_wsol_prepare_cache"):
+                newHeader = io.StringIO()
+                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs)
+                newHeader = newHeader.getvalue()
+                headerKeys = {line[2:].split(":")[0].strip()
+                              for line in newHeader.splitlines() if line.startswith("- ")}
+                oldBodyOffset = _findBodyOffset(filename, headerKeys)
+        with timing_context("python_wsol_header"):
+            if len(newHeader) == oldBodyOffset:
+                # Same size header; overwrite in place, body untouched
+                with open(filename, "r+") as f:
+                    f.write(newHeader)
+            else:
+                # Header size changed; must shift the body
+                with open(filename, "r+") as f:
+                    f.seek(oldBodyOffset)
+                    solutionsBody = f.read()
+                    f.seek(0)
+                    f.write(newHeader)
+                    f.write(solutionsBody)
+                    f.truncate()
+        return
 
     with timing_context("python_wsol_prepare"):
-        if cache:
-            with timing_context("python_wsol_prepare_cache"):
-                solutionStates = load_solution_states_from_cache(filename)
-        else:
-            with timing_context("python_wsol_prepare_nocache"):
-                solutionStates: list[dict] = []
-                for solution in solutions:
-                    solutionState = solution.getAttributes()
-                    solutionState["ProblemType"] = solutionState["ProblemType"].state
-                    problemTypeToEnum(solutionState["ProblemType"])
-                    isa = solutionState["ISA"]
-                    solutionState["ISA"] = [isa[0], isa[1], isa[2]]
-                    solutionStates.append(solutionState)
-                if _msgpack_available:
-                    try:
-                        writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
-                    except Exception as e:
-                        printWarning("Failed to write solution cache: {}".format(e))
-    # write dictionaries
+        with timing_context("python_wsol_prepare_nocache"):
+            solutionStates: list[dict] = []
+            for solution in solutions:
+                solutionState = solution.getAttributes()
+                solutionState["ProblemType"] = solutionState["ProblemType"].state
+                problemTypeToEnum(solutionState["ProblemType"])
+                isa = solutionState["ISA"]
+                solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+                solutionStates.append(solutionState)
     with open(filename, "w") as f:
-        f.write("- MinimumRequiredVersion: {}\n".format(__version__))
-        f.write("- ProblemSizes:\n")
-        if problemSizes:
-            for sizeRange in problemSizes.ranges:
-                f.write("  - Range: {}\n".format(sizeRange))
-            for problemExact in problemSizes.exacts:
-                #FIXME-problem, this ignores strides:
-                f.write("  - Exact: {}\n".format(problemExact))
-        if biasTypeArgs:
-            f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
-        if activationArgs:
-            f.write("- ActivationArgs:\n")
-            for setting in activationArgs.settingList:
-                f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
+        with timing_context("python_wsol_header"):
+            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs)
+        with timing_context("python_wsol_dump"):
+            fast_yaml_dump(solutionStates, f)
 
 
 ###############################
@@ -314,6 +439,7 @@ class LibraryLogic(NamedTuple):
     solutions: list
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
+    typeMismatches: dict = {}
 
 def parseLibraryLogicFile(
         filename,
@@ -424,7 +550,9 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
+    resetTypeMismatchCollector()
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
         data,
@@ -439,7 +567,7 @@ def parseLibraryLogicData(
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
-            data.get("ExactLogic"), newLibrary)
+            data.get("ExactLogic"), newLibrary, typeMismatches)
 
 
 def parseLibraryLogicList(data, srcFile="?"):

@@ -9,8 +9,8 @@
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/utils/swizzle.hpp"
 #include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
 #pragma clang diagnostic pop
@@ -220,8 +220,8 @@ TEST_F(LdsBankConflictTest, XorSwizzleDoesNotIncreaseBankConflicts_4c)
 
     // w2q4
     {
-        constexpr auto cfg_n = v3::configs[6];
-        constexpr auto cfg_x = v3::configs[26];
+        constexpr auto cfg_n = v3::KernelConfigurations<>::configs[6];
+        constexpr auto cfg_x = v3::KernelConfigurations<>::configs[26];
         using TC_n = v3::TileConstants<cfg_n>;
         using TC_x = v3::TileConstants<cfg_x>;
         for(int kw = 0; kw < cfg_n.kw; kw++)
@@ -233,8 +233,8 @@ TEST_F(LdsBankConflictTest, XorSwizzleDoesNotIncreaseBankConflicts_4c)
     }
     // w2q2
     {
-        constexpr auto cfg_n = v3::configs[7];
-        constexpr auto cfg_x = v3::configs[27];
+        constexpr auto cfg_n = v3::KernelConfigurations<>::configs[7];
+        constexpr auto cfg_x = v3::KernelConfigurations<>::configs[27];
         using TC_n = v3::TileConstants<cfg_n>;
         using TC_x = v3::TileConstants<cfg_x>;
         for(int kw = 0; kw < cfg_n.kw; kw++)
@@ -246,8 +246,8 @@ TEST_F(LdsBankConflictTest, XorSwizzleDoesNotIncreaseBankConflicts_4c)
     }
     // w1q1
     {
-        constexpr auto cfg_n = v3::configs[9];
-        constexpr auto cfg_x = v3::configs[29];
+        constexpr auto cfg_n = v3::KernelConfigurations<>::configs[9];
+        constexpr auto cfg_x = v3::KernelConfigurations<>::configs[29];
         using TC_n = v3::TileConstants<cfg_n>;
         using TC_x = v3::TileConstants<cfg_x>;
         for(int kw = 0; kw < cfg_n.kw; kw++)
@@ -263,8 +263,8 @@ TEST_F(LdsBankConflictTest, XorSwizzleDoesNotIncreaseBankConflicts_16c)
 {
     // w4: None=14, XOR=50
     {
-        constexpr auto cfg_n = v2::configs[14];
-        constexpr auto cfg_x = v2::configs[50];
+        constexpr auto cfg_n = v2::KernelConfigurations<>::configs[14];
+        constexpr auto cfg_x = v2::KernelConfigurations<>::configs[50];
         using TC_n = v2::TileConstants<cfg_n>;
         using TC_x = v2::TileConstants<cfg_x>;
         for(int kw = 0; kw < cfg_n.kw; kw++)
@@ -276,8 +276,8 @@ TEST_F(LdsBankConflictTest, XorSwizzleDoesNotIncreaseBankConflicts_16c)
     }
     // w1: None=17, XOR=53
     {
-        constexpr auto cfg_n = v2::configs[17];
-        constexpr auto cfg_x = v2::configs[53];
+        constexpr auto cfg_n = v2::KernelConfigurations<>::configs[17];
+        constexpr auto cfg_x = v2::KernelConfigurations<>::configs[53];
         using TC_n = v2::TileConstants<cfg_n>;
         using TC_x = v2::TileConstants<cfg_x>;
         for(int kw = 0; kw < cfg_n.kw; kw++)
@@ -296,14 +296,14 @@ TEST_F(LdsBankConflictTest, XorSwizzleDoesNotIncreaseBankConflicts_16c)
 TEST_F(LdsBankConflictTest, NoSwizzleHasBankConflicts)
 {
     {
-        constexpr auto cfg = v3::configs[6]; // 4c w2q4 None
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[6]; // 4c w2q4 None
         using TC = v3::TileConstants<cfg>;
         auto off = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_GT(count_bank_conflicts(off, cfg.block_size()), 0)
             << "4c None w2q4 should have bank conflicts";
     }
     {
-        constexpr auto cfg = v2::configs[14]; // 16c w4 None
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[14]; // 16c w4 None
         using TC = v2::TileConstants<cfg>;
         auto off = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_GT(count_bank_conflicts(off, cfg.block_size()), 0)
@@ -319,21 +319,21 @@ TEST_F(LdsBankConflictTest, AllLanesDistinct_4c)
 {
     // XOR swizzle configs
     {
-        constexpr auto cfg = v3::configs[26]; // w2q4 XOR
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[26]; // w2q4 XOR
         using TC = v3::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "4c XOR w2q4: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v3::configs[27]; // w2q2 XOR
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[27]; // w2q2 XOR
         using TC = v3::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "4c XOR w2q2: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v3::configs[29]; // w1q1 XOR
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[29]; // w1q1 XOR
         using TC = v3::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
@@ -341,21 +341,21 @@ TEST_F(LdsBankConflictTest, AllLanesDistinct_4c)
     }
     // No-swizzle configs
     {
-        constexpr auto cfg = v3::configs[6]; // w2q4 None
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[6]; // w2q4 None
         using TC = v3::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "4c None w2q4: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v3::configs[7]; // w2q2 None
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[7]; // w2q2 None
         using TC = v3::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "4c None w2q2: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v3::configs[9]; // w1q1 None
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[9]; // w1q1 None
         using TC = v3::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
@@ -366,28 +366,28 @@ TEST_F(LdsBankConflictTest, AllLanesDistinct_4c)
 TEST_F(LdsBankConflictTest, AllLanesDistinct_16c)
 {
     {
-        constexpr auto cfg = v2::configs[50]; // w4 XOR
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[50]; // w4 XOR
         using TC = v2::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "16c XOR w4: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v2::configs[53]; // w1 XOR
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[53]; // w1 XOR
         using TC = v2::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "16c XOR w1: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v2::configs[14]; // w4 None
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[14]; // w4 None
         using TC = v2::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "16c None w4: lanes within a wave read aliased addresses";
     }
     {
-        constexpr auto cfg = v2::configs[17]; // w1 None
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[17]; // w1 None
         using TC = v2::TileConstants<cfg>;
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
@@ -458,7 +458,7 @@ std::vector<int> run_hip_conv_capture_kernel(int block_size, int kw_slice)
 TEST_F(LdsBankConflictTest, CyclicShiftSameBankConflictsAsHipConv_16c)
 {
     // Config 73: Fprop, waves_per_wg=8, CyclicShift, DRAM epilogue
-    constexpr auto cfg_cs = v2::configs[73];
+    constexpr auto cfg_cs = v2::KernelConfigurations<>::configs[73];
     static_assert(cfg_cs.swizzle_type == ck_tile::direct_conv::SwizzleType::CyclicShift,
                   "Expected CyclicShift config");
 
@@ -494,7 +494,7 @@ TEST_F(LdsBankConflictTest, CyclicShiftSameBankConflictsAsHipConv_16c)
 
 TEST_F(LdsBankConflictTest, CyclicShiftBankConflictsMatchHipConv_16c)
 {
-    constexpr auto cfg_cs = v2::configs[73];
+    constexpr auto cfg_cs = v2::KernelConfigurations<>::configs[73];
     using TC_cs = v2::TileConstants<cfg_cs>;
     constexpr int BLOCK_C = TC_cs::BLOCK_C;
     constexpr int GROUP_SIZE_4 = TC_cs::GROUP_SIZE_4;
@@ -539,7 +539,7 @@ TEST_F(LdsBankConflictTest, PrintConflictSummary_16c_w8)
 
     // 16c w8 None (idx 10 = Fprop w8)
     {
-        constexpr auto cfg = v2::configs[10];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[10];
         using TC = v2::TileConstants<cfg>;
         std::vector<std::vector<int>> offsets_by_kw;
         for(int kw = 0; kw < cfg.kw; kw++)
@@ -548,7 +548,7 @@ TEST_F(LdsBankConflictTest, PrintConflictSummary_16c_w8)
     }
     // 16c w8 XOR (idx 46 = Fprop w8 XOR)
     {
-        constexpr auto cfg = v2::configs[46];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[46];
         using TC = v2::TileConstants<cfg>;
         std::vector<std::vector<int>> offsets_by_kw;
         for(int kw = 0; kw < cfg.kw; kw++)
@@ -557,7 +557,7 @@ TEST_F(LdsBankConflictTest, PrintConflictSummary_16c_w8)
     }
     // 16c w8 CyclicShift CK Tile (idx 73)
     {
-        constexpr auto cfg = v2::configs[73];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[73];
         using TC = v2::TileConstants<cfg>;
         std::vector<std::vector<int>> offsets_by_kw;
         for(int kw = 0; kw < cfg.kw; kw++)
@@ -566,7 +566,7 @@ TEST_F(LdsBankConflictTest, PrintConflictSummary_16c_w8)
     }
     // 16c w8 HIP conv SwizzleT reference
     {
-        constexpr auto cfg = v2::configs[73]; // same wave config
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[73]; // same wave config
         using TC = v2::TileConstants<cfg>;
         constexpr int BLOCK_C = TC::BLOCK_C;
         constexpr int GROUP_SIZE_4 = TC::GROUP_SIZE_4;
@@ -595,54 +595,54 @@ TEST_F(LdsBankConflictTest, PrintConflictSummary)
 
     // 4c configs
     {
-        constexpr auto cfg = v3::configs[6];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[6];
         using TC = v3::TileConstants<cfg>;
         print_line("4c w2q4 None (idx 6)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v3::configs[26];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[26];
         using TC = v3::TileConstants<cfg>;
         print_line("4c w2q4 XOR  (idx 26)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v3::configs[7];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[7];
         using TC = v3::TileConstants<cfg>;
         print_line("4c w2q2 None (idx 7)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v3::configs[27];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[27];
         using TC = v3::TileConstants<cfg>;
         print_line("4c w2q2 XOR  (idx 27)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v3::configs[9];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[9];
         using TC = v3::TileConstants<cfg>;
         print_line("4c w1q1 None (idx 9)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v3::configs[29];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs[29];
         using TC = v3::TileConstants<cfg>;
         print_line("4c w1q1 XOR  (idx 29)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
 
     // 16c configs
     {
-        constexpr auto cfg = v2::configs[14];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[14];
         using TC = v2::TileConstants<cfg>;
         print_line("16c w4 None (idx 14)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v2::configs[50];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[50];
         using TC = v2::TileConstants<cfg>;
         print_line("16c w4 XOR  (idx 50)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v2::configs[17];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[17];
         using TC = v2::TileConstants<cfg>;
         print_line("16c w1 None (idx 17)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }
     {
-        constexpr auto cfg = v2::configs[53];
+        constexpr auto cfg = v2::KernelConfigurations<>::configs[53];
         using TC = v2::TileConstants<cfg>;
         print_line("16c w1 XOR  (idx 53)", run_capture_kernel<TC>(cfg.block_size(), 0), cfg.block_size());
     }

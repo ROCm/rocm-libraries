@@ -5,6 +5,8 @@
 
 #include <type_traits>
 #include "ck/utility/data_type.hpp"
+#include "ck_tile/core/numeric/bfloat16.hpp"
+#include "ck_tile/core/numeric/half.hpp"
 
 namespace ck {
 namespace profiler {
@@ -28,7 +30,15 @@ inline __host__ __device__ constexpr double get_rtol()
     {
         return 1e-3;
     }
+    else if constexpr(std::is_same_v<DataType, ck_tile::half_t>)
+    {
+        return 1e-3;
+    }
     else if constexpr(std::is_same_v<DataType, ck::bhalf_t>)
+    {
+        return 5e-2;
+    }
+    else if constexpr(std::is_same_v<DataType, ck_tile::bfloat16_t>)
     {
         return 5e-2;
     }
@@ -73,7 +83,15 @@ inline __host__ __device__ constexpr double get_atol()
     {
         return 1e-3;
     }
+    else if constexpr(std::is_same_v<DataType, ck_tile::half_t>)
+    {
+        return 1e-3;
+    }
     else if constexpr(std::is_same_v<DataType, ck::bhalf_t>)
+    {
+        return 5e-2;
+    }
+    else if constexpr(std::is_same_v<DataType, ck_tile::bfloat16_t>)
     {
         return 5e-2;
     }

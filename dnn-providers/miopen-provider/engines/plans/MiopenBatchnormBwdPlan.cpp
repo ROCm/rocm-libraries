@@ -30,8 +30,9 @@ int64_t getRequiredOptionalUid(const flatbuffers::Optional<int64_t>& opt,
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormBwdParams::BatchnormBwdParams(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _dy(miopen_utils::createBatchnormTensor(tensorMap, attributes.dy_tensor_uid()))
@@ -54,10 +55,13 @@ BatchnormBwdParams::BatchnormBwdParams(
 }
 
 BatchnormBwdParams::BatchnormBwdParams(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& batchnormBackwardAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes&
+        batchnormBackwardAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes&
+        batchnormInferenceAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
     , _dy(miopen_utils::createBatchnormTensor(
@@ -156,13 +160,14 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
                                [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     float alphaDataDiff = 1.0f;
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
     float betaParamDiff = 0.0f;
-    double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
+    const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);

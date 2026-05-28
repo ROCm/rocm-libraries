@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -14,13 +14,13 @@ constexpr auto v3 = ck_tile::direct_conv::Version::v3;
 struct TileConvKernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CFp16Kernel<ConfigIdx, v3>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CKernel<ConfigIdx, v3>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CFp16Kernel<ConfigIdx, v3>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CKernel<ConfigIdx, v3>;
 };
 
 class DirectConvGrouped4cFp16TileConvTestV3
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConvKernelTraits>
 {
 };
 
@@ -638,7 +638,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Config30_
 
 // Cyclic-shift swizzle tests (instances 40-43)
 class DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConvKernelTraits>
 {
 };
 
@@ -673,7 +673,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, Dgrad_V3_CyclicS
 // =============================================================================
 
 class DirectConvGrouped4cFp16TileConvV3PaddedTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConvKernelTraits>
 {
 };
 

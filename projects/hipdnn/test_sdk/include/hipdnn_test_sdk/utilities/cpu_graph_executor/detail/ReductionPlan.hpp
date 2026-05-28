@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -18,19 +18,19 @@ namespace hipdnn_test_sdk::detail
 struct ReductionParams
 {
     ReductionParams() = default;
-    ReductionParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-                    const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
-                    hipdnn_data_sdk::data_objects::ReductionMode reductionMode)
+    ReductionParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+                    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+                    hipdnn_flatbuffers_sdk::data_objects::ReductionMode reductionMode)
         : xTensor(unpackTensorAttributes(xAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
         , mode(reductionMode)
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT yTensor;
-    hipdnn_data_sdk::data_objects::ReductionMode mode
-        = hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT yTensor;
+    hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode
+        = hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NOT_SET;
 };
 
 template <typename XDataType, typename YDataType, typename ComputeDataType>
@@ -62,9 +62,9 @@ private:
     ReductionParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType YDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType YDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class ReductionPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -73,8 +73,9 @@ public:
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -98,8 +99,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_ReductionAttributes();
         if(nodeAttributes == nullptr)
@@ -108,12 +109,11 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        ReductionParams params(*tensorMap.at(nodeAttributes->in_tensor_uid()),
-                               *tensorMap.at(nodeAttributes->out_tensor_uid()),
-                               nodeAttributes->mode());
 
         return std::make_unique<ReductionPlan<XDataType, YDataType, ComputeDataType>>(
-            std::move(params));
+            ReductionParams(*tensorMap.at(nodeAttributes->in_tensor_uid()),
+                            *tensorMap.at(nodeAttributes->out_tensor_uid()),
+                            nodeAttributes->mode()));
     }
 };
 

@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -14,9 +14,9 @@ constexpr auto v2 = ck_tile::direct_conv::Version::v2;
 struct TileConv32cKernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward32CFp16Kernel<ConfigIdx, v2>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward32CKernel<ConfigIdx, v2>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData32CFp16Kernel<ConfigIdx, v2>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData32CKernel<ConfigIdx, v2>;
 };
 
 // =============================================================================
@@ -26,7 +26,7 @@ struct TileConv32cKernelTraits
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2Test
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv32cKernelTraits>
 {
 };
 
@@ -149,7 +149,7 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Dgrad_Config2_Groups6_LargerSpati
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2LdsTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv32cKernelTraits>
 {
 };
 
@@ -204,7 +204,7 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2LdsTest, Dgrad_Config20_Groups8_LargerS
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2XorTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv32cKernelTraits>
 {
 };
 
@@ -258,7 +258,7 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2XorTest, Dgrad_Config36_Groups8_LargerS
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2XorLdsTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv32cKernelTraits>
 {
 };
 
@@ -311,7 +311,7 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2XorLdsTest, Dgrad_Config52_Groups8_Larg
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2CyclicShiftSwizzleTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv32cKernelTraits>
 {
 };
 
@@ -344,7 +344,7 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config67_
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2PaddedTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv32cKernelTraits>
 {
 };
 

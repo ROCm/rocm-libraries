@@ -6,10 +6,6 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/node/{{ op.frontend.node_class }}.hpp>
 
-#include <flatbuffers/flatbuffers.h>
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-#include <hipdnn_data_sdk/data_objects/node_generated.h>
-
 #include <memory>
 #include <unordered_set>
 #include <vector>
@@ -175,80 +171,6 @@ TEST(Test{{ op.frontend.node_class }}, InferPropertiesNode)
     // Stub implementation: verify the method can be called without error
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 {% endif %}
-}
-
-// --- PackNode ---
-
-TEST(Test{{ op.frontend.node_class }}, PackNode)
-{
-    {{ op.frontend.attributes_class }} attrs;
-    attrs.set_name("{{ op.frontend.node_class }}");
-
-{% for tensor in op.frontend.all_tensors %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
-    {{ tensor.name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }})
-        .set_name("{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}Tensor")
-        .set_data_type(DataType_t::FLOAT);
-{% set tc = op.test_data.tensor_configs.get(tensor.name) %}
-{% if tc %}
-    {{ tensor.name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
-    {{ tensor.name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
-
-{% endfor %}
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
-{% elif df.is_mode or df.is_enum %}
-{% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
-{% else %}
-    // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
-{% endif %}
-{% endif %}
-{% endfor %}
-
-    GraphAttributes graphAttributes;
-    {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = node.pack_node(builder);
-    EXPECT_NE(offset.o, 0);
-
-    builder.Finish(offset);
-    auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
-
-    EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "{{ op.frontend.node_class }}");
-    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::{{ op.frontend.node_attributes_union_type }});
-
-    auto packedAttributes = nodeFlatbuffer->{{ op.frontend.deserialization_accessor }}();
-    ASSERT_NE(packedAttributes, nullptr);
-
-    // Verify tensor UIDs
-{% for tf in op.tensor_fields %}
-{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
-{% if ft %}
-    EXPECT_EQ(packedAttributes->{{ tf.fbs_field }}(), {{ ft.name }}Tensor->get_uid());
-{% endif %}
-{% endfor %}
-
-    // Verify data fields
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-{% set values = op.test_data.field_values.get(df.name, [1, 1]) %}
-    ASSERT_EQ(packedAttributes->{{ df.fbs_field }}()->size(), {{ values | length }});
-{% for val in values %}
-    EXPECT_EQ(packedAttributes->{{ df.fbs_field }}()->Get({{ loop.index0 }}), {{ val }});
-{% endfor %}
-{% elif df.is_mode or df.is_enum %}
-
-    EXPECT_EQ(packedAttributes->{{ df.fbs_field }}(),
-              {{ df.cpp_enum }}::{{ df.test_enum_value }});
-{% endif %}
-{% endfor %}
 }
 
 // --- GatherHipdnnTensors ---

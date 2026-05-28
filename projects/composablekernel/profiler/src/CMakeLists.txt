@@ -145,6 +145,30 @@ foreach(SOURCE ${PROFILER_OPS})
 endforeach()
 message(VERBOSE "ckProfiler sources: ${PROFILER_SOURCES}")
 
+# Direct conv per-variant instance TUs (always built when builder is enabled,
+# not subject to operator filter since they are support libraries).
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
+  if(CK_EXPERIMENTAL_BUILDER)
+    list(APPEND PROFILER_SOURCES
+        profile_grouped_conv_fwd_direct_nhwgc_fp16_4c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_fp16_16c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_fp16_8c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_fp16_32c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_bf16_4c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_bf16_16c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_bf16_8c.cpp
+        profile_grouped_conv_fwd_direct_nhwgc_bf16_32c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_4c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_16c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_8c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_32c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_4c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_16c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_8c.cpp
+        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_32c.cpp)
+  endif()
+endif()
+
 set(PROFILER_EXECUTABLE ckProfiler)
 
 add_executable(${PROFILER_EXECUTABLE} ${PROFILER_SOURCES})

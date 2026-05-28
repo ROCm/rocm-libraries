@@ -25,4 +25,5 @@ enum class EpilogueType
     RegistersToGlobalMemory       // Write MFMA results directly from registers to global memory
 };
 
+
 } // namespace ck_tile::direct_conv

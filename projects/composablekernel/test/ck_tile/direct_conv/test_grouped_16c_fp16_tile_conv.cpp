@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -14,9 +14,9 @@ constexpr auto v2 = ck_tile::direct_conv::Version::v2;
 struct TileConv16cKernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward16CFp16Kernel<ConfigIdx, v2>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward16CKernel<ConfigIdx, v2>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData16CFp16Kernel<ConfigIdx, v2>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData16CKernel<ConfigIdx, v2>;
 };
 
 // =============================================================================
@@ -24,7 +24,7 @@ struct TileConv16cKernelTraits
 // =============================================================================
 
 class DirectConvGrouped16cFp16TileConvV2Test
-    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv16cKernelTraits>
 {
 };
 
@@ -138,7 +138,7 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2Test, Dgrad_Config3_Groups12_LargerSpat
 // =============================================================================
 
 class DirectConvGrouped16cFp16TileConvV2LdsTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv16cKernelTraits>
 {
 };
 
@@ -193,7 +193,7 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2LdsTest, Dgrad_Config23_Groups16_Larger
 // =============================================================================
 
 class DirectConvGrouped16cFp16TileConvV2XorTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv16cKernelTraits>
 {
 };
 
@@ -247,7 +247,7 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2XorTest, Dgrad_Config41_Groups16_Larger
 // =============================================================================
 
 class DirectConvGrouped16cFp16TileConvV2XorLdsTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv16cKernelTraits>
 {
 };
 
@@ -298,7 +298,7 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2XorLdsTest, Dgrad_Config59_Groups16_Lar
 // --- Test cyclic-shift swizzle instances (indices 72-75)
 
 class DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv16cKernelTraits>
 {
 };
 
@@ -329,7 +329,7 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config75_
 // =============================================================================
 
 class DirectConvGrouped16cFp16TileConvV2PaddedTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv16cKernelTraits>
 {
 };
 

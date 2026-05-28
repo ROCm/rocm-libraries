@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 * ************************************************************************ */
 #pragma once
 
+#include "hipsparse-bfloat16.h"
+#include "hipsparse-float16.h"
 #include "hipsparse_test_traits.hpp"
 
 template <hipsparse_test_enum::value_type ROUTINE>
@@ -47,6 +49,20 @@ public:
         {
             return std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
         }
+        case hipsparse_test_numeric_types_enum::scatter:
+        {
+            return std::is_same<T, int8_t>{} || std::is_same<T, hipsparseFloat16>{}
+                   || std::is_same<T, hipsparseBfloat16>{} || std::is_same<T, float>{}
+                   || std::is_same<T, double>{} || std::is_same<T, hipComplex>{}
+                   || std::is_same<T, hipDoubleComplex>{};
+        }
+        case hipsparse_test_numeric_types_enum::spmv:
+        {
+            return std::is_same<T, int8_t>{} || std::is_same<T, int32_t>{}
+                   || std::is_same<T, hipsparseFloat16>{} || std::is_same<T, hipsparseBfloat16>{}
+                   || std::is_same<T, float>{} || std::is_same<T, double>{}
+                   || std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
+        }
         }
         return false;
     };
@@ -61,5 +77,19 @@ public:
     static constexpr bool is_valid_type()
     {
         return std::is_integral<I>::value && std::is_integral<J>::value && is_valid_type<T>();
+    };
+
+    template <typename I, typename A, typename X, typename Y, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && is_valid_type<A>() && is_valid_type<X>()
+               && is_valid_type<Y>() && is_valid_type<T>();
+    };
+
+    template <typename I, typename J, typename A, typename X, typename Y, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && std::is_integral<J>::value && is_valid_type<A>()
+               && is_valid_type<X>() && is_valid_type<Y>() && is_valid_type<T>();
     };
 };

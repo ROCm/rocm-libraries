@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
@@ -19,7 +19,7 @@ struct HipConvKernelTraits
 };
 
 class DirectConvGrouped4cFp16HipTest
-    : public DirectConvGrouped4cFp16TestHarness<HipConvKernelTraits>
+    : public DirectConvGroupedTestHarness<HipConvKernelTraits>
 {
 };
 

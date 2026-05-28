@@ -49,7 +49,7 @@ int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 {
     int nIn, cIn, hIn, wIn;
     miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
-    const auto tensorLayout = miopen::deref(inputTensor).GetLayout_t();
+    const auto tensorLayout = miopen::deref(inputTensor).GetLayoutEnum().value();
 
     int n_batchs = nIn;
     int channels = cIn;
@@ -106,7 +106,7 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 
     int nIn, cIn, hIn, wIn;
     miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
-    const auto tensorLayout = miopen::deref(inputTensor).GetLayout_t();
+    const auto tensorLayout = miopen::deref(inputTensor).GetLayoutEnum().value();
 
     int n_batchs = nIn;
     int channels = cIn;

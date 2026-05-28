@@ -20,6 +20,10 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #include "ck/host_utility/device_prop.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 template <typename GridwiseGemm>
@@ -213,6 +217,7 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
     using ThisThreadBlock = typename Base::ThisThreadBlock;
     using Base::GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1;
     using Base::GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1;
+    using Base::GetSharedMemoryNumberOfByte;
 
     // K1 should be Number<...>
     static constexpr auto K1        = Number<K1Value>{};
@@ -282,13 +287,17 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
 
     __host__ static constexpr index_t GetSharedMemoryNumberOfByteOnHost()
     {
-        if(ck::get_device_name() == "gfx950")
+        if(is_gfx125_supported())
         {
-            return Base::GetSharedMemoryNumberOfByte(gfx950_t{});
+            return GetSharedMemoryNumberOfByte(gfx125_t{});
+        }
+        else if(ck::get_device_name() == "gfx950")
+        {
+            return GetSharedMemoryNumberOfByte(gfx950_t{});
         }
         else
         {
-            return Base::GetSharedMemoryNumberOfByte(gfx_invalid_t{});
+            return GetSharedMemoryNumberOfByte(gfx_invalid_t{});
         }
     }
     __host__ __device__ static auto CalculateK0(index_t KPad) { return KPad / K1; }
@@ -374,7 +383,32 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
 
     static constexpr index_t MXdlPerWave = MRepeat;
     static constexpr index_t NXdlPerWave = NRepeat;
-    IS_VALID_COMPILATION_PARAMETER_IMPL(FloatC)
+    template <
+        InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
+    __device__ static bool constexpr IsValidCompilationParameter()
+    {
+        constexpr bool valid = ck::tensor_operation::device::IsValidGemmCompilationParameter<
+            BlockSize,
+            MPerBlock,
+            NPerBlock,
+            MPerXdl,
+            NPerXdl,
+            MXdlPerWave,
+            NXdlPerWave,
+            FloatC,
+            CGlobalMemoryDataOperation_>();
+        if(!valid)
+        {
+            return false;
+        }
+        if constexpr(K1 %
+                         MfmaSelector<FloatAB, MPerXdl, NPerXdl, FloatAB, true>::GetK1PerXdlops() !=
+                     0)
+        {
+            return false;
+        }
+        return true;
+    }
 
     __host__ __device__ static constexpr bool CheckValidity(const Argument& karg)
     {
@@ -409,6 +443,11 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
         {
             if(karg.M % CBlockTransferScalarPerVector_NWaveNPerXDL != 0)
                 return false;
+        }
+
+        if(!is_xdl_wmma_k_supported<FloatAB, KPerBlock, K1>())
+        {
+            return false;
         }
 
         return true;
@@ -1172,3 +1211,5 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
 };
 
 } // namespace ck
+
+#pragma clang diagnostic pop

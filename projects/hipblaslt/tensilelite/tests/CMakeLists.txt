@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
@@ -21,19 +22,34 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
 )
+
+# MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
+# which is only defined when MSGPACK is the active serialization format
+# (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
+# files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
+if(NOT HIPBLASLT_ENABLE_YAML)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
+    )
+endif()
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
@@ -44,7 +60,16 @@ target_link_libraries(tensilelite-tests
     PRIVATE
         hip::device
         ${CMAKE_DL_LIBS}
+        ${hipblaslt_msgpack_target}
 )
+
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/MXDataGen_test.cpp"
+    )
+    target_link_libraries(tensilelite-tests PRIVATE hipblaslt::mxdatagen)
+endif()
 
 gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
 
@@ -70,42 +95,200 @@ function(add_cpu_gemm_test TEST_NAME)
     )
 endfunction()
 
-# 2. Basic Sanity Check (F32)
-add_cpu_gemm_test(F32_Sanity
-    ARGS --M 31 --N 41 --K 51 --type f32 --validate 1
-)
+# Default test sizes. Non-tile-aligned to stress remainder handling.
+# f32 and f16/bf16 use different sizes to increase coverage diversity.
+set(F32_SIZES -M 133 -N 147 -K 165)
+set(F16_SIZES -M 131 -N 141 -K 151)
+set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
-# 3. Transpose Combinations (T/N, N/T, T/T)
-add_cpu_gemm_test(F32_TransA
-    ARGS --M 31 --N 41 --K 51 --transA 1 --transB 0 --type f32 --validate 1
-)
-add_cpu_gemm_test(F32_TransB
-    ARGS --M 31 --N 41 --K 51 --transA 0 --transB 1 --type f32 --validate 1
-)
-add_cpu_gemm_test(F32_TransAB
-    ARGS --M 31 --N 41 --K 51 --transA 1 --transB 1 --type f32 --validate 1
-)
+function(get_test_sizes TYPE OUT_SIZES)
+    if("${TYPE}" STREQUAL "f32")
+        set(${OUT_SIZES} ${F32_SIZES} PARENT_SCOPE)
+    else()
+        set(${OUT_SIZES} ${F16_SIZES} PARENT_SCOPE)
+    endif()
+endfunction()
 
-# 4. Small sizes
-add_cpu_gemm_test(F32_Odd_Sizes
-    ARGS --M 2 --N 3 --K 5 --type f32 --validate 1
-)
+# Helper: convert transpose tag (NN/TN/NT/TT) to flags
+macro(get_trans_flags TRANS OUT_FLAGS)
+    set(${OUT_FLAGS} "")
+    if("${TRANS}" MATCHES "^T")
+        list(APPEND ${OUT_FLAGS} --transA)
+    endif()
+    if("${TRANS}" MATCHES "T$")
+        list(APPEND ${OUT_FLAGS} --transB)
+    endif()
+endmacro()
 
-# 5. BFloat16 Tests
-# These verify your "cast to f32 -> compute -> cast back" logic
-add_cpu_gemm_test(BF16_Standard
-    ARGS --M 128 --N 128 --K 128 --type bf16 --validate 1
-)
+# Run all tests against both fast and slow paths
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
 
-# 6. FP16 Tests
-add_cpu_gemm_test(F16_Standard
-    ARGS --M 128 --N 128 --K 128 --type f16 --validate 1
-)
+    # Basic sanity, transpose combos, odd sizes, type coverage
+    add_cpu_gemm_test(${PATH}_F32_Sanity
+        ARGS ${F32_SIZES} --type f32 --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_F32_ADDITIONAL_SIZES
+        ARGS ${ADDITIONAL_SIZES} --type f32 --validate ${PATH_FLAGS}
+    )
+    foreach(TYPE f32 f16 bf16)
+        get_test_sizes(${TYPE} SIZES)
+        foreach(TRANS NN TN NT TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_${TYPE}_${TRANS}
+                ARGS ${SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+            )
+        endforeach()
+    endforeach()
 
-# 7. Verify fast flag on / off works
-add_cpu_gemm_test(FastPath_On
-    ARGS --M 256 --N 256 --K 256 --tryFastPath 1 --validate 1 --type f32
-)
-add_cpu_gemm_test(FastPath_Off
-    ARGS --M 256 --N 256 --K 256 --tryFastPath 0 --validate 1 --type f32
-)
+    # Cross-validate: features per type
+    foreach(TYPE f32 f16 bf16)
+        get_test_sizes(${TYPE} SIZES)
+        add_cpu_gemm_test(${PATH}_${TYPE}_Beta
+            ARGS ${SIZES} --type ${TYPE} --beta 1.0 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_Bias
+            ARGS ${SIZES} --type ${TYPE} --validate --bias ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_AllFeatures
+            ARGS ${SIZES} --type ${TYPE} --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_TN_AllFeatures
+            ARGS ${SIZES} --transA --type ${TYPE} --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+    endforeach()
+
+    # F32-only individual feature tests
+    add_cpu_gemm_test(${PATH}_f32_Relu
+        ARGS ${F32_SIZES} --type f32 --validate --activation relu ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f32_ScaleAlphaVec
+        ARGS ${F32_SIZES} --type f32 --validate --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f32_Beta_AllFeatures
+        ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f32_ScaleAlphaVec_ColN
+        ARGS ${F32_SIZES} --type f32 --validate --scaleAlphaVec --factorDim 1 ${PATH_FLAGS}
+    )
+
+    # Edge cases: dimensions at or below tile size (BLOCK_M=32, BLOCK_N=32, BLOCK_K=8)
+    foreach(CASE "M1;1;147;165" "N1;133;1;165" "K1;133;147;1" "1x1;1;1;1" "ExactBlock;32;32;8")
+        list(GET CASE 0 NAME)
+        list(GET CASE 1 EM)
+        list(GET CASE 2 EN)
+        list(GET CASE 3 EK)
+        add_cpu_gemm_test(${PATH}_f32_${NAME}
+            ARGS -M ${EM} -N ${EN} -K ${EK} --type f32 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+
+    # ScaleAB tests
+    foreach(MODE Scalar Vector)
+        foreach(TYPE f32 f16 bf16)
+            get_test_sizes(${TYPE} SIZES)
+            add_cpu_gemm_test(${PATH}_${TYPE}_ScaleAB_${MODE}
+                ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_AllFeatures
+            ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        # ScaleAB with factorDim=1 (column-dimension ScaleAlphaVec)
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_ColN
+            ARGS ${F32_SIZES} --type f32 --validate --useScaleAB ${MODE} --scaleAlphaVec --factorDim 1 ${PATH_FLAGS}
+        )
+    endforeach()
+endforeach()
+
+#################################################
+#        FP8 tests (fast & slow)                #
+#################################################
+if(NOT WIN32)
+    foreach(TYPE f8 bf8 f8fnuz bf8fnuz)
+        foreach(PATH fast slow)
+            if("${PATH}" STREQUAL "fast")
+                set(PATH_FLAGS --tryFastPath)
+            else()
+                set(PATH_FLAGS "")
+            endif()
+
+            # Transpose combos
+            foreach(TRANS NN TN NT TT)
+                get_trans_flags(${TRANS} TFLAGS)
+                add_cpu_gemm_test(${PATH}_${TYPE}_${TRANS}
+                    ARGS ${F16_SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+                )
+            endforeach()
+
+            # Feature tests
+            add_cpu_gemm_test(${PATH}_${TYPE}_Beta
+                ARGS ${F16_SIZES} --type ${TYPE} --beta 1.0 --validate ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_Beta_Half
+                ARGS ${F16_SIZES} --type ${TYPE} --beta 0.5 --validate ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_Bias
+                ARGS ${F16_SIZES} --type ${TYPE} --validate --bias ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_AllFeatures
+                ARGS ${F16_SIZES} --type ${TYPE} --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_TN_AllFeatures
+                ARGS ${F16_SIZES} --transA --type ${TYPE} --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+            )
+
+            # ScaleAB tests
+            foreach(MODE Scalar Vector)
+                add_cpu_gemm_test(${PATH}_${TYPE}_ScaleAB_${MODE}
+                    ARGS ${F16_SIZES} --type ${TYPE} --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+                )
+            endforeach()
+        endforeach()
+    endforeach()
+endif()
+
+#################################################
+# Mixed-input-type FP8 tests (fast & slow path).#
+# Reproduces production failure where A and B   #
+# have different storage types but share a      #
+# narrower MAC compute-input type (the kernel   #
+# quantizes the wider operand for F8 MFMA).     #
+# See: sk_f8ngemm_quick.yaml F8NH_F8NSS NN.     #
+#################################################
+if(NOT WIN32)
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+
+        # A=F8N, B=Half, both quantized to F8N at the MAC. This is the exact
+        # shape that failed in sk_f8ngemm_quick.yaml's F8NH_F8NSS NN test.
+        # Pre-fix, the fast path skipped the B->F8N quantization while the slow
+        # path applied it, and the two diverged.
+        add_cpu_gemm_test(${PATH}_f8fnuz_x_h_macF8N
+            ARGS ${F16_SIZES} --typeA f8fnuz --typeB f16 --computeInputB f8fnuz --validate ${PATH_FLAGS}
+        )
+        # OCP F8 counterpart (same shape, non-fnuz storage).
+        # NB: BFloat8_fnuz x Half is intentionally absent - the slow path
+        # has no TypedGemm dispatch for that combination.
+        add_cpu_gemm_test(${PATH}_f8_x_h_macF8
+            ARGS ${F16_SIZES} --typeA f8 --typeB f16 --computeInputB f8 --validate ${PATH_FLAGS}
+        )
+        # Mirror cases - A is the wider operand and gets quantized to F8 at
+        # the MAC. Exercises the symmetric A-side quantization path on both
+        # the test driver init and the GEMM implementations.
+        add_cpu_gemm_test(${PATH}_h_x_f8fnuz_macF8N
+            ARGS ${F16_SIZES} --typeA f16 --typeB f8fnuz --computeInputA f8fnuz --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_h_x_f8_macF8
+            ARGS ${F16_SIZES} --typeA f16 --typeB f8 --computeInputA f8 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+endif()

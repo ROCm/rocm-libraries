@@ -375,13 +375,13 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    int                     direction    = -1;
-    rocfft_result_placement placement    = rocfft_placement_inplace;
-    rocfft_precision        precision    = rocfft_precision_single;
-    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp   = {};
-    bool                    rootIsC2C;
+    int                     direction         = -1;
+    rocfft_result_placement placement         = rocfft_placement_inplace;
+    rocfft_precision        precision         = rocfft_precision_single;
+    rocfft_array_type       inArrayType       = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType      = rocfft_array_type_unset;
+    rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
+    hipDeviceProp_t         deviceProp        = {};
     BufferPtr               input_buffer, output_buffer;
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
@@ -399,6 +399,13 @@ struct NodeMetaData
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
         }
+    };
+
+    inline bool is_using_default_contiguous_layout_for(io_data_label io) const
+    {
+        return layout_for(io)
+               == data_layout_t::default_full_layout(
+                   io == io_data_label::INPUT ? length : outputLength, batch);
     };
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -710,7 +717,7 @@ public:
     // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
     {
-        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+        return (scheme == CS_3D_PP || scheme == CS_REAL_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
                 || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
     }
 
@@ -752,7 +759,7 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    TreeNode* GetPlanRoot();
+    const TreeNode* GetPlanRoot() const;
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -762,7 +769,14 @@ public:
     // Return ancestor node of 'this' that is real-even (1D/2D/3D), or
     // nullptr if there is no such ancestor
     TreeNode* GetRealEvenAncestor();
-    bool      IsRootPlanC2CTransform();
+
+    // Return true if the root plan is C2C, R2C, or C2R
+    bool IsRootPlanC2CTransform() const;
+    bool IsRootPlanR2CTransform() const;
+    bool IsRootPlanC2RTransform() const;
+
+    // Return the transform type of the root plan
+    rocfft_transform_type GetRootPlanTransformType() const;
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -810,7 +824,7 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
-    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // Partial pass parent nodes, e.g., CS_3D_PP or CS_REAL_3D_PP, have
     // two kernels associated with them. The key for
     // querying the function pool is different from the
     // the standard kernel key.
@@ -827,6 +841,7 @@ public:
                        pp_parent_node->length[1],
                        pp_parent_node->length[2],
                        precision,
+                       GetRootPlanTransformType(),
                        pp_parent_node->scheme);
     }
 

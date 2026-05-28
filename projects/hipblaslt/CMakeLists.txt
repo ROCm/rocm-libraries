@@ -26,7 +26,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.2.2" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.4.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -87,6 +87,10 @@ if(HIPBLASLT_ENABLE_HOST)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
+
+# mxDataGenerator is used by hipblaslt clients and tensilelite client; default OFF on Windows
+cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Use mxDataGenerator for MX format data generation (clients/tests)." ON "NOT WIN32" OFF)
+message(STATUS "Enable mxDataGenerator for MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
@@ -197,10 +201,10 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
 endif()
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    set(HIPBLASLT_PYTHON_DEPS "rocisa")
+    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
     set(hipblaslt_python_dev Development.Module)
     hipblaslt_find_python("${hipblaslt_python_dev}")
-    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${san_opts}")
+    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 else()
     hipblaslt_find_python("${hipblaslt_python_dev}")
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
@@ -233,7 +237,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        # TODO: set minimum version requied for *-cxx library
+        # TODO: set minimum version required for *-cxx library
         find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
         set(hipblaslt_msgpack_target "msgpackc-cxx")
         message(STATUS "Found msgpack (<=5.x)")
@@ -253,6 +257,48 @@ if(NOT ROCM_LIBS_SUPERBUILD)
             add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
         endblock()
     endif()
+endif()
+
+# INTERFACE library that owns the public hipblaslt API headers (the in-tree
+# `library/include` subtree plus its build-tree counterpart, where
+# `hipblaslt-export.h` and `hipblaslt-version.h` are generated). Routing the
+# include directories through a target lets consumers pick them up via the
+# build graph rather than via `target_include_directories(<tgt> BEFORE
+# PRIVATE .../library/include ...)`. `hip::host` is exposed as an INTERFACE
+# link because the in-tree headers `#include <hip/...>`.
+add_library(hipblaslt-headers INTERFACE)
+add_library(hipblaslt::headers ALIAS hipblaslt-headers)
+target_include_directories(hipblaslt-headers
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
+)
+target_link_libraries(hipblaslt-headers INTERFACE hip::host)
+
+# `hipblaslt-version.h` is consumed by `library/include/hipblaslt/hipblaslt.h`
+# (only included when HIPBLASLT_ENABLE_HOST is ON). When HOST is ON, the
+# canonical `configure_file` call in `library/include/CMakeLists.txt`
+# regenerates the same file from the same template; this generation is
+# unconditional only because the file is cheap to produce.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
+)
+
+# `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
+# only built when at least one consumer needs it. tensilelite/client and
+# tensilelite/tests reach for it on the same condition, so we drive the
+# subdir from here to keep the dependency wiring close to the gate that
+# decides whether to build it at all.
+set(_hipblaslt_mxdatagen_enabled FALSE)
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR
+        AND (HIPBLASLT_ENABLE_CLIENT
+             OR TENSILELITE_ENABLE_CLIENT
+             OR TENSILELITE_BUILD_TESTING))
+    set(_hipblaslt_mxdatagen_enabled TRUE)
+endif()
+if(_hipblaslt_mxdatagen_enabled)
+    add_subdirectory(clients/common)
 endif()
 
 add_subdirectory(tensilelite)

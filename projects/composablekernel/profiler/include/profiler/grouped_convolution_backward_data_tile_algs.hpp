@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "../../experimental/builder/test/utils/conv_algorithm_type_utils.hpp"
+#include "common.hpp"
 #include "grouped_convolution_signatures.hpp"
 #include "ck_tile/ref/naive_grouped_conv_bwd_data_gpu.hpp"
 
@@ -15,7 +16,7 @@
 #include "ck_tile/builder/testing/conv/reference.hpp"
 #include "ck_tile/builder/conv_builder.hpp"
 #include "tile_profiler_utils.hpp"
-#include "direct_conv_profiler_bridge.hpp"
+#include "direct_conv_instance_registry.hpp"
 
 namespace ck_tile::builder::profiling {
 
@@ -51,7 +52,10 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
         hipMemcpy(&ref.data()[0], reference.input, input_bytes_num, hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(
         hipMemcpy(&in.data()[0], outputs.input, input_bytes_num, hipMemcpyDeviceToHost));
-    ck_tile::check_err(in, ref, "\tError: Incorrect results!");
+        
+    constexpr double rtol = ck::profiler::get_rtol<DataType>();
+    constexpr double atol = ck::profiler::get_atol<DataType>();
+    ck_tile::check_err(in, ref, "\tError: Incorrect results!", rtol, atol);
 }
 
 /// @brief `run_grouped_conv_backward_data_tile_algs()` run all grouped conv fwd instances.
@@ -178,6 +182,16 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                 else
                 {
                     std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
+
+                    const auto conv_param_loc = args_k_batch.to_ck_tile_conv_param();
+                    float tflops          = static_cast<float>(conv_param_loc.GetFlops()) / 1.E9 / avg_time;
+                    float gb_per_sec      = static_cast<float>(
+                        conv_param_loc.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
+                    std::cout << "[Inalid] Perf: " << std::setw(10) << avg_time << " ms, "
+                              << tflops << " TFlops, " << gb_per_sec << " GB/s, "
+                              << op_name << " (instance " << num_kernel - 1 << "), SplitK "
+                              << k_batch << std::endl;
+
                     for(const auto& error : report.get_errors())
                     {
                         std::cout << "\tNumber of incorrect values: " << error.wrong_elements
@@ -201,13 +215,28 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data_direct/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
+        // for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_4c())
+        //     run_alg(fn);
+        // for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_16c())
+        //     run_alg(fn);
+        // for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_8c())
+        //     run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_32c())
+            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_BWD_DATA)
     {
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
+        // for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_4c())
+        //     run_alg(fn);
+        // for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_16c())
+        //     run_alg(fn);
+        // for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_8c())
+        //     run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_32c())
+            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_DATA)
     {

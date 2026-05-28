@@ -239,19 +239,96 @@ struct BlockCoords
 };
 
 // ======================================================================
+// BlockCoordsNonGrouped — workgroup-level coordinates for non-grouped conv.
+//
+// Maps blockIdx.y to K-tile ranges (instead of conv groups).
+// Each wave independently handles 16 output channels (one K-tile).
+// ======================================================================
+template <auto cfg>
+struct BlockCoordsNonGrouped
+{
+    int block_n;
+    int block_q;
+    int block_k_start;   // output channel start = blockIdx.y * block_k_size
+
+    // Total input/output channels.
+    int C_in;            // = C_total
+    int C_out;           // = K_total
+
+    // Channel offsets — block_k_in is mutable for c_block iteration.
+    int block_k_in;      // input channel offset (set per c_block)
+    int block_k_out;     // output channel offset (= block_k_start)
+
+    // Compatibility fields for InputLoader / OutputWriter:
+    int C;               // = C_in  (input channel stride in NHWC)
+    int C8;              // = C_in / 8
+    int K;               // = C_out (output channel stride in NHWK)
+    int block_k;         // alias for block_k_in (used by InputLoader)
+    int block_c8;        // = block_k_in / 8
+
+    __device__ BlockCoordsNonGrouped(int C_total, int K_total)
+        : C_in(C_total), C_out(K_total),
+          C(C_total), C8(C_total / 8), K(K_total)
+    {
+        const int block_q_n_idx = static_cast<int>(blockIdx.x);
+        block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
+        block_q     = (block_q_n_idx / cfg.n_fold) * cfg.block_q();
+        block_k_start = static_cast<int>(blockIdx.y) * cfg.block_k_size();
+        block_k_in  = 0;
+        block_k_out = block_k_start;
+        block_k     = 0;
+        block_c8    = 0;
+    }
+
+    // Advance input channel offset for the next c_block.
+    __device__ void set_c_block(int c_block)
+    {
+        const int c_block_size = cfg.block_groups() * cfg.group_size();
+        block_k_in = c_block * c_block_size;
+        block_k    = block_k_in;
+        block_c8   = block_k_in / 8;
+    }
+};
+
+// ======================================================================
+// get_launch_params_non_grouped — launch-parameter computation for non-grouped conv.
+//
+// For Fprop: Grid.y = ceil(K / block_k_size) — tile over output channels.
+// For Dgrad: Grid.y = ceil(C / block_k_size) — tile over input gradient channels.
+// ======================================================================
+template <typename Config>
+LaunchParams get_launch_params_non_grouped(const Config& cfg, const Conv2dParams& par)
+{
+    const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
+    auto blocks_w      = ck_tile::integer_divide_ceil(out_q, cfg.block_q());
+    auto blocks_w_n    = blocks_w * cfg.n_fold;
+
+    // Fprop tiles over K (output channels); Dgrad tiles over C (input gradient channels).
+    const int tile_channels = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
+    auto blocks_k      = ck_tile::integer_divide_ceil(tile_channels, cfg.block_k_size());
+    auto blocks_n_fold = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
+
+    LaunchParams launch;
+    launch.grid       = dim3(blocks_w_n, blocks_k, blocks_n_fold);
+    launch.block_size = dim3(cfg.block_size(), 1, 1);
+    return launch;
+}
+
+// ======================================================================
 // weight_read_fprop<TC> — shared Fprop weight-register read from LDS.
 //
 // Loads the weight tile via load_tile() and stores each filter position's
 // fp16x4_t into the WeightAccessor using get_as<fp16x4_t>() which
 // provides a zero-copy reinterpret view over the thread buffer.
 // ======================================================================
-template <typename TC, int KH, int KW>
-__device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
+template <typename TC, int KH, int KW, typename WeightAccessorT,
+          typename ElementType = _Float16>
+__device__ void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
     auto weight_lds_view =
         ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-            reinterpret_cast<_Float16*>(weight_lds), weight_lds_read_desc);
+            reinterpret_cast<ElementType*>(weight_lds), weight_lds_read_desc);
 
     constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadTileDistribution();
     auto weight_lds_read_window = ck_tile::make_tile_window(
@@ -264,10 +341,11 @@ __device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
 
     const auto weight_tile = ck_tile::load_tile(weight_lds_read_window);
 
-    // get_as<fp16x4_t>() reinterprets the thread_buffer<_Float16, KH_KW*4>
-    // as thread_buffer<fp16x4_t, KH_KW> — a zero-copy view where each
-    // element is one fp16x4_t per filter position.
-    const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<ck_tile::fp16x4_t>();
+    // get_as<VecType>() reinterprets the thread_buffer<ElementType, KH_KW*4>
+    // as thread_buffer<VecType, KH_KW> — a zero-copy view where each
+    // element is one VecType (e.g. fp16x4_t or bf16x4_t) per filter position.
+    using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
+    const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<VecType>();
     static_for<TC::KH_KW>(
         [&]<int khw>()
         {
@@ -276,15 +354,13 @@ __device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
 }
 
 // ======================================================================
-// is_applicable_base — data-type, layout, and geometry checks shared
-// by all grouped-conv fp16 variants.  Each variant additionally checks
+// is_applicable_base — layout and geometry checks shared by all
+// grouped-conv variants.  Each variant additionally checks
 // channels_per_group() and c_tot alignment.
+// Data type checks are done by make_variant<DT>().
 // ======================================================================
 inline bool is_applicable_base(const Conv2dParams& par)
 {
-    if(par.in_type  != DataType::fp16)   return false;
-    if(par.wei_type != DataType::fp16)   return false;
-    if(par.out_type != DataType::fp16)   return false;
     if(par.order    != TensorOrder::NHWC) return false;
     if(par.direction != Direction::Fprop &&
        par.direction != Direction::Dgrad) return false;

@@ -752,10 +752,7 @@ struct GroupedConvolutionBackwardDataKernel
         {
             if(kargs.k_batch != 1)
             {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Conditions not met for Kbatch >1 !");
-                }
+                LogInfo("Conditions not met for Kbatch >1 !");
                 return false;
             }
         }
@@ -825,13 +822,16 @@ struct GroupedConvolutionBackwardDataKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
+                LogInfo("Conv C is not a multiple of vector load size for input! ConvC: ",
+                        ConvC,
+                        ", VectorSizeB: ",
+                        GroupedConvTraitsType_::VectorSizeB);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported input layout!");
+            LogInfo("Not supported input layout! Now InLayout is ", InLayout::name);
             return false;
         }
 
@@ -842,13 +842,16 @@ struct GroupedConvolutionBackwardDataKernel
         {
             if(ConvC % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ",
+                        ConvC,
+                        ", VectorSizeC: ",
+                        GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported weight layout!");
+            LogInfo("Not supported weight layout! Now WeiLayout is ", WeiLayout::name);
             return false;
         }
 
@@ -858,13 +861,16 @@ struct GroupedConvolutionBackwardDataKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                CK_TILE_ERROR("Conv K is not a multiple of vector store size for output image!");
+                LogInfo("Conv K is not a multiple of vector load size for output! ConvK: ",
+                        ConvK,
+                        ", VectorSizeA: ",
+                        GroupedConvTraitsType_::VectorSizeA);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported output layout!");
+            LogInfo("Not supported output layout! Now OutLayout is ", OutLayout::name);
             return false;
         }
 

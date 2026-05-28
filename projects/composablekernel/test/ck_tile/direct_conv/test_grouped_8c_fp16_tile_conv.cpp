@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -18,13 +18,13 @@ constexpr auto v2 = ck_tile::direct_conv::Version::v2;
 struct TileConv8cV2KernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward8CFp16Kernel<ConfigIdx, v2>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward8CKernel<ConfigIdx, v2>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData8CFp16Kernel<ConfigIdx, v2>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData8CKernel<ConfigIdx, v2>;
 };
 
 class DirectConvGrouped8cFp16TileConvV2Test
-    : public DirectConvGrouped4cFp16TestHarness<TileConv8cV2KernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv8cV2KernelTraits>
 {
 };
 
@@ -236,7 +236,7 @@ TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_CyclicShift_Direct_Config75_
 // =============================================================================
 
 class DirectConvGrouped8cFp16TileConvV2PaddedTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv8cV2KernelTraits>
+    : public DirectConvGroupedTestHarness<TileConv8cV2KernelTraits>
 {
 };
 
