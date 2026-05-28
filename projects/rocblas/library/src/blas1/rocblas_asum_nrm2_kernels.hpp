@@ -92,7 +92,6 @@ rocblas_reduction_kernel_part1(rocblas_int    n,
     uint32_t batch = blockIdx.z;
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         int64_t tid = blockIdx.x * NB + threadIdx.x;
         To      sum = 0;
 
