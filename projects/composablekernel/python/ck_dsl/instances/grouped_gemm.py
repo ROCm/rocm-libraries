@@ -73,12 +73,13 @@ changing their input plumbing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, List, Sequence
 
 from ..core.ir import KernelDef
 from ..runtime.launcher import KernelLauncher, LaunchConfig, LaunchSummary
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -116,6 +117,7 @@ class GroupedGemmSpec:
     name: str
     tile: TileSpec
     trait: TraitSpec
+    data: DataSpec = field(default_factory=DataSpec)
     wave_size: int = 64
     block_size: int = 0
 
@@ -133,6 +135,7 @@ class GroupedGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self.data,
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=False,
@@ -158,9 +161,9 @@ def grouped_gemm_signature(spec: GroupedGemmSpec):
 
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
+        .ptr("A", spec.data.dtype_a)
+        .ptr("B", spec.data.dtype_b)
+        .ptr("C", spec.data.dtype_c)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")

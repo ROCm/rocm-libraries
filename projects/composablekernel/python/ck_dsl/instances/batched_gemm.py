@@ -51,6 +51,7 @@ from typing import Tuple
 
 from ..core.ir import KernelDef
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -72,6 +73,7 @@ class BatchedGemmSpec:
     name: str
     tile: TileSpec
     trait: TraitSpec = field(default_factory=TraitSpec)
+    data: DataSpec = field(default_factory=DataSpec)
     wave_size: int = 64
     block_size: int = 0
     batch_size: int = 0
@@ -90,6 +92,7 @@ class BatchedGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self.data,
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -170,9 +173,9 @@ def batched_gemm_signature(spec: BatchedGemmSpec):
 
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
+        .ptr("A", spec.data.dtype_a)
+        .ptr("B", spec.data.dtype_b)
+        .ptr("C", spec.data.dtype_c)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
