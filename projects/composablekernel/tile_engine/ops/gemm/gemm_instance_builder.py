@@ -255,6 +255,8 @@ class GemmKernelBuilder:
             default_pipeline = "compv3"
         elif self.kernel_name_prefix == "grouped_gemm_tensorquant":
             default_pipeline = "compv3"
+        elif self.kernel_name_prefix == "batched_contraction":
+            default_pipeline = "compv4"
 
         configs = []
         for tile_m in tile_m_values:
@@ -430,6 +432,7 @@ class GemmKernelBuilder:
             "gemm_multi_d",
             "gemm_multi_abd",
             "grouped_gemm",
+            "batched_contraction",
         ]:
             # Map pipeline names to the correct pipeline implementation
             pipeline_impl_map = {
