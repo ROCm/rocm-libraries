@@ -4,7 +4,14 @@ Convert MIOpen driver shape files to hipDNN JSON graph files.
 
 ## Overview
 
-`dnn-convert-shapes` reads MIOpen driver shape `.txt` files (one driver invocation per line) and writes a hipDNN JSON graph file for each shape. It supports convolution and batchnorm operations, 2-D and 3-D convolutions, forward/backward/wgrad directions, and NCHW/NHWC layouts.
+`dnn-convert-shapes` translates MIOpen driver invocations into hipDNN JSON graph files. It accepts two input modes:
+
+- **Shape files**: `.txt` files containing one MIOpen driver invocation per line (batch conversion).
+- **Inline arguments**: a single MIOpen driver argument string passed directly on the CLI via `--args`.
+
+It supports convolution and batchnorm operations, 2-D and 3-D convolutions, forward/backward/wgrad directions, and NCHW/NHWC layouts.
+
+The generated JSON graphs are consumed by [`dnn-benchmark`](../dnn-benchmarking/README.md) to run and benchmark the shapes against hipDNN providers.
 
 ## Installation
 
