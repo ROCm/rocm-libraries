@@ -71,6 +71,7 @@ cmake_dependent_option(BUILD_EXAMPLE "Build examples" OFF "NOT ONLY_INSTALL" OFF
 option(BUILD_NAIVE_BENCHMARK "Build naive benchmarks" OFF)
 cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "NOT ONLY_INSTALL" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
@@ -164,7 +165,7 @@ else()
   set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
 
   if(GPU_TARGETS STREQUAL "all")
-    if(BUILD_ADDRESS_SANITIZER)
+    if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
       # ASAN builds require xnack
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
@@ -196,6 +197,12 @@ find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 set(VERSION_STRING "4.4.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
+
+# Enable Address Sanitizer
+if(BUILD_ADDRESS_SANITIZER)
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=address -shared-libasan -fuse-ld=lld)
+endif()
 
 # Print configuration summary
 include(cmake/Summary.cmake)
@@ -248,7 +255,7 @@ set(BUILD_SHARED_LIBS ${PKG_BUILD_SHARED_LIBS})
 if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   # add dependency on HIP runtime
   set(HIP_RUNTIME_MINIMUM 4.5.0)
-  if(BUILD_ADDRESS_SANITIZER)
+  if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
     set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
   else()
     set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )

@@ -213,10 +213,13 @@ if (WIN32)
 endif()
 
 # Address Sanitizer
-if(BUILD_ADDRESS_SANITIZER)
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
   add_compile_definitions(ADDRESS_SANITIZER_BUILD)
-  list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
-  add_link_options(-fuse-ld=lld)
+  #list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
+  list(APPEND COMPILE_OPTIONS -fsanitize=address -fno-omit-frame-pointer -g)
+  #add_link_options(-fuse-ld=lld)
+  add_link_options(-fsanitize=address -shared-libasan -fuse-ld=lld)
+  list(APPEND COMPILE_OPTIONS -O3 -mllvm -amdgpu-attributor-enable=0)
 endif()
 
 # Setup VERSION

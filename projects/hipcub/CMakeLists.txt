@@ -177,8 +177,8 @@ include(VerifyCompiler)
 include(Dependencies)
 
 if(BUILD_ADDRESS_SANITIZER)
-  add_compile_options(-fsanitize=address -shared-libasan)
-  add_link_options(-fuse-ld=lld)
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=address -shared-libasan -fuse-ld=lld)
 endif()
 
 include(CheckCXXCompilerFlag)
