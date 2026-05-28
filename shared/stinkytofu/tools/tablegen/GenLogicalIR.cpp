@@ -97,7 +97,7 @@ static std::vector<IRInstDef> getIRInstructions() {
 }
 
 // Generate special instruction factory functions (pure enum design with specialData_)
-bool genSpecialMFMAClasses(std::ofstream& out) {
+static bool genSpecialMFMAClasses(std::ofstream& out) {
     // Factory functions for special instructions (MFMA, Label, etc.)
     out << "    // "
            "========================================================================\n";
@@ -262,7 +262,7 @@ bool genSpecialMFMAClasses(std::ofstream& out) {
 
 // Generate IR instruction class definitions
 // Generate opcode enum values
-bool genOpcodeEnum(const std::string& outdir) {
+static bool genOpcodeEnum(const std::string& outdir) {
     std::ofstream out(outdir + "/LogicalOpcodes_generated.inc");
     if (!out) {
         std::cerr << "Failed to open LogicalOpcodes_generated.inc for writing\n";
@@ -285,7 +285,7 @@ bool genOpcodeEnum(const std::string& outdir) {
 }
 
 // Generate opcode to string mapping tables
-bool genOpcodeMappings(const std::string& outdir) {
+static bool genOpcodeMappings(const std::string& outdir) {
     std::ofstream out(outdir + "/stinkytofu/ir/logical/LogicalOpcode.cpp");
     if (!out) {
         std::cerr << "Failed to open LogicalOpcode.cpp for writing\n";
@@ -372,7 +372,7 @@ bool genOpcodeMappings(const std::string& outdir) {
     return true;
 }
 
-bool genIRClasses(const std::string& outdir) {
+static bool genIRClasses(const std::string& outdir) {
     std::ofstream out(outdir + "/stinkytofu/ir/logical/LogicalInstructions_generated.hpp");
     if (!out) {
         std::cerr << "Failed to open LogicalInstructions_generated.hpp for writing\n";
@@ -605,7 +605,7 @@ bool genIRClasses(const std::string& outdir) {
 // Generate builder method implementations
 // Generate C++ factory functions for all IR instructions
 // Generate Python bindings for all IR instructions
-bool genPythonBindings(const std::string& outdir) {
+static bool genPythonBindings(const std::string& outdir) {
     std::ofstream out(outdir + "/PythonBindings_generated.inc");
     if (!out) {
         std::cerr << "Failed to open PythonBindings_generated.inc for writing\n";
@@ -683,7 +683,7 @@ bool genPythonBindings(const std::string& outdir) {
 
         // Pass parameters, converting optional sources to pointers
         for (size_t i = 0; i < paramNames.size(); i++) {
-            std::string paramName = paramNames[i];
+            const std::string& paramName = paramNames[i];
 
             // Check if this is an optional source parameter
             bool isOptionalSrc = paramName.starts_with("src") &&
@@ -721,6 +721,7 @@ bool genPythonBindings(const std::string& outdir) {
 }
 
 // Generate all high-level IR artifacts
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genLogicalIR(const std::string& outdir) {
     bool success = true;
 

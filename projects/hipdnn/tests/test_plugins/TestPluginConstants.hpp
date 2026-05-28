@@ -114,4 +114,60 @@ inline const std::string& testIncompatibleVersionPluginPath()
         = getTestCustomFilepathForPlugin(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME);
     return s_testIncompatibleVersionPluginPath;
 }
+
+// Override-execute fake-plugin paths.
+inline const std::string& testOverrideImplementingPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testOverrideOmittingPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_OVERRIDE_OMITTING_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testVersionLiarPluginPath()
+{
+    static const std::string s_path = getTestCustomFilepathForPlugin(TEST_VERSION_LIAR_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testSecondOverridePluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_SECOND_OVERRIDE_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testMalformedVersionPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_MALFORMED_VERSION_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testVersionZeroPluginPath()
+{
+    static const std::string s_path = getTestCustomFilepathForPlugin(TEST_VERSION_ZERO_PLUGIN_NAME);
+    return s_path;
+}
+
+// Heuristic test plugins. Policy name registered by test_good_heuristic_plugin --
+// callers that need a specific policy should set HIPDNN_HEUR_POLICY_ORDER to
+// this value via a scoped env guard.
+inline const char* testGoodHeuristicPolicyName()
+{
+    return "TestGoodHeuristicPolicy";
+}
+
+inline const std::string& testGoodHeuristicPluginPath()
+{
+    static const std::string s_testGoodHeuristicPluginPath
+        = getTestCustomFilepathForPlugin(TEST_GOOD_HEURISTIC_PLUGIN_NAME);
+    return s_testGoodHeuristicPluginPath;
+}
 } // namespace hipdnn_tests::plugin_constants
