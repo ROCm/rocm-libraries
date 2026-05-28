@@ -75,6 +75,7 @@ if(ENABLE_HIP_MLOPS_ENGINE)
         hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormBackward.cpp
         hip_mlops_engine/Layernorm/IntegrationGpuLayernormForward.cpp
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
+        hip_mlops_engine/Resample/IntegrationGpuResampleForward.cpp
     )
 endif()
 
