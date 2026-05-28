@@ -52,6 +52,12 @@ set(DQDKDV_VARIANTS
     fmha_bwd_dqdkdv_fp16_d128_batch_det
     fmha_bwd_dqdkdv_fp16_d128_group
     fmha_bwd_dqdkdv_bf16_d128_group
+    fmha_bwd_dqdkdv_fp16_d128_group_cmask
+    fmha_bwd_dqdkdv_fp16_d128_group_det
+    fmha_bwd_dqdkdv_fp16_d128_group_dropout
+    fmha_bwd_dqdkdv_fp16_d128_group_ebias
+    fmha_bwd_dqdkdv_fp16_d128_group_alibi
+    fmha_bwd_dqdkdv_fp16_d128_group_ebias_dbias
     fmha_bwd_dqdkdv_fp16_d128_batch_ebias
     fmha_bwd_dqdkdv_bf16_d128_batch_ebias
     fmha_bwd_dqdkdv_fp16_d128_batch_alibi
