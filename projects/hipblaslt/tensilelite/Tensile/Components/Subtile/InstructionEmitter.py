@@ -218,8 +218,6 @@ class InstructionEmitter:
 
     def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor."""
-        if getattr(source, 'alt_unroll', False) and unroll_iter % 2 == 0:
-            return []
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
