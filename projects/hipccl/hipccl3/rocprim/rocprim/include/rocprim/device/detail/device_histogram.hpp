@@ -321,10 +321,17 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
 template<unsigned int BlockSize, unsigned int ActiveChannels, class Counter>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void init_histogram(fixed_array<Counter*, ActiveChannels>     histogram,
-                    const fixed_array<size_t, ActiveChannels> bins)
+                    const fixed_array<size_t, ActiveChannels> bins,
+                    unsigned int*                             block_id_count,
+                    unsigned int                              block_id_count_value)
 {
     const unsigned int flat_id  = ::rocprim::detail::block_thread_id<0>();
     const unsigned int block_id = ::rocprim::detail::block_id<0>();
+
+    if(block_id_count != nullptr && block_id == 0 && flat_id == 0)
+    {
+        *block_id_count = block_id_count_value;
+    }
 
     const size_t index = block_id * BlockSize + flat_id;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
