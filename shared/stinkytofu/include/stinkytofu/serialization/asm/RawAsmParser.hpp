@@ -52,6 +52,26 @@ struct RawAsmParseResult {
     }
 };
 
+/// Options that control RawAsmParser behaviour.
+struct RawAsmParserOptions {
+    /// When true, the parser preserves the original symbolic register name
+    /// (e.g. "v[vgprSerialPersist-768]") on each operand alongside the
+    /// resolved numeric index. Combined with
+    /// AsmEmitterOptions::useSymbolicNames the pipeline can re-emit the
+    /// original symbolic form verbatim instead of the numeric form (e.g.
+    /// "v255"). When false the numeric index alone is retained, which is
+    /// what downstream optimisation passes generally expect.
+    bool preserveSymbolicNames = false;
+
+    /// When true, the parser captures any trailing "// ..." or ";" comment
+    /// on each instruction/directive line and attaches it to the resulting
+    /// ParsedInstruction (or AsmDirective). Combined with
+    /// AsmEmitterOptions::emitComments this lets the original source-level
+    /// comments round-trip through the pipeline. When false, comments are
+    /// dropped during parsing as before.
+    bool preserveComments = false;
+};
+
 /// Parse a raw GPU assembly string (as emitted by StinkyAsmEmitter) into a ParsedFunction.
 ///
 /// The returned ParsedFunction is in flat format (single block "entry") and can be
@@ -65,7 +85,10 @@ struct RawAsmParseResult {
 ///
 /// @param asmText  Raw GPU assembly source text.
 /// @param arch     Target architecture for instruction lookup.
+/// @param options  Parser options (see RawAsmParserOptions).
 /// @return         RawAsmParseResult with parsed function and any diagnostics.
-STINKYTOFU_EXPORT RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch);
+STINKYTOFU_EXPORT RawAsmParseResult
+parseRawAsmString(const std::string& asmText, GfxArchID arch,
+                  const RawAsmParserOptions& options = RawAsmParserOptions());
 
 }  // namespace stinkytofu

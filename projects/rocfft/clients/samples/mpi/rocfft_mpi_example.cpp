@@ -1,6 +1,6 @@
 
 /******************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,7 @@ auto rocfft_status_sync(const rocfft_status fftrc, const MPI_Comm comm)
     // by getting the maximum value of the return code over all procs.
 
     // Guarantee that the enum is an unsigned int so that we can send this via MPI:
-    static_assert(std::is_same_v<std::underlying_type_t<typeof(fftrc)>, unsigned int>);
+    static_assert(std::is_same_v<std::underlying_type_t<decltype(fftrc)>, unsigned int>);
 
     auto       global_fftrc = rocfft_status_success;
     const auto mpirc        = MPI_Allreduce(&fftrc, &global_fftrc, 1, MPI_UNSIGNED, MPI_MAX, comm);
@@ -60,7 +60,7 @@ auto hip_status_sync(const hipError_t hiprc, const MPI_Comm comm)
     // by getting the maximum value of the return code over all procs.
 
     // Guarantee that the enum is an unsigned int so that we can send this via MPI:
-    static_assert(std::is_same_v<std::underlying_type_t<typeof(hiprc)>, unsigned int>);
+    static_assert(std::is_same_v<std::underlying_type_t<decltype(hiprc)>, unsigned int>);
 
     auto       global_hiprc = hipSuccess;
     const auto mpirc        = MPI_Allreduce(&hiprc, &global_hiprc, 1, MPI_UNSIGNED, MPI_MAX, comm);
@@ -259,8 +259,6 @@ int main(int argc, char** argv)
         rocfft_field_create(&outfield);
 
         rocfft_brick outbrick = nullptr;
-        outbrick_lower        = {0, outbrick_lower1, 0};
-        outbrick_upper        = {length[0], outbrick_lower1 + outbrick_length1, 1};
         rocfft_brick_create(&outbrick,
                             outbrick_lower.data(),
                             outbrick_upper.data(),
@@ -398,7 +396,7 @@ int main(int argc, char** argv)
     {
         if(rocfft_plan_description_destroy(description) != rocfft_status_success)
         {
-            std::cerr << "description descruction failed\n";
+            std::cerr << "description destruction failed\n";
         }
         else
         {

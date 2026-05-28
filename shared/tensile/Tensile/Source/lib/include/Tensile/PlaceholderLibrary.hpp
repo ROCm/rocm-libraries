@@ -203,7 +203,21 @@ namespace Tensile
                     arch.resize(pos);
 
                 if(coFileDependency.find("fallback") != std::string::npos)
-                    coFileDependency += std::string("_") + arch + std::string(".hsaco");
+                {
+                    // Idempotent: producer may already have suffixed the
+                    // filePrefix with "_<arch>" (per-arch fallback routing).
+                    // Don't double-append.
+                    const std::string archSuffix = std::string("_") + arch;
+                    if(coFileDependency.size() < archSuffix.size()
+                       || coFileDependency.compare(coFileDependency.size() - archSuffix.size(),
+                                                   archSuffix.size(),
+                                                   archSuffix)
+                              != 0)
+                    {
+                        coFileDependency += archSuffix;
+                    }
+                    coFileDependency += std::string(".hsaco");
+                }
                 else
                     coFileDependency += std::string(".hsaco");
             }

@@ -13,7 +13,7 @@ namespace hipdnn_gpu_ref
 
 // GPU-based floating-point tensor validator implementing IReferenceValidation.
 // Launches a HipRTC kernel to perform element-wise tolerance comparison on the GPU
-// using a single atomic failure flag. Only supports packed (contiguous) tensors.
+// using a single atomic failure flag. Supports both packed and strided tensors.
 template <class T>
 class GpuFpReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
@@ -27,6 +27,7 @@ public:
 
     ~GpuFpReferenceValidation() override = default;
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function) - explicit instantiation in .cpp
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override;
 

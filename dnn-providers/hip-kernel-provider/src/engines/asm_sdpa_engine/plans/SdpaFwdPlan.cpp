@@ -3,69 +3,17 @@
 
 #include "plans/SdpaFwdPlan.hpp"
 #include "asm/SdpaFwdKernelArgs.hpp"
-#include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
+#include <utility>
 
 namespace asm_sdpa_engine
 {
 
-SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule, hipFunction_t function, SdpaFwdParams params)
-    : _module(kernelModule)
-    , _function(function)
+SdpaFwdPlan::SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params)
+    : _kernel(std::move(kernel))
     , _params(std::move(params))
 {
-}
-
-SdpaFwdPlan::~SdpaFwdPlan()
-{
-    if(_module != nullptr)
-    {
-        hipError_t err = hipModuleUnload(_module);
-        if(err != hipSuccess)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to unload kernel module, error: " << hipGetErrorString(err));
-        }
-    }
-}
-
-SdpaFwdPlan::SdpaFwdPlan(SdpaFwdPlan&& other) noexcept
-    : _module(other._module)
-    , _function(other._function)
-    , _params(std::move(other._params))
-{
-    // Transfer ownership - set source to nullptr to prevent double-free
-    other._module = nullptr;
-    other._function = nullptr;
-}
-
-SdpaFwdPlan& SdpaFwdPlan::operator=(SdpaFwdPlan&& other) noexcept
-{
-    if(this != &other)
-    {
-        // Clean up existing resource
-        if(_module != nullptr)
-        {
-            hipError_t err = hipModuleUnload(_module);
-            if(err != hipSuccess)
-            {
-                HIPDNN_PLUGIN_LOG_ERROR(
-                    "Failed to unload kernel module during move assignment, error: "
-                    << hipGetErrorString(err));
-            }
-        }
-
-        // Transfer ownership
-        _module = other._module;
-        _function = other._function;
-        _params = other._params;
-
-        // Set source to nullptr to prevent double-free
-        other._module = nullptr;
-        other._function = nullptr;
-    }
-    return *this;
 }
 
 size_t SdpaFwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
@@ -74,7 +22,7 @@ size_t SdpaFwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
     return 0;
 }
 
-void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
+void SdpaFwdPlan::execute(const HipKernelHandle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* /*workspace*/) const
@@ -181,50 +129,24 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
     unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
     unsigned int gridDimY = _params.numHeadsQ;
-    unsigned int gridDimZ = _params.batchSize;
+    const unsigned int gridDimZ = _params.batchSize;
 
     if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
     {
         std::swap(gridDimX, gridDimY);
     }
 
-    unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
+    const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 
-    // Block dimensions (fixed for this kernel)
-    constexpr unsigned int K_BLOCK_DIM_Y = 1;
-    constexpr unsigned int K_BLOCK_DIM_Z = 1;
-
-    // Launch kernel using HIP_LAUNCH_PARAM mechanism
-    // This is required for passing large argument structures(656 bytes) to ASM kernels
-    size_t argSize = sizeof(args);
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays) - HIP API requires C-style array
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      &args,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    hipError_t err = hipModuleLaunchKernel(_function,
-                                           gridDimX,
-                                           gridDimY,
-                                           gridDimZ, // grid dimensions
-                                           blockDimX,
-                                           K_BLOCK_DIM_Y,
-                                           K_BLOCK_DIM_Z, // block dimensions
-                                           0, // shared memory bytes (kernel uses LDS internally)
-                                           nullptr, // stream (use default)
-                                           nullptr, // kernel arguments (not used with config)
-                                           config); // extra options (HIP_LAUNCH_PARAM config)
-
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to launch kernel, error: " << hipGetErrorString(err));
-        return;
-    }
-
-    HIPDNN_PLUGIN_LOG_INFO("SDPA kernel launched: grid=["
-                           << gridDimX << "," << gridDimY << "," << gridDimZ << "] block=["
-                           << blockDimX << "," << K_BLOCK_DIM_Y << "," << K_BLOCK_DIM_Z << "]");
+    launchKernel("fwd",
+                 _kernel.function(),
+                 &args,
+                 sizeof(args),
+                 gridDimX,
+                 gridDimY,
+                 gridDimZ,
+                 blockDimX,
+                 handle.getStream());
 }
 
 } // namespace asm_sdpa_engine

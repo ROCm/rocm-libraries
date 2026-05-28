@@ -7,19 +7,25 @@
 #include "hip/HipKernel.hpp"
 #include "hip/HipProgram.hpp"
 
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
 #include <vector>
 
 using namespace hip_kernel_provider;
 
 TEST(TestHipProgram, CompilesAndGetsKernel)
 {
-    HipProgram program("vector_add.cpp", {"-O3"});
+    SKIP_IF_NO_DEVICES();
+
+    const HipProgram program("vector_add.cpp", {"-O3"});
     hipFunction_t kernel = program.getKernel("vector_add");
     EXPECT_NE(nullptr, kernel);
 }
 
 TEST(TestHipKernel, LaunchesVectorAdd)
 {
+    SKIP_IF_NO_DEVICES();
+
     constexpr int N = 256;
 
     // Allocate and initialize
@@ -38,7 +44,7 @@ TEST(TestHipKernel, LaunchesVectorAdd)
     ASSERT_EQ(hipSuccess, hipMemcpy(devB, hostB.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
     // Launch kernel
-    HipProgram program("vector_add.cpp", {"-O3"});
+    const HipProgram program("vector_add.cpp", {"-O3"});
     HipKernel kernel(program, "vector_add");
     kernel.setBlockSize(256);
     kernel.setGridSize(1);

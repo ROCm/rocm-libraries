@@ -42,7 +42,7 @@ namespace
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class Integration{{ op.name }}DescriptorLowering : public IntegrationTestFixture
+class Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering : public IntegrationTestFixture
 {
 protected:
     /// Builds and lowers a graph, returning the deserialized GraphT.
@@ -97,7 +97,7 @@ protected:
 {% endif %}
 // Lowering round-trip: builds a graph, lowers via descriptors, and verifies
 // the deserialized FlatBuffer attributes match.
-TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTrip)
 {
     {{ op.frontend.attributes_class }} attrs;
     attrs.set_name("test_op");
@@ -179,7 +179,7 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTri
 {% set test_val = '1' %}
 {% endif %}
 // Verifies that the optional {{ df.name }} attribute survives lowering round-trip.
-TEST_F(Integration{{ op.name }}DescriptorLowering, {{ df.pascal_name }}PreservedInRoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering, {{ df.pascal_name }}PreservedInRoundTrip)
 {
     {{ op.frontend.attributes_class }} attrs;
     attrs.set_name("test_{{ df.name }}");
