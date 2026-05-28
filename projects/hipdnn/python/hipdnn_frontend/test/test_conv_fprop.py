@@ -6,8 +6,6 @@
 import numpy as np
 import pytest
 
-import hipdnn_frontend as hipdnn
-
 from .helpers import build_conv_fprop_graph, execute_graph
 
 # Dimensions used across tests
