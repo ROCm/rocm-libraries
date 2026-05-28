@@ -1271,15 +1271,18 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
     # (no-op outside UseSubtileImpl A/B). Needed for bf16 (boundary DTL
     # load) and fp4 (regular tail-loop dwordx4 must see the actual K_rem
     # to avoid pulling stale OOB-zeroed dwords into LDS).
-    module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA))
-    module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB))
+    module.add(writer.computeTailLoopSrdLimit(
+        kernel, [tensorParametersA, tensorParametersB]))
     # MX scale operands: SrdMXS{A,B}+2 tightened with K_pad=256 (host scale
     # re-scatter granularity from DataInitialization.cpp::rearrangePaddedMXScaleLayout).
     # No-op when DepthU<=256 since host padding alone already covers K_rem.
+    mxScaleTPs = []
     if kernel["ProblemType"].get("MXBlockA", 0) > 0 and "MX" in tensorParametersA:
-      module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA["MX"]))
+      mxScaleTPs.append(tensorParametersA["MX"])
     if kernel["ProblemType"].get("MXBlockB", 0) > 0 and "MX" in tensorParametersB:
-      module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB["MX"]))
+      mxScaleTPs.append(tensorParametersB["MX"])
+    if mxScaleTPs:
+      module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
     module.add(scheduler.emitTailLoop(writer, kernel))
     module.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,

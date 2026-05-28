@@ -4432,118 +4432,97 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  # Tighten Srd{A,B,MXSA,MXSB}+2 (num_records / OOB limit) just before the tail loop.
-  #
-  # Replaces the conservative tile-boundary limit set in computeLoadSrd
-  #   Srd+2 = (numLine * stride + DepthU) * bpeGR
-  # with a tail-aware limit using the actual K remainder:
-  #   Srd+2 = (numLine * stride + K_rem_aligned) * bpe_K_byteStride
-  # where:
-  #   numLine        = min(SizeI/J - WG*MT, MT) - 1   (0-based last line index)
-  #   K_rem          = SizesSum % DepthU              (already in
-  #                    LoopCounter<unrollChar> after calculateLoopNumIter(-1))
-  #   K_rem_aligned  = roundUp(K_rem, K_pad)
-  #                    - K_pad = 1 for A/B (plain bf16/fp4 etc.)
-  #                    - K_pad = 256 for MX scale operands (matches host pad
-  #                      from DataInitialization.cpp::rearrangePaddedMXScaleLayout)
-  #   stride         = strideRef(tc, tP['tileIdx'])   in elements
-  #   bpe_K_byteStride
-  #                  = tP["bpeGR"]                   for A/B
-  #                  = swizzleSize0 / mxBlock        for MX scale (matches
-  #                    computeLoadSrd's swizzle math; 1 for mxBlock=32)
-  #
-  # Supports: bf16/fp4/int8 A/B + MX scale MXSA/MXSB.
-  # Swizzled A/B (SwizzleTensor*) and non-1 groOffsetInMacroTile fall through.
+  # Tighten Srd{A,B,MXSA,MXSB}+2 (OOB limit) before the tail loop:
+  #   Srd+2 -= (DepthU - roundUp(K_rem, K_pad)) * bpe_K_byteStride
+  # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
+  # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
+  # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
+  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
   ##############################################################################
-  def computeTailLoopSrdLimit(self, kernel, tP):
+  def computeTailLoopSrdLimit(self, kernel, tPs):
     module = Module("computeTailLoopSrdLimit")
-    tc = tP["tensorChar"]
 
-    if not kernel.get("UseSubtileImpl"):
+    if not tPs:
       return module
-    if tc not in ("A", "B", "MXSA", "MXSB"):
+    if not kernel.get("UseSubtileImpl"):
       return module
     if self.states.groOffsetInMacroTile != 1:
       return module
 
-    isMx = tc in ("MXSA", "MXSB")
-
-    # MX-scale specifics: K-padding granularity from host scale re-scatter, and
-    # K-direction byte stride from the swizzle math in computeLoadSrd.
     MX_PAD_K = 256
-    if isMx:
-      tcab = "A" if tc == "MXSA" else "B"
-      mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
-      if mxBlock <= 0:
-        return module
-      depthU = int(kernel["DepthU"])
-      # When DepthU <= MX_PAD_K, roundUp(K_rem, 256) >= DepthU so the clip is
-      # always a no-op; host padding alone already covers the over-read.
-      if depthU <= MX_PAD_K:
-        return module
-      mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
-      isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
-      swizzleSize0 = 32 if isMxSwizzledScale else 1
-      if swizzleSize0 % mxBlock != 0:
-        return module
-      bytesPerKElement = swizzleSize0 // mxBlock  # 1 for gauntlet mxBlock=32
-      kPad = MX_PAD_K
-      bpeForLimit = float(bytesPerKElement)
-    else:
-      kPad = 1
-      bpeForLimit = float(tP["bpeGR"])
+    depthU = int(kernel["DepthU"])
 
-    strideF = self.strideRef(tc, tP['tileIdx'])
-    if self.isConstUnitStride(strideF):
+    # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
+    tcKpadBpeList = []
+    for tP in tPs:
+      tc = tP["tensorChar"]
+      if tc not in ("A", "B", "MXSA", "MXSB"):
+        return module
+      strideF = self.strideRef(tc, tP['tileIdx'])
+      if self.isConstUnitStride(strideF):
+        return module
+      isMx = tc in ("MXSA", "MXSB")
+      if isMx:
+        tcab = "A" if tc == "MXSA" else "B"
+        mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
+        if mxBlock <= 0:
+          return module
+        # When DepthU <= MX_PAD_K, roundUp(K_rem, 256) >= DepthU so delta <= 0
+        # always; host padding alone already covers the over-read.
+        if depthU <= MX_PAD_K:
+          return module
+        mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+        isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+        swizzleSize0 = 32 if isMxSwizzledScale else 1
+        if swizzleSize0 % mxBlock != 0:
+          return module
+        bytesPerKElement = swizzleSize0 // mxBlock  # 1 for gauntlet mxBlock=32
+        kPad = MX_PAD_K
+        bpeForLimit = float(bytesPerKElement)
+      else:
+        kPad = 1
+        bpeForLimit = float(tP["bpeGR"])
+      tcKpadBpeList.append((tc, kPad, bpeForLimit))
+
+    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
+    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    kPad = tcKpadBpeList[0][1]
+    bpeForLimit = tcKpadBpeList[0][2]
+    if any(kp != kPad or bp != bpeForLimit for _, kp, bp in tcKpadBpeList):
       return module
-
-    mt = kernel[tP["mt"]]
+    tcs = [t for t, _, _ in tcKpadBpeList]
+    isMx = tcs[0] in ("MXSA", "MXSB")
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
-    tileIdx = tP["tileIdx"]
 
-    with self.allocTmpSgpr(3) as tmpSgprInfo:
+    with self.allocTmpSgpr(1) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
       module.addComment1(
-        "Tighten Srd%s+2 for tail loop: (numLine * stride + roundUp(K_rem,%u)) * %s"
-        % (tc, kPad, "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
-
-      # tileStart = WG * MT (element units)
-      module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(tP["wg"]), src1=mt,
-                         comment="tileStart = WG%s * MT(%u)"%(tP["wg"][-1], mt)))
-
-      # numToEnd = sizeTile - tileStart
-      module.add(SSubU32(dst=sgpr(stmp+0), src0=self.sizeRef(tileIdx), src1=sgpr(stmp+0),
-                         comment="numToEnd = Size%s - WG*MT"%self.states.indexChars[tileIdx]))
-
-      # numLine = min(numToEnd, MT) - 1   (0-based last line index)
-      module.add(SMinU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=mt,
-                         comment="min(numToEnd, MT)"))
-      module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1,
-                         comment="numLine = min - 1 (0-based)"))
-
-      # m_stride_elems = numLine * strideF (low 32 bits)
-      module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=strideF,
-                         comment="numLine * stride (element units)"))
+        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s"
+        % (",".join(tcs), kPad,
+           "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
 
       if kPad > 1:
-        # K_rem_aligned = roundUp(K_rem, kPad) = (K_rem + kPad - 1) & ~(kPad-1)
         padMaskInv = (~(kPad - 1)) & 0xffffffff
-        module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(loopCounterName),
+        module.add(SAddU32(dst=sgpr(stmp), src0=sgpr(loopCounterName),
                            src1=(kPad - 1),
                            comment="K_rem + (K_pad-1) for roundUp"))
-        module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(padMaskInv),
+        module.add(SAndB32(dst=sgpr(stmp), src0=sgpr(stmp), src1=hex(padMaskInv),
                            comment="K_rem_aligned = roundUp(K_rem, %u)" % kPad))
-        module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1),
-                           comment="+ K_rem_aligned"))
+        module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(stmp),
+                           comment="delta_K = DepthU - K_rem_aligned (>= 0)"))
       else:
-        # limit_elems = m_stride_elems + K_rem (full tail, including odd trailing
-        # element so the boundary DTL load doesn't need to bump Srd+2).
-        module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(loopCounterName),
-                           comment="+ K_rem"))
+        # delta_K = DepthU - K_rem (full tail, including odd trailing element
+        # so the boundary DTL load doesn't need to bump Srd+2).
+        module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
+                           comment="delta_K = DepthU - K_rem"))
 
-      # Srd+2 = limit_elems * bpe_K_byteStride (bytes)
-      module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, bpeForLimit,
-                                   comment="buffer_load limit for %s (tail-loop tight)"%tc))
+      # delta_bytes = delta_K * bpe_K_byteStride (handles bpe=0.5 via SShr 1)
+      module.add(scalarMultiplyBpe(stmp, stmp, bpeForLimit,
+                                   comment="delta_bytes (multiple bpe)"))
+      for tc in tcs:
+        module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
+                           src1=sgpr(stmp),
+                           comment="Srd%s+2 -= delta_bytes (tail-loop tight)" % tc))
 
     return module
 
