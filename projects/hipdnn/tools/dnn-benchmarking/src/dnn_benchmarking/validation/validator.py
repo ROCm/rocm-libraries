@@ -1,27 +1,18 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Validation module for comparing execution output against reference.
-
-CPU reference validation is not yet implemented.
-"""
+"""Validation module for comparing execution output against reference."""
 
 from typing import Optional, Tuple
 
 import numpy as np
 
 from ..graph.tensor_info import TensorInfo
-from .comparison import ArrayComparator
+from .comparison import ArrayComparator, ComparisonResult
 
 
 class Validator:
-    """Validates execution output against a reference using allclose comparison.
-
-    CPU reference validation is not yet implemented.
-    When implemented, this will:
-    1. Copy output buffer to host
-    2. Compare against reference data using np.allclose(rtol, atol)
-    """
+    """Validates execution output against a reference using allclose comparison."""
 
     def __init__(
         self,
@@ -38,12 +29,22 @@ class Validator:
         self._atol = atol
         self._comparator = ArrayComparator(rtol=rtol, atol=atol)
 
+    @property
+    def rtol(self) -> float:
+        """Relative tolerance."""
+        return self._rtol
+
+    @property
+    def atol(self) -> float:
+        """Absolute tolerance."""
+        return self._atol
+
     def validate(
         self,
         output_data: np.ndarray,
         tensor_info: TensorInfo,
         reference_data: Optional[np.ndarray] = None,
-    ) -> Tuple[bool, str]:
+    ) -> ComparisonResult:
         """Compare output data against reference using np.allclose.
 
         Args:
@@ -53,34 +54,20 @@ class Validator:
                            If None, validation is skipped.
 
         Returns:
-            Tuple of (passed: bool, message: str).
+            ComparisonResult. When reference_data is None, returns a passed
+            result with a "skipped" message and zero diffs.
         """
         if reference_data is None:
-            return (True, "Validation skipped - no reference data provided")
-
-        result = self._comparator.compare(
-            output_data, reference_data, "output", "reference"
-        )
-
-        if result.passed:
-            return (True, f"Validation passed (rtol={self._rtol}, atol={self._atol})")
-        else:
-            return (
-                False,
-                f"Validation failed: max_abs_diff={result.max_abs_diff:.2e}, "
-                f"max_rel_diff={result.max_rel_diff:.2e} "
-                f"(rtol={self._rtol}, atol={self._atol})",
+            return ComparisonResult(
+                passed=True,
+                max_abs_diff=0.0,
+                max_rel_diff=0.0,
+                message="Validation skipped - no reference data provided",
             )
 
-    def validate_stub(self) -> Tuple[bool, str]:
-        """Stubbed validation - returns success with message.
-
-        Use this when no reference data is available.
-
-        Returns:
-            Tuple of (True, stub message).
-        """
-        return (True, "Validation skipped - CPU reference not yet implemented")
+        return self._comparator.compare(
+            output_data, reference_data, "output", "reference"
+        )
 
     def compare_ab(
         self, output_a: np.ndarray, output_b: np.ndarray

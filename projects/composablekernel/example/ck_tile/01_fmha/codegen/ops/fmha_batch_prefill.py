@@ -715,14 +715,20 @@ class KernelComponentFactory:
                 SUPPORTED_KV_MEMORY_LAYOUT,
                 SUPPORTED_KV_LOOKUP_TABLE,
             ):
+                # sink tokens are only meaningful when masking is enabled;
+                # skip the sink="t" + nomask combinations to avoid emitting
+                # kernels that can never be dispatched.
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
                 pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, sink, kv_memory_layout, kv_lookup_table))  # fmt: skip
         elif dtype in ["fp8bf16"]:
-            # no need lse/dropout/sink kernels
+            # no need lse/dropout kernels (sink is supported via kHasSink)
             for (
                 logits,
                 qscale,
                 mask,
                 bias,
+                sink,
                 kv_memory_layout,
                 kv_lookup_table,
             ) in itertools.product(
@@ -730,10 +736,16 @@ class KernelComponentFactory:
                 ["pertensor", "kv_blockscale"],
                 get_mask_map(mask_impl).keys(),
                 ["no"],
+                ["t", "f"],
                 SUPPORTED_KV_MEMORY_LAYOUT,
                 SUPPORTED_KV_LOOKUP_TABLE,
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", kv_memory_layout, kv_lookup_table))  # fmt: skip
+                # sink tokens are only meaningful when masking is enabled;
+                # skip the sink="t" + nomask combinations to avoid emitting
+                # kernels that can never be dispatched.
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
+                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, sink, kv_memory_layout, kv_lookup_table))  # fmt: skip
         else:
             assert False
         return pipelines
@@ -866,6 +878,8 @@ def get_fwd_blobs(
                         cond &= pipeline.F_qscale == "no"
                         if not cond:
                             continue
+                    elif receipt == 700:
+                        continue  # TE does not use this API
 
                     # fp32 only
                     if receipt == 800 or receipt == 801:

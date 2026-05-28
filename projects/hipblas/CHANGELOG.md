@@ -3,11 +3,13 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
-## hipBLAS 3.4.0 
+## hipBLAS 3.5.0
+
+## hipBLAS 3.4.0
  
 ### Added
 
-* gfx90c support to clients.
+* gfx1250 and gfx90c support to clients.
 * Version and other properties to Windows `hipblas.dll`.
 * Support for `OpenBLAS` ILP64-based API usage in clients.
 

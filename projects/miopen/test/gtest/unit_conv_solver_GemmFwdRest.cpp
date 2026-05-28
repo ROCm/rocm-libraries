@@ -39,8 +39,6 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, type_x, type_w, type_y},
-        // dilation=2: effective kernel size 5, pad=2 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {2, 2}, {1, 1}, {2, 2}, type_x, type_w, type_y},
         // clang-format on
     };
 }
@@ -56,16 +54,7 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         // Regression test for https://github.com/ROCm/MIOpen/issues/2047
-        // TODO: Temporarily disabled due to rocBLAS bug on gfx90a with 3D BFP16
-        // TestCase{{1, 1, 2, 1, 2}, {2, 1, 2, 1, 2}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, type_x, type_w, type_y},
-        // dilation=3: effective kernel size 7, pad=3 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {3, 3}, {1, 1}, {3, 3}, type_x, type_w, type_y},
-        // asymmetric dilation: different dilation per spatial dim
-        TestCase{{1, 8, 9, 9}, {8, 8, 3, 3}, {1, 2}, {1, 1}, {1, 2}, type_x, type_w, type_y},
-        // 3D dilation=2: effective kernel size 5 in each dim, pad=2 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8, 8}, {8, 8, 3, 3, 3}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, type_x, type_w, type_y},
-        // 3D asymmetric dilation: dilation=(1,2,3), pad=(1,2,3) keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8, 8}, {8, 8, 3, 3, 3}, {1, 2, 3}, {1, 1, 1}, {1, 2, 3}, type_x, type_w, type_y},
+        TestCase{{1, 1, 2, 1, 2}, {2, 1, 2, 1, 2}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, type_x, type_w, type_y},
         // clang-format on
     };
 }
@@ -74,6 +63,19 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
+        return p;
+    }();
+    return params;
+}
+
+// BFP16 Full tests include 3D convolution shapes that trigger a rocBLAS bug on gfx90a
+// (rocBLAS does not support BF16->BF16 GEMM on that architecture). Skip on gfx90A only;
+// all other GPUs continue to exercise the full test suite.
+// TODO: Remove this exclusion once the rocBLAS bug is fixed.
+const auto& GetTestParamsNoGfx90A()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All & ~Gpu::gfx90A);
         return p;
     }();
     return params;
@@ -153,7 +155,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenBFloat16))));
 

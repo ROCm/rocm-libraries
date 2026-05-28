@@ -4,70 +4,26 @@
 
 .. _linux-install:
 
-********************************************************************
-Installing and building on Linux
-********************************************************************
+**************************
+Build and install on Linux
+**************************
 
-This topic discusses how to install rocBLAS on Linux from a prebuilt package or from source.
+To build rocBLAS as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build rocBLAS standalone using the following
+instructions.
 
 Prerequisites
-===================================
+=============
 
 rocBLAS requires a ROCm-enabled platform. For more information,
-see the :doc:`system requirements <rocm-install-on-linux:reference/system-requirements>`.
-
-Installing prebuilt packages
-===================================
-
-Install rocBLAS on Linux using the appropriate package manager for your distribution.
-For example, on Ubuntu or Debian, use these commands:
-
-.. code-block:: shell
-
-   sudo apt-get update
-   sudo apt-get install rocblas
-
-For Fedora, CentOS, or RHEL, use these commands:
-
-.. code-block:: shell
-
-   sudo dnf update
-   sudo dnf install rocblas
-
-If you are compiling a program that will link against rocBLAS, instead install the ``rocblas-dev`` package.
-Similarly, at the top level, install ``rocm-dev`` instead of ``rocm``.
-For example, on Ubuntu or Debian, use these commands:
-
-.. code-block:: shell
-
-   sudo apt-get update
-   sudo apt-get install rocblas-dev
-
-For Fedora, CentOS, or RHEL, use these commands:
-
-.. code-block:: shell
-
-   sudo dnf update
-   sudo dnf install rocblas-devel
-
-If you are using a different distribution, use the appropriate package manager to install the ``rocblas`` or ``rocblas-dev`` package.
-
-The ``rocblas`` package contains the shared library and runtime only requirements.
-The ``rocblas-dev`` package includes the header files and depends on the ``rocblas`` package.
-The development package will also include the static library when using static library packages.
-The ``rocblas-dev`` package is not required to run the library but is required to compile code that uses rocBLAS.
-
-After installation of the development package which includes the headers, use rocBLAS like any other library with a C API.
-The ``rocblas.h`` header file must be included in the user code to make calls
-into rocBLAS, while the rocBLAS shared library is link-time and run-time
-dependent for the user application.
-
-The header files ``rocblas.h`` and ``rocblas_module.f90`` are installed in ``/opt/rocm/include/rocblas``.
-The library file ``librocblas.so`` is installed in ``/opt/rocm/lib``.
-
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 Static library
-----------------
+--------------
 
 Non-standard static library builds have the additional runtime dependency of
 the entire ``rocblas/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder.
@@ -78,26 +34,6 @@ the same directory as the executable.
 The contents of the ``rocblas/`` subdirectory are read at execution time
 in the same way as shared library files.
 These files contain GPU code objects and metadata.
-
-Building and installing rocBLAS
-===================================
-
-For most users, it isn't necessary to build rocBLAS from source. They can use
-the prebuilt packages as described above. However, if necessary, you can use the following instructions to build
-rocBLAS from source.  You need to install ``rocm-dev`` instead of ``rocm`` (or in addition to ``rocm``), because ``rocm`` contains the runtime-only packages.
-For example, on Ubuntu or Debian, use these commands:
-
-.. code-block:: shell
-
-   sudo apt-get update
-   sudo apt-get install rocm-dev
-
-For Fedora, CentOS, or RHEL, use these commands:
-
-.. code-block:: shell
-
-   sudo dnf update
-   sudo dnf install rocm-dev
 
 Requirements
 ------------
@@ -299,3 +235,22 @@ one of these commands.
 
    "``./install.sh --clients-only``", "Build the rocBLAS clients and use the installed rocBLAS library at ``ROCM_PATH`` (defaults to ``/opt/rocm`` if not specified)."
    "``./install.sh --clients-only --library-path /path/to/rocBLAS``", "Build the rocBLAS clients and use the rocBLAS library at the specified location."
+
+Using the rocBLAS Docker images
+------------------------------------------
+
+The rocBLAS Docker images provide a reproducible, ready-to-use development environment to simplify
+the set-up process. The Dockerfiles install all system dependencies, such as Clang, LLVM,
+zstd, and the development libraries, schedule update alternatives, and configure the environment.
+Two Dockerfiles are available for Ubuntu 24.04:
+
+*  ``Dockerfile.ubuntu24.prebuilt``: Downloads a prebuilt ROCm nightly tarball from the `ROCm nightly builds <https://rocm.nightlies.amd.com>`_.
+   This solution is faster to build and suitable for most development work. It lets you configure the target ASIC,
+   nightly tag, tarball filename, and tarball source URL.
+*  ``Dockerfile.ubuntu24.fullbuild``: Clones `<https://github.com/ROCm/TheRock>`_ and builds ROCm from source.
+   It's the best choice for when a prebuilt tarball is unavailable or custom build options are required.
+   The configuration options include the target ASIC, specific commit hash, build type (release, debug, or preset), CMake presets,
+   and parallel job count.
+   
+For more information on how to download and use these images, see the
+`rocBLAS Docker documentation <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/docker/README.md>`_.

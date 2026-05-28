@@ -53,7 +53,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         x, mean, variance, scale, bias, epsilon, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);

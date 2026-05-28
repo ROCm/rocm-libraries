@@ -45,13 +45,11 @@ operation:
       fbs_field: "in_tensor_uid"
       attr_suffix: "XDESC"
       required: true
-      frontend_getter: "get_x()"
 
     - name: "y"
       fbs_field: "out_tensor_uid"
       attr_suffix: "YDESC"
       required: true
-      frontend_getter: "get_y()"
 
   data_fields:
     - name: "mode"
@@ -61,9 +59,9 @@ operation:
       cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ReductionMode"
       frontend_type: "ReductionMode"
       required: true
+      fbs_optional: true
       default_value: "ReductionMode::NOT_SET"
       frontend_getter: "get_mode()"
-      frontend_getter_returns_optional: true
       backend_setter: "setReductionMode"
       backend_getter: "getReductionMode"
       backend_converter: "toBackendReductionMode"

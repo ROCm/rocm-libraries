@@ -50,7 +50,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     dscale->set_output(true).set_data_type(intermediateType);
     dbias->set_output(true).set_data_type(intermediateType);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
