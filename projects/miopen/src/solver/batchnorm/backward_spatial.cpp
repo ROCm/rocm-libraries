@@ -111,7 +111,8 @@ bool PerformanceConfigBnBwdBackward::SetNextValue(
         return true;
     }
     // Get next valid configuration
-    if(static_cast<size_t>(this->index + 1) < valid_kernels.size())
+    auto next = static_cast<size_t>(this->index) + 1U;
+    if(next < valid_kernels.size())
     {
         ++this->index;
         this->kernel_id = this->valid_kernels[index];
