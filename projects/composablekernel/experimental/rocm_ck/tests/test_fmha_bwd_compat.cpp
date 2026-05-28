@@ -469,6 +469,38 @@ TEST(FmhaBwdCompat, ConvertDQ_FP16_D256_Batch)
     EXPECT_EQ(k.block_size, 256);
 }
 
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D64_Group)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D256_Group)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 256);
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
 // ============================================================================
 // Registry: OGradDotO findVariant
 // ============================================================================
@@ -811,6 +843,42 @@ TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsD256Group)
         .algorithm = {}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d256_group_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16D64Batch)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d64_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsFP16D64Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d64_group_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16D256Batch)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d256_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsFP16D256Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d256_group_det");
 }
 
 TEST(FmhaBwdCompat, Registry_ConvertDQ_VariantCount)
