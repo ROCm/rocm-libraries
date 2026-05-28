@@ -894,11 +894,10 @@ class Solution(collections.abc.Mapping):
         return
 
     state["Multicast"] = False
+    state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
-    else:
-      if state["ClusterBarrier"] == True:
-        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
+      state["ClusterBarrier"] = True
 
     # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
     # when TDM is enabled.
