@@ -375,7 +375,7 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
             "Batchnorm backward fusion does not support peer statistics");
     }
 
-    auto actIn1Uid = actAttr.in_1_tensor_uid();
+    const auto actIn1Uid = actAttr.in_1_tensor_uid();
     if(!actIn1Uid.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -384,7 +384,7 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
     }
 
     const std::vector<int64_t> ioTensorIds
-        = {bnBwdAttr.x_tensor_uid(), *actIn1Uid, bnBwdAttr.dx_tensor_uid()};
+        = {bnBwdAttr.x_tensor_uid(), actAttr.in_0_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
     const std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
                                                   bnBwdAttr.dscale_tensor_uid(),
                                                   bnBwdAttr.dbias_tensor_uid(),
@@ -399,7 +399,7 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
         statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
     }
     const std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
-                                                        actAttr.in_0_tensor_uid(),
+                                                        *actIn1Uid,
                                                         actAttr.out_0_tensor_uid(),
                                                         bnBwdAttr.dy_tensor_uid()};
 

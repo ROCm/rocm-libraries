@@ -113,6 +113,7 @@ add_executable(
     heuristics/TestConfigBuiltIn.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
+    TestEnginePluginOverride.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
     TestVersion.cpp
