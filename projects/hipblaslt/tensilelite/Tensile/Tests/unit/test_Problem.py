@@ -25,33 +25,28 @@
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from Tensile.Common.DataType import DataType
+import sys
+from importlib import import_module
 
 
-@pytest.fixture(scope="module")
-def ProblemModule():
-    """Lazy import Problem module to handle import dependencies"""
-    # Import the module, not the class
-    from Tensile.SolutionStructs import Problem
-    # Return a namespace with all the module exports including private ones
-    class ModuleNamespace:
-        def __init__(self):
-            # Import all the items from the module
-            import sys
-            mod = sys.modules['Tensile.SolutionStructs.Problem']
-            for attr in dir(mod):
-                # Include underscore prefixed items for module constants
-                setattr(self, attr, getattr(mod, attr))
-    return ModuleNamespace()
+# Import the Problem.py module directly (not through __init__.py which does from .Problem import *)
+ProblemModule = import_module('Tensile.SolutionStructs.Problem')
+from Tensile.SolutionStructs.Problem import (
+    Problem,
+    ProblemType,
+    ProblemSizesMock,
+    ProblemSizesMockDummy,
+)
 
 
 @pytest.mark.unit
 class TestProblemClass:
     """Tests for Problem class"""
 
-    def test_problem_init_with_sizes(self, ProblemModule):
+    def test_problem_init_with_sizes(self):
         """Test Problem initialization with sizes"""
         sizes = [128, 128, 64]
-        prob = ProblemModule.Problem(sizes=sizes)
+        prob = Problem(sizes=sizes)
 
         assert prob.sizes == tuple(sizes)
         assert prob.stridesA is None
@@ -59,7 +54,7 @@ class TestProblemClass:
         assert prob.stridesC is None
         assert prob.stridesD is None
 
-    def test_problem_init_with_strides(self, ProblemModule):
+    def test_problem_init_with_strides(self):
         """Test Problem initialization with strides"""
         sizes = [128, 128, 64]
         stridesA = [1, 128]
@@ -67,7 +62,7 @@ class TestProblemClass:
         stridesC = [1, 128]
         stridesD = [1, 128]
 
-        prob = ProblemModule.Problem(
+        prob = Problem(
             sizes=sizes,
             stridesA=stridesA,
             stridesB=stridesB,
@@ -81,30 +76,30 @@ class TestProblemClass:
         assert prob.stridesC == tuple(stridesC)
         assert prob.stridesD == tuple(stridesD)
 
-    def test_problem_init_with_count(self, ProblemModule):
+    def test_problem_init_with_count(self):
         """Test Problem initialization with count"""
         sizes = [64, 64, 32]
         count = 10
 
-        prob = ProblemModule.Problem(sizes=sizes, count=count)
+        prob = Problem(sizes=sizes, count=count)
 
         assert prob.count == count
 
-    def test_problem_str(self, ProblemModule):
+    def test_problem_str(self):
         """Test Problem string representation"""
         sizes = [128, 128, 64]
-        prob = ProblemModule.Problem(sizes=sizes)
+        prob = Problem(sizes=sizes)
 
         result = str(prob)
         assert "sizes:" in result
         assert "128" in result
 
-    def test_problem_str_with_strides(self, ProblemModule):
+    def test_problem_str_with_strides(self):
         """Test Problem string representation with strides"""
         sizes = [64, 64, 32]
         stridesA = [1, 64]
 
-        prob = ProblemModule.Problem(sizes=sizes, stridesA=stridesA)
+        prob = Problem(sizes=sizes, stridesA=stridesA)
 
         result = str(prob)
         assert "sizes:" in result
@@ -115,7 +110,7 @@ class TestProblemClass:
 class TestGetRealDataTypeHelpers:
     """Tests for getRealDataTypeA/B helper functions"""
 
-    def test_get_real_data_type_a_regular(self, ProblemModule):
+    def test_get_real_data_type_a_regular(self):
         """Test getRealDataTypeA with regular data type"""
         from rocisa.enum import DataTypeEnum
         dt = DataType(DataTypeEnum.Float)
@@ -123,7 +118,7 @@ class TestGetRealDataTypeHelpers:
         result = ProblemModule.getRealDataTypeA(dt)
         assert result == dt
 
-    def test_get_real_data_type_b_regular(self, ProblemModule):
+    def test_get_real_data_type_b_regular(self):
         """Test getRealDataTypeB with regular data type"""
         from rocisa.enum import DataTypeEnum
         dt = DataType(DataTypeEnum.Float)
@@ -136,29 +131,29 @@ class TestGetRealDataTypeHelpers:
 class TestProblemSizesMock:
     """Tests for ProblemSizesMock adapter class"""
 
-    def test_problem_sizes_mock_basic(self, ProblemModule):
+    def test_problem_sizes_mock_basic(self):
         """Test ProblemSizesMock initialization"""
         exact_logic = [
             ([128, 128, 64], "solution1"),
             ([256, 256, 128], "solution2")
         ]
 
-        mock = ProblemModule.ProblemSizesMock(exact_logic)
+        mock = ProblemSizesMock(exact_logic)
 
         assert len(mock.problems) == 2
-        assert all(isinstance(p, ProblemModule.Problem) for p in mock.problems)
+        assert all(isinstance(p, Problem) for p in mock.problems)
 
 
 @pytest.mark.unit
 class TestProblemSizesMockDummy:
     """Tests for ProblemSizesMockDummy class"""
 
-    def test_problem_sizes_mock_dummy(self, ProblemModule):
+    def test_problem_sizes_mock_dummy(self):
         """Test ProblemSizesMockDummy initialization"""
-        dummy = ProblemModule.ProblemSizesMockDummy()
+        dummy = ProblemSizesMockDummy()
 
         assert len(dummy.problems) == 1
-        assert isinstance(dummy.problems[0], ProblemModule.Problem)
+        assert isinstance(dummy.problems[0], Problem)
         assert dummy.problems[0].sizes == (128, 128, 1, 512)  # It's a tuple, not a list
 
 
@@ -166,7 +161,7 @@ class TestProblemSizesMockDummy:
 class TestGetBiasDataTypeListDefault:
     """Tests for getBiasDataTypeListDefault function"""
 
-    def test_get_bias_data_type_list_default_single(self, ProblemModule):
+    def test_get_bias_data_type_list_default_single(self):
         """Test getBiasDataTypeListDefault with single precision"""
         problem_type = Mock()
         problem_type.__getitem__ = Mock(side_effect=lambda x: DataType('s') if 'DataType' in x or 'ComputeDataType' in x or 'DestDataType' in x else None)
@@ -176,7 +171,7 @@ class TestGetBiasDataTypeListDefault:
         assert isinstance(result, list)
         assert len(result) >= 1
 
-    def test_get_bias_data_type_list_default_filters_small(self, ProblemModule):
+    def test_get_bias_data_type_list_default_filters_small(self):
         """Test that getBiasDataTypeListDefault filters out small types"""
         # Create a problem type with mix of small and large types
         # Int8 has numBytes=1, should be filtered out
@@ -195,26 +190,26 @@ class TestGetBiasDataTypeListDefault:
 class TestProblemTypeValidGEMMTypes:
     """Tests for valid GEMM type lists"""
 
-    def test_valid_gemm_types_exists(self, ProblemModule):
+    def test_valid_gemm_types_exists(self):
         """Test that _validGEMMTypes exists and is populated"""
         assert hasattr(ProblemModule, '_validGEMMTypes')
         assert isinstance(ProblemModule._validGEMMTypes, list)
         assert len(ProblemModule._validGEMMTypes) > 0
 
-    def test_valid_gemm_types_format(self, ProblemModule):
+    def test_valid_gemm_types_format(self):
         """Test _validGEMMTypes format"""
         # Each entry should be a 4-tuple (Ti, To, Tc, Tc)
         for entry in ProblemModule._validGEMMTypes:
             assert isinstance(entry, tuple)
             assert len(entry) == 4
 
-    def test_hpa_types_exists(self, ProblemModule):
+    def test_hpa_types_exists(self):
         """Test that _HPATypes exists"""
         assert hasattr(ProblemModule, '_HPATypes')
         assert isinstance(ProblemModule._HPATypes, list)
         assert len(ProblemModule._HPATypes) > 0
 
-    def test_hpa_types_format(self, ProblemModule):
+    def test_hpa_types_format(self):
         """Test _HPATypes format"""
         for entry in ProblemModule._HPATypes:
             assert isinstance(entry, tuple)
@@ -225,12 +220,12 @@ class TestProblemTypeValidGEMMTypes:
 class TestDefaultProblemType:
     """Tests for _defaultProblemType dictionary"""
 
-    def test_default_problem_type_exists(self, ProblemModule):
+    def test_default_problem_type_exists(self):
         """Test that _defaultProblemType exists"""
         assert hasattr(ProblemModule, '_defaultProblemType')
         assert isinstance(ProblemModule._defaultProblemType, dict)
 
-    def test_default_problem_type_has_required_keys(self, ProblemModule):
+    def test_default_problem_type_has_required_keys(self):
         """Test _defaultProblemType has required keys"""
         required_keys = [
             "OperationType", "DataType", "UseBeta",
@@ -242,21 +237,21 @@ class TestDefaultProblemType:
         for key in required_keys:
             assert key in ProblemModule._defaultProblemType
 
-    def test_default_problem_type_operation_type(self, ProblemModule):
+    def test_default_problem_type_operation_type(self):
         """Test default OperationType"""
         assert ProblemModule._defaultProblemType["OperationType"] == "GEMM"
 
-    def test_default_problem_type_transpose(self, ProblemModule):
+    def test_default_problem_type_transpose(self):
         """Test default transpose settings"""
         assert ProblemModule._defaultProblemType["TransposeA"] == False
         assert ProblemModule._defaultProblemType["TransposeB"] == True
 
-    def test_default_problem_type_index_assignments(self, ProblemModule):
+    def test_default_problem_type_index_assignments(self):
         """Test default index assignments"""
         assert ProblemModule._defaultProblemType["IndexAssignmentsA"] == [0, 2]
         assert ProblemModule._defaultProblemType["IndexAssignmentsB"] == [1, 2]
 
-    def test_default_problem_type_num_indices(self, ProblemModule):
+    def test_default_problem_type_num_indices(self):
         """Test default number of indices"""
         assert ProblemModule._defaultProblemType["NumIndicesC"] == 2
         assert ProblemModule._defaultProblemType["NumIndicesLD"] == 4
@@ -266,7 +261,7 @@ class TestDefaultProblemType:
 class TestProblemTypeEnum:
     """Tests for problemTypeToEnum function"""
 
-    def test_problem_type_to_enum_basic(self, ProblemModule):
+    def test_problem_type_to_enum_basic(self):
         """Test problemTypeToEnum converts data types"""
         problem_type = {
             "DataType": Mock(value=0),
@@ -290,7 +285,7 @@ class TestProblemTypeEnum:
         assert problem_type["MacDataTypeA"] == 0
         assert problem_type["BiasDataTypeList"] == [1, 2]
 
-    def test_problem_type_to_enum_with_metadata(self, ProblemModule):
+    def test_problem_type_to_enum_with_metadata(self):
         """Test problemTypeToEnum with metadata"""
         problem_type = {
             "DataType": Mock(value=0),
@@ -318,7 +313,7 @@ class TestProblemTypeEnum:
 class TestProblemTypeAssignDerivedParameters:
     """Tests for ProblemType.assignDerivedParameters static method"""
 
-    def test_assign_derived_parameters_basic(self, ProblemModule):
+    def test_assign_derived_parameters_basic(self):
         """Test assignDerivedParameters with basic state"""
         state = {
             "IndexAssignmentsA": [0, 2],
@@ -331,7 +326,7 @@ class TestProblemTypeAssignDerivedParameters:
             "Sparse": 0
         }
 
-        ProblemModule.ProblemType.assignDerivedParameters(state, printIndexAssignmentInfo=False)
+        ProblemType.assignDerivedParameters(state, printIndexAssignmentInfo=False)
 
         assert "AssignedDerivedParameters" in state
         assert state["AssignedDerivedParameters"] == True
@@ -340,19 +335,19 @@ class TestProblemTypeAssignDerivedParameters:
         assert "IndicesBatch" in state
         assert "IndicesSummation" in state
 
-    def test_assign_derived_parameters_already_assigned(self, ProblemModule):
+    def test_assign_derived_parameters_already_assigned(self):
         """Test assignDerivedParameters skips if already assigned"""
         state = {
             "AssignedDerivedParameters": True
         }
 
         # Should return early
-        ProblemModule.ProblemType.assignDerivedParameters(state, printIndexAssignmentInfo=False)
+        ProblemType.assignDerivedParameters(state, printIndexAssignmentInfo=False)
 
         # Should not add new keys
         assert "TotalIndices" not in state
 
-    def test_assign_derived_parameters_with_batch(self, ProblemModule):
+    def test_assign_derived_parameters_with_batch(self):
         """Test assignDerivedParameters with batch indices"""
         state = {
             "IndexAssignmentsA": [0, 2, 3],
@@ -365,7 +360,7 @@ class TestProblemTypeAssignDerivedParameters:
             "Sparse": 0
         }
 
-        ProblemModule.ProblemType.assignDerivedParameters(state, printIndexAssignmentInfo=False)
+        ProblemType.assignDerivedParameters(state, printIndexAssignmentInfo=False)
 
         assert len(state["IndicesBatch"]) > 0
 
@@ -374,7 +369,7 @@ class TestProblemTypeAssignDerivedParameters:
 class TestConvertLeadingDims:
     """Tests for ExactList.convertLeadingDims static method"""
 
-    def test_convert_leading_dims_basic(self, ProblemModule):
+    def test_convert_leading_dims_basic(self):
         """Test convertLeadingDims with basic inputs"""
         problem_type = {
             "NumIndicesC": 2,
@@ -389,7 +384,7 @@ class TestConvertLeadingDims:
         assert isinstance(result, tuple)
         assert len(result) > problem_type["NumIndicesC"]
 
-    def test_convert_leading_dims_with_strides(self, ProblemModule):
+    def test_convert_leading_dims_with_strides(self):
         """Test convertLeadingDims with stride information"""
         problem_type = {
             "NumIndicesC": 2,

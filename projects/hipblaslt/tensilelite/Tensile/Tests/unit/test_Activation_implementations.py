@@ -26,25 +26,15 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch
 
 
-@pytest.fixture(scope="module")
-def Activation():
-    """Lazy import Activation module"""
-    import Tensile.Activation as act
-    return act
-
-
-@pytest.fixture(scope="module")
-def DataType():
-    """Lazy import DataType"""
-    from Tensile.Common.DataType import DataType
-    return DataType
+import Tensile.Activation as Activation
+from Tensile.Common.DataType import DataType
 
 
 @pytest.mark.unit
 class TestActivationModuleImplementations:
     """Tests for activation implementation methods with mocking"""
 
-    def test_get_abs_module_single(self, Activation, DataType):
+    def test_get_abs_module_single(self):
         """Test getAbsModule for single precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -56,7 +46,7 @@ class TestActivationModuleImplementations:
         assert result is not None
         assert module.vgprCounter >= 0
 
-    def test_get_abs_module_half(self, Activation, DataType):
+    def test_get_abs_module_half(self):
         """Test getAbsModule for half precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -67,7 +57,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_abs_module_double(self, Activation, DataType):
+    def test_get_abs_module_double(self):
         """Test getAbsModule for double precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -78,7 +68,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_abs_module_int32(self, Activation, DataType):
+    def test_get_abs_module_int32(self):
         """Test getAbsModule for int32"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -90,7 +80,7 @@ class TestActivationModuleImplementations:
         assert result is not None
         assert module.vgprCounter > 0  # Should allocate vgprs
 
-    def test_get_abs_module_int32_saturate(self, Activation, DataType):
+    def test_get_abs_module_int32_saturate(self):
         """Test getAbsModule for int32 with saturation"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -103,7 +93,7 @@ class TestActivationModuleImplementations:
         assert result is not None
         assert module.vgprCounter > 0
 
-    def test_get_abs_module_bfloat16(self, Activation, DataType):
+    def test_get_abs_module_bfloat16(self):
         """Test getAbsModule for bfloat16"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -114,7 +104,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_abs_module_unsupported_raises(self, Activation, DataType):
+    def test_get_abs_module_unsupported_raises(self):
         """Test getAbsModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -124,7 +114,7 @@ class TestActivationModuleImplementations:
         with pytest.raises(RuntimeError):
             module.getAbsModule(dt, 0, 1)
 
-    def test_get_relu_module_single(self, Activation, DataType):
+    def test_get_relu_module_single(self):
         """Test getReluModule for single precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -135,7 +125,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_relu_module_half(self, Activation, DataType):
+    def test_get_relu_module_half(self):
         """Test getReluModule for half precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -146,7 +136,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_relu_module_double(self, Activation, DataType):
+    def test_get_relu_module_double(self):
         """Test getReluModule for double precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -157,7 +147,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_relu_module_int32(self, Activation, DataType):
+    def test_get_relu_module_int32(self):
         """Test getReluModule for int32"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -168,7 +158,7 @@ class TestActivationModuleImplementations:
         # Should return a Module
         assert result is not None
 
-    def test_get_relu_module_int32_saturate(self, Activation, DataType):
+    def test_get_relu_module_int32_saturate(self):
         """Test getReluModule for int32 with saturation"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -181,7 +171,7 @@ class TestActivationModuleImplementations:
         assert result is not None
         assert module.vgprCounter > 0
 
-    def test_get_relu_module_unsupported_raises(self, Activation, DataType):
+    def test_get_relu_module_unsupported_raises(self):
         """Test getReluModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -198,7 +188,7 @@ class TestExpModule:
 
     @pytest.mark.skip(reason="SelectBit not imported in Activation.py - code issue")
     @patch('Tensile.Activation.rocIsa')
-    def test_get_exp_module_half(self, mock_rocisa, Activation, DataType):
+    def test_get_exp_module_half(self, mock_rocisa):
         """Test getExpModule for half precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -216,7 +206,7 @@ class TestExpModule:
         assert module.sgprCounter > 0
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_exp_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_exp_module_single(self, mock_rocisa):
         """Test getExpModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -233,7 +223,7 @@ class TestExpModule:
         assert result is not None
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_exp_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_exp_module_unsupported_raises(self, mock_rocisa):
         """Test getExpModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -248,7 +238,7 @@ class TestExpModule:
 class TestClippedReluModule:
     """Tests for getClippedReluModule"""
 
-    def test_get_clipped_relu_module_single(self, Activation, DataType):
+    def test_get_clipped_relu_module_single(self):
         """Test getClippedReluModule for single precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -260,7 +250,7 @@ class TestClippedReluModule:
         assert result is not None
         assert module.vgprCounter > 0
 
-    def test_get_clipped_relu_module_double(self, Activation, DataType):
+    def test_get_clipped_relu_module_double(self):
         """Test getClippedReluModule for double precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -272,7 +262,7 @@ class TestClippedReluModule:
         assert result is not None
         assert module.vgprCounter > 0
 
-    def test_get_clipped_relu_module_int32(self, Activation, DataType):
+    def test_get_clipped_relu_module_int32(self):
         """Test getClippedReluModule for int32"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -289,7 +279,7 @@ class TestGeluModule:
     """Tests for getGeluModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_gelu_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_gelu_module_single(self, mock_rocisa):
         """Test getGeluModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -308,7 +298,7 @@ class TestGeluModule:
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_gelu_module_with_alpha(self, mock_rocisa, Activation, DataType):
+    def test_get_gelu_module_with_alpha(self, mock_rocisa):
         """Test getGeluModule with activationAlpha"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -325,7 +315,7 @@ class TestGeluModule:
         assert result is not None
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_gelu_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_gelu_module_unsupported_raises(self, mock_rocisa):
         """Test getGeluModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -340,7 +330,7 @@ class TestGeluModule:
 class TestLeakyReluModule:
     """Tests for getLeakyReluModule"""
 
-    def test_get_leaky_relu_module_single(self, Activation, DataType):
+    def test_get_leaky_relu_module_single(self):
         """Test getLeakyReluModule for single precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -352,7 +342,7 @@ class TestLeakyReluModule:
         assert result is not None
         assert module.vgprCounter > 0
 
-    def test_get_leaky_relu_module_double(self, Activation, DataType):
+    def test_get_leaky_relu_module_double(self):
         """Test getLeakyReluModule for double precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -363,7 +353,7 @@ class TestLeakyReluModule:
         # Should return a Module
         assert result is not None
 
-    def test_get_leaky_relu_module_int32(self, Activation, DataType):
+    def test_get_leaky_relu_module_int32(self):
         """Test getLeakyReluModule for int32"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -374,7 +364,7 @@ class TestLeakyReluModule:
         # Should return a Module
         assert result is not None
 
-    def test_get_leaky_relu_module_unsupported_raises(self, Activation, DataType):
+    def test_get_leaky_relu_module_unsupported_raises(self):
         """Test getLeakyReluModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -390,7 +380,7 @@ class TestSigmoidModule:
     """Tests for getSigmoidModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_sigmoid_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_sigmoid_module_single(self, mock_rocisa):
         """Test getSigmoidModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -408,7 +398,7 @@ class TestSigmoidModule:
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_sigmoid_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_sigmoid_module_unsupported_raises(self, mock_rocisa):
         """Test getSigmoidModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -424,7 +414,7 @@ class TestTanhModule:
     """Tests for getTanhModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_tanh_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_tanh_module_single(self, mock_rocisa):
         """Test getTanhModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -442,7 +432,7 @@ class TestTanhModule:
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_tanh_module_no_alpha_beta(self, mock_rocisa, Activation, DataType):
+    def test_get_tanh_module_no_alpha_beta(self, mock_rocisa):
         """Test getTanhModule without alpha/beta"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -459,7 +449,7 @@ class TestTanhModule:
         assert result is not None
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_tanh_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_tanh_module_unsupported_raises(self, mock_rocisa):
         """Test getTanhModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -475,7 +465,7 @@ class TestDGeluModule:
     """Tests for getDGeluModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_dgelu_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_dgelu_module_single(self, mock_rocisa):
         """Test getDGeluModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -495,7 +485,7 @@ class TestDGeluModule:
         assert module.sgprCounter > 0
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_dgelu_module_with_alt(self, mock_rocisa, Activation, DataType):
+    def test_get_dgelu_module_with_alt(self, mock_rocisa):
         """Test getDGeluModule with isAlt flag"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -513,7 +503,7 @@ class TestDGeluModule:
         assert result is not None
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_dgelu_module_with_guard(self, mock_rocisa, Activation, DataType):
+    def test_get_dgelu_module_with_guard(self, mock_rocisa):
         """Test getDGeluModule with enableGuard flag"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -532,7 +522,7 @@ class TestDGeluModule:
         assert result is not None
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_dgelu_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_dgelu_module_unsupported_raises(self, mock_rocisa):
         """Test getDGeluModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -548,7 +538,7 @@ class TestDReluModule:
     """Tests for getDReluModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_drelu_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_drelu_module_single(self, mock_rocisa):
         """Test getDReluModule for single precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -561,7 +551,7 @@ class TestDReluModule:
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_drelu_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_drelu_module_unsupported_raises(self, mock_rocisa):
         """Test getDReluModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -577,7 +567,7 @@ class TestSiluModule:
     """Tests for getSiluModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_silu_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_silu_module_single(self, mock_rocisa):
         """Test getSiluModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -596,7 +586,7 @@ class TestSiluModule:
 
     @pytest.mark.skip(reason="SelectBit not imported in Activation.py - code issue")
     @patch('Tensile.Activation.rocIsa')
-    def test_get_silu_module_half(self, mock_rocisa, Activation, DataType):
+    def test_get_silu_module_half(self, mock_rocisa):
         """Test getSiluModule for half precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -613,7 +603,7 @@ class TestSiluModule:
         assert result is not None
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_silu_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_silu_module_unsupported_raises(self, mock_rocisa):
         """Test getSiluModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -629,7 +619,7 @@ class TestSwishModule:
     """Tests for getSwishModule"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_swish_module_single(self, mock_rocisa, Activation, DataType):
+    def test_get_swish_module_single(self, mock_rocisa):
         """Test getSwishModule for single precision"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -647,7 +637,7 @@ class TestSwishModule:
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_swish_module_unsupported_raises(self, mock_rocisa, Activation, DataType):
+    def test_get_swish_module_unsupported_raises(self, mock_rocisa):
         """Test getSwishModule raises for unsupported type"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -662,7 +652,7 @@ class TestSwishModule:
 class TestClampModule:
     """Tests for getClampModule"""
 
-    def test_get_clamp_module_single(self, Activation, DataType):
+    def test_get_clamp_module_single(self):
         """Test getClampModule for single precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -673,7 +663,7 @@ class TestClampModule:
         # Should return a Module
         assert result is not None
 
-    def test_get_clamp_module_double(self, Activation, DataType):
+    def test_get_clamp_module_double(self):
         """Test getClampModule for double precision"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -684,7 +674,7 @@ class TestClampModule:
         # Should return a Module
         assert result is not None
 
-    def test_get_clamp_module_int32(self, Activation, DataType):
+    def test_get_clamp_module_int32(self):
         """Test getClampModule for int32"""
         ActivationModule = Activation.ActivationModule
         module = ActivationModule()
@@ -701,7 +691,7 @@ class TestGetAllGprUsage:
     """Tests for getAllGprUsage method"""
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_all_gpr_usage_single_activation(self, mock_rocisa, Activation, DataType):
+    def test_get_all_gpr_usage_single_activation(self, mock_rocisa):
         """Test getAllGprUsage for single activation"""
         # Mock rocIsa
         mock_instance = Mock()
@@ -721,7 +711,7 @@ class TestGetAllGprUsage:
         assert 'sgpr' in usage['relu']
 
     @patch('Tensile.Activation.rocIsa')
-    def test_get_all_gpr_usage_all_activations(self, mock_rocisa, Activation, DataType):
+    def test_get_all_gpr_usage_all_activations(self, mock_rocisa):
         """Test getAllGprUsage for 'all' activations"""
         # Mock rocIsa
         mock_instance = Mock()

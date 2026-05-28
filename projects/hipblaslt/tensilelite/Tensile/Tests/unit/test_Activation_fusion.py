@@ -39,139 +39,185 @@ def Activation():
 class TestFindUseFunction:
     """Tests for FindUse and FindUseIter functions"""
 
-    def test_find_use_exists(self, Activation):
-        """Test that FindUse function exists"""
-        assert hasattr(Activation, 'FindUse')
-
-    def test_find_use_iter_exists(self, Activation):
-        """Test that FindUseIter function exists"""
-        assert hasattr(Activation, 'FindUseIter')
-
-    def test_find_use_iter_with_module(self, Activation):
-        """Test FindUseIter starting with Module"""
+    def test_find_use_iter_empty_module(self, Activation):
+        """Test FindUseIter with empty module returns False"""
+        from rocisa.container import vgpr
         FindUseIter = Activation.FindUseIter
 
         module = Module("test")
         target_inst = Mock(spec=Instruction)
-        var_target = Mock()
+        var_target = vgpr(0)
 
-        # Call with module
         isEnd, isUse = FindUseIter(module, target_inst, var_target)
 
-        # Should return False when module is empty
+        # Empty module should return False for both
         assert isEnd == False
         assert isUse == False
 
-    def test_find_use_iter_basic_call(self, Activation):
-        """Test FindUseIter can be called"""
+    def test_find_use_iter_finds_usage_in_srcs(self, Activation):
+        """Test FindUseIter detects variable usage in instruction sources"""
+        from rocisa.container import vgpr
+        from rocisa.instruction import VAddF32
         FindUseIter = Activation.FindUseIter
 
         module = Module("test")
-        target_inst = Mock(spec=Instruction)
-        var_target = Mock()
+        var_target = vgpr(0)
+        var_other = vgpr(1)
 
-        # Call with empty module
+        # Create instruction that uses var_target in srcs
+        inst = VAddF32(dst=var_other, src0=var_target, src1=vgpr(2))
+        module.add(inst)
+
+        target_inst = Mock(spec=Instruction)
+
         isEnd, isUse = FindUseIter(module, target_inst, var_target)
 
-        # Should return booleans
-        assert isinstance(isEnd, bool)
-        assert isinstance(isUse, bool)
+        # Should find the variable used in sources
+        assert isEnd == True
+        assert isUse == True
+
+    def test_find_use_iter_does_not_find_dst_when_srcs_exist(self, Activation):
+        """Test FindUseIter only checks dst when instruction has no srcs"""
+        from rocisa.container import vgpr
+        from rocisa.instruction import VAddF32
+        FindUseIter = Activation.FindUseIter
+
+        module = Module("test")
+        var_target = vgpr(0)
+
+        # Create instruction that assigns to var_target but has srcs
+        # FindUseIter only checks dst when srcs is falsy, so this won't be detected
+        inst = VAddF32(dst=var_target, src0=vgpr(1), src1=vgpr(2))
+        module.add(inst)
+
+        target_inst = Mock(spec=Instruction)
+
+        isEnd, isUse = FindUseIter(module, target_inst, var_target)
+
+        # Should NOT find the assignment because instruction has srcs
+        assert isEnd == False
+        assert isUse == False
 
     def test_find_use_wrapper(self, Activation):
-        """Test FindUse wrapper function"""
+        """Test FindUse wrapper returns only isUse value"""
+        from rocisa.container import vgpr
+        from rocisa.instruction import VAddF32
         FindUse = Activation.FindUse
 
         module = Module("test")
-        target_inst = Mock(spec=Instruction)
-        var_target = Mock()
+        var_target = vgpr(0)
 
-        # Call wrapper
+        # Create instruction that uses var_target
+        inst = VAddF32(dst=vgpr(1), src0=var_target, src1=vgpr(2))
+        module.add(inst)
+
+        target_inst = Mock(spec=Instruction)
+
         isUse = FindUse(module, target_inst, var_target)
 
-        # Should return boolean
-        assert isinstance(isUse, bool)
+        # Should return True for usage
+        assert isUse == True
 
 
 @pytest.mark.unit
 class TestFindAssignAndUseFunction:
     """Tests for FindAssignAndUse and FindAssignAndUseIter functions"""
 
-    def test_find_assign_and_use_exists(self, Activation):
-        """Test that FindAssignAndUse function exists"""
-        assert hasattr(Activation, 'FindAssignAndUse')
-
-    def test_find_assign_and_use_iter_exists(self, Activation):
-        """Test that FindAssignAndUseIter function exists"""
-        assert hasattr(Activation, 'FindAssignAndUseIter')
-
-    def test_find_assign_and_use_iter_with_module(self, Activation):
-        """Test FindAssignAndUseIter starting with Module"""
+    def test_find_assign_and_use_iter_empty_module(self, Activation):
+        """Test FindAssignAndUseIter with empty module returns False"""
+        from rocisa.container import vgpr
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
         end_inst = Mock(spec=Instruction)
-        assign_var = Mock()
-        use_var = Mock()
+        assign_var = vgpr(0)
+        use_var = vgpr(1)
 
-        # Call with module
         isEnd, isUse = FindAssignAndUseIter(module, end_inst, assign_var, use_var)
 
-        # Should return False when module is empty
+        # Empty module should return False for both
         assert isEnd == False
         assert isUse == False
 
-    def test_find_assign_and_use_iter_empty(self, Activation):
-        """Test FindAssignAndUseIter with empty module"""
+    def test_find_assign_and_use_iter_finds_assignment(self, Activation):
+        """Test FindAssignAndUseIter detects assignment to assignVar"""
+        from rocisa.container import vgpr
+        from rocisa.instruction import VAddF32
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
-        end_inst = Mock(spec=Instruction)
-        assign_var = Mock()
-        use_var = Mock()
+        assign_var = vgpr(0)
+        use_var = vgpr(1)
 
-        # Empty module returns False
+        # Create instruction that assigns to assign_var
+        inst = VAddF32(dst=assign_var, src0=vgpr(2), src1=vgpr(3))
+        module.add(inst)
+
+        end_inst = Mock(spec=Instruction)
+
         isEnd, isUse = FindAssignAndUseIter(module, end_inst, assign_var, use_var)
 
-        assert isinstance(isEnd, bool)
-        assert isinstance(isUse, bool)
+        # Should detect assignment
+        assert isEnd == True
+        assert isUse == True
 
-    def test_find_assign_and_use_iter_basic(self, Activation):
-        """Test FindAssignAndUseIter with basic module"""
+    def test_find_assign_and_use_iter_finds_use(self, Activation):
+        """Test FindAssignAndUseIter detects usage of useVar"""
+        from rocisa.container import vgpr
+        from rocisa.instruction import VAddF32
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
-        end_inst = Mock(spec=Instruction)
-        assign_var = Mock()
-        use_var = Mock()
+        assign_var = vgpr(0)
+        use_var = vgpr(1)
 
-        # Empty module should return False
+        # Create instruction that uses use_var in sources
+        inst = VAddF32(dst=vgpr(2), src0=use_var, src1=vgpr(3))
+        module.add(inst)
+
+        end_inst = Mock(spec=Instruction)
+
         isEnd, isUse = FindAssignAndUseIter(module, end_inst, assign_var, use_var)
-        assert isinstance(isEnd, bool)
-        assert isinstance(isUse, bool)
+
+        # Should detect usage
+        assert isEnd == True
+        assert isUse == True
+
+    def test_find_assign_and_use_iter_stops_at_end_inst(self, Activation):
+        """Test FindAssignAndUseIter stops when encountering endInst"""
+        from rocisa.container import vgpr
+        from rocisa.instruction import VAddF32
+        FindAssignAndUseIter = Activation.FindAssignAndUseIter
+
+        module = Module("test")
+        assign_var = vgpr(0)
+        use_var = vgpr(1)
+
+        # Create end instruction
+        end_inst = VAddF32(dst=vgpr(2), src0=vgpr(3), src1=vgpr(4))
+        module.add(end_inst)
+
+        # Add another instruction after (should not be checked)
+        inst_after = VAddF32(dst=assign_var, src0=vgpr(5), src1=vgpr(6))
+        module.add(inst_after)
+
+        isEnd, isUse = FindAssignAndUseIter(module, end_inst, assign_var, use_var)
+
+        # Should stop at end_inst without finding assignment
+        assert isEnd == True
+        assert isUse == False
 
 
 @pytest.mark.unit
 class TestReplaceAndRemoveInstFunctions:
     """Tests for replaceInst and removeOldInst helper functions"""
 
-    def test_replace_inst_exists(self, Activation):
-        """Test that replaceInst function exists"""
-        if hasattr(Activation, 'replaceInst'):
-            assert callable(Activation.replaceInst)
-
-    def test_remove_old_inst_exists(self, Activation):
-        """Test that removeOldInst function exists"""
-        if hasattr(Activation, 'removeOldInst'):
-            assert callable(Activation.removeOldInst)
+    # These functions are internal helpers - no need to test existence
 
 
 @pytest.mark.unit
 class TestConvertCoeffToHex:
     """Tests for ConvertCoeffToHex function"""
-
-    def test_convert_coeff_to_hex_exists(self, Activation):
-        """Test that ConvertCoeffToHex function exists"""
-        assert hasattr(Activation, 'ConvertCoeffToHex')
 
     def test_convert_coeff_to_hex_basic(self, Activation):
         """Test ConvertCoeffToHex with basic module"""
@@ -199,10 +245,6 @@ class TestConvertCoeffToHex:
 class TestHexToStr:
     """Tests for HexToStr function"""
 
-    def test_hex_to_str_exists(self, Activation):
-        """Test that HexToStr function exists"""
-        assert hasattr(Activation, 'HexToStr')
-
     def test_hex_to_str_basic(self, Activation):
         """Test HexToStr with basic input"""
         from Tensile.Common.DataType import DataType
@@ -220,10 +262,6 @@ class TestHexToStr:
 class TestHolderToGpr:
     """Tests for HolderToGpr function"""
 
-    def test_holder_to_gpr_exists(self, Activation):
-        """Test that HolderToGpr function exists"""
-        assert hasattr(Activation, 'HolderToGpr')
-
     def test_holder_to_gpr_basic(self, Activation):
         """Test HolderToGpr with basic module"""
         HolderToGpr = Activation.HolderToGpr
@@ -238,10 +276,6 @@ class TestHolderToGpr:
 @pytest.mark.unit
 class TestCreateVgprIdxList:
     """Tests for createVgprIdxList function"""
-
-    def test_create_vgpr_idx_list_exists(self, Activation):
-        """Test that createVgprIdxList function exists"""
-        assert hasattr(Activation, 'createVgprIdxList')
 
     def test_create_vgpr_idx_list_basic(self, Activation):
         """Test createVgprIdxList with basic module"""
@@ -342,13 +376,6 @@ class TestActivationMagicNumbersUsage:
 @pytest.mark.unit
 class TestActivationLookupVeri:
     """Tests for ActivationType.lookupVeri dictionary"""
-
-    def test_lookup_veri_exists(self, Activation):
-        """Test that lookupVeri exists"""
-        ActivationType = Activation.ActivationType
-
-        assert hasattr(ActivationType, 'lookupVeri')
-        assert isinstance(ActivationType.lookupVeri, dict)
 
     def test_lookup_veri_contains_exp(self, Activation):
         """Test that lookupVeri contains 'exp'"""

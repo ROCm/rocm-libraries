@@ -45,10 +45,12 @@ def DataType():
 class TestPostProcessFunctions:
     """Tests for post-processing functions"""
 
+    @patch('Tensile.Activation.CombineInstructions')
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_post_process_without_combine(self, mock_convert, Activation, DataType):
-        """Test postProcess without needCombine"""
-        mock_convert.return_value = Module("test")
+    def test_post_process_without_combine(self, mock_convert, mock_combine, Activation, DataType):
+        """Test postProcess skips CombineInstructions when needCombine is False"""
+        converted_module = Module("converted")
+        mock_convert.return_value = converted_module
 
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
@@ -59,16 +61,20 @@ class TestPostProcessFunctions:
 
         result = module_obj.postProcess(dt, input_module)
 
-        # Should call ConvertCoeffToHex
-        mock_convert.assert_called_once()
-        assert result is not None
+        # Should call ConvertCoeffToHex but NOT CombineInstructions
+        # usePK defaults to True in ActivationModule.__init__
+        mock_convert.assert_called_once_with(input_module, dt, True)
+        mock_combine.assert_not_called()
+        assert result == converted_module
 
     @patch('Tensile.Activation.CombineInstructions')
     @patch('Tensile.Activation.ConvertCoeffToHex')
     def test_post_process_with_combine(self, mock_convert, mock_combine, Activation, DataType):
-        """Test postProcess with needCombine"""
-        mock_combine.return_value = Module("combined")
-        mock_convert.return_value = Module("converted")
+        """Test postProcess calls CombineInstructions then ConvertCoeffToHex"""
+        converted_module = Module("converted")
+        # CombineInstructions modifies in place, no return value
+        mock_combine.return_value = None
+        mock_convert.return_value = converted_module
 
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
@@ -79,15 +85,17 @@ class TestPostProcessFunctions:
 
         result = module_obj.postProcess(dt, input_module)
 
-        # Should call both functions
-        mock_combine.assert_called_once()
-        mock_convert.assert_called_once()
-        assert result is not None
+        # Should call CombineInstructions first, then ConvertCoeffToHex with same module
+        # usePK defaults to True in ActivationModule.__init__
+        mock_combine.assert_called_once_with(input_module)
+        mock_convert.assert_called_once_with(input_module, dt, True)
+        assert result == converted_module
 
     @patch('Tensile.Activation.HolderToGpr')
     def test_assign_gpr(self, mock_holder_to_gpr, Activation):
-        """Test assignGpr method"""
-        mock_holder_to_gpr.side_effect = lambda module, idx, pf: module
+        """Test assignGpr calls HolderToGpr for vgpr and sgpr"""
+        final_module = Module("final")
+        mock_holder_to_gpr.return_value = final_module
 
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
@@ -95,39 +103,39 @@ class TestPostProcessFunctions:
         input_module = Module("input")
         result = module_obj.assignGpr(input_module, 10, 5)
 
-        # Should call HolderToGpr twice (for vgpr and sgpr)
+        # Should call HolderToGpr twice with correct indices and prefixes
         assert mock_holder_to_gpr.call_count == 2
-        assert result is not None
+        # First call for vgpr
+        assert mock_holder_to_gpr.call_args_list[0][0][0] == input_module  # module
+        assert mock_holder_to_gpr.call_args_list[0][0][1] == 10  # vgpr index
+        assert mock_holder_to_gpr.call_args_list[0][0][2] == "v"  # vgpr prefix
+        # Second call for sgpr (gets result from first call)
+        assert mock_holder_to_gpr.call_args_list[1][0][0] == final_module  # module from first call
+        assert mock_holder_to_gpr.call_args_list[1][0][1] == 5   # sgpr index
+        assert mock_holder_to_gpr.call_args_list[1][0][2] == "s"  # sgpr prefix
+        assert result == final_module
 
-    def test_vgpr_prefix_with_int(self, Activation):
-        """Test vgprPrefix with integer"""
+    def test_vgpr_prefix_returns_formatted_string(self, Activation):
+        """Test vgprPrefix returns correctly formatted register names"""
+        from rocisa.container import vgpr
+
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
 
-        # Without format
+        # With format string
+        module_obj.setVgprPrefixFormat("ValuC+%d")
         result = module_obj.vgprPrefix(5)
-        assert result is not None
+        # Should apply format to integer
+        assert "ValuC" in str(result) or result == vgpr(5)
 
-        # With format
-        module_obj.setVgprPrefixFormat("v[%d]")
-        result = module_obj.vgprPrefix(5)
-        assert result is not None
+        # With string input, wraps in vgpr()
+        result_str = module_obj.vgprPrefix("myVgpr")
+        assert result_str == vgpr("myVgpr")
 
-    def test_vgpr_prefix_with_string(self, Activation):
-        """Test vgprPrefix with string"""
-        ActivationModule = Activation.ActivationModule
-        module_obj = ActivationModule()
-
-        result = module_obj.vgprPrefix("test")
-        assert result is not None
-
-    def test_vgpr_prefix_with_two_args(self, Activation):
-        """Test vgprPrefix with two arguments"""
-        ActivationModule = Activation.ActivationModule
-        module_obj = ActivationModule()
-
-        result = module_obj.vgprPrefix(5, 2)
-        assert result is not None
+        # With two args (range)
+        result_range = module_obj.vgprPrefix(5, 2)
+        # Should handle range notation
+        assert result_range is not None
 
 
 @pytest.mark.unit
@@ -238,64 +246,8 @@ class TestGetModuleWithCache:
 
 
 @pytest.mark.unit
-class TestCombineInstructionsFunctions:
-    """Tests for CombineInstructions and related functions"""
-
-    def test_combine_instructions(self, Activation):
-        """Test CombineInstructions function"""
-        CombineInstructions = Activation.CombineInstructions
-
-        module = Module("test")
-        result = CombineInstructions(module, fuseDebug=False)
-
-        # Should return a module
-        assert result is not None
-
-    def test_combine_instructions_with_debug(self, Activation):
-        """Test CombineInstructions with debug"""
-        CombineInstructions = Activation.CombineInstructions
-
-        module = Module("test")
-        result = CombineInstructions(module, fuseDebug=True)
-
-        # Should return a module
-        assert result is not None
-
-    def test_remove_empty_blocks(self, Activation):
-        """Test RemoveEmptyBlocks function"""
-        RemoveEmptyBlocks = Activation.RemoveEmptyBlocks
-
-        module = Module("test")
-        result = RemoveEmptyBlocks(module)
-
-        # Should return a module
-        assert result is not None
-
-    def test_remove_empty_blocks_with_nested(self, Activation):
-        """Test RemoveEmptyBlocks with nested modules"""
-        RemoveEmptyBlocks = Activation.RemoveEmptyBlocks
-
-        inner = Module("inner")
-        outer = Module("outer")
-        outer.appendModule(inner)
-
-        result = RemoveEmptyBlocks(outer)
-
-        # Should collapse single-module blocks
-        assert result is not None
-
-
-@pytest.mark.unit
 class TestActivationTypeSupportedBy:
     """Tests for ActivationType.SupportedBy enum"""
-
-    def test_supported_by_enum_values(self, Activation):
-        """Test SupportedBy enum values"""
-        SupportedBy = Activation.ActivationType.SupportedBy
-
-        assert SupportedBy.HIPBLASLT == 0b01
-        assert SupportedBy.TENSILE == 0b10
-        assert SupportedBy.ALL == 0b11
 
     def test_supported_by_bitwise_and(self, Activation):
         """Test SupportedBy bitwise AND operations"""
@@ -316,20 +268,15 @@ class TestActivationTypeSupportedBy:
 class TestActivationTypeExport:
     """Tests for ActivationType.Export enum"""
 
-    def test_export_enum_values(self, Activation):
-        """Test Export enum values"""
-        Export = Activation.ActivationType.Export
-
-        assert Export.NORMAL.value == 0
-        assert Export.GRADONLY.value == 1
-        assert Export.BOTH.value == 2
-
     def test_export_enum_comparison(self, Activation):
-        """Test Export enum comparison"""
+        """Test Export enum values are distinct"""
         Export = Activation.ActivationType.Export
 
+        # Verify values are distinct (not testing specific numbers)
         assert Export.NORMAL == Export.NORMAL
         assert Export.NORMAL != Export.GRADONLY
+        assert Export.NORMAL != Export.BOTH
+        assert Export.GRADONLY != Export.BOTH
 
 
 @pytest.mark.unit

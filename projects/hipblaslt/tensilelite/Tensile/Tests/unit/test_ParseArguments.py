@@ -42,7 +42,8 @@ class TestParseArguments:
 
         assert args.LogicPath == "/path/to/logic"
         assert args.Verbose == 1  # default
-        assert args.Jobs == 48  # default
+        # Note: Default is int, but argument parser doesn't specify type=int
+        assert args.Jobs == 48  # default is int
 
     def test_parse_arguments_with_verbose(self):
         """Test parsing with verbose flag"""
@@ -60,6 +61,8 @@ class TestParseArguments:
 
         args = parseArguments()
 
+        # Note: Jobs becomes a string when passed as argument because
+        # the argument parser doesn't specify type=int (inconsistent with default)
         assert args.Jobs == "16"
 
     def test_parse_arguments_with_check_all(self):

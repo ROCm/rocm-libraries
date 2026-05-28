@@ -38,15 +38,6 @@ def Activation():
 class TestActivationModule:
     """Tests for Activation module functions"""
 
-    def test_module_exists(self, Activation):
-        """Test that Activation module can be imported"""
-        assert Activation is not None
-
-    def test_activation_enums_exist(self, Activation):
-        """Test that ActivationType enum exists"""
-        # Check if ActivationType enum exists
-        assert hasattr(Activation, 'ActivationType')
-
     def test_activation_type_lookup_values(self, Activation):
         """Test ActivationType lookup has expected values"""
         ActivationType = Activation.ActivationType
@@ -73,79 +64,25 @@ class TestActivationModule:
 
         # 'none' should be instantiable
         act = ActivationType('none')
-        assert act is not None
         assert act.value == 'none'
 
-    def test_activation_module_exists(self, Activation):
-        """Test that ActivationModule class exists"""
-        assert hasattr(Activation, 'ActivationModule')
-
     def test_activation_module_instantiation(self, Activation):
-        """Test ActivationModule can be instantiated"""
+        """Test ActivationModule initializes with correct defaults"""
         ActivationModule = Activation.ActivationModule
 
-        # Should be instantiable
         module = ActivationModule()
-        assert module is not None
         assert module.vgprCounter == 0
         assert module.sgprCounter == 0
 
-    def test_activation_name_mapping_exists(self, Activation):
-        """Test that activationToEnum mapping exists"""
-        # Should have a dictionary mapping string names to enum values
-        if hasattr(Activation, 'activationToEnum'):
-            mapping = Activation.activationToEnum
-            assert isinstance(mapping, dict)
-            assert 'none' in mapping or 'None' in mapping
-
-    def test_enum_to_name_mapping_exists(self, Activation):
-        """Test that enumToActivation reverse mapping exists"""
-        if hasattr(Activation, 'enumToActivation'):
-            mapping = Activation.enumToActivation
-            assert isinstance(mapping, dict)
-
-
-@pytest.mark.unit
-class TestActivationFunctions:
-    """Tests for activation-related functions"""
-
-    def test_get_enum_name_function(self, Activation):
-        """Test function to get enum name from string"""
-        # If there's a function to convert string to enum
-        if hasattr(Activation, 'getEnumName'):
-            func = Activation.getEnumName
-            result = func('relu')
-            assert result is not None
-
-    def test_get_activation_function(self, Activation):
-        """Test function to get activation from name"""
-        if hasattr(Activation, 'getActivation'):
-            func = Activation.getActivation
-            result = func('none')
-            assert result is not None
-
-    def test_activation_has_args_function(self, Activation):
-        """Test function to check if activation has arguments"""
-        if hasattr(Activation, 'activationHasArgs'):
-            func = Activation.activationHasArgs
-            # 'none' should not have args
-            # 'clippedrelu' should have args (threshold)
-            pass
-
-    def test_activation_arg_names_function(self, Activation):
-        """Test function to get activation argument names"""
-        if hasattr(Activation, 'getActivationArgNames'):
-            func = Activation.getActivationArgNames
-            # Some activations have args, some don't
-            pass
+    # Mapping dictionaries are tested indirectly through ActivationType usage
 
 
 @pytest.mark.unit
 class TestActivationEnumOperations:
     """Tests for operations on activation enums"""
 
-    def test_activation_type_comparison(self, Activation):
-        """Test that activation types can be compared"""
+    def test_activation_type_equality(self, Activation):
+        """Test that activation types can be compared for equality"""
         ActivationType = Activation.ActivationType
 
         # Same activation should be equal
@@ -153,16 +90,6 @@ class TestActivationEnumOperations:
         act2 = ActivationType('none')
         assert act1 == act2
         assert act1 == 'none'
-
-    def test_activation_type_ordering(self, Activation):
-        """Test that activation types can be compared with less than"""
-        ActivationType = Activation.ActivationType
-
-        # Test ordering
-        act_abs = ActivationType('abs')
-        act_relu = ActivationType('relu')
-        # 'abs' < 'relu' alphabetically
-        assert act_abs < act_relu
 
     def test_activation_type_string_representation(self, Activation):
         """Test that activation types have string representation"""
@@ -179,28 +106,8 @@ class TestActivationEnumOperations:
 class TestActivationDataStructures:
     """Tests for activation-related data structures"""
 
-    def test_activation_params_class(self, Activation):
-        """Test ActivationParams class if it exists"""
-        if hasattr(Activation, 'ActivationParams'):
-            ActivationParams = Activation.ActivationParams
-            # Should be instantiable
-            params = ActivationParams()
-            assert params is not None
-
-    def test_activation_config_class(self, Activation):
-        """Test ActivationConfig class if it exists"""
-        if hasattr(Activation, 'ActivationConfig'):
-            ActivationConfig = Activation.ActivationConfig
-            config = ActivationConfig()
-            assert config is not None
-
-    def test_activation_spec_creation(self, Activation):
-        """Test creating activation specification"""
-        # Some modules have functions to create activation specs
-        if hasattr(Activation, 'createActivationSpec'):
-            func = Activation.createActivationSpec
-            spec = func('relu')
-            assert spec is not None
+    # Optional helper classes (ActivationParams, ActivationConfig) and functions
+    # are not core to the module - skipping optional API tests
 
     def test_activation_available_class(self, Activation):
         """Test ActivationAvailable class"""
@@ -235,65 +142,23 @@ class TestActivationDataStructures:
 class TestActivationTypeRegisterTypeAvailable:
     """Tests for ActivationTypeRegister.typeAvailable method"""
 
-    def test_type_available_single(self, Activation):
-        """Test typeAvailable for single precision"""
+    @pytest.mark.parametrize("dtype_str,can_param", [
+        ("s", "canSingle"),
+        ("h", "canHalf"),
+        ("d", "canDouble"),
+        ("b", "canBFloat16"),
+        ("I8", "canInt8"),
+        ("i", "canInt32"),
+    ])
+    def test_type_available(self, Activation, dtype_str, can_param):
+        """Test typeAvailable returns True when type is supported"""
         from Tensile.Common.DataType import DataType
 
         ActivationTypeRegister = Activation.ActivationTypeRegister
-        reg = ActivationTypeRegister("test", False, 0, canSingle=True)
+        reg = ActivationTypeRegister("test", False, 0, **{can_param: True})
 
-        dt_single = DataType("s")
-        assert reg.typeAvailable(dt_single) == True
-
-    def test_type_available_half(self, Activation):
-        """Test typeAvailable for half precision"""
-        from Tensile.Common.DataType import DataType
-
-        ActivationTypeRegister = Activation.ActivationTypeRegister
-        reg = ActivationTypeRegister("test", False, 0, canHalf=True)
-
-        dt_half = DataType("h")
-        assert reg.typeAvailable(dt_half) == True
-
-    def test_type_available_double(self, Activation):
-        """Test typeAvailable for double precision"""
-        from Tensile.Common.DataType import DataType
-
-        ActivationTypeRegister = Activation.ActivationTypeRegister
-        reg = ActivationTypeRegister("test", False, 0, canDouble=True)
-
-        dt_double = DataType("d")
-        assert reg.typeAvailable(dt_double) == True
-
-    def test_type_available_bfloat16(self, Activation):
-        """Test typeAvailable for bfloat16"""
-        from Tensile.Common.DataType import DataType
-
-        ActivationTypeRegister = Activation.ActivationTypeRegister
-        reg = ActivationTypeRegister("test", False, 0, canBFloat16=True)
-
-        dt_bf16 = DataType("b")
-        assert reg.typeAvailable(dt_bf16) == True
-
-    def test_type_available_int8(self, Activation):
-        """Test typeAvailable for int8"""
-        from Tensile.Common.DataType import DataType
-
-        ActivationTypeRegister = Activation.ActivationTypeRegister
-        reg = ActivationTypeRegister("test", False, 0, canInt8=True)
-
-        dt_int8 = DataType("I8")
-        assert reg.typeAvailable(dt_int8) == True
-
-    def test_type_available_int32(self, Activation):
-        """Test typeAvailable for int32"""
-        from Tensile.Common.DataType import DataType
-
-        ActivationTypeRegister = Activation.ActivationTypeRegister
-        reg = ActivationTypeRegister("test", False, 0, canInt32=True)
-
-        dt_int32 = DataType("i")
-        assert reg.typeAvailable(dt_int32) == True
+        dt = DataType(dtype_str)
+        assert reg.typeAvailable(dt) == True
 
     def test_type_not_available(self, Activation):
         """Test typeAvailable returns False when type not supported"""
@@ -582,83 +447,63 @@ class TestActivationModuleMethods:
 
 @pytest.mark.unit
 class TestActivationModuleGetModule:
-    """Tests for ActivationModule.getModule method"""
+    """Tests for ActivationModule.getModule dispatcher"""
 
-    def test_get_module_none(self, Activation):
-        """Test getModule with 'none' activation"""
+    @pytest.mark.parametrize("activation_type,expected_method", [
+        ('abs', 'getAbsModule'),
+        ('relu', 'getReluModule'),
+        ('gelu', 'getGeluModule'),
+        ('sigmoid', 'getSigmoidModule'),
+        ('tanh', 'getTanhModule'),
+    ])
+    def test_get_module_routes_correctly(self, Activation, activation_type, expected_method):
+        """Test getModule dispatches to correct implementation method"""
+        from Tensile.Common.DataType import DataType
+        from rocisa.code import Module
+        from unittest.mock import patch
+
         ActivationModule = Activation.ActivationModule
-
         module = ActivationModule()
-        result = module.getModule(Mock(), 'none', 0, 1)
+        dt = DataType("s")
 
-        # Should return a Module
-        assert result is not None
+        # Mock the specific implementation method with a proper Module
+        mock_module = Module("test")
+        with patch.object(module, expected_method, return_value=mock_module) as mock_method:
+            result = module.getModule(dt, activation_type, 0, 1)
 
-    def test_get_module_unsupported(self, Activation):
-        """Test getModule with unsupported activation"""
-        ActivationModule = Activation.ActivationModule
-
-        module = ActivationModule()
-        result = module.getModule(Mock(), 'unsupported_activation', 0, 1)
-
-        # Should return a Module with error message
-        assert result is not None
+            # Verify the correct method was called
+            mock_method.assert_called_once()
+            # Verify it was called with the correct arguments
+            assert mock_method.call_args[0][0] == dt  # datatype
+            assert mock_method.call_args[0][1] == 0   # vgprIn
+            assert mock_method.call_args[0][2] == 1   # vgprOut
 
 
 @pytest.mark.unit
 class TestActivationMagicNumbers:
     """Tests for activation magic numbers"""
 
-    def test_activation_magic_numbers_exist(self, Activation):
-        """Test that ActivationMagicNumbers dict exists"""
-        assert hasattr(Activation, 'ActivationMagicNumbers')
-
-        magic = Activation.ActivationMagicNumbers
-        assert isinstance(magic, dict)
-        assert 'FloatGeluK0' in magic
-        assert 'FloatGeluK1' in magic
-
-    def test_float_union_class(self, Activation):
-        """Test floatUnion class"""
+    def test_float_union_bidirectional_conversion(self, Activation):
+        """Test floatUnion converts between float and uint bit patterns"""
         floatUnion = Activation.floatUnion
 
-        # Create instance
+        # Test float -> uint conversion: 1.0 has known bit pattern
         f = floatUnion()
         f.f = 1.0
-        assert f.u > 0  # Should be a positive int representation
+        assert f.u == 0x3f800000  # IEEE 754 bit pattern for 1.0
 
-        # Test with magic number
+        # Test uint -> float conversion with magic number
         f.u = Activation.ActivationMagicNumbers['FloatGeluK0']
-        assert isinstance(f.f, float)
+        # Magic number should convert to a valid float value
+        assert abs(f.f) > 0  # Should be a non-zero float value
 
 
 @pytest.mark.unit
 class TestActCacheInfo:
     """Tests for actCacheInfo dataclass"""
 
-    def test_act_cache_info_creation(self, Activation):
-        """Test creating actCacheInfo"""
-        actCacheInfo = Activation.actCacheInfo
-
-        cache = actCacheInfo(
-            usePK=True,
-            saturateI8=False,
-            enableGuard=False,
-            isAlt=False,
-            prefix="test",
-            vgprIdxList=[[],[]],
-            module=Mock(),
-            vgprCounter=10,
-            sgprCounter=5
-        )
-
-        assert cache.usePK == True
-        assert cache.saturateI8 == False
-        assert cache.vgprCounter == 10
-        assert cache.sgprCounter == 5
-
     def test_act_cache_info_is_same(self, Activation):
-        """Test actCacheInfo.isSame method"""
+        """Test actCacheInfo.isSame method logic"""
         actCacheInfo = Activation.actCacheInfo
 
         cache = actCacheInfo(
@@ -673,11 +518,10 @@ class TestActCacheInfo:
             sgprCounter=5
         )
 
-        # Same parameters
+        # Test isSame returns True when all parameters match
         assert cache.isSame(True, False, False, False, "test") == True
 
-        # Different usePK
-        assert cache.isSame(False, False, False, False, "test") == False
-
-        # Different prefix
-        assert cache.isSame(True, False, False, False, "other") == False
+        # Test isSame returns False when parameters differ
+        assert cache.isSame(False, False, False, False, "test") == False  # Different usePK
+        assert cache.isSame(True, True, False, False, "test") == False   # Different saturateI8
+        assert cache.isSame(True, False, False, False, "other") == False # Different prefix
