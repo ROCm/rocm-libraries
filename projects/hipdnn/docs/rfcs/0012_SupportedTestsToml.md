@@ -340,12 +340,6 @@ Earlier drafts used `patterns = ["*ConvFwd*"]` matched against GTest test names 
 
 `archs = ["gfx942", "gfx90a"]` to share patterns. Couples updates that should be independent — engineer fixing gfx942 has to know the gfx90a story. **Rejected** in favour of one block per asic; sharing is by duplication.
 
-### 11.6 Standalone verifier binary
-
-Architect-suggested: pull the verifier out of the test binary into its own tool that consumes serialized records + TOML. Survives test-binary aborts; fits sharding reduce naturally. **Deferred** to v2 — v1 keeps the verifier in-process for one-command simplicity; the sharding reduce-phase mode (§9) can be reused as a standalone path when it lands.
-
-Other variants reviewed and rejected without dedicated subsections: per-`(suite, instantiation)` counts/digests (stale on partial runs); coverage floors / `min_count` (stale by construction); sidecar-`tomlkit`-Python helper (cross-language pipeline avoided); single global hash digest (zero diagnostic value); reusing the `--generate-support-matrix` markdown as baseline (aggregation hides regressions); inverting the schema to enumerate every unsupported test in `[[test_skips]]` (forces the complement). Justifications captured in commit history.
-
 ## 12. Risks
 
 | Risk | Mitigation |
