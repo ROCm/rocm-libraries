@@ -3,7 +3,6 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -64,12 +63,6 @@ public:
             [[maybe_unused]] std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
             const
     {
-    }
-
-    virtual flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        return {};
     }
 
     /// Unpacks operation attributes from a backend descriptor into this node.

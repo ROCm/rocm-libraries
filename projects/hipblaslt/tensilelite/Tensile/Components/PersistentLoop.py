@@ -20,9 +20,11 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from math import ceil, log2
+
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SCmpGeU32
+from rocisa.instruction import VMovB32, SCmpGeU32, SMulI32, SLShiftRightB32, VReadfirstlaneB32
 from ..Component import Component
 import abc
 
@@ -85,6 +87,16 @@ class PersistentLoopOn(PersistentLoop):
         persistentLabel = Label(label="PersistentLoopStart", comment="")
         module.add(persistentLabel)
 
+        # Re-init sgprWaveIdx every persistent loop iteration: TDM init reads
+        # s[sgprWaveIdx] but the same sgpr is later UNDEFed and reused as a temp,
+        # so on the 2nd iteration the value would be stale.
+        if kernel["enableTDMA"] or kernel["enableTDMB"]:
+            wavelen = kernel["WavefrontSize"]
+            with writer.allocTmpSgpr(1) as tmpSgprRes:
+                module.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
+                module.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(tmpSgprRes.idx),
+                                           "re-init WaveIdx for persistent loop iteration"))
+
         # TODO remove?
         # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
         #kStr += str(Code.WaitCnt(self.version, 0,0,"wait for outstanding stores"))
@@ -128,8 +140,13 @@ class PersistentLoopOn(PersistentLoop):
         module = Module("PersistentLoop On closePersistentLoop")
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(skCloseLoopLabel)
-        # endIter = "StreamKIterEnd" if kernel["StreamK"] == 1 else "TotalIters"
-        endIter = "TotalIters" if kernel["StreamK"] == 2 else "StreamKIterEnd"
-        module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(endIter), comment="Check if done all StreamK iterations"))
+        if kernel["StreamK"] == 2:
+            streamk = Component.StreamK.find(writer)
+            sTmp = writer.sgprPool.checkOut(1, "TotalIters")
+            module.add(streamk.computeTotalIters(writer, kernel, sTmp))
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Check if done all StreamK iterations"))
+            writer.sgprPool.checkIn(sTmp)
+        else:
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
         module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
         return module

@@ -6,18 +6,26 @@
 #include <array>
 #include <cstdint>
 #include <hip/hip_runtime.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+
+#include "ConvolutionFwdGraphTestUtils.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
 
 namespace
 {
 
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_integration_tests::test_utils;
 using hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor;
+using hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor;
 
 // Creates a minimal pointwise graph with two FLOAT tensors (input + output).
 // The pointwise operation is RELU_FWD but the dummy plan ignores the operation.
@@ -152,6 +160,109 @@ flatbuffers::FlatBufferBuilder createBatchnormInferenceGraph()
     return builder;
 }
 
+inline size_t elementCount(const std::vector<int64_t>& dims)
+{
+    size_t count = 1;
+    for(auto d : dims)
+    {
+        count *= static_cast<size_t>(d);
+    }
+    return count;
+}
+
+template <typename T, typename ComputeT = float>
+void runConvFwdExecutorVsCpu(const std::vector<int64_t>& xDims,
+                             const std::vector<int64_t>& wDims,
+                             const std::vector<int64_t>& yDims,
+                             const std::vector<int64_t>& padding,
+                             const std::vector<int64_t>& convStride,
+                             const std::vector<int64_t>& dilation,
+                             DataType dataType,
+                             double tolerance)
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t W_UID = 11;
+    constexpr int64_t Y_UID = 12;
+
+    auto xStrides = generateStrides(xDims);
+    auto wStrides = generateStrides(wDims);
+    auto yStrides = generateStrides(yDims);
+
+    auto graphBuilder = createConvFwdGraph(X_UID,
+                                           W_UID,
+                                           Y_UID,
+                                           xDims,
+                                           wDims,
+                                           yDims,
+                                           xStrides,
+                                           wStrides,
+                                           yStrides,
+                                           padding,
+                                           convStride,
+                                           dilation,
+                                           dataType);
+
+    auto xCount = elementCount(xDims);
+    auto wCount = elementCount(wDims);
+    auto yCount = elementCount(yDims);
+
+    // Prepare CPU tensors and fill with deterministic data
+    hipdnn_data_sdk::utilities::Tensor<T> cpuX(xDims, xStrides);
+    hipdnn_data_sdk::utilities::Tensor<T> cpuW(wDims, wStrides);
+    hipdnn_data_sdk::utilities::Tensor<T> cpuY(yDims, yStrides);
+
+    for(size_t i = 0; i < xCount; ++i)
+    {
+        static_cast<T*>(cpuX.rawHostData())[i] = T(static_cast<float>(i + 1));
+    }
+    for(size_t i = 0; i < wCount; ++i)
+    {
+        static_cast<T*>(cpuW.rawHostData())[i] = T(1.0f);
+    }
+
+    // Allocate device buffers (RAII — freed automatically)
+    const hipdnn_data_sdk::utilities::Workspace dX(xCount * sizeof(T));
+    const hipdnn_data_sdk::utilities::Workspace dW(wCount * sizeof(T));
+    const hipdnn_data_sdk::utilities::Workspace dY(yCount * sizeof(T));
+
+    ASSERT_EQ(hipMemset(dY.get(), 0, yCount * sizeof(T)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dX.get(), cpuX.rawHostData(), xCount * sizeof(T), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW.get(), cpuW.rawHostData(), wCount * sizeof(T), hipMemcpyHostToDevice),
+              hipSuccess);
+
+    // Run GPU graph executor with device pointers
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[X_UID] = dX.get();
+    variantPack[W_UID] = dW.get();
+    variantPack[Y_UID] = dY.get();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    // Copy GPU result back to host
+    std::vector<T> gpuYData(yCount);
+    ASSERT_EQ(hipMemcpy(gpuYData.data(), dY.get(), yCount * sizeof(T), hipMemcpyDeviceToHost),
+              hipSuccess);
+
+    // Run CPU reference executor with host pointers (same graph)
+    std::unordered_map<int64_t, void*> cpuVariantPack;
+    cpuVariantPack[X_UID] = cpuX.rawHostData();
+    cpuVariantPack[W_UID] = cpuW.rawHostData();
+    cpuVariantPack[Y_UID] = cpuY.rawHostData();
+
+    CpuReferenceGraphExecutor cpuExecutor;
+    cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
+
+    // Compare GPU executor output against CPU executor output
+    const auto* cpuResult = static_cast<const T*>(cpuY.rawHostData());
+    for(size_t i = 0; i < yCount; ++i)
+    {
+        EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuResult[i]), tolerance)
+            << "Mismatch at index " << i;
+    }
+}
+
 } // namespace
 
 TEST(TestGpuReferenceGraphExecutor, CanBeConstructed)
@@ -251,4 +362,60 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneMultiDimensional)
     {
         EXPECT_FLOAT_EQ(output[i], input[i] + 1.0f) << "Mismatch at index " << i;
     }
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvFwdExecutorVsCpu<float>({1, 1, 4, 4}, // xDims
+                                   {1, 1, 3, 3}, // wDims
+                                   {1, 1, 2, 2}, // yDims
+                                   {0, 0}, // padding
+                                   {1, 1}, // stride
+                                   {1, 1}, // dilation
+                                   DataType::FLOAT,
+                                   1e-5);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdWithPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvFwdExecutorVsCpu<float>({1, 1, 4, 4}, // xDims
+                                   {1, 1, 3, 3}, // wDims
+                                   {1, 1, 4, 4}, // yDims (same as input due to padding=1)
+                                   {1, 1}, // padding
+                                   {1, 1}, // stride
+                                   {1, 1}, // dilation
+                                   DataType::FLOAT,
+                                   1e-5);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp16, ConvFwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvFwdExecutorVsCpu<hipdnn_data_sdk::types::half>({1, 1, 4, 4}, // xDims
+                                                          {1, 1, 3, 3}, // wDims
+                                                          {1, 1, 2, 2}, // yDims
+                                                          {0, 0}, // padding
+                                                          {1, 1}, // stride
+                                                          {1, 1}, // dilation
+                                                          DataType::HALF,
+                                                          0.01);
+}
+
+TEST(TestGpuReferenceGraphExecutorBfp16, ConvFwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvFwdExecutorVsCpu<hipdnn_data_sdk::types::bfloat16>({1, 1, 4, 4}, // xDims
+                                                              {1, 1, 3, 3}, // wDims
+                                                              {1, 1, 2, 2}, // yDims
+                                                              {0, 0}, // padding
+                                                              {1, 1}, // stride
+                                                              {1, 1}, // dilation
+                                                              DataType::BFLOAT16,
+                                                              0.1);
 }

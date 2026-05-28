@@ -31,13 +31,13 @@
 #include <miopen/miopen.h>
 
 #include "gtest_common.hpp"
+#include "gtest_desc_guard.hpp"
 #include "test_parameter_name_generator.hpp"
 #include "verify.hpp"
 
 namespace {
 
 using TestCase = std::tuple<NamedParameter<int>,
-                            NamedParameter<int>,
                             NamedParameter<int>,
                             NamedParameter<int>,
                             NamedParameter<int>,
@@ -411,8 +411,6 @@ struct verify_w_tensor_set
 
                 EXPECT_EQUAL(status, miopenStatusSuccess);
 
-                const auto param_dev_out = handle.Create(paramSize);
-
                 status = miopenGetRNNLayerParam(&handle,
                                                 rnnDesc,
                                                 layer,
@@ -451,8 +449,6 @@ struct verify_w_tensor_set
                     status = miopenGetRNNLayerBiasSize(&handle, rnnDesc, layer, layerID, &biasSize);
 
                     EXPECT_EQUAL(status, miopenStatusSuccess);
-
-                    const auto bias_dev_out = handle.Create(biasSize);
 
                     status = miopenGetRNNLayerBias(&handle,
                                                    rnnDesc,
@@ -493,8 +489,24 @@ struct verify_w_tensor_set
 
 inline auto GenCases()
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // When Address Sanitizer is enabled, the process exceeds the allowable limit for virtual
+    // memory areas.  Another way around this is to set vm.max_map_count to something large in
+    // the environment (eg. vm.max_map_count=1048576).  However it was determined that while
+    // ASan is enabled, losing a small amount of edge case test coverage was acceptable.
     return testing::Combine(
-        MakeNamedParameterValues<int>("seqLen", 1, 2, 4),
+        MakeNamedParameterValues<int>("batch_size", 2, 4),
+        MakeNamedParameterValues<int>("num_layer", 2, 4),
+        MakeNamedParameterValues<int>("in_size", 4, 8),
+        MakeNamedParameterValues<int>("wei_hh", 4, 8),
+        MakeNamedParameterValues<miopenRNNMode_t>("mode", miopenRNNRELU, miopenLSTM, miopenGRU),
+        MakeNamedParameterValues<miopenRNNBiasMode_t>(
+            "biasMode", miopenRNNwithBias, miopenRNNNoBias),
+        MakeNamedParameterValues<miopenRNNDirectionMode_t>(
+            "directionMode", miopenRNNunidirection, miopenRNNbidirection),
+        MakeNamedParameterValues<miopenRNNInputMode_t>("inMode", miopenRNNskip, miopenRNNlinear));
+#else
+    return testing::Combine(
         MakeNamedParameterValues<int>("batch_size", 2, 4, 8),
         MakeNamedParameterValues<int>("num_layer", 4, 8, 16),
         MakeNamedParameterValues<int>("in_size", 2, 8, 16),
@@ -505,6 +517,7 @@ inline auto GenCases()
         MakeNamedParameterValues<miopenRNNDirectionMode_t>(
             "directionMode", miopenRNNunidirection, miopenRNNbidirection),
         MakeNamedParameterValues<miopenRNNInputMode_t>("inMode", miopenRNNskip, miopenRNNlinear));
+#endif
 }
 
 inline auto GetCases()
@@ -580,25 +593,17 @@ struct WSuperTensorTest : public testing::TestWithParam<TestCase>
     void SetUp() override
     {
         prng::reset_seed();
-        std::tie(
-            seqLen, batch_size, num_layer, in_size, wei_hh, mode, biasMode, directionMode, inMode) =
+        std::tie(batch_size, num_layer, in_size, wei_hh, mode, biasMode, directionMode, inMode) =
             GetParam();
 
-        auto status = miopenCreateRNNDescriptor(&rnnDesc);
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        status = miopenCreateTensorDescriptor(&inputTensor);
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        status = miopenCreateTensorDescriptor(&weightTensor);
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        status = miopenCreateTensorDescriptor(&paramTensor);
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        status = miopenCreateTensorDescriptor(&biasTensor);
-        EXPECT_EQ(status, miopenStatusSuccess);
+        ASSERT_EQ(rnnDesc.getStatus(), miopenStatusSuccess);
+        ASSERT_EQ(inputTensor.getStatus(), miopenStatusSuccess);
+        ASSERT_EQ(weightTensor.getStatus(), miopenStatusSuccess);
+        ASSERT_EQ(paramTensor.getStatus(), miopenStatusSuccess);
+        ASSERT_EQ(biasTensor.getStatus(), miopenStatusSuccess);
     }
+
+    void TearDown() override { DestroyDropoutDesc(); }
 
     void Run()
     {
@@ -608,6 +613,10 @@ struct WSuperTensorTest : public testing::TestWithParam<TestCase>
         }
 
         const std::array<int, 2> in_lens{{batch_size, in_size}};
+
+        // miopenSetRNNDescriptor overwrites the descriptor via copy assignment,
+        // leaking the internal DropoutDescriptor allocated by miopenCreateRNNDescriptor.
+        DestroyDropoutDesc();
 
         auto status = miopenSetRNNDescriptor(
             rnnDesc, wei_hh, num_layer, inMode, directionMode, mode, biasMode, algo, dataType);
@@ -621,6 +630,25 @@ struct WSuperTensorTest : public testing::TestWithParam<TestCase>
 
         Verify<verify_w_tensor_set>();
         Verify<verify_w_tensor_get>();
+    }
+
+    void DestroyDropoutDesc()
+    {
+        miopenDropoutDescriptor_t dropDesc = nullptr;
+        miopenGetRNNDescriptor_V2(rnnDesc,
+                                  nullptr,
+                                  nullptr,
+                                  &dropDesc,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr);
+        if(dropDesc != nullptr)
+        {
+            miopenDestroyDropoutDescriptor(dropDesc);
+        }
     }
 
 private:
@@ -651,7 +679,6 @@ private:
     }
 
 private:
-    int seqLen{};
     int batch_size{};
     int num_layer{};
     int in_size{};
@@ -660,21 +687,20 @@ private:
     miopenRNNBiasMode_t biasMode{};
     miopenRNNDirectionMode_t directionMode{};
     miopenRNNInputMode_t inMode{};
-    miopenRNNDescriptor_t rnnDesc{};
+    RNNDescGuard rnnDesc;
     miopenRNNAlgo_t algo{miopenRNNdefault};
     miopenDataType_t dataType{miopenFloat};
-    miopenTensorDescriptor_t inputTensor{};
-    miopenTensorDescriptor_t weightTensor{};
-    miopenTensorDescriptor_t paramTensor{};
-    miopenTensorDescriptor_t biasTensor{};
+    TensorDescGuard inputTensor;
+    TensorDescGuard weightTensor;
+    TensorDescGuard paramTensor;
+    TensorDescGuard biasTensor;
 };
 
 struct TestNameGenerator
 {
     std::string operator()(const auto& info)
     {
-        const auto& [seqLen,
-                     batch_size,
+        const auto& [batch_size,
                      num_layer,
                      in_size,
                      wei_hh,
@@ -685,10 +711,9 @@ struct TestNameGenerator
         std::stringstream ss;
         std::string str;
 
-        ss << "seqLen_" << seqLen() << "_batch_size_" << batch_size() << "_num_layer_"
-           << num_layer() << "_in_size_" << in_size() << "_wei_hh_" << wei_hh() << "_mode_"
-           << mode() << "_directionMode_" << directionMode() << "_inMode_" << inMode()
-           << "_test_id_" << info.index;
+        ss << "batch_size_" << batch_size() << "_num_layer_" << num_layer() << "_in_size_"
+           << in_size() << "_wei_hh_" << wei_hh() << "_mode_" << mode() << "_directionMode_"
+           << directionMode() << "_inMode_" << inMode() << "_test_id_" << info.index;
 
         str = ss.str();
 

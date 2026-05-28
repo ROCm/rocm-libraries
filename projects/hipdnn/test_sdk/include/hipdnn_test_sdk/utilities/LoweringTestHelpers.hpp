@@ -8,7 +8,7 @@
 #include <vector>
 
 #include <hipdnn_backend.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 namespace hipdnn_tests
@@ -18,12 +18,12 @@ namespace hipdnn_tests
 /// retrieves the serialized binary graph, and deserializes it into a GraphT.
 /// Uses EXPECT macros internally; callers should verify the returned GraphT
 /// is well-formed (e.g., check tensors.size()).
-inline hipdnn_data_sdk::data_objects::GraphT lowerAndDeserialize(TestableGraphLowering& graph,
-                                                                 hipdnnHandle_t handle)
+inline hipdnn_flatbuffers_sdk::data_objects::GraphT
+    lowerAndDeserialize(TestableGraphLowering& graph, hipdnnHandle_t handle)
 {
     using hipdnn_frontend::ErrorCode;
 
-    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
 
     auto result = graph.validate();
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -63,7 +63,7 @@ inline hipdnn_data_sdk::data_objects::GraphT lowerAndDeserialize(TestableGraphLo
         return graphT;
     }
 
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data());
     EXPECT_NE(graphFb, nullptr); // NOLINT(readability-implicit-bool-conversion)
     if(graphFb != nullptr)
     {
@@ -74,10 +74,11 @@ inline hipdnn_data_sdk::data_objects::GraphT lowerAndDeserialize(TestableGraphLo
 }
 
 /// Builds a UID-to-TensorAttributesT lookup map from a deserialized GraphT.
-inline std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*>
-    buildTensorMap(const hipdnn_data_sdk::data_objects::GraphT& graphT)
+inline std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+    buildTensorMap(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graphT)
 {
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+        tensorMap;
     for(const auto& t : graphT.tensors)
     {
         tensorMap[t->uid] = t.get();

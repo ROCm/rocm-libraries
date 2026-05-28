@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_gpu_ref/GpuFpReferenceValidation.hpp>
 #include <hipdnn_gpu_ref/GpuIntReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
@@ -18,7 +19,7 @@ namespace hipdnn_gpu_ref
 // Factory function to create a GPU allClose validator for the given data type.
 // Mirrors the createAllCloseValidator() API from CpuFpReferenceValidation.hpp.
 std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
-    createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType dataType,
+    createGpuAllCloseValidator(hipdnn_frontend::DataType dataType,
                                float absoluteTolerance = std::numeric_limits<float>::epsilon(),
                                float relativeTolerance = std::numeric_limits<float>::epsilon());
 

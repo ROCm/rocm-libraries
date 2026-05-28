@@ -50,8 +50,13 @@ option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
+option(CK_EXPERIMENTAL_GEMM_BENCHMARK "Enable experimental gemm benchmark for gfx1250" OFF)
 option(FORCE_DISABLE_XDL "Skip compiling XDL specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
 option(FORCE_DISABLE_WMMA "Skip compiling WMMA specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
+option(BUILD_CK_TILE_ENGINE "Build the tile_engine subdirectory" OFF)
+option(BUILD_CK_EXAMPLES "Build the example subdirectory" ON)
+option(BUILD_CK_TUTORIALS "Build the tutorial subdirectory" ON)
+option(CK_ENABLE_ROCM_CK "Build rocm_ck API" OFF)
 
 if(CK_EXPERIMENTAL_BUILDER)
     add_definitions(-DCK_EXPERIMENTAL_BUILDER)
@@ -130,6 +135,11 @@ add_compile_options(-Wno-bit-int-extension)
 add_compile_options(-Wno-pass-failed)
 add_compile_options(-Wno-switch-default)
 add_compile_options(-Wno-unique-object-duplication)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(-Wno-unknown-warning-option)
+else()
+    add_compile_options(-Wno-unknown-pragmas)
+endif()
 
 # Increase the number of max elements in fold expressions
 add_compile_options(-fbracket-depth=1024)
@@ -168,8 +178,48 @@ endif()
 include(getopt)
 
 # CK version file to record release version as well as git commit hash
-find_package(Git REQUIRED)
-execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD OUTPUT_VARIABLE COMMIT_ID OUTPUT_STRIP_TRAILING_WHITESPACE)
+# identifying the CK source tree.
+#
+# NOTE: execute_process() runs in the build directory by default, so we must
+# pin WORKING_DIRECTORY to the source tree -- otherwise out-of-source builds
+# (where the build dir is not inside a git checkout) would silently produce
+# an empty CK_COMMIT_ID. We use `git log -1 -- .` (the last commit touching
+# CK's sources) rather than `git rev-parse HEAD` so unrelated changes
+# elsewhere in a containing monorepo (e.g. rocm-libraries) do not bump the
+# CK identity. RESULT_VARIABLE/ERROR_QUIET also let us degrade gracefully
+# when building from a release tarball without a .git directory.
+find_package(Git)
+set(COMMIT_ID "unknown")
+set(CK_PARENT_COMMIT_ID "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H -- .
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE GIT_COMMIT_ID
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE GIT_LOG_RESULT
+        ERROR_QUIET
+    )
+    if(GIT_LOG_RESULT EQUAL 0 AND GIT_COMMIT_ID)
+        set(COMMIT_ID "${GIT_COMMIT_ID}")
+    endif()
+
+    # Containing-repo HEAD. Captures the surrounding repository's exact
+    # snapshot, including shared infrastructure that lives outside CK
+    # (e.g. rocm-libraries top-level CMake/codegen helpers). When CK is
+    # built standalone, this is just CK's own HEAD.
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE GIT_REPO_HEAD
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE GIT_REV_PARSE_RESULT
+        ERROR_QUIET
+    )
+    if(GIT_REV_PARSE_RESULT EQUAL 0 AND GIT_REPO_HEAD)
+        set(CK_PARENT_COMMIT_ID "${GIT_REPO_HEAD}")
+    endif()
+endif()
 configure_file(include/ck/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ck/version.h)
 
 set(ROCM_SYMLINK_LIBS OFF)
@@ -207,6 +257,21 @@ else()
     set(USER_GPU_TARGETS 0)
 endif()
 
+#Unsupported GPU targets to be filtered from the list:
+set(CK_UNSUPPORTED_GPU_TARGETS "gfx900;gfx906;gfx90c")
+
+#If only one of the unsupported targets is requested, generate dummy target and exit here.
+if("${GPU_TARGETS}" IN_LIST CK_UNSUPPORTED_GPU_TARGETS)
+    add_custom_target(ck_dummy_target)
+    message("CK is not supported for target ${GPU_TARGETS}")
+    return()
+endif()
+
+#If multiple targets are requested, filter out any targets currently on the unsupported list:
+message(STATUS "Filtering out unsupported targets: ${CK_UNSUPPORTED_GPU_TARGETS}")
+list(REMOVE_ITEM GPU_TARGETS ${CK_UNSUPPORTED_GPU_TARGETS})
+list(REMOVE_ITEM GPU_ARCHS ${CK_UNSUPPORTED_GPU_TARGETS})
+
 find_package(hip REQUIRED)
 enable_language(HIP)
 
@@ -229,8 +294,10 @@ if(NOT ENABLE_ASAN_PACKAGING)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 600443483)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950")
-    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483)
+    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483 AND ${hip_VERSION_FLAT} LESS 700200000)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic")
+    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 700200000)
+        set(CK_GPU_TARGETS "")
     endif()
 else()
     #build CK only for xnack-supported targets when using ASAN
@@ -282,6 +349,9 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx10")
     add_definitions(-DCK_GFX1030_SUPPORT)
 endif()
 
+# new macro CK_TILE_USE_WMMA in order to separately compile examples for MFMA/WMMA
+set(CK_TILE_USE_WMMA 0)
+
 if ((SUPPORTED_GPU_TARGETS MATCHES "gfx11" OR SUPPORTED_GPU_TARGETS MATCHES "gfx12") AND NOT FORCE_DISABLE_WMMA)
     message(STATUS "Enabling WMMA instances")
     add_definitions(-DCK_USE_WMMA)
@@ -300,6 +370,8 @@ endif()
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx12" OR SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     add_definitions(-DCK_USE_OCP_FP8)
     set(CK_USE_OCP_FP8 "ON")
+    add_definitions(-DCK_TILE_USE_OCP_FP8)
+    set(CK_TILE_USE_OCP_FP8 "ON")
 endif()
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx90a" OR SUPPORTED_GPU_TARGETS MATCHES "gfx94")
     add_definitions(-DCK_USE_FNUZ_FP8)
@@ -310,6 +382,16 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     set(CK_USE_NATIVE_MX_SUPPORT "ON")
     add_definitions(-DCK_GFX950_SUPPORT)
     set(CK_GFX950_SUPPORT "ON")
+endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+    add_definitions(-DCK_USE_GFX1250)
+    add_definitions(-DCK_USE_NATIVE_MX_SUPPORT)
+    set(CK_USE_NATIVE_MX_SUPPORT "ON")
+    add_definitions(-DCK_GFX1250_SUPPORT)
+    set(CK_GFX1250_SUPPORT "ON")
+endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx12")
+    add_definitions(-DCK_GFX12_SUPPORT)
 endif()
 
 if ((SUPPORTED_GPU_TARGETS MATCHES "gfx942" OR SUPPORTED_GPU_TARGETS MATCHES "gfx95") AND CK_ENABLE_TF32)
@@ -392,6 +474,7 @@ endif()
 option(USE_BITINT_EXTENSION_INT4 "Whether to enable clang's BitInt extension to provide int4 data type." OFF)
 option(ENABLE_ASM_DUMP "Whether to enable assembly dump for kernels." OFF)
 option(ENABLE_JSON_DUMP "Whether to enable json dump for examples." OFF)
+option(CK_TEST_DISABLE_GPU_VALIDATION "Whether to disable GPU validation in CK tests." OFF )
 
 if(USE_BITINT_EXTENSION_INT4)
     add_compile_definitions(CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4)
@@ -408,6 +491,10 @@ endif()
 if (ENABLE_JSON_DUMP)
     add_compile_definitions(CK_ENABLE_JSON_DUMP)
     message("CK compiled with ENABLE_JSON_DUMP set to ${ENABLE_JSON_DUMP}")
+endif()
+
+if (CK_TEST_DISABLE_GPU_VALIDATION)
+    add_compile_definitions(CK_TEST_DISABLE_GPU_VALIDATION)
 endif()
 
 ## Threads
@@ -668,59 +755,64 @@ if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
 endif()
 
 
-
-# Optimization: Search only in library/src where all instance files actually live
-# (was searching entire source tree, taking ~40s instead of <1s)
-file(GLOB_RECURSE INSTANCE_FILES "${PROJECT_SOURCE_DIR}/library/src/*/device_*_instance.cpp")
-file(GLOB dir_list RELATIVE ${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu ${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/*)
-set(CK_DEVICE_INSTANCES)
-FOREACH(subdir_path ${dir_list})
-set(target_dir)
-IF(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/${subdir_path}")
-    set(cmake_instance)
-    file(READ "${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/${subdir_path}/CMakeLists.txt" cmake_instance)
-    set(add_inst 0)
-    if(("${cmake_instance}" MATCHES "fp8" OR "${cmake_instance}" MATCHES "_f8") AND DTYPES MATCHES "fp8")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "bf8" OR "${cmake_instance}" MATCHES "_b8") AND DTYPES MATCHES "bf8")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "fp16" OR "${cmake_instance}" MATCHES "_f16") AND DTYPES MATCHES "fp16")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "fp32" OR "${cmake_instance}" MATCHES "_f32") AND DTYPES MATCHES "fp32")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "tf32" OR "${cmake_instance}" MATCHES "_tf32") AND DTYPES MATCHES "tf32")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "fp64" OR "${cmake_instance}" MATCHES "_f64") AND DTYPES MATCHES "fp64")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "bf16" OR "${cmake_instance}" MATCHES "_b16") AND DTYPES MATCHES "bf16")
-        set(add_inst 1)
-    endif()
-    if(("${cmake_instance}" MATCHES "int8" OR "${cmake_instance}" MATCHES "_i8") AND DTYPES MATCHES "int8")
-        set(add_inst 1)
-    endif()
-    if(NOT "${cmake_instance}" MATCHES "DTYPES")
-        set(add_inst 1)
-    endif()
-    if(add_inst EQUAL 1 OR NOT DEFINED DTYPES)
-        list(APPEND CK_DEVICE_INSTANCES device_${subdir_path}_instance)
-    endif()
-ENDIF()
-ENDFOREACH()
-
-add_custom_target(instances DEPENDS utility;${CK_DEVICE_INSTANCES}  SOURCES ${INSTANCE_FILES})
-
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(DISABLE_OFFLOAD_COMPRESS "Disable offload compress compiler flag when building instances" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
+option(BUILD_CK_DEVICE_INSTANCES "Build device operation instances in library/" ON)
+option(BUILD_CK_PROFILER "Build the CK profiler in profiler/" ON)
+option(BUILD_CK_TILE_ENGINE_TESTS "Build tile engine tests" ON)
+option(BUILD_CK_TILE_FMHA_TESTS "Build FMHA tests" ON)
+option(BUILD_CK_TILE_CSHUFFLE_LDS_BENCHMARKS "Build CShuffleLds microbenchmarks (requires BUILD_CK_EXAMPLES=ON)" OFF)
 
-add_subdirectory(library)
+if(BUILD_CK_DEVICE_INSTANCES)
+    # Optimization: Search only in library/src where all instance files actually live
+    # (was searching entire source tree, taking ~40s instead of <1s)
+    file(GLOB_RECURSE INSTANCE_FILES "${PROJECT_SOURCE_DIR}/library/src/*/device_*_instance.cpp")
+    file(GLOB dir_list RELATIVE ${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu ${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/*)
+    set(CK_DEVICE_INSTANCES)
+    FOREACH(subdir_path ${dir_list})
+    set(target_dir)
+    IF(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/${subdir_path}")
+        set(cmake_instance)
+        file(READ "${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/${subdir_path}/CMakeLists.txt" cmake_instance)
+        set(add_inst 0)
+        if(("${cmake_instance}" MATCHES "fp8" OR "${cmake_instance}" MATCHES "_f8") AND DTYPES MATCHES "fp8")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "bf8" OR "${cmake_instance}" MATCHES "_b8") AND DTYPES MATCHES "bf8")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "fp16" OR "${cmake_instance}" MATCHES "_f16") AND DTYPES MATCHES "fp16")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "fp32" OR "${cmake_instance}" MATCHES "_f32") AND DTYPES MATCHES "fp32")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "tf32" OR "${cmake_instance}" MATCHES "_tf32") AND DTYPES MATCHES "tf32")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "fp64" OR "${cmake_instance}" MATCHES "_f64") AND DTYPES MATCHES "fp64")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "bf16" OR "${cmake_instance}" MATCHES "_b16") AND DTYPES MATCHES "bf16")
+            set(add_inst 1)
+        endif()
+        if(("${cmake_instance}" MATCHES "int8" OR "${cmake_instance}" MATCHES "_i8") AND DTYPES MATCHES "int8")
+            set(add_inst 1)
+        endif()
+        if(NOT "${cmake_instance}" MATCHES "DTYPES")
+            set(add_inst 1)
+        endif()
+        if(add_inst EQUAL 1 OR NOT DEFINED DTYPES)
+            list(APPEND CK_DEVICE_INSTANCES device_${subdir_path}_instance)
+        endif()
+    ENDIF()
+    ENDFOREACH()
+
+    add_custom_target(instances DEPENDS utility;${CK_DEVICE_INSTANCES}  SOURCES ${INSTANCE_FILES})
+    add_subdirectory(library)
+endif()
 
 if (CK_EXPERIMENTAL_BUILDER)
   add_subdirectory(experimental/builder)
@@ -728,34 +820,51 @@ if (CK_EXPERIMENTAL_BUILDER)
 endif()
 
 if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
-   rocm_package_setup_component(tests
-        LIBRARY_NAME composablekernel
-        PACKAGE_NAME tests # Prevent -static suffix on package name
-   )
+   if(BUILD_CK_EXAMPLES)
+       rocm_package_setup_component(examples
+            LIBRARY_NAME composablekernel
+            PACKAGE_NAME examples
+       )
+       add_subdirectory(example)
+   endif()
 
-   rocm_package_setup_component(examples
-        LIBRARY_NAME composablekernel
-        PACKAGE_NAME examples
-   )
-   add_subdirectory(example)
-
-   add_subdirectory(tutorial)
-   rocm_package_setup_component(tutorials
-        LIBRARY_NAME composablekernel
-        PACKAGE_NAME tutorials
-   )
-   add_subdirectory(tile_engine)
+   if(BUILD_CK_TUTORIALS)
+       add_subdirectory(tutorial)
+       rocm_package_setup_component(tutorials
+            LIBRARY_NAME composablekernel
+            PACKAGE_NAME tutorials
+       )
+   endif()
+   if(BUILD_CK_TILE_ENGINE)
+       add_subdirectory(tile_engine)
+   endif()
+   if(CK_ENABLE_ROCM_CK)
+       add_subdirectory(rocm_ck)
+       if(TARGET check)
+           add_dependencies(check build-smoke-rocm-ck)
+       endif()
+   endif()
    if(BUILD_TESTING)
+       rocm_package_setup_component(tests
+            LIBRARY_NAME composablekernel
+            PACKAGE_NAME tests # Prevent -static suffix on package name
+       )
        add_subdirectory(test)
    endif()
 endif()
 
-if (NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
-    rocm_package_setup_component(profiler
-        LIBRARY_NAME composablekernel
-        PACKAGE_NAME ckprofiler
-    )
-    add_subdirectory(profiler)
+if(BUILD_CK_PROFILER)
+    if (NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
+        rocm_package_setup_component(profiler
+            LIBRARY_NAME composablekernel
+            PACKAGE_NAME ckprofiler
+        )
+        add_subdirectory(profiler)
+    endif()
+endif()
+
+if (CK_EXPERIMENTAL_GEMM_BENCHMARK)
+  add_subdirectory(experimental/gemm_benchmark)
 endif()
 
 if(CK_USE_CODEGEN AND (SUPPORTED_GPU_TARGETS MATCHES "gfx9" OR GPU_ARCHS))

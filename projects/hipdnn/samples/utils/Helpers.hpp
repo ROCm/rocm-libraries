@@ -56,6 +56,33 @@ using hipdnn_data_sdk::types::half;
         }                                                                                 \
     } while(0)
 
+// Skip-aware variant of HIPDNN_FE_CHECK for use inside bool-returning sample
+// callbacks (e.g. SampleRunner::operator()). On GRAPH_NOT_SUPPORTED the macro
+// prints a clear skip message and `return true;` so the enclosing variant is
+// counted as gracefully skipped (samples/README.md documents this contract).
+// On any other non-good status, behavior matches HIPDNN_FE_CHECK (exit 1).
+//
+// The macro contains `return true;`, so it MUST only be used inside a
+// bool-returning function context. For non-bool contexts (e.g. int main),
+// use HIPDNN_FE_CHECK instead.
+#define HIPDNN_FE_CHECK_SKIPPABLE(statusObj)                                                    \
+    do                                                                                          \
+    {                                                                                           \
+        auto const& status = statusObj;                                                         \
+        if(!status.is_good())                                                                   \
+        {                                                                                       \
+            if(status.get_code() == hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED)            \
+            {                                                                                   \
+                std::cout << "Skipping: no engine has an applicable solution for this "         \
+                          << "graph on the current device. (" << status.get_message() << ")\n"; \
+                return true;                                                                    \
+            }                                                                                   \
+            std::cerr << "hipDNN Frontend Error: " << status.get_message() << " in file "       \
+                      << __FILE__ << " at line " << __LINE__ << std::endl;                      \
+            exit(EXIT_FAILURE);                                                                 \
+        }                                                                                       \
+    } while(0)
+
 enum class SampleType
 {
     GENERIC,

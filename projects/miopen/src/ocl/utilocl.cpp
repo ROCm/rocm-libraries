@@ -1227,40 +1227,43 @@ float transpose_NCHW2Vec(const Handle& handle,
         std::string WRITE_TYPE = "uint" + std::to_string(WR_BLCK / vec_size);
 
         std::string params;
-        params += " -DFORWARD=" + std::to_string(static_cast<int>(forward));
-        params += " -DN=" + std::to_string(n);
-        params += " -DC=" + std::to_string(c);
-        params += " -DHW=" + std::to_string(hw);
-        params += " -DCHW=" + std::to_string(c * hw);
-        params += " -DVEC_SIZE=" + std::to_string(vec_size);
-        params += vec_size == 4 ? " -DDATA_TYPE=char" : " -DDATA_TYPE=ushort";
+        params += " -DMIOPEN_DEF_FORWARD=" + std::to_string(static_cast<int>(forward));
+        params += " -DMIOPEN_DEF_N=" + std::to_string(n);
+        params += " -DMIOPEN_DEF_C=" + std::to_string(c);
+        params += " -DMIOPEN_DEF_HW=" + std::to_string(hw);
+        params += " -DMIOPEN_DEF_CHW=" + std::to_string(c * hw);
+        params += " -DMIOPEN_DEF_VEC_SIZE=" + std::to_string(vec_size);
+        params += vec_size == 4 ? " -DMIOPEN_DEF_DATA_TYPE=char" : " -DMIOPEN_DEF_DATA_TYPE=ushort";
 
-        params += " -DTRANS=" + std::to_string(static_cast<int>(trans));
+        params += " -DMIOPEN_DEF_TRANS=" + std::to_string(static_cast<int>(trans));
         if(trans)
         {
-            params += " -DNHW_OUT=" + std::to_string(n_vec * hw);
-            params += " -DN_OUT=" + std::to_string(n_vec);
-            params += " -DIS_N_ODD=" + std::to_string(static_cast<int>((n % vec_size) != 0));
+            params += " -DMIOPEN_DEF_NHW_OUT=" + std::to_string(n_vec * hw);
+            params += " -DMIOPEN_DEF_N_OUT=" + std::to_string(n_vec);
+            params +=
+                " -DMIOPEN_DEF_IS_N_ODD=" + std::to_string(static_cast<int>((n % vec_size) != 0));
         }
         else
         {
-            params += " -DCHW_OUT=" + std::to_string(c_vec * hw);
-            params += " -DIS_C_ODD=" + std::to_string(static_cast<int>((c % vec_size) != 0));
+            params += " -DMIOPEN_DEF_CHW_OUT=" + std::to_string(c_vec * hw);
+            params +=
+                " -DMIOPEN_DEF_IS_C_ODD=" + std::to_string(static_cast<int>((c % vec_size) != 0));
         }
 
-        params += " -DIS_HW_ODD=" + std::to_string(static_cast<int>(((hw) % vec_size) != 0));
-        params += " -DRD_BLCK=" + std::to_string(RD_BLCK);
-        params += " -DWR_BLCK=" + std::to_string(WR_BLCK);
-        params += " -DHW_RD=" + std::to_string(HW_RD);
-        params += " -DMAP_RD=" + std::to_string(MAP_RD);
-        params += " -DREAD_TYPE=" + READ_TYPE;
-        params += " -DWRITE_TYPE=" + WRITE_TYPE;
+        params +=
+            " -DMIOPEN_DEF_IS_HW_ODD=" + std::to_string(static_cast<int>(((hw) % vec_size) != 0));
+        params += " -DMIOPEN_DEF_RD_BLCK=" + std::to_string(RD_BLCK);
+        params += " -DMIOPEN_DEF_WR_BLCK=" + std::to_string(WR_BLCK);
+        params += " -DMIOPEN_DEF_HW_RD=" + std::to_string(HW_RD);
+        params += " -DMIOPEN_DEF_MAP_RD=" + std::to_string(MAP_RD);
+        params += " -DMIOPEN_DEF_READ_TYPE=" + READ_TYPE;
+        params += " -DMIOPEN_DEF_WRITE_TYPE=" + WRITE_TYPE;
 
         if(!float_equal(alpha_fp, 1.0))
-            params += " -DUSE_ALPHA=1";
+            params += " -DMIOPEN_DEF_USE_ALPHA=1";
 
         if(!float_equal(beta_fp, 0))
-            params += " -DUSE_BETA=1";
+            params += " -DMIOPEN_DEF_USE_BETA=1";
 
         const size_t gd0 = MAP_RD;
         size_t gd1;
@@ -1270,13 +1273,13 @@ float transpose_NCHW2Vec(const Handle& handle,
         // if(gd0 < MAX_ACTIVE_THREADS)
         {
             gd1 = trans ? static_cast<size_t>(n_vec / vec_size) : static_cast<size_t>(n);
-            params += " -DIS_2D_WG=1";
+            params += " -DMIOPEN_DEF_IS_2D_WG=1";
         }
         // else
         //{
         // gd1 = 1;
-        // params += " -DIS_2D_WG=0";
-        // params += " -DGD_1=" + std::to_string(gd1);
+        // params += " -DMIOPEN_DEF_IS_2D_WG=0";
+        // params += " -DMIOPEN_DEF_GD_1=" + std::to_string(gd1);
         //}
 
         const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};

@@ -15,6 +15,7 @@
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/rocroller/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "project: hipblaslt-provider":
 - changed-files:
@@ -23,10 +24,6 @@
 "project: hip-kernel-provider":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
-
-"project: fusilli-provider":
-- changed-files:
-  - any-glob-to-any-file: 'dnn-providers/fusilli-provider/**/*'
 
 "project: hipdnn-integration-tests":
 - changed-files:
@@ -60,6 +57,7 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
   - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "ci:hipsparselt-fast":
 - changed-files:
@@ -113,6 +111,10 @@
 "shared: origami":
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
+
+"shared: stinkytofu":
+- changed-files:
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "shared: primbench":
 - changed-files:

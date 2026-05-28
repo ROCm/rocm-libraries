@@ -9,29 +9,14 @@
 namespace miopen_plugin
 {
 
-namespace
-{
-
-int64_t getRequiredOptionalUid(const flatbuffers::Optional<int64_t>& opt,
-                               const std::string& fieldName)
-{
-    if(!opt.has_value())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, fieldName + " tensor uid is required but not set");
-    }
-    return *opt;
-}
-
-} // namespace
-
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
 // rather than making it configurable and adding extra complexity.
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormBwdParams::BatchnormBwdParams(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _dy(miopen_utils::createBatchnormTensor(tensorMap, attributes.dy_tensor_uid()))
@@ -54,15 +39,16 @@ BatchnormBwdParams::BatchnormBwdParams(
 }
 
 BatchnormBwdParams::BatchnormBwdParams(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& batchnormBackwardAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes&
+        batchnormBackwardAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes&
+        batchnormInferenceAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(miopen_utils::createBatchnormTensor(
-          tensorMap,
-          getRequiredOptionalUid(pointwiseAttributes.in_1_tensor_uid(), "Pointwise in_1")))
+    , _dy(miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.in_0_tensor_uid()))
     , _dx(miopen_utils::createBatchnormTensor(tensorMap,
                                               batchnormBackwardAttributes.dx_tensor_uid()))
     , _scale(miopen_utils::createBatchnormTensor(tensorMap,
@@ -156,13 +142,14 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
                                [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     float alphaDataDiff = 1.0f;
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
     float betaParamDiff = 0.0f;
-    double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
+    const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);

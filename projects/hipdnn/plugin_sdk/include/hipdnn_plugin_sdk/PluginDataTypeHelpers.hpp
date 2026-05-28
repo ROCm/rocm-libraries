@@ -21,6 +21,10 @@ inline const char* toString(hipdnnPluginStatus_t status)
         return "HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR";
     case HIPDNN_PLUGIN_STATUS_ALLOC_FAILED:
         return "HIPDNN_PLUGIN_STATUS_ALLOC_FAILED";
+    case HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE:
+        return "HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE";
+    case HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED:
+        return "HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED";
     default:
         return "HIPDNN_PLUGIN_STATUS_UNKNOWN";
     }
@@ -34,6 +38,8 @@ inline const char* toString(hipdnnPluginType_t type)
         return "HIPDNN_PLUGIN_TYPE_UNSPECIFIED";
     case HIPDNN_PLUGIN_TYPE_ENGINE:
         return "HIPDNN_PLUGIN_TYPE_ENGINE";
+    case HIPDNN_PLUGIN_TYPE_HEURISTIC:
+        return "HIPDNN_PLUGIN_TYPE_HEURISTIC";
     default:
         return "HIPDNN_PLUGIN_TYPE_UNKNOWN";
     }
