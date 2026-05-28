@@ -168,6 +168,26 @@ def _default_gemm_tile() -> TileSpec:
     )
 
 
+def _default_bf16_gemm_tile() -> TileSpec:
+    """BF16-compatible default tile for fused-MoE batched GEMMs.
+
+    BF16 on gfx950 only supports 16x16 MFMA atoms (no 32x32 atom).
+    Using warp_tile=(16,16,32) with warp_m=2, warp_n=2 gives:
+    tile_m=32, tile_n=32, tile_k=32, block_size=256.
+    This satisfies load_vec >= 2: a_vecs=1024/2=512>=256 and b_vecs=2.
+    """
+    return TileSpec(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+    )
+
+
 def _large_batch_gemm_tile() -> TileSpec:
     """Measured winner for large hidden + T>=32 shapes.
 
@@ -415,6 +435,7 @@ class FusedMoeForwardSpec:
             name=f"{self.name}_batched_gemm",
             tile=self.gemm_tile,
             trait=trait,
+            dtype=_gemm_dtype_to_universal(self.dtype),
         )
 
     def to_batched_gemm_spec(self) -> BatchedGemmSpec:
@@ -455,6 +476,7 @@ class FusedMoeForwardSpec:
             name=f"{self.name}_batched_gemm",
             tile=self.gemm_tile,
             trait=trait,
+            dtype=_gemm_dtype_to_universal(self.dtype),
         )
 
 
@@ -477,7 +499,11 @@ class FusedMoeForward:
     def __init__(self, spec: FusedMoeForwardSpec) -> None:
         # Shape-aware tile policy from the tuning sweep. Only override
         # the auto/default tile; caller-supplied tiles are respected.
-        if (
+        is_bf16 = spec.dtype in ("bf16",)
+        if is_bf16 and spec.gemm_tile == _default_gemm_tile():
+            # 32x32x16 atom is F16-only; switch to a BF16-compatible tile.
+            spec.gemm_tile = _default_bf16_gemm_tile()
+        elif (
             spec.gemm_tile == _default_gemm_tile()
             and spec.hidden >= 1024
             and spec.tokens >= 32
@@ -637,6 +663,7 @@ class FusedMoeForward:
             name=f"{self.spec.name}_batched_gemm",
             tile=self.spec.gemm_tile,
             trait=trait,
+            dtype=_gemm_dtype_to_universal(self.spec.dtype),
         )
         artifact = compile_kernel(build_batched_gemm(spec), capture_ir_text=False)
         launcher = KernelLauncher(
@@ -677,6 +704,7 @@ class FusedMoeForward:
             name=f"{self.spec.name}_interleaved_gate_up_silu",
             tile=self.spec.gemm_tile,
             trait=trait,
+            dtype=_gemm_dtype_to_universal(self.spec.dtype),
         )
         artifact = compile_kernel(
             build_moe_interleaved_gate_up_silu_gemm(spec), capture_ir_text=False
@@ -803,6 +831,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                dtype=_gemm_dtype_to_universal(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_gate_up_silu_gemm(spec), capture_ir_text=False
@@ -822,6 +851,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_interleaved_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                dtype=_gemm_dtype_to_universal(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_interleaved_gate_up_silu_gemm(spec),
@@ -856,6 +886,7 @@ class FusedMoeForward:
                     epilogue="default",
                     preshuffle_b=True,
                 ),
+                dtype=_gemm_dtype_to_universal(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_interleaved_gate_up_silu_gemm(spec),
@@ -907,6 +938,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_down_reduce",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                dtype=_gemm_dtype_to_universal(self.spec.dtype),
             )
             artifact = compile_kernel(
                 build_moe_down_reduce_gemm(spec), capture_ir_text=False
@@ -1897,6 +1929,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_gate_up_silu",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                dtype=_gemm_dtype_to_universal(s.dtype),
             )
             # True CK Tile-style gate+up fusion: one MFMA kernel keeps
             # gate and up accumulators in registers and writes
@@ -1936,6 +1969,7 @@ class FusedMoeForward:
                     epilogue="default",
                     active_tile_skip=s.active_tile_skip_gemms,
                 ),
+                dtype=_gemm_dtype_to_universal(s.dtype),
             )
             gate_up_args = {
                 "A": grouped_input_padded,
@@ -2031,6 +2065,7 @@ class FusedMoeForward:
                 name=f"{self.spec.name}_down_reduce",
                 tile=self.spec.gemm_tile,
                 trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+                dtype=_gemm_dtype_to_universal(s.dtype),
             )
             down_stage_callables = [
                 make_kernel(

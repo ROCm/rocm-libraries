@@ -51,6 +51,7 @@ from typing import Tuple
 
 from ..core.ir import KernelDef
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -75,6 +76,7 @@ class BatchedGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     batch_size: int = 0
+    dtype: str = "fp16"
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -85,11 +87,16 @@ class BatchedGemmSpec:
                 t.warp_m * t.warp_n * t.warp_k * self.wave_size,
             )
 
+    def _data_spec(self) -> DataSpec:
+        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
+        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self._data_spec(),
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -168,11 +175,12 @@ def build_persistent_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
 def batched_gemm_signature(spec: BatchedGemmSpec):
     from ..helpers.spec import SignatureBuilder
 
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
     sig = (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
+        .ptr("A", ptr_dt)
+        .ptr("B", ptr_dt)
+        .ptr("C", ptr_dt)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
@@ -181,9 +189,6 @@ def batched_gemm_signature(spec: BatchedGemmSpec):
         .scalar("stride_c", "i32")
     )
     if spec.trait.active_tile_skip:
-        # Two extra args used by the active-tile gate at the start
-        # of the kernel; their layout must match the kernel's
-        # ``b.param`` order in ``build_universal_gemm``.
         sig = sig.ptr("SortedTokenIds", "i32").scalar("slot_size", "i32")
     return sig.build()
 
