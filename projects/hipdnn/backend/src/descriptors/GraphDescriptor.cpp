@@ -54,6 +54,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
     graph->preferred_engine_id = _preferredEngineId;
+    graph->is_override_shape_enabled = _isOverrideShapeEnabled;
     graph->name = _name;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
@@ -195,6 +196,15 @@ void GraphDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         getPreferredEngineId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        getScalar(_isOverrideShapeEnabled,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::getAttribute()");
+        break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         getString(_name,
                   attributeType,
@@ -326,6 +336,14 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         setPreferredEngineId(attributeType, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        setScalar(_isOverrideShapeEnabled,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::setAttribute()");
+        break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         setString(
             _name, attributeType, elementCount, arrayOfElements, "GraphDescriptor::setAttribute()");
@@ -365,6 +383,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
+    _isOverrideShapeEnabled = graph->is_override_shape_enabled;
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes
@@ -473,6 +492,11 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
 {
     THROW_IF_NULL(_handle, HIPDNN_STATUS_BAD_PARAM, "GraphDescriptor::getHandle: handle is null");
     return _handle;
+}
+
+bool GraphDescriptor::isOverrideShapeEnabled() const
+{
+    return _isOverrideShapeEnabled;
 }
 
 std::string GraphDescriptor::toString() const

@@ -111,7 +111,7 @@ std::vector<RegKeySet> computePhiSites(const std::vector<BlockDefs>& blockDefs,
     defSites.reserve(usedRegs.size());
     for (unsigned i = 0; i < N; ++i)
         for (const auto& key : blockDefs[i].keys)
-            if (usedRegs.count(key)) defSites[key].push_back(i);
+            if (usedRegs.contains(key)) defSites[key].push_back(i);
 
     std::vector<RegKeySet> sites(N);
 
