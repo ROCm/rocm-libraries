@@ -317,6 +317,7 @@ class InstructionEmitter:
         writer.vgprPool.checkIn(workKVgpr)
 
         self._tail_boundaryMask = None
+        laneSGPRCount = writer.states.laneSGPRCount
         if self.kernel["ProblemType"]["DataTypeA"].isBFloat16():
             halfMaskVgpr = writer.vgprPool.checkOut(1, "tail_halfMask")
             module.add(VMovB32(
@@ -335,7 +336,6 @@ class InstructionEmitter:
             assert numMIInUnroll % kStride == 0, \
                 f"numMIInUnroll ({numMIInUnroll}) must be a multiple of kStride ({kStride})"
             numBoundaryMasks = numMIInUnroll // kStride
-            laneSGPRCount = writer.states.laneSGPRCount
             vDLaneRem = writer.vgprPool.checkOut(1, "tail_vDLaneRem")
             module.add(VAndB32(
                 dst=vgpr(vDLaneRem),
@@ -371,6 +371,7 @@ class InstructionEmitter:
                         comment=f"boundaryMask[{i}] = (d<{loBound}) ? 0 : prev"))
             writer.vgprPool.checkIn(halfMaskVgpr)
             writer.vgprPool.checkIn(vDLaneRem)
+
         return list(module.flatitems())
 
     def emit_mask_k(self, source):
@@ -478,6 +479,59 @@ class InstructionEmitter:
                         module.add(VAndB32(
                             dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
                             comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
+
+            # MX scale mask: each scale vgpr packs 4 bytes covering lrSA.k
+            # pairs of subIterK (bytes 0..1 → subIterK=base, bytes 2..3 →
+            # subIterK=base+1). K_rem is always a multiple of MXBlock=32, so
+            # the per-lane decision is byte-binary on eff_diff = diff - kBase:
+            #   eff_diff <= 0           → mask = 0           (drop both bytes)
+            #   eff_diff <= MatrixInstK → mask = 0x0000FFFF  (drop subIterK=+1)
+            #   else                    → mask = 0xFFFFFFFF  (keep both)
+            # Recomputed at the start of each scale group (subIterK %
+            # lrSA.k == 0) since the scale LR reloads the vgpr at that
+            # boundary. Live tiles only — vgprTilesSA/SB still contain the
+            # dead PGR≥1 prefetch slots returned to the pool by
+            # _release_unused_tail_tiles.
+            scaleStride = self.config.lrSA.k if self.hasScale else 0
+            if self.hasScale and (self.vgprTilesSA or self.vgprTilesSB) \
+                    and scaleStride > 0 and (subIterK % scaleStride == 0):
+                miK = kernel["MatrixInstK"]
+                scaleMaskVgpr = writer.vgprPool.checkOut(
+                    1, f"tail_scaleMask_k{subIterK}")
+                scaleLowMaskVgpr = writer.vgprPool.checkOut(
+                    1, f"tail_scaleLowMask_k{subIterK}")
+                module.add(VMovB32(
+                    dst=vgpr(scaleMaskVgpr), src=-1,
+                    comment="scale mask init = 0xFFFFFFFF (keep both bytes)"))
+                module.add(VMovB32(
+                    dst=vgpr(scaleLowMaskVgpr), src="0x0000FFFF",
+                    comment="scale low-half mask = 0x0000FFFF (keep low byte-pair)"))
+                _emit_cmp(VCmpLeI32, kBaseConst + miK,
+                          f"scale: eff_diff <= MatrixInstK ({miK}) ? drop high bytes")
+                module.add(VCndMaskB32(
+                    dst=vgpr(scaleMaskVgpr),
+                    src0=vgpr(scaleMaskVgpr), src1=vgpr(scaleLowMaskVgpr),
+                    src2=sgpr(maskSgpr, laneSGPRCount),
+                    comment="scale mask = (eff_diff<=MIK) ? 0x0000FFFF : -1"))
+                _emit_cmp(VCmpLeI32, kBaseConst,
+                          "scale: eff_diff <= 0 ? drop both bytes")
+                module.add(VCndMaskB32(
+                    dst=vgpr(scaleMaskVgpr),
+                    src0=vgpr(scaleMaskVgpr), src1=0,
+                    src2=sgpr(maskSgpr, laneSGPRCount),
+                    comment="scale mask = (eff_diff<=0) ? 0 : prev"))
+                for tensor, tilesList in (('SA', self.vgprTilesSA),
+                                          ('SB', self.vgprTilesSB)):
+                    liveIds = sorted(set(
+                        source.vgpr_tile_map.get(tensor, [{}])[0].values()))
+                    for tid in liveIds:
+                        for v in list(tilesList[tid]):
+                            module.add(VAndB32(
+                                dst=vgpr(v), src0=vgpr(v),
+                                src1=vgpr(scaleMaskVgpr),
+                                comment=f"mask scale vgpr (subIterK={subIterK})"))
+                writer.vgprPool.checkIn(scaleMaskVgpr)
+                writer.vgprPool.checkIn(scaleLowMaskVgpr)
 
         for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)
