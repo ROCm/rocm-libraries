@@ -1223,7 +1223,7 @@ struct BlockFmhaPipelineQRKSVS
             const auto tmp       = [&]() {
                 // When bias carries -inf masks the denominator can be zero; guard the normalization
                 // so we do not divide by zero after a fully masked row.
-                if constexpr(FmhaMask::IsMasking ||
+                if constexpr(FmhaMask::IsMasking || kHasBlockMask ||
                              BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                 {
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];

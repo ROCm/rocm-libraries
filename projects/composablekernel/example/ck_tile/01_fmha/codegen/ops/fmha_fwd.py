@@ -248,7 +248,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
-        ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
+        ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_block_mask_check}) && ({F_constraint})) {{
     using trait_ = fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}>;
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
 }}
@@ -397,6 +397,11 @@ class FmhaFwdApiTrait:
         else:
             assert False
 
+    @property
+    def block_mask_check(self) -> str:
+        if self.bm0 == 128:
+            return "true"
+        return "a.block_mask_ptr == nullptr"
 
 @dataclass
 class FmhaFwdPipeline:
@@ -585,6 +590,7 @@ class FmhaFwdApiPool:
                             F_skcheck=trait.skcheck,
                             F_dcheck=trait.dcheck,
                             F_dvcheck=trait.dvcheck,
+                            F_block_mask_check=trait.block_mask_check,
                             F_constraint=trait.constraint,
                             F_spad=BOOL_MAP[trait.spad],
                             F_skpad=BOOL_MAP[trait.skpad],
