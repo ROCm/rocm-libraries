@@ -650,8 +650,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeUnsup
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -717,7 +717,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
-    // Activation without in_1 (missing dy gradient!)
+    // Activation without in_1 (missing forward activation input!)
     auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
@@ -725,7 +725,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
+        6,
         flatbuffers::nullopt, // Missing in_1!
         flatbuffers::nullopt,
         11);
@@ -1115,8 +1115,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1261,8 +1261,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1322,7 +1322,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
-    // Activation with input uid=999
+    // Activation with forward input uid=999
     auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
@@ -1330,8 +1330,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        999, // Wrong input
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(999), // Wrong forward input
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1406,8 +1406,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1481,8 +1481,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1557,8 +1557,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1632,8 +1632,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -1707,8 +1707,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
-        10,
-        flatbuffers::Optional<int64_t>(6),
+        6,
+        flatbuffers::Optional<int64_t>(10),
         flatbuffers::nullopt,
         11);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

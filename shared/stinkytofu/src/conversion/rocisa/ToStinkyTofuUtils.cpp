@@ -618,6 +618,20 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitDscnt, handleSWaitDscntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitLoadcnt, handleSWaitLoadcntModifiers(stinkyInst, typedInst, asmCaps))
+
+            // global_wb / global_inv: device-scope memory fences with no
+            // register operands. The only encoded modifier is the cache
+            // scope, which we attach as a dedicated CacheScopeModifiers so
+            // MUBUFModifiers can evolve independently without affecting
+            // fence emission.
+            else HANDLE_INST_TYPE(rocisa::GlobalWb,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
+            else HANDLE_INST_TYPE(rocisa::GlobalInv,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
         }
     // clang-format on
 
@@ -828,18 +842,9 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // Get GfxArchID from architecture array
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-    // Populate assembler-capability-derived module options from rocisa asmCaps.
-    // This is done here (in the rocisa conversion layer, which is the only
-    // stinkytofu TU allowed to depend on rocisa headers) so that the
-    // stinkytofu library itself stays decoupled from rocisa.
-    StinkyAsmModule::ModuleOptions finalModuleOptions = moduleOptions;
-    {
-        auto probedCaps = rocisa::rocIsa::getInstance().getAsmCaps();
-        finalModuleOptions.HasVgprMSB16 =
-            probedCaps.count("HasVgprMSB16") && probedCaps.at("HasVgprMSB16");
-    }
-
-    StinkyAsmModule stinkyAsmModule(moduleName, arch, finalModuleOptions);
+    // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
+    // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
+    StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
 
     // Add instruction groups registered by the target backend.
     if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
