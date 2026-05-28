@@ -143,12 +143,17 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
             static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
             static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
             if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
-                arg == "--print-output" || arg == "--emit-asm" ||
+                arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
                 arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
                 continue;
-            if (arg == "-o") {
-                ++i;  // skip the filename argument
+            // Two-arg flags: skip both the flag and its value so the value
+            // doesn't get mistaken for a pass name and the flag doesn't get
+            // mistaken for a missing pass (e.g. `--debug-pass FooPass` was
+            // emitting `Warning: Unknown pass 'debug-pass'` because the
+            // `--` prefix was stripped and `debug-pass` wasn't a known pass).
+            if (arg == "-o" || arg == "--debug-pass") {
+                ++i;  // skip the value argument
                 continue;
             }
             passNames.push_back(arg.substr(2));  // Remove "--" prefix
@@ -221,6 +226,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
+        std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -280,6 +286,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
+        std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -400,6 +407,7 @@ int main(int argc, char** argv) {
     // --preserve-symbolic-regs, --preserve-comments flags
     bool printOutput = false;
     bool emitAsm = false;
+    bool enableRemarks = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -408,6 +416,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--print-output") printOutput = true;
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
+        if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
@@ -603,6 +612,7 @@ int main(int argc, char** argv) {
             // Pipeline mode: create a StinkyAsmModule and run the registered pipeline
             stinkytofu::StinkyAsmModule::ModuleOptions moduleOpts{};
             moduleOpts.OptLevel = optLevel;
+            moduleOpts.EnableRemarks = enableRemarks;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -634,6 +644,7 @@ int main(int argc, char** argv) {
             passManager.setPassFeatureConfig(passFeatureConfig);
             setKernelConfig(passManager, arch);
             passManager.setAsmCapsConfig(stinkytofu::ToolchainCaps::probe(archID));
+            if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
             for (const auto& passName : requestedPasses) {
                 auto pass = createPassByName(passName);
