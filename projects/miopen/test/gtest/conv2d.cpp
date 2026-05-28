@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifdef MIOPEN_GTEST_ALL
+
 #include <gtest/gtest.h>
 
 #include "conv_common_gtest.hpp"
@@ -12,21 +14,11 @@ using TestCase = Conv2DBaseTestCase<NamedContainer<std::vector<size_t>>, // inpu
                                     NamedContainer<std::vector<size_t>>  // weights_tensor_dims
                                     >;
 
-#ifdef MIOPEN_GTEST_ALL
 bool IsTestSupportedForDevice(const miopen::Handle& handle)
 {
     std::string devName = handle.GetDeviceName();
     return (devName != "gfx900" && devName != "gfx906");
 }
-
-void SetEnvVars(std::vector<std::string>& envvars)
-{
-    for(auto& elem : envvars)
-    {
-        putenv(elem.data());
-    }
-}
-#endif // MIOPEN_GTEST_ALL
 
 template <typename T>
 auto GenCases(bool smoke_test,
@@ -89,32 +81,18 @@ TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv2d_), MIOPEN_TEST_INFO(Test)) { run(); }
 TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv2d_RegressionIssue2624_),
        MIOPEN_TEST_INFO(TestRegressionIssue2624))
 {
-#ifndef MIOPEN_GTEST_ALL
-    GTEST_SKIP()
-        << "This test is being skipped as it is not intended to be run in 'smoke test' mode.";
-#else  // MIOPEN_GTEST_ALL
     if(!IsTestSupportedForDevice(get_handle()))
     {
         GTEST_SKIP() << "Test not supported for the current device";
     }
 
-    std::vector<std::string> env_vars{"MIOPEN_DEBUG_CONV_WINOGRAD=0",
-                                      "MIOPEN_DEBUG_CONV_FFT=0",
-                                      "MIOPEN_DEBUG_CONV_DIRECT=0",
-                                      "MIOPEN_DEBUG_CONV_GEMM=0",
-                                      "MIOPEN_DEBUG_CONV_IMPLICIT_GEMM=1"};
-
-    SetEnvVars(env_vars);
+    ScopedEnvironment<bool> winograd(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+    ScopedEnvironment<bool> fft(MIOPEN_DEBUG_CONV_FFT, false);
+    ScopedEnvironment<bool> direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+    ScopedEnvironment<bool> gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    ScopedEnvironment<bool> implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, true);
 
     run();
-
-    std::vector<std::string> deleted_env_vars{"MIOPEN_DEBUG_CONV_WINOGRAD=",
-                                              "MIOPEN_DEBUG_CONV_FFT=",
-                                              "MIOPEN_DEBUG_CONV_DIRECT=",
-                                              "MIOPEN_DEBUG_CONV_GEMM=",
-                                              "MIOPEN_DEBUG_CONV_IMPLICIT_GEMM="};
-    SetEnvVars(deleted_env_vars);
-#endif // MIOPEN_GTEST_ALL
 }
 
 INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0),
@@ -156,3 +134,5 @@ INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(2),
                               false,
                               false,
                               true);
+
+#endif // MIOPEN_GTEST_ALL
