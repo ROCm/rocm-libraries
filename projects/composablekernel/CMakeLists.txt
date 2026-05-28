@@ -734,6 +734,7 @@ include_directories(BEFORE
     ${PROJECT_BINARY_DIR}/include
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/library/include
+    ${PROJECT_SOURCE_DIR}/common/include
     ${HIP_INCLUDE_DIRS}
 )
 
@@ -829,6 +830,10 @@ if (CK_EXPERIMENTAL_BUILDER)
   add_subdirectory(experimental/grouped_convolution_tile_instances)
 endif()
 
+# Common types shared across CK Tile, rocm_ck, and dispatcher.
+# Header-only — no GPU dependency, always available.
+add_subdirectory(common)
+
 if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
    if(BUILD_CK_EXAMPLES)
        rocm_package_setup_component(examples
@@ -848,6 +853,7 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
    if(BUILD_CK_TILE_ENGINE)
        add_subdirectory(tile_engine)
    endif()
+
    if(CK_ENABLE_ROCM_CK)
        add_subdirectory(rocm_ck)
        if(TARGET check)
