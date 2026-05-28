@@ -2,6 +2,7 @@
 #include "mxfp6_types.hpp"
 #include <vector>
 #include <cmath>
+#include <cstring>
 #include <cassert>
 
 namespace mxfp6 {
@@ -126,6 +127,52 @@ inline PreprocessedScale preprocess_scale(const uint8_t* scales, int dim, int K)
         }
     }
     return ps;
+}
+
+// Pre-shuffle B for coalesced VMEM loads in the MFMA kernel.
+//
+// Input: B_q (from preprocess_B), shape B^T[N][K], row-major packed FP6.
+//        For a single 32×64 tile: 32 rows × 48 bytes = 1536 bytes.
+//
+// Output: B_shuffled, 1536 bytes per tile, split into two sections:
+//   Section 0 [0..1023]:    tid × 16 bytes = DWORDs 0-3 (for global_load_dwordx4)
+//   Section 1 [1024..1535]: tid × 8  bytes = DWORDs 4-5 (for global_load_dwordx2)
+//
+// Thread tid maps to: n = tid%32 (N-column), khalf = tid/32 (K-half 0 or 1).
+// Original data at: B_q.packed_data[n * packed_row_bytes + khalf * 24], 24 bytes.
+struct PreshuffledB {
+    std::vector<uint8_t> data;    // [n_tiles * k64_iters * 1536]
+    int N, K;
+    int n_tiles;    // N / 32
+    int k64_iters;  // K / 64
+};
+
+inline PreshuffledB preshuffle_B(const QuantizedMatrix& B_q) {
+    assert(B_q.rows % 32 == 0 && B_q.cols % 64 == 0);
+
+    PreshuffledB pb;
+    pb.N = B_q.rows;
+    pb.K = B_q.cols;
+    pb.n_tiles = B_q.rows / 32;
+    pb.k64_iters = B_q.cols / 64;
+    pb.data.resize(pb.n_tiles * pb.k64_iters * 1536);
+
+    for (int nt = 0; nt < pb.n_tiles; nt++) {
+        for (int ki = 0; ki < pb.k64_iters; ki++) {
+            uint8_t* tile = pb.data.data() + (nt * pb.k64_iters + ki) * 1536;
+
+            for (int tid = 0; tid < 64; tid++) {
+                int n = nt * 32 + (tid % 32);
+                int khalf = tid / 32;
+                int k_byte_off = ki * 48 + khalf * 24;  // 48 = fp6_packed_bytes(64)
+                const uint8_t* src = B_q.packed_data.data()
+                                   + n * B_q.packed_row_bytes + k_byte_off;
+                memcpy(tile + tid * 16,        src,      16);  // section 0
+                memcpy(tile + 1024 + tid * 8,  src + 16,  8);  // section 1
+            }
+        }
+    }
+    return pb;
 }
 
 } // namespace mxfp6

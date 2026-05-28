@@ -11,7 +11,10 @@ test_reference: test_reference.cpp $(filter-out mxfp6_asm_utils.hpp, $(HEADERS))
 test_lds_shuffle: test_lds_shuffle.cpp $(HEADERS)
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
-test_single_mfma: test_single_mfma.cpp $(HEADERS)
+test_gemm_corrected: test_gemm_corrected.cpp $(HEADERS)
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
+test_preshuffle: test_preshuffle.cpp $(HEADERS)
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
 bench_lds_shuffle: bench_lds_shuffle.cpp $(HEADERS)
@@ -20,11 +23,11 @@ bench_lds_shuffle: bench_lds_shuffle.cpp $(HEADERS)
 test_cpu: test_reference
 	./test_reference
 
-test_gpu: test_lds_shuffle test_single_mfma
+test_gpu: test_lds_shuffle test_preshuffle
 	./test_lds_shuffle
-	./test_single_mfma
+	./test_preshuffle
 
 clean:
-	rm -f test_reference test_lds_shuffle test_single_mfma bench_lds_shuffle
+	rm -f test_reference test_lds_shuffle test_gemm_corrected test_preshuffle bench_lds_shuffle
 
 .PHONY: test_cpu test_gpu clean

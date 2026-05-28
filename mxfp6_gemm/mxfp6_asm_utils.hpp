@@ -99,39 +99,54 @@ struct alignas(64) AccTile { v16f vec; };
 
 __device__ __forceinline__ void clear_acc(AccTile& acc) { acc.vec = v16f{}; }
 
+// TransposeC variant: swap src0/src1 so output layout has each lane
+// holding 1 M-row × 16 N-columns, enabling vectorized stores.
+//
+// Calling mfma(B, A, ...) computes D_out[n][m] = C[m][n] = A*B.
+// The output is C transposed, but the store maps it back correctly.
+//
+// For FP6 × FP6: cbsz=2 for src0(=B), blgp=2 for src1(=A).
+// scale_a in the builtin → src0 scale = B's scale.
+// scale_b in the builtin → src1 scale = A's scale.
 template <int BYTE_SEL>
 __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
     AccTile& acc, v8i a, v8i b, int scale_a, int scale_b)
 {
     static_assert(BYTE_SEL >= 0 && BYTE_SEL <= 3, "byte_sel must be 0-3");
     acc.vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-        a, b, acc.vec,
+        b, a, acc.vec,
         /*cbsz=*/2, /*blgp=*/2,
-        /*opsel_a=*/BYTE_SEL, scale_a,
-        /*opsel_b=*/BYTE_SEL, scale_b);
+        /*opsel_a=*/BYTE_SEL, scale_b,
+        /*opsel_b=*/BYTE_SEL, scale_a);
 }
 
 // ---- Epilogue: store 32×32 AccTile to global ----
 //
-// MFMA output layout (per lane within 64-thread wave):
-//   grp 0 (lane  0-15): M= 0-15, N= 0-15
-//   grp 1 (lane 16-31): M=16-31, N= 0-15
-//   grp 2 (lane 32-47): M= 0-15, N=16-31
-//   grp 3 (lane 48-63): M=16-31, N=16-31
+// With TransposeC (src0=B, src1=A), each lane holds:
+//   m = tid % 32 (one M-row)
+//   16 acc values spanning N columns
+//
+// N mapping per acc item:
+//   m_half=0 (lanes 0-31):  acc[p] → N = (p%4) + (p/4)*8
+//   m_half=1 (lanes 32-63): acc[p] → N = (p%4) + (p/4)*8 + 4
+//
+// Groups of 4 consecutive acc values map to 4 consecutive N positions
+// → enables global_store_dwordx4 (4 stores instead of 16).
 
 __device__ __forceinline__ void store_acc_f32(
     float* __restrict__ D, int D_stride, const AccTile& acc,
     int m_tile_base, int n_tile_base)
 {
-    int lane = threadIdx.x & 0xF;
-    int grp  = (threadIdx.x >> 4) & 3;
-    int m = m_tile_base + lane + (grp & 1) * 16;
-    int n = n_tile_base + (grp >> 1) * 16;
+    int m = m_tile_base + (threadIdx.x % 32);
+    int m_half = threadIdx.x / 32;
+    float* row = &D[m * D_stride + n_tile_base];
 
     #pragma unroll
-    for (int i = 0; i < 16; i += 4)
-        *reinterpret_cast<float4*>(&D[m * D_stride + n + i]) =
-            make_float4(acc.vec[i], acc.vec[i+1], acc.vec[i+2], acc.vec[i+3]);
+    for (int g = 0; g < 4; g++) {
+        int n = g * 8 + m_half * 4;
+        *reinterpret_cast<float4*>(&row[n]) =
+            make_float4(acc.vec[g*4], acc.vec[g*4+1], acc.vec[g*4+2], acc.vec[g*4+3]);
+    }
 }
 
 } // namespace mxfp6
