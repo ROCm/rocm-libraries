@@ -1112,8 +1112,10 @@ struct MoeFlatmmKernel
             constexpr index_t kM0 = MPerXdl / kM1 / kM2;       // Var-dim
 
             constexpr index_t ScaleMRepeat = MRepeat * kM0 * kM2;
-            statically_indexed_array<index_t, ScaleMRepeat> scale_m_offsets;
-            statically_indexed_array<bool, ScaleMRepeat> scale_m_valids;
+            // BMXFP4 handles scaling in the GEMM pipeline, so this epilogue scale-M
+            // gather view is never loaded on that path.
+            statically_indexed_array<index_t, ScaleMRepeat> scale_m_offsets{};
+            statically_indexed_array<bool, ScaleMRepeat> scale_m_valids{};
 
             if constexpr(!BMXFP4_Pipeline)
                 static_ford<sequence<MRepeat, kM0, kM2>>{}([&](auto mmm) {

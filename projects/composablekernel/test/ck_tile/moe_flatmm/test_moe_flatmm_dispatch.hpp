@@ -602,7 +602,10 @@ float a16w4_moe_gemm(const MoeFlatmmHostArgs& args, const ck_tile::stream_config
         using CodegenFlatmmPipeline =
             ck_tile::F16xMXF4FlatmmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem>;
 
-        using FusedAct = ck_tile::moe::Swiglu;
+        using FusedAct =
+            std::conditional_t<moe_kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_only,
+                               ck_tile::moe::MoeSilu,
+                               ck_tile::moe::Swiglu>;
 
         using Kernel = ck_tile::MoeFlatmmKernel<TilePartitioner,
                                                 CodegenFlatmmPipeline,

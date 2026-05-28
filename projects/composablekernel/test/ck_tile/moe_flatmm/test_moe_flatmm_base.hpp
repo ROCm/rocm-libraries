@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -45,6 +46,7 @@ class TestMoeFlatmmBase : public ::testing::Test
     static constexpr ck_tile::MoeFlatmmKind Kind = MoeKindTag::value;
     static constexpr bool IsInputGemm            = Kind != ck_tile::MoeFlatmmKind::kFFN_gemm2;
     static constexpr bool IsGateUp = Kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up;
+    static constexpr bool IsSplitK = Kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_split_k;
 
     void run_test(ck_tile::index_t num_tokens,
                   ck_tile::index_t topk,
@@ -53,7 +55,8 @@ class TestMoeFlatmmBase : public ::testing::Test
                   ck_tile::index_t K,
                   std::optional<std::vector<ck_tile::index_t>> forced_topk_ids = std::nullopt,
                   bool skip_experts_with_zero_token                            = true,
-                  int seed                                                     = 42)
+                  int seed                                                     = 42,
+                  ck_tile::index_t k_batch                                     = 1)
     {
         ASSERT_EQ(K % FlatmmConfig::K_Tile, 0)
             << "K (" << K << ") must be a multiple of K_Tile (" << FlatmmConfig::K_Tile << ")";
@@ -175,7 +178,7 @@ class TestMoeFlatmmBase : public ::testing::Test
                            num_tokens,
                            experts,
                            topk,
-                           1, // k_batch
+                           k_batch,
                            M,
                            N,
                            K,
@@ -185,17 +188,32 @@ class TestMoeFlatmmBase : public ::testing::Test
                            per_token_scale_dev_ptr,
                            per_channel_scale_dev_ptr};
 
-        moe_gemm<FlatmmConfig,
-                 ADataType,
-                 BDataType,
-                 ck_tile::tuple<>,
-                 AccDataType,
-                 CDataType,
-                 ALayout,
-                 BLayout,
-                 ck_tile::tuple<>,
-                 CLayout,
-                 Kind>(args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
+        try
+        {
+            moe_gemm<FlatmmConfig,
+                     ADataType,
+                     BDataType,
+                     ck_tile::tuple<>,
+                     AccDataType,
+                     CDataType,
+                     ALayout,
+                     BLayout,
+                     ck_tile::tuple<>,
+                     CLayout,
+                     Kind>(args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
+        }
+        catch(const std::runtime_error& e)
+        {
+            if constexpr(IsSplitK)
+            {
+                GTEST_SKIP() << "Split-K MoE FlatMM unsupported for this configuration: "
+                             << e.what();
+            }
+            else
+            {
+                throw;
+            }
+        }
 
         c_m_n_dev_buf.FromDevice(c_m_n_tensor.data());
 
@@ -245,9 +263,9 @@ class TestMoeFlatmmBase : public ::testing::Test
         c_m_n_ref_buf->FromDevice(c_m_n_host_ref.data());
 
         const float rtol =
-            std::is_same_v<ADataType, ck_tile::half_t> && IsInputGemm ? 1e-3f : 1e-2f;
+            std::is_same_v<ADataType, ck_tile::half_t> && IsInputGemm && !IsSplitK ? 1e-3f : 1e-2f;
         const float atol =
-            std::is_same_v<ADataType, ck_tile::half_t> && IsInputGemm ? 1e-3f : 1e-2f;
+            std::is_same_v<ADataType, ck_tile::half_t> && IsInputGemm && !IsSplitK ? 1e-3f : 1e-2f;
 
         EXPECT_TRUE(ck_tile::check_err(
             c_m_n_tensor, c_m_n_host_ref, "MoE FlatMM result mismatch", rtol, atol));

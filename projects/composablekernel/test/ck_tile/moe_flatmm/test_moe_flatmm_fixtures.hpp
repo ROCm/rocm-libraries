@@ -23,3 +23,4 @@ struct MoeKind
 using GateOnly = MoeKind<ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_only>;
 using GateUp   = MoeKind<ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up>;
 using Gemm2    = MoeKind<ck_tile::MoeFlatmmKind::kFFN_gemm2>;
+using SplitK   = MoeKind<ck_tile::MoeFlatmmKind::kFFN_gemm1_split_k>;

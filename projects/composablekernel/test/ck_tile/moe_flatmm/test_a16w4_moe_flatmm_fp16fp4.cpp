@@ -7,11 +7,10 @@
 #include "test_moe_flatmm_scenarios.hpp"
 
 // A16W4 MoE FlatMM fp16xfp4 on gfx950 (F16xMXF4FlatmmPipelineAGmemBGmemCRegV1).
-// Same shape coverage as the bf16xfp4 suite. AITER builds this combo as well
-// (its dispatcher accepts both fp16 and bf16 activations on the a16w4 path),
-// though production deployments typically use bf16.
+// Same shape coverage as the bf16xfp4 suite, including gate_only as a support probe.
 // clang-format off
 using FP16FP4Types = ::testing::Types<
+    std::tuple<A16W4_GemmTypeConfig_fp16xfp4, GateOnly>,
     std::tuple<A16W4_GemmTypeConfig_fp16xfp4, GateUp>,
     std::tuple<A16W4_GemmTypeConfig_fp16xfp4, Gemm2>>;
 // clang-format on

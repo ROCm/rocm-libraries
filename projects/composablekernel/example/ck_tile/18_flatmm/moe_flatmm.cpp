@@ -99,6 +99,7 @@ int run_moe_flatmm_example(int argc, char* argv[])
                     FlatmmConfig<ck_tile::half_t>,
                     ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_only>(argc, argv, Row{}, Col{}, Row{});
             }
+#if defined(CK_GFX950_SUPPORT)
             else if(prec_type == "fp4xfp4")
             {
                 return run_mx_moe_gemm_example_with_layouts<
@@ -113,6 +114,13 @@ int run_moe_flatmm_example(int argc, char* argv[])
                     MXMoeFlatmmConfig16,
                     ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_only>(argc, argv, Row{}, Col{}, Row{});
             }
+#else
+            else if(prec_type == "fp4xfp4" || prec_type == "fp8xfp4")
+            {
+                throw std::runtime_error("MX MoE FlatMM fp4xfp4/fp8xfp4 is only supported on "
+                                         "gfx950.");
+            }
+#endif
             else
             {
                 throw std::runtime_error("Unsupported precision type for gemm1_gate_only!");

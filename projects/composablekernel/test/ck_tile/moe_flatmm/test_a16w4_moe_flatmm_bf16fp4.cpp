@@ -9,10 +9,10 @@
 // A16W4 MoE FlatMM bf16xfp4 on gfx950 (F16xMXF4FlatmmPipelineAGmemBGmemCRegV1).
 // Mirrors AITER's `a16w4_gfx950` codegen path (bf16 activation, pk_fp4 weights
 // with K=32 MX block scales, bf16 output, Swiglu activation, expert bias).
-// Covers gemm1_gate_up (mlp1) and gemm2 (mlp2) MoeKinds; gemm1_gate_only is
-// not part of AITER's A16W4 dispatch and is omitted here as well.
+// Covers gate_only as a support probe in addition to the AITER gate_up/gemm2 path.
 // clang-format off
 using BF16FP4Types = ::testing::Types<
+    std::tuple<A16W4_GemmTypeConfig_bf16xfp4, GateOnly>,
     std::tuple<A16W4_GemmTypeConfig_bf16xfp4, GateUp>,
     std::tuple<A16W4_GemmTypeConfig_bf16xfp4, Gemm2>>;
 // clang-format on
