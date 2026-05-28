@@ -1659,20 +1659,23 @@ struct GridwiseMoeGemmBlockScale
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, true, IsInputGemm, false, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problemN);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      true,
+                                      IsInputGemm,
+                                      false,
+                                      IndexType>(blockwise_gemm_pipeline,
+                                                 c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 c_thread_buf,
+                                                 block_m_id,
+                                                 block_n_id,
+                                                 p_shared,
+                                                 p_sorted_token_ids,
+                                                 p_c_grid,
+                                                 p_ds_grid,
+                                                 c_element_op,
+                                                 problem.TopK,
+                                                 problemN);
     }
 
     template <bool HasMainKBlockLoop,
@@ -2206,20 +2209,23 @@ struct GridwiseMoeGemmBlockScale
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, true, IsInputGemm, false, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problemN);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      true,
+                                      IsInputGemm,
+                                      false,
+                                      IndexType>(blockwise_gemm_pipeline,
+                                                 c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 c_thread_buf,
+                                                 block_m_id,
+                                                 block_n_id,
+                                                 p_shared,
+                                                 p_sorted_token_ids,
+                                                 p_c_grid,
+                                                 p_ds_grid,
+                                                 c_element_op,
+                                                 problem.TopK,
+                                                 problemN);
     }
 };
 

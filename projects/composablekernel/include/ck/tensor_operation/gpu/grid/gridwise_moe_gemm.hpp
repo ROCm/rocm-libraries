@@ -1603,20 +1603,23 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, NoCombine, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      false,
+                                      IsInputGemm,
+                                      NoCombine,
+                                      IndexType>(blockwise_gemm_pipeline,
+                                                 c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 c_thread_buf_fp32,
+                                                 block_m_id,
+                                                 block_n_id,
+                                                 p_shared,
+                                                 p_sorted_token_ids,
+                                                 p_c_grid,
+                                                 p_ds_grid,
+                                                 c_element_op,
+                                                 problem.TopK,
+                                                 problem.N);
     }
 
     template <bool HasMainKBlockLoop,
@@ -2109,20 +2112,23 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, NoCombine, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      false,
+                                      IsInputGemm,
+                                      NoCombine,
+                                      IndexType>(blockwise_gemm_pipeline,
+                                                 c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                 c_thread_buf_fp32,
+                                                 block_m_id,
+                                                 block_n_id,
+                                                 p_shared,
+                                                 p_sorted_token_ids,
+                                                 p_c_grid,
+                                                 p_ds_grid,
+                                                 c_element_op,
+                                                 problem.TopK,
+                                                 problem.N);
     }
 };
 
