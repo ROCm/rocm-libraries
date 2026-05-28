@@ -87,6 +87,10 @@ int main()
     int                  option   = 0;
     float                tol      = 1e-7;
 
+    option |= rocsparse_itilu0_option_stopping_criteria; // Add stopping criteria.
+    option |= rocsparse_itilu0_option_compute_nrm_residual; // Compute the norm of the residual.
+    option |= rocsparse_itilu0_option_verbose; // Put verbose.
+
     size_t buffer_size;
     ROCSPARSE_CHECK(rocsparse_csritilu0_buffer_size(handle,
                                                     alg,
@@ -116,11 +120,12 @@ int main()
                                                    buffer_size,
                                                    dbuffer));
 
+    const int num_iterations_without_stopping_criteria = 1;
     ROCSPARSE_CHECK(rocsparse_scsritilu0_compute_ex(handle,
                                                     alg,
                                                     option,
                                                     &nmaxiter,
-                                                    1,
+                                                    num_iterations_without_stopping_criteria,
                                                     tol,
                                                     m,
                                                     nnz,
@@ -134,6 +139,7 @@ int main()
 
     std::vector<float> hilu0(nnz);
     HIP_CHECK(hipMemcpy(hilu0.data(), dilu0, sizeof(float) * nnz, hipMemcpyDeviceToHost));
+    std::cout << "nmaxiter " << nmaxiter << std::endl;
 
     std::cout << "hilu0" << std::endl;
     for(size_t i = 0; i < hilu0.size(); i++)
