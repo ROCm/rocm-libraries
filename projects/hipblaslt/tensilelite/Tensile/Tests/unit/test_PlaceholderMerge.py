@@ -46,7 +46,7 @@ _LOGIC_ROOT = (
     / "Tensile" / "Logic" / "asm_full"
 )
 
-pytestmark = pytest.mark.xfail(
+_needs_logic_dir = pytest.mark.xfail(
     not _LOGIC_ROOT.is_dir(),
     reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
 )
@@ -90,6 +90,7 @@ def _read_device_names(yaml_path: Path):
     return None
 
 
+@_needs_logic_dir
 def test_logic_yaml_sibling_device_names_consistent():
     """Same-basename YAMLs in one arch dir must declare identical DeviceNames."""
     assert _LOGIC_ROOT.is_dir(), f"Logic root not found: {_LOGIC_ROOT}"
@@ -199,6 +200,7 @@ def test_hardware_gates_placeholder_chip_id_suffix(
     assert placeholderName.endswith("_" + devicePart), placeholderName
 
 
+@_needs_logic_dir
 @pytest.mark.parametrize("arch", _all_arch_names())
 def test_supports_chip_id_predicate_only_gfx950(arch):
     """Lock chip-id-aware archs to gfx950; new entries require re-audit of

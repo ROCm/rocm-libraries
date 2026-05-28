@@ -5,7 +5,6 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
-    "dnn-providers/fusilli-provider": "fusilli-provider",
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
@@ -69,10 +68,6 @@ project_map = {
         ],
         "projects_to_test": ["hipkernelprovider"],
     },
-    "fusilli-provider": {
-        "cmake_options": ["-DTHEROCK_ENABLE_IREE_LIBS=ON"],
-        "projects_to_test": ["fusilliprovider"],
-    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -104,7 +99,6 @@ additional_options = {
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
-            "-DTHEROCK_ENABLE_IREE_LIBS=ON",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -114,7 +108,6 @@ additional_options = {
             "hipblasltprovider",
             "hipkernelprovider",
             "hipdnn-integration-tests",
-            "fusilliprovider",
         ],
         "project_to_add": "miopen",
     },
@@ -153,7 +146,7 @@ additional_options = {
 # If a project has dependencies that are also being built, we combine build options and test options
 # This way, there will be no S3 upload overlap and we save redundant builds
 dependency_graph = {
-    "miopen": ["blas", "rand", "fusilli-provider"],
+    "miopen": ["blas", "rand"],
 }
 
 
