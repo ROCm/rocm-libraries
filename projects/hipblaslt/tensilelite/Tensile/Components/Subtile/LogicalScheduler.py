@@ -2073,14 +2073,28 @@ class LogicalScheduler:
         """Template for Tailloop based on PGR0 schedule.
 
         Returns [partition][groups] where each group has at most one MFMA.
+
+        The tail loop runs flat (no partitioning): per subIterK we emit one
+        LR pass covering every unique (tensor, tile_range), one boundary
+        mask, then every partition's MFMAs back-to-back. This requires the
+        flat tile-id layout from _compute_flat_tail_tile_state (and the
+        matching vgpr realloc in _realloc_tail_tiles_flat) so each unique
+        partition group has its own vgpr range — the mainloop's per-
+        partition tile budget multiplexes vgprs across pi and cannot hold
+        all partitions' tiles live at once.
         """
         cfg = self.config
         numK = cfg.numSubIterK
 
-        # We use PGR0, so we only need half the tiles. Getting the tiles for tail loop
-        # and flagging unused tiles so that they can be freed.
-        tile_maps, self._tail_unused_tile_ids = self._compute_tail_tile_state()
-        
+        # Flat tile layout: every unique (tensor, partition_group) gets its
+        # own vgpr tile id. _compute_tail_tile_state's old per-partition
+        # tile_maps would reuse vgprs across pi and break a flat loop.
+        tile_maps, self._flat_tail_peaks = self._compute_flat_tail_tile_state()
+        # Legacy unused-tile bookkeeping: in the flat path we replace the
+        # vgpr tiles wholesale at tail entry, so nothing here.
+        self._tail_unused_tile_ids = {'A': set(), 'B': set(),
+                                      'SA': set(), 'SB': set()}
+
         preamble = []
 
         # GRs entire MT at once for all tensors.
@@ -2108,53 +2122,75 @@ class LogicalScheduler:
         preamble.append(SyncOp())
         
 
-        # Loop over partitions to re-use vgpr tile maps.
+        # Flat per-subIterK emission. The K-boundary mask depends only on k,
+        # and with flat tile ids the per-partition tile_maps reference
+        # disjoint vgpr ranges per (tensor, group). So per k we can:
+        #   1. emit each unique (tensor, tile_range) LR exactly once
+        #   2. wait + mask once (single VAnd per unique flat vgpr)
+        #   3. run every partition's MFMA back-to-back
+        # The returned shape is still [partition][group][ops]; we use a
+        # single outer "partition" holding all per-k groups.
         miK = int(self._kernel["MatrixInstK"])
-        all_partitions = []
+        groups = [self._to_emitted(preamble)]
+
+        # Build a merged tile_map covering every partition's tiles, used by
+        # MaskKOp to enumerate the live flat vgpr ids.
+        merged_tile_map: dict = {}
         for pi in range(cfg.numPartitions):
-            groups = []
-            # Add GRs on 1st partition.
-            if pi == 0:
-                groups.append(self._to_emitted(preamble))
-            cur = self._partition_tile_range(pi)
-            # Loop over subIterK
-            for k in range(numK):
-                ops = []
+            for tensor in ('A', 'B', 'SA', 'SB'):
+                src = tile_maps[pi].get(tensor)
+                if not src:
+                    continue
+                dst = merged_tile_map.setdefault(tensor, [{}])
+                while len(dst) < len(src):
+                    dst.append({})
+                for ui, m in enumerate(src):
+                    dst[ui].update(m)
+
+        for k in range(numK):
+            ops = []
+            # Dedup LRs across partitions by tileId range — with flat tile
+            # ids, same range ⇒ same vgprs, so one LR populates all readers.
+            seen_lr = set()
+            for pi in range(cfg.numPartitions):
+                cur = self._partition_tile_range(pi)
                 for tensor, gran in self._lr_tensors():
-                    if k % gran.k != 0: # Handle granularity > 1 by skipping subIterK
+                    if k % gran.k != 0:
                         continue
                     side_key = 'A' if tensor in ('A', 'SA') else 'B'
                     tiles = gran.tile_range(k, *cur[side_key])
+                    lr_key = (tensor,
+                              tiles.tileId_start, tiles.tileId_end,
+                              tiles.subIterK_start, tiles.subIterK_end)
+                    if lr_key in seen_lr:
+                        continue
+                    seen_lr.add(lr_key)
                     lr = LRPlacement(tensor=tensor, mtIteration=0,
                                      tiles=tiles,
                                      subIterK_slot=k, partition=pi)
                     lr.vgpr_tile_map = copy.deepcopy(tile_maps[pi].get(tensor, []))
                     ops.append(lr)
-                ops.append(WaitLROp())
-                ops.append(MaskKOp(subIterK=k,
-                                   vgpr_tile_map=copy.deepcopy(tile_maps[pi])))
+            ops.append(WaitLROp())
+            ops.append(MaskKOp(subIterK=k,
+                               vgpr_tile_map=copy.deepcopy(merged_tile_map)))
+            # All partitions' MFMAs for this k, back-to-back.
+            for pi in range(cfg.numPartitions):
+                cur = self._partition_tile_range(pi)
                 mfma_tileA = MFMATileRange(k, k + 1, *cur['A'])
                 mfma_tileB = MFMATileRange(k, k + 1, *cur['B'])
                 mfma = MFMAPlacement(subIterK=k, tileA=mfma_tileA, tileB=mfma_tileB)
                 mfma.vgpr_tile_maps = copy.deepcopy(tile_maps[pi])
                 ops.append(mfma)
-                # Early-exit: after subIterK=k completes on the LAST partition,
-                # if LoopCounterL <= MIK*(k+1) then no further valid K remains
-                # for any partition (all partitions share the K dimension), so
-                # branch to SkipTailLoopL. Earlier partitions must still finish
-                # subIterKs 0..k for their MN tiles, so no early-exit there.
-                # No skip on the very last group (nothing left to skip).
-                isLastPartition = (pi == cfg.numPartitions - 1)
-                isLastGroup = isLastPartition and (k == numK - 1)
-                if isLastPartition and not isLastGroup:
-                    ops.append(SkipOp(
-                        compare='LE', value=miK * (k + 1),
-                        target='SkipTailLoopL', rawLabel=True,
-                        branchComment=f"early-exit tail after subIterK={k} (no valid K left)"))
-                groups.append(self._to_emitted(ops))
-            all_partitions.append(groups)
+            # Early-exit: after subIterK=k completes for every partition,
+            # skip ahead if no more valid K remains. Omit on the last k.
+            if k != numK - 1:
+                ops.append(SkipOp(
+                    compare='LE', value=miK * (k + 1),
+                    target='SkipTailLoopL', rawLabel=True,
+                    branchComment=f"early-exit tail after subIterK={k} (no valid K left)"))
+            groups.append(self._to_emitted(ops))
 
-        self._tailloop_emitted = all_partitions
+        self._tailloop_emitted = [groups]
         return self._tailloop_emitted
 
     @staticmethod
@@ -2443,9 +2479,11 @@ class LogicalScheduler:
             return module
 
         module.addComment0("TAILLOOP")
-        # Return tile slots dead for the tail loop (PGR>=1 prefetch half)
-        # to the pool so emit_mask_k_init / emit_mask_k checkouts reuse them.
-        self._release_unused_tail_tiles(writer)
+        # Swap to the flat tail vgpr tile layout. Frees the mainloop's
+        # per-partition tiles back to the pool and reallocates a flat set
+        # sized by _compute_flat_tail_tile_state (already invoked by
+        # build_tailloop_pgr0; peaks stashed on self._flat_tail_peaks).
+        self._realloc_tail_tiles_flat(writer, self._flat_tail_peaks)
         # init must run before populate so each MaskKOp in the body can read
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
@@ -2465,6 +2503,10 @@ class LogicalScheduler:
         """Return the total number of VGPRs needed across all tensors (A, B, SA, SB)
         without performing any allocation.
 
+        Returns max(mainloop_peak, flat_tail_peak) — the two layouts don't
+        coexist (the tail frees and reallocates at entry), so the kernel
+        budget is the larger of them.
+
         Must be called after scheduling is complete.
         """
         self._ensure_pass(Pass.VGPR_TILES)
@@ -2474,14 +2516,18 @@ class LogicalScheduler:
         def _tile_vgpr_count(tileInfo, lrGran):
             return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
 
-        total = self.tile_peaks.get('A', 0) * _tile_vgpr_count(tileInfoA, cfg.lrA) \
-              + self.tile_peaks.get('B', 0) * _tile_vgpr_count(tileInfoB, cfg.lrB)
+        def _total_for(peaks):
+            t = peaks.get('A', 0) * _tile_vgpr_count(tileInfoA, cfg.lrA) \
+              + peaks.get('B', 0) * _tile_vgpr_count(tileInfoB, cfg.lrB)
+            if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
+                t += peaks.get('SA', 0) * _tile_vgpr_count(scaleTileInfoA, cfg.lrSA) \
+                   + peaks.get('SB', 0) * _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)
+            return t
 
-        if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
-            total += self.tile_peaks.get('SA', 0) * _tile_vgpr_count(scaleTileInfoA, cfg.lrSA) \
-                   + self.tile_peaks.get('SB', 0) * _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)
-
-        return total
+        mainloop_total = _total_for(self.tile_peaks)
+        _, flat_peaks = self._compute_flat_tail_tile_state()
+        tail_total = _total_for(flat_peaks)
+        return max(mainloop_total, tail_total)
 
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
                        scaleTileInfoA=None, scaleTileInfoB=None):
@@ -2530,6 +2576,12 @@ class LogicalScheduler:
         else:
             self.vgprTilesSA = []
             self.vgprTilesSB = []
+
+        # Stash tile-info so _realloc_tail_tiles_flat can reallocate the
+        # tail's flat tile set without the caller plumbing them in again.
+        self._alloc_tile_info = {
+            'tileInfoA': tileInfoA, 'tileInfoB': tileInfoB,
+            'scaleTileInfoA': scaleTileInfoA, 'scaleTileInfoB': scaleTileInfoB}
 
     def deallocVgprTiles(self, writer):
         """Deallocate VGPR tiles allocated by allocVgprTiles.
@@ -2584,6 +2636,48 @@ class LogicalScheduler:
         }
         return tile_maps, unused
 
+    def _compute_flat_tail_tile_state(self):
+        """Tile-id remap for a non-partitioned ("flat") tail loop.
+
+        The mainloop's tile_peaks are per-partition (each pi reuses the same
+        vgprs across its subIterKs). A flat tail loop holds every partition's
+        tiles live at once and needs one vgpr range per unique (tensor,
+        partition_group). This method assigns each such group a fresh flat
+        tile id in 0..flat_peaks[T)-1.
+
+        Returns (tile_maps, peaks) where
+          - tile_maps[pi][tensor] = [{group_key: flat_tile_id}] (single-entry
+            list mirroring the mainloop's per-unroll_iter shape; tail always
+            uses unroll_iter=0).
+          - peaks[tensor] = count of distinct flat tile ids for tensor.
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
+        if cfg.hasScale:
+            lr_grans['SA'] = cfg.lrSA
+            lr_grans['SB'] = cfg.lrSB
+
+        part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
+        # group_id[(tensor, group_key)] = flat tile id
+        group_id: dict = {t: {} for t in lr_grans}
+        # tile_maps[pi][tensor] = [{group_key: flat_tile_id}]
+        tile_maps: list = [{} for _ in range(numP)]
+        for pi in range(numP):
+            for tensor, gran in lr_grans.items():
+                side = TENSOR_SIDE[tensor]
+                start, end = part_ranges[pi][side]
+                groups = sorted({(t // gran.mn) * gran.mn
+                                 for t in range(start, end)})
+                m = {}
+                for g in groups:
+                    if g not in group_id[tensor]:
+                        group_id[tensor][g] = len(group_id[tensor])
+                    m[g] = group_id[tensor][g]
+                tile_maps[pi][tensor] = [m]
+        peaks = {t: len(group_id[t]) for t in lr_grans}
+        return tile_maps, peaks
+
     def _release_unused_tail_tiles(self, writer):
         """Return tile slots dead for the tail loop to the vgpr pool.
 
@@ -2606,6 +2700,74 @@ class LogicalScheduler:
                     if j % 4 == 0:                # match _alloc_tiles block stride
                         pool.checkIn(v)
                 self._tail_freed_tile_ids[tensor].add(tid)
+
+    def _realloc_tail_tiles_flat(self, writer, peaks):
+        """Free mainloop's per-partition tiles and reallocate flat tiles for
+        the non-partitioned tail loop.
+
+        `peaks[tensor]` comes from _compute_flat_tail_tile_state and is the
+        number of distinct flat tile ids per tensor. The new flat tiles
+        replace self.vgprTilesA/B/SA/SB; _tail_freed_tile_ids is cleared so
+        deallocVgprTiles drops the flat set wholesale at kernel end.
+        """
+        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+
+        cfg = self.config
+        info = self._alloc_tile_info
+
+        def _tile_vgpr_count(tileInfo, lrGran):
+            return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
+
+        def _dealloc_all(tiles):
+            for tile in tiles:
+                pool = tile.regList.pool
+                for j, v in enumerate(tile):
+                    if j % 4 == 0:
+                        pool.checkIn(v)
+
+        def _alloc_tiles(count, numRegs):
+            tiles = []
+            for _ in range(count):
+                tile = RegisterTileInfo(writer.vgprPool)
+                for j in range(0, numRegs, 4):
+                    blockSize = min(4, numRegs - j)
+                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize)
+                    for k in range(blockSize):
+                        tile.append(vstart + k)
+                tiles.append(tile)
+            return tiles
+
+        def _swap(target, new_tiles):
+            # In-place swap so the InstructionEmitter's references stay valid.
+            target.clear()
+            target.extend(new_tiles)
+
+        _dealloc_all(self.vgprTilesA)
+        _dealloc_all(self.vgprTilesB)
+        _dealloc_all(self.vgprTilesSA)
+        _dealloc_all(self.vgprTilesSB)
+
+        _swap(self.vgprTilesA,
+              _alloc_tiles(peaks.get('A', 0),
+                           _tile_vgpr_count(info['tileInfoA'], cfg.lrA)))
+        _swap(self.vgprTilesB,
+              _alloc_tiles(peaks.get('B', 0),
+                           _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
+        if cfg.hasScale and info['scaleTileInfoA'] and info['scaleTileInfoB']:
+            _swap(self.vgprTilesSA,
+                  _alloc_tiles(peaks.get('SA', 0),
+                               _tile_vgpr_count(info['scaleTileInfoA'], cfg.lrSA)))
+            _swap(self.vgprTilesSB,
+                  _alloc_tiles(peaks.get('SB', 0),
+                               _tile_vgpr_count(info['scaleTileInfoB'], cfg.lrSB)))
+        else:
+            _swap(self.vgprTilesSA, [])
+            _swap(self.vgprTilesSB, [])
+
+        # Flat tiles are freed wholesale by deallocVgprTiles at kernel end;
+        # there are no pre-freed tids to skip.
+        self._tail_freed_tile_ids = {'A': set(), 'B': set(),
+                                     'SA': set(), 'SB': set()}
 
     # ── Populate instructions ──────────────────────────────
 
