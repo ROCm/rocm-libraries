@@ -46,7 +46,26 @@ RUN apt-get update && apt-get install -y \
     bison \
     flex \
     gh \
+    linux-tools-common \
+    linux-tools-generic \
     && rm -rf /var/lib/apt/lists/*
+
+# linux-tools-{common,generic} provide the `perf` binary required by
+# dnn-benchmarking's `--perf` source (CPU cycles/IPC). Two runtime
+# gotchas the apt install can't fix:
+#
+#  * Container kernel mismatch — the perf wrapper dispatches to
+#    `perf_<kernel-version>`. If that build isn't present, perf
+#    complains and falls back; sometimes the user needs
+#    `apt install linux-tools-$(uname -r)` matching the host kernel.
+#  * Kernel-event collection (`cycles:k`) requires
+#    `/proc/sys/kernel/perf_event_paranoid <= 1`. Containers inherit
+#    the host value, so either run the container with
+#    `--cap-add=SYS_ADMIN` and `sysctl kernel.perf_event_paranoid=1`
+#    on the host first, or accept user-space-only counters
+#    (cycles:u / instructions:u — dnn-benchmarking records these
+#    unconditionally and surfaces the paranoid value next to the
+#    None kernel fields). See docs/troubleshooting.md.
 
 # Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
 # official .deb package directly. It bundles all remote backends (incl. S3),

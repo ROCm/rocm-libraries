@@ -139,6 +139,9 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
         if constexpr(Base::template is_b_load_tr<Problem>)
         {
+            // TODO: better LDS descriptor for performance
+            // This branch is reusing the logic from
+            // UniversalGemmBasePolicy::MakeBLdsBlockDescriptor
             constexpr auto b_lds_block_desc_0 =
                 make_naive_tensor_descriptor(make_tuple(number<KPerBlock>{}, number<NPerBlock>{}),
                                              make_tuple(number<NPerBlock>{}, number<1>{}),

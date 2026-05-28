@@ -207,11 +207,7 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
         const index_t row_stride = orig_desc.calculate_offset(make_tuple(1, 0));
         const auto desc_0        = make_naive_tensor_descriptor(
             container_concat(row_lens, col_lens),
-            make_tuple(M1 * row_stride,
-                       row_stride,
-                       number<K1 * K2>{},
-                       number<K2>{},
-                       number<1>{}),
+            make_tuple(M1 * row_stride, row_stride, number<K1 * K2>{}, number<K2>{}, number<1>{}),
             number<K2>{},
             number<1>{});
         const auto desc_1 = transform_tensor_descriptor(
@@ -305,11 +301,7 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
         const index_t row_stride = orig_desc.calculate_offset(make_tuple(1, 0));
         const auto desc_0        = make_naive_tensor_descriptor(
             container_concat(row_lens, col_lens),
-            make_tuple(N1 * row_stride,
-                       row_stride,
-                       number<K1 * K2>{},
-                       number<K2>{},
-                       number<1>{}),
+            make_tuple(N1 * row_stride, row_stride, number<K1 * K2>{}, number<K2>{}, number<1>{}),
             number<K2>{},
             number<1>{});
         const auto desc_1 = transform_tensor_descriptor(
