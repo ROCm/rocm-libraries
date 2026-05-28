@@ -5,7 +5,7 @@
 
 #include "rocm_fmha_bwd_registry.hpp"
 
-// BF16, hdim_q=256, group, deterministic. Paired with bf16 group det dQ/dK/dV.
+// BF16, hdim_q=256, group, deterministic. Will pair with bf16 group det dQ/dK/dV.
 // Compilation proof only -- numerical verification deferred.
 static constexpr rocm_ck::FmhaBwdConvertDQSpec spec =
     rocm_ck::fmha_bwd_convert_dq_variant_spec("fmha_bwd_convert_dq_bf16_d256_group_det");

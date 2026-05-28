@@ -6,7 +6,7 @@
 #include "rocm_fmha_bwd_registry.hpp"
 
 // FP16, hdim_q=128, batch, deterministic. Paired with det dQ/dK/dV.
-// Compilation proof only — numerical verification deferred.
+// Compilation proof only -- numerical verification deferred.
 static constexpr rocm_ck::FmhaBwdConvertDQSpec spec =
     rocm_ck::fmha_bwd_convert_dq_variant_spec("fmha_bwd_convert_dq_fp16_d128_batch_det");
 
