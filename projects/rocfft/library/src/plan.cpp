@@ -2550,10 +2550,9 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
 }
 
 #ifdef ROCFFT_RCCL_ENABLE
-std::vector<size_t>
-    rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&        input,
-                                       const field_view_t&        output,
-                                       const std::vector<size_t>& antecedents)
+std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&        input,
+                                                       const field_view_t&        output,
+                                                       const std::vector<size_t>& antecedents)
 {
     const auto        elem_size       = element_size(precision, input.array_type);
     const auto        local_comm_rank = desc.get_local_comm_rank();
@@ -2827,8 +2826,8 @@ std::vector<size_t>
         for(const auto& brick : output.field.bricks)
             validate_brick_device(brick, "output");
 
-        auto rcclGrouped         = std::make_unique<CommRCCLGrouped>(rccl, precision, input.array_type);
-        rcclGrouped->group       = itemGroup;
+        auto rcclGrouped   = std::make_unique<CommRCCLGrouped>(rccl, precision, input.array_type);
+        rcclGrouped->group = itemGroup;
         rcclGrouped->description = "RCCL grouped send/recv";
 
         // packBufs keeps the leases alive so the BufferPtr::temp aliases
