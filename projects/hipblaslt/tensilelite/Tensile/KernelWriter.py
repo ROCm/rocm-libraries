@@ -5260,29 +5260,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
-      ntCombos = [[0, 0], [0, 4], [4, 0], [4, 4]]
+      ntCombos = [[0, 0], [0, 4], [4, 0]]
       ntLabels = [Label("LoopBody_NTA{}_NTB{}".format(nta, ntb), "") for nta, ntb in ntCombos]
       ntLabelDone = Label("LoopBody_NTA_NTB_Done", "")
 
       # Bit layout in sgpr("GSU") (== internalArg0 low 16b):
       #   bit 12 -> NTA (1 means use NTA=4)
       #   bit 13 -> NTB (1 means use NTB=4)
-      kNtaMask  = 0x1000
-      kNtbMask  = 0x2000
-      kBothMask = 0x3000
+      kNtaMask = 0x1000
+      kNtbMask = 0x2000
 
-      module.addComment1("AdaptiveGemmNTAB: 4-way bit-based dispatch from internalArg0")
+      module.addComment1("AdaptiveGemmNTAB: 3-way bit-based dispatch from internalArg0")
 
       with self.allocTmpSgpr(1) as tmpNtBitsInfo:
         tmpNtBits = tmpNtBitsInfo.idx
-        # Extract both NT bits then dispatch on the 4 combos.
-        # ntCombos order: [0,0]=idx0, [0,4]=idx1, [4,0]=idx2, [4,4]=idx3
+        # Extract both NT bits then dispatch on the 3 combos.
+        # ntCombos order: [0,0]=idx0, [0,4]=idx1, [4,0]=idx2
         # Use long branches because each kernelBody is large (>128KB possible).
         module.add(SAndB32(dst=sgpr(tmpNtBits), src0=sgpr("GSU"),
-                           src1=hex(kBothMask), comment="extract NTA|NTB bits"))
-        module.add(SCmpEQU32(src0=sgpr(tmpNtBits), src1=hex(kBothMask),
-                             comment="NTA=4 && NTB=4 ?"))
-        module.add(self.longBranchScc1(ntLabels[3], 1, comment="-> NTA4_NTB4"))
+                           src1=hex(kNtaMask | kNtbMask), comment="extract NTA|NTB bits"))
         module.add(SCmpEQU32(src0=sgpr(tmpNtBits), src1=hex(kNtbMask),
                              comment="NTB=4 only ?"))
         module.add(self.longBranchScc1(ntLabels[1], 1, comment="-> NTA0_NTB4"))

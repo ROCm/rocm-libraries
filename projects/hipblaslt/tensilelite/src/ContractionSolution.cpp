@@ -45,6 +45,8 @@
 #include <cstdlib>
 #include <random>
 
+#include <sstream>
+
 #ifdef ENABLE_ROCTX
 #include <roctracer/roctx.h>
 #endif
@@ -1394,7 +1396,7 @@ namespace TensileLite
         const uint32_t loopIters = (depthU > 0) ? (K / depthU) : 0;
         const bool     enough    = loopIters > 2;
 
-        // A conservative constraints are required to keep the gate off
+        // These constraints are intentionally conservative: keep the gate off
         // small problems where bypassing L1 has no streaming benefit.
         if(skinnyA && longA && alignedA && enough)
             result.nta = 4;
@@ -1536,8 +1538,19 @@ namespace TensileLite
         // Runtime sanity: GSU must fit in the available bits (12 or 14, depending on version).
         if(((uint32_t)gsu & ~gsuMask) != 0)
         {
-            throw std::runtime_error(
-                "GSU value exceeds available bits in internalArg0 for this kernel arguments version.");
+            std::stringstream gsuMaskHex;
+            gsuMaskHex << "0x" << std::hex << gsuMask;
+            std::string msg
+                = std::string("GSU value ") + std::to_string((uint32_t)gsu)
+                  + " exceeds the GSU bit-field in internalArg0 (max allowed="
+                  + std::to_string(gsuMask) + ", gsuMask=" + gsuMaskHex.str()
+                  + ", InternalArgsSupport.version="
+                  + std::to_string(internalArgsSupport.version) + ", AdaptiveGemmNTAB="
+                  + std::to_string(sizeMapping.adaptiveGemmNTAB)
+                  + "). When AdaptiveGemmNTAB is enabled (version>=3), GSU is narrowed"
+                  + " from bits 0..13 (max 16383) to bits 0..11 (max 4095) because"
+                  + " bits 12/13 carry the NTA/NTB selector.";
+            throw std::runtime_error(msg.c_str());
         }
         internalArg0 = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14)
                        | (ntbBit << kNtbBitPos) | (ntaBit << kNtaBitPos)
