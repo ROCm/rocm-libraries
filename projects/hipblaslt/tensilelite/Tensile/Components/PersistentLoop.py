@@ -24,7 +24,7 @@ from math import ceil, log2
 
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SBarrier, SCmpGeU32, SMulI32, SLShiftRightB32, VReadfirstlaneB32, SLongBranchNegative
+from rocisa.instruction import VMovB32, SBarrier, SCmpGeU32, SLShiftRightB32, VReadfirstlaneB32, SLongBranchNegative
 from ..Component import Component
 import abc
 
