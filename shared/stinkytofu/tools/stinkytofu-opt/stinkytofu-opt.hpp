@@ -31,6 +31,7 @@
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -69,6 +70,7 @@ const std::vector<PassInfo> availablePasses = {
     {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
     {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
     {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
+    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
     {"DumpStinkyFunctionPass",
      []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
     {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},

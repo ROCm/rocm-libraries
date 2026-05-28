@@ -147,8 +147,13 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
                 arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
                 continue;
-            if (arg == "-o") {
-                ++i;  // skip the filename argument
+            // Two-arg flags: skip both the flag and its value so the value
+            // doesn't get mistaken for a pass name and the flag doesn't get
+            // mistaken for a missing pass (e.g. `--debug-pass FooPass` was
+            // emitting `Warning: Unknown pass 'debug-pass'` because the
+            // `--` prefix was stripped and `debug-pass` wasn't a known pass).
+            if (arg == "-o" || arg == "--debug-pass") {
+                ++i;  // skip the value argument
                 continue;
             }
             passNames.push_back(arg.substr(2));  // Remove "--" prefix
