@@ -211,6 +211,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SCMovB32", "s_cmov_b32"},
         {"SCMovB64", "s_cmov_b64"},
         {"SFf1B32", "s_ff1_i32_b32"},
+        {"SBfeU32", "s_bfe_u32"},
         {"SBfmB32", "s_bfm_b32"},
         {"SMovkI32", "s_movk_i32"},
         {"SSExtI16toI32", "s_sext_i32_i16"},
@@ -219,7 +220,6 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SOrSaveExecB32", "s_or_saveexec_b32"},
         {"SOrSaveExecB64", "s_or_saveexec_b64"},
         {"SSetPrior", "s_setprio"},
-        {"SBarrier", "s_barrier"},
         {"SNop", "s_nop"},
         {"SEndpgm", "s_endpgm"},
         {"SSleep", "s_sleep"},
@@ -328,6 +328,7 @@ void setGfx1250ConversionMap(GpuArch& registry) {
         {"_SWaitDscnt", "lowerRocisaWaitCnt"},
         {"SWaitTensorcnt", "lowerRocisaWaitTensorcnt"},
         {"SWaitAlu", "lowerRocisaWaitAlu"},
+        {"SBarrier", "lowerRocisaSBarrier"},
 
         // {"VMaxPKF16", "v_max_pk_f16"},
 

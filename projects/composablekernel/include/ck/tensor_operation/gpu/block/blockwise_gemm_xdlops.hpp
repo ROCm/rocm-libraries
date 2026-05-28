@@ -10,9 +10,10 @@
 #include "ck/tensor_description/tensor_adaptor.hpp"
 #include "ck/utility/thread_buf_to_vec_loader.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 template <index_t MNXdlPerWave, index_t MNWaves, index_t MNPerXdl, typename TileDesc_K0_MN_K1>
@@ -1078,4 +1079,6 @@ struct BlockwiseGemmXdlops_v2
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "bindings.hpp"
+
 #include <HipdnnBackendPluginLoadingMode.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
@@ -10,7 +12,7 @@
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
 
-void types_bindings(nb::module_& m)
+void typesBindings(nb::module_& m)
 {
     // Bind DataType enum
     nb::enum_<DataType>(m, "DataType")

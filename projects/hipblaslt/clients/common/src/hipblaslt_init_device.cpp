@@ -31,6 +31,8 @@
 #include "hipblaslt_test.hpp"
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <array>
+#include <limits>
 #include <type_traits>
 #include <vector>
 
@@ -626,7 +628,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   N,
                            size_t                   lda,
                            size_t                   stride,
-                           size_t                   batch_count)
+                           size_t                   batch_count,
+                           int                      norm_dist_one_special_type = -1)
 {
     using T_real = get_real_type_t<T>;
 
@@ -864,6 +867,50 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            });
                 break;
             }
+        case hipblaslt_initialization::norm_dist_one_special:
+            if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
+                         || std::is_same_v<T, hip_bfloat16>)
+            {
+                constexpr unsigned int kNormDistOneSpecialSeed = 12345u;
+                // Match integer_exact B / fp16_accumulator_probe B: stride==0 means packed batches;
+                // fill_batch must see a non-zero stride spanning each slab so special_idx and the
+                // Gaussian fill cover the full strided buffer (see testing_matmul.hpp size_*).
+                size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
+                size_t size_64            = effective_stride >= lda
+                                 ? lda * N + size_t(batch_count - 1) * effective_stride
+                                 : lda * N;
+                if(size_64 == 0)
+                {
+                    break;
+                }
+                unsigned int s           = kNormDistOneSpecialSeed * 1103515245u + 12345u;
+                size_t       special_idx = size_t(s) % size_64;
+                s                        = s * 1103515245u + 12345u;
+                int special_type         = (norm_dist_one_special_type >= 0 && norm_dist_one_special_type <= 2)
+                                   ? norm_dist_one_special_type
+                                   : int(s >> 16) % 3;
+                float special_val        = (special_type == 0)   ? std::numeric_limits<float>::infinity()
+                                    : (special_type == 1) ? -std::numeric_limits<float>::infinity()
+                                                          : std::numeric_limits<float>::quiet_NaN();
+                T special_T = T(special_val);
+                fill_batch(A, M, N, lda, effective_stride, batch_count,
+                           [base_seed = kNormDistOneSpecialSeed, special_idx, special_T] __host__ __device__(
+                               size_t idx) -> T {
+                               if(idx == special_idx)
+                                   return special_T;
+                               hipblaslt_norm_dist::XorwowState state;
+                               hipblaslt_norm_dist::init_xorwow(&state, base_seed + idx);
+                               return T(hipblaslt_norm_dist::box_muller_normal(&state));
+                           });
+                CHECK_HIP_ERROR(hipDeviceSynchronize());
+            }
+            else
+            {
+                hipblaslt_cerr << "hipblaslt_init_device: norm_dist_one_special only supported for "
+                                  "floating-point types"
+                               << std::endl;
+            }
+            break;
         case hipblaslt_initialization::uniform_01:
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                 return uniform_01<T>(idx);
@@ -933,6 +980,69 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t) -> T { return T(0); });
             }
             break;
+        case hipblaslt_initialization::inf:
+            if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
+                         || std::is_same_v<T, hip_bfloat16>)
+            {
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                    return T(std::numeric_limits<float>::infinity());
+                });
+            }
+            else
+            {
+                hipblaslt_cerr << "hipblaslt_init_device: inf initialization only supported for "
+                                  "floating-point types"
+                               << std::endl;
+            }
+            break;
+        case hipblaslt_initialization::neg_zero:
+            if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
+                         || std::is_same_v<T, hip_bfloat16>)
+            {
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                    return T(-0.0);
+                });
+            }
+            else
+            {
+                hipblaslt_cerr << "hipblaslt_init_device: neg_zero initialization only supported for "
+                                  "floating-point types"
+                               << std::endl;
+            }
+            break;
+        case hipblaslt_initialization::neg_inf:
+            if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
+                         || std::is_same_v<T, hip_bfloat16>)
+            {
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                    return T(-std::numeric_limits<float>::infinity());
+                });
+            }
+            else
+            {
+                hipblaslt_cerr << "hipblaslt_init_device: neg_inf initialization only supported for "
+                                  "floating-point types"
+                               << std::endl;
+            }
+            break;
+        case hipblaslt_initialization::nan:
+            if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
+                         || std::is_same_v<T, hip_bfloat16>)
+            {
+                std::array<T, 100> rand_nans;
+                for(auto& r : rand_nans)
+                    r = T(hipblaslt_nan_rng());
+                fill_batch(A, M, N, lda, stride, batch_count, [rand_nans](size_t idx) -> T {
+                    return rand_nans[pseudo_random_device(idx) % rand_nans.size()];
+                });
+            }
+            else
+            {
+                hipblaslt_cerr << "hipblaslt_init_device: nan initialization only supported for "
+                                  "floating-point types"
+                               << std::endl;
+            }
+            break;
         default:
             hipblaslt_cerr << "Error type in hipblaslt_init_device" << std::endl;
             break;
@@ -949,81 +1059,82 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   lda,
                            hipDataType              type,
                            size_t                   stride,
-                           size_t                   batch_count)
+                           size_t                   batch_count,
+                           int                      norm_dist_one_special_type)
 {
     switch(type)
     {
     case HIP_R_32F:
         hipblaslt_init_device<float>(
-            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_64F:
         hipblaslt_init_device<double>(
-            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_16F:
         hipblaslt_init_device<hipblasLtHalf>(
-            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_16BF:
         hipblaslt_init_device<hip_bfloat16>(
-            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #if HIP_FP8_TYPE_FNUZ
     case HIP_R_8F_E4M3_FNUZ:
         hipblaslt_init_device<hipblaslt_f8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_8F_E5M2_FNUZ:
         hipblaslt_init_device<hipblaslt_bf8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #endif
 #if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         hipblaslt_init_device<hipblaslt_f8>(
-            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_8F_E5M2:
         hipblaslt_init_device<hipblaslt_bf8>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #endif
     case HIP_R_32I:
         hipblaslt_init_device<int32_t>(
-            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_8I:
         hipblaslt_init_device<hipblasLtInt8>(
-            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
     case HIP_R_8F_UE8M0:
         hipblaslt_init_device<hipblaslt_e8>(
-            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
     case HIP_R_8F_E5M3_EXT:
 #pragma GCC diagnostic pop
         hipblaslt_init_device<hipblaslt_e5m3>(
-            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #if defined(HIPBLASLT_USE_FP6)
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         hipblaslt_init_device<hipblaslt_f6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #endif
 #if defined(HIPBLASLT_USE_BF6)
     case static_cast<hipDataType>(HIP_R_6F_E3M2):
         hipblaslt_init_device<hipblaslt_bf6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #endif
 #if defined(HIPBLASLT_USE_FP4)
     case static_cast<hipDataType>(HIP_R_4F_E2M1):
         hipblaslt_init_device<hipblaslt_f4x2>(
-            abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count);
+            abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
         break;
 #endif
     case HIP_C_32F:

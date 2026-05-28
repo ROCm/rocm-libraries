@@ -1345,9 +1345,10 @@ class StreamK(Component):
         # for the top-left corner this thread will write.    These are not changed
         # across all the store loop iters.
         if writer.db["ConservativeWaitCnt"] & 0x10:
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
+
         if not edge and writer.db["ForceEdgeStores"]>=2:
             module.add(writer.getBomb()) # should not get here
         if edge and writer.db["AssertNoEdge"]:
@@ -1795,9 +1796,10 @@ class StreamK(Component):
         # for the top-left corner this thread will write.    These are not changed
         # across all the store loop iters.
         if writer.db["ConservativeWaitCnt"] & 0x10:
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
+
         if not edge and writer.db["ForceEdgeStores"]>=2:
             module.add(writer.getBomb()) # should not get here
         if edge and writer.db["AssertNoEdge"]:
@@ -2136,9 +2138,10 @@ class StreamK(Component):
             module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
 
         if writer.db["ConservativeWaitCnt"] & 0x40:
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
+
         ########################################
         # End Not Atomic
         ########################################
