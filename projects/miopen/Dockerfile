@@ -299,7 +299,7 @@ RUN set -x && \
     echo Building for GPU Archs: ${THEROCK_ASIC} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
         mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-        wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+        wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v$SCCACHE_VERSION/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
         tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
         chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \
         export ROCM_PATH=/opt/rocm && \

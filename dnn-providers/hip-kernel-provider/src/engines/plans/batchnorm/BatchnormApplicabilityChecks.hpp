@@ -6,6 +6,7 @@
 #include "engines/plans/ApplicabilityChecks.hpp"
 #include <array>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -16,11 +17,10 @@ namespace hip_kernel_provider
 class BatchnormValidator : public IValidator
 {
     // --- Activation Mode Validators ---
-public:
+private:
     static void checkFwdActivationModeSupported(
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr);
 
-private:
     static void checkBwdActivationModeSupported(
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr);
 
@@ -79,6 +79,14 @@ public:
     void checkFwdTrainingActivationTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr);
+
+    void checkBwdTensorConfigSupported(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
+
+    void checkBwdActivationTensorConfigSupported(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
 };
 
 // --- Batchnorm Type Configuration ---

@@ -41,7 +41,7 @@ function(_build_test_environment_list_internal OUT_VAR)
     set(${OUT_VAR} ${ENVIRONMENT_LIST} PARENT_SCOPE)
 endfunction() # _build_test_environment_list_internal
 
-# Creates a custom target to validate test names using a Python script
+# Creates a custom target and ctest test to validate test names using a Python script
 function(_create_test_name_validation_target_internal prefix_name)
     if(Python3_FOUND)
         # Write list of test executables with their paths to a file
@@ -68,6 +68,18 @@ function(_create_test_name_validation_target_internal prefix_name)
             ${prefix_name}-validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
             COMMENT "Validating test names"
         )
+
+        # Also register as a ctest test so it runs with ctest and appears in test results
+        add_test(
+            NAME ${prefix_name}_test_name_validation
+            COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/cmake/scripts/test_name_validator.py
+                --test-executables ${TEST_EXECUTABLES_FILE}
+                --build-dir ${CMAKE_BINARY_DIR}
+                --strict
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+        set_tests_properties(${prefix_name}_test_name_validation PROPERTIES LABELS "unit_test;integration_test;quick")
     else()
         message(WARNING "Python3 not found. Test name validation will be skipped.")
         add_custom_target(

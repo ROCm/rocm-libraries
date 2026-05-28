@@ -32,6 +32,7 @@ subtree_to_project_map = {
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "blas",
+    "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
 

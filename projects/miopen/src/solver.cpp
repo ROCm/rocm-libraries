@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <miopen/activ/solvers.hpp>
@@ -302,7 +302,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(
         registry, ++id, conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1{}, miopenConvolutionAlgoDirect);
     RegisterWithSolver(registry, ++id, conv::ConvHipDirectFwd11x11{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwdGen{}, miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwdGen
     ++id; // removed ConvOclDirectFwd3x3
     RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd{}, miopenConvolutionAlgoDirect);
     Register(registry,
@@ -310,20 +310,19 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              Primitive::Fusion,
              fusion::ConvOclDirectFwdFused{}.SolverDbId(),
              miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd1x1{}, miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwd1x1
     RegisterWithSolver(registry, ++id, conv::ConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvAsmBwdWrW3x3{}, miopenConvolutionAlgoDirect);
     RegisterWithSolver(registry, ++id, conv::ConvAsmBwdWrW1x1{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<1>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<2>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<4>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<8>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<16>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvOclBwdWrW2NonTunable{}, miopenConvolutionAlgoDirect);
+    ++id; // removed solver ConvOclBwdWrW2<1>
+    ++id; // removed solver ConvOclBwdWrW2<2>
+    ++id; // removed solver ConvOclBwdWrW2<4>
+    ++id; // removed solver ConvOclBwdWrW2<8>
+    ++id; // removed solver ConvOclBwdWrW2<16>
+    ++id; // removed solver ConvOclBwdWrW2NonTunable
     RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW53{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW1x1{}, miopenConvolutionAlgoDirect);
+    ++id; // removed solver ConvOclBwdWrW1x1
     RegisterWithSolver(
         registry, ++id, conv::ConvHipImplicitGemmV4R1Fwd{}, miopenConvolutionAlgoImplicitGEMM);
     ++id; // removed solver ConvHipImplicitGemmV4Fwd
