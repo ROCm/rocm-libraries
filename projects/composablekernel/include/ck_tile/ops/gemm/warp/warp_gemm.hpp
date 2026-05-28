@@ -14,7 +14,7 @@
 
 namespace ck_tile {
 
-// For the pipelines that do not use the dispatcher but instead directly used names WarpGemms,
+// For the pipelines that do not use the dispatcher but instead directly used named WarpGemms,
 // redefine them in terms of the new unification dispatcher. Only did so for named WarpGemms that
 // are already (or seem likely to be) used directly.
 #if USE_NEW_UNIFIED_FRAMEWORK
