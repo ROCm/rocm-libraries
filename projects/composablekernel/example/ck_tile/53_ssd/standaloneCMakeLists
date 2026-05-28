@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21)
-project(ck_tile_ssd_52 LANGUAGES CXX HIP)
+project(ck_tile_ssd_53 LANGUAGES CXX HIP)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
