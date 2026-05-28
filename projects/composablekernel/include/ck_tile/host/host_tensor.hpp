@@ -17,9 +17,10 @@
 #include "ck_tile/host/joinable_thread.hpp"
 #include "ck_tile/host/ranges.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 template <typename Range>
@@ -600,6 +601,8 @@ struct HostTensor
 
     typename Data::size_type size() const { return mData.size(); }
 
+    bool empty() const { return mData.empty(); }
+
     T max() const { return *std::max_element(mData.begin(), mData.end()); }
 
     // return a slice of this tensor
@@ -721,86 +724,6 @@ struct HostTensor
         return os;
     }
 
-    // read data from a file, as dtype
-    // the file could dumped from torch as (targeting tensor is t here)
-    // numpy.savetxt("f.txt", t.view(-1).numpy())
-    // numpy.savetxt("f.txt", t.cpu().view(-1).numpy()) # from cuda to cpu to save
-    // numpy.savetxt("f.txt", t.cpu().view(-1).numpy(), fmt="%d")   # save as int
-    // will output f.txt, each line is a value
-    // dtype=float or int, internally will cast to real type
-    void loadtxt(std::string file_name, std::string dtype = "float")
-    {
-        std::ifstream file(file_name);
-
-        if(file.is_open())
-        {
-            std::string line;
-
-            index_t cnt = 0;
-            while(std::getline(file, line))
-            {
-                if(cnt >= static_cast<index_t>(mData.size()))
-                {
-                    throw std::runtime_error(std::string("data read from file:") + file_name +
-                                             " is too big");
-                }
-
-                if(dtype == "float")
-                {
-                    mData[cnt] = type_convert<T>(std::stof(line));
-                }
-                else if(dtype == "int" || dtype == "int32")
-                {
-                    mData[cnt] = type_convert<T>(std::stoi(line));
-                }
-                cnt++;
-            }
-            file.close();
-            if(cnt < static_cast<index_t>(mData.size()))
-            {
-                std::cerr << "Warning! reading from file:" << file_name
-                          << ", does not match the size of this tensor" << std::endl;
-            }
-        }
-        else
-        {
-            // Print an error message to the standard error
-            // stream if the file cannot be opened.
-            throw std::runtime_error(std::string("unable to open file:") + file_name);
-        }
-    }
-
-    // can save to a txt file and read from torch as:
-    // torch.from_numpy(np.loadtxt('f.txt', dtype=np.int32/np.float32...)).view([...]).contiguous()
-    void savetxt(std::string file_name, std::string dtype = "float")
-    {
-        std::ofstream file(file_name);
-
-        if(file.is_open())
-        {
-            for(auto& itm : mData)
-            {
-                if(dtype == "float")
-                    file << type_convert<float>(itm) << std::endl;
-                else if(dtype == "int")
-                    file << type_convert<int>(itm) << std::endl;
-                else if(dtype == "int8_t")
-                    file << static_cast<int>(type_convert<ck_tile::int8_t>(itm)) << std::endl;
-                else
-                    // TODO: we didn't implement operator<< for all custom
-                    // data types, here fall back to float in case compile error
-                    file << type_convert<float>(itm) << std::endl;
-            }
-            file.close();
-        }
-        else
-        {
-            // Print an error message to the standard error
-            // stream if the file cannot be opened.
-            throw std::runtime_error(std::string("unable to open file:") + file_name);
-        }
-    }
-
     Descriptor mDesc;
     Data mData;
 };
@@ -862,4 +785,6 @@ auto get_default_stride(std::size_t row,
         return stride;
 }
 } // namespace ck_tile
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

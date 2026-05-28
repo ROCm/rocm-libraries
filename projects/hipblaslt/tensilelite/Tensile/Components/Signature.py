@@ -108,7 +108,13 @@ class SignatureDefault(Signature):
 
         group_segment_size = kernel["LdsNumBytes"]
 
+        # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
+        userArgumentsInfo.commonArgsNum += 4
+        userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
+
         sgprWgZ = 1 if kernel["ProblemType"]["NumIndicesC"] > 2 else 0
+        numSgprToLoad = writer.states.numSgprToLoad + userArgumentsInfo.commonArgsNum
+        writer.states.numSgprPreload = min(numSgprToLoad, writer.states.numSgprPreload)
         signature = SignatureBase(kernelName=writer.states.kernelName,
                                     kernArgsVersion=kernel["InternalSupportParams"]["KernArgsVersion"],
                                     codeObjectVersion=kernel["CodeObjectVersion"],
@@ -116,16 +122,13 @@ class SignatureDefault(Signature):
                                     sgprWorkGroup=(1, 1, sgprWgZ),
                                     vgprWorkItem=0,
                                     flatWorkGroupSize=(kernel["NumThreads"]),
-                                    preloadKernArgs=bool(kernel["PreloadKernArgs"]))
+                                    numSgprPreload=writer.states.numSgprPreload)
 
        # General Argument info
         signature.addArg(   "Gemm info", SVK.SIG_VALUE, "u32")
         signature.addArg("kernel info0", SVK.SIG_VALUE, "u32")
         signature.addArg("kernel info1", SVK.SIG_VALUE, "u32")
         signature.addArg("numWG",        SVK.SIG_VALUE, "u32")
-        # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
-        userArgumentsInfo.commonArgsNum += 4
-        userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
 
         srcValueTypeA = getSrcValueType(kernel, True)
         srcValueTypeB = getSrcValueType(kernel, False)
@@ -206,6 +209,10 @@ class SignatureDefault(Signature):
         # These are fixed sizes
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.betaMaxSize
+
+        if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
+            signature.addArg( "ESMRuntimeSupported", SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
 
         if kernel["StreamK"]:
             # StreamK args
