@@ -417,7 +417,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
 
         {
             // Fill scale tensors with values uniformly drawn from [0.125, 2.0] = [2^-3, 2^1].
-            // This spans 4 exponent bands centred around 1.0, keeping scales numerically
+            // This spans 5 exponent bands centred around 1.0, keeping scales numerically
             // well-behaved without saturating the accumulator.
             //
             // Per-type raw byte ranges produced (raw bytes sampled uniformly within each):
