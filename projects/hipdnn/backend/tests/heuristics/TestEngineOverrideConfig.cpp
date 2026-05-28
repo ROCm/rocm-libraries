@@ -154,7 +154,7 @@ TEST(TestEngineOverrideConfig, AllWildcardRuleMatchesAnyShape)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engineName = FUSILLI_ENGINE_NAME;
+    rule.engineName = HIP_KERNEL_ENGINE_NAME;
     rule.tensors = {makePattern({-1, -1, -1, -1})};
 
     const auto config = makeConfig({std::move(rule)});
@@ -165,7 +165,7 @@ TEST(TestEngineOverrideConfig, AllWildcardRuleMatchesAnyShape)
         const std::vector<TensorData> tensors = {{shape, {}}};
         auto result = config.matchOperation("conv_fprop", viewsOf(tensors));
         ASSERT_TRUE(result.has_value());
-        EXPECT_EQ(*result, FUSILLI_ENGINE_ID);
+        EXPECT_EQ(*result, HIP_KERNEL_ENGINE_ID);
     }
 }
 
@@ -212,7 +212,7 @@ TEST(TestEngineOverrideConfig, WildcardBeforeExactBothMatch)
 {
     OperationRule wildcard;
     wildcard.op = "conv_fprop";
-    wildcard.engineName = FUSILLI_ENGINE_NAME;
+    wildcard.engineName = HIP_KERNEL_ENGINE_NAME;
     wildcard.tensors = {makePattern({-1, 3, 224, 224})};
 
     OperationRule exact;
@@ -225,7 +225,7 @@ TEST(TestEngineOverrideConfig, WildcardBeforeExactBothMatch)
     const std::vector<TensorData> tensors = {{{1, 3, 224, 224}, {}}};
     auto result = config.matchOperation("conv_fprop", viewsOf(tensors));
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, FUSILLI_ENGINE_ID);
+    EXPECT_EQ(*result, HIP_KERNEL_ENGINE_ID);
 }
 
 TEST(TestEngineOverrideConfig, ExactBeforeWildcardBothMatch)
@@ -237,7 +237,7 @@ TEST(TestEngineOverrideConfig, ExactBeforeWildcardBothMatch)
 
     OperationRule wildcard;
     wildcard.op = "conv_fprop";
-    wildcard.engineName = FUSILLI_ENGINE_NAME;
+    wildcard.engineName = HIP_KERNEL_ENGINE_NAME;
     wildcard.tensors = {makePattern({-1, 3, 224, 224})};
 
     const auto config = makeConfig({std::move(exact), std::move(wildcard)});
@@ -294,7 +294,7 @@ TEST(TestEngineOverrideConfig, EmptyStridePatternMatchesAnyStride)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engineName = FUSILLI_ENGINE_NAME;
+    rule.engineName = HIP_KERNEL_ENGINE_NAME;
     rule.tensors = {makePattern({1, 3, 224, 224})};
 
     const auto config = makeConfig({std::move(rule)});
@@ -305,7 +305,7 @@ TEST(TestEngineOverrideConfig, EmptyStridePatternMatchesAnyStride)
         const std::vector<TensorData> tensors = {{{1, 3, 224, 224}, strides}};
         auto result = config.matchOperation("conv_fprop", viewsOf(tensors));
         ASSERT_TRUE(result.has_value());
-        EXPECT_EQ(*result, FUSILLI_ENGINE_ID);
+        EXPECT_EQ(*result, HIP_KERNEL_ENGINE_ID);
     }
 }
 
@@ -327,7 +327,7 @@ TEST(TestEngineOverrideConfig, LoadFromValidJsonFile)
     {
       "comment": "wildcard catch-all",
       "op": "conv_fprop",
-      "engine_name": "FUSILLI_ENGINE",
+      "engine_name": "HIP_KERNEL_ENGINE",
       "tensors": [
         { "dim": [-1, -1, -1, -1] },
         { "dim": [-1, -1, -1, -1] }
@@ -347,7 +347,7 @@ TEST(TestEngineOverrideConfig, LoadFromValidJsonFile)
     const std::vector<TensorData> other = {{{8, 64, 56, 56}, {}}, {{64, 64, 3, 3}, {}}};
     auto r2 = config->matchOperation("conv_fprop", viewsOf(other));
     ASSERT_TRUE(r2.has_value());
-    EXPECT_EQ(*r2, FUSILLI_ENGINE_ID);
+    EXPECT_EQ(*r2, HIP_KERNEL_ENGINE_ID);
 }
 
 TEST(TestEngineOverrideConfig, LoadFromMissingFileReturnsNullopt)
