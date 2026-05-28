@@ -3287,7 +3287,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # put barrier at localWriteEndIter+1
           if (u == localWriteEndIter+1 and not self.states.doFullPackCodePrefetch) or \
              (self.states.doFullPackCodePrefetch and (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)) or \
-             (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["_ScheduleIterAlg"] == 2):
+             (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["_ScheduleIterAlg"] == 2) or \
+             (u == (localWriteEndIter+1)%kernel["LoopIters"] and not self.states.numItersPLR \
+              and kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0):
+            # PLR=0 + TDM + SIA=0 wrap-around handling, mirroring the main-loop
+            # emit (see equivalent block ~line 4085). With numItersPLR==0 the
+            # canonical isBarrier (= localWriteEndIter+1) equals LoopIters and
+            # the `u == isBarrier` clause above never fires inside the loop
+            # body; emit at the wrapped position (u == 0) instead. SIA gating
+            # is narrow on purpose: SIA=2 is handled by the prior clause;
+            # SIA=3 takes a dedicated codegen path; SIA=1 is not exercised
+            # with TDM in any current test.
             if not kernel["NoLdsWriteCode"]:
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
             elif kernel["enableTDMA"] and kernel["enableTDMB"]:
@@ -4087,7 +4097,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
         isBarrier = localWriteEndIter+1 if not self.states.doFullPackCodePrefetch else (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)
         if (u == isBarrier) or \
            (self.states.doFullPackCodePrefetch and (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)) or \
-           (u == isBarrier%kernel["LoopIters"] and kernel["_ScheduleIterAlg"] == 2):
+           (u == isBarrier%kernel["LoopIters"] and kernel["_ScheduleIterAlg"] == 2) or \
+           (u == isBarrier%kernel["LoopIters"] and not self.states.numItersPLR \
+            and kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0):
+          # The 4th clause handles PLR=0 + TDM + SIA=0: numItersPLR==0 makes
+          # isBarrier (= localWriteEndIter+1) equal to LoopIters, so the
+          # canonical "u == isBarrier" emit above never fires inside the loop
+          # body. The TDM tensor_load_to_lds issued at end of iter 0 would be
+          # unsynced against the next trip's local reads from the swapped LDS
+          # buffer. Emit the wait_tensorcnt+barrier at the wrapped position so
+          # the previous trip's TDM has landed before this trip reads from it.
+          # SIA gating is narrow on purpose: SIA=2 is handled above; SIA=3
+          # uses a dedicated codegen path; SIA=1 isn't exercised with TDM.
           if (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and not self.states.scheduleGROverBarrier:
             vlcntVal = kernel["PrefetchGlobalRead"] - 1 if kernel["PrefetchGlobalRead"] >= 2 else 0
             waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
