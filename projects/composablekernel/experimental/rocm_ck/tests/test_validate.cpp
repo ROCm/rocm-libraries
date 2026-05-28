@@ -70,7 +70,13 @@ TEST(Validate, PassesWithD0TensorFilled)
 
 // ============================================================================
 // validate() — aborts when a tensor is missing
+//
+// validate() body is guarded by #ifndef NDEBUG (see validate.hpp), so these
+// death tests are only meaningful in Debug builds. In Release they degenerate
+// to no-ops and the EXPECT_DEATH calls would fail; gate them on NDEBUG.
 // ============================================================================
+
+#ifndef NDEBUG
 
 TEST(ValidateDeathTest, AbortsOnNullTensorPointer)
 {
@@ -105,3 +111,5 @@ TEST(ValidateDeathTest, ReportsFirstMissingTensor)
 
     EXPECT_DEATH(validate(args, test_spec), "tensor \"A\" \\(slot 0\\) has null pointer");
 }
+
+#endif // NDEBUG
