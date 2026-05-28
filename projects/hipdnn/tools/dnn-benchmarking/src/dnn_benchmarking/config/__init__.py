@@ -3,6 +3,6 @@
 
 """Configuration module for dnn-benchmarking."""
 
-from .benchmark_config import ABTestConfig, BenchmarkConfig, ValidationConfig
+from .benchmark_config import BenchmarkConfig, MetricsConfig, SuiteConfig, ValidationConfig
 
-__all__ = ["ABTestConfig", "BenchmarkConfig", "ValidationConfig"]
+__all__ = ["BenchmarkConfig", "MetricsConfig", "SuiteConfig", "ValidationConfig"]

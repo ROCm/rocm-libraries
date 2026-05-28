@@ -93,6 +93,27 @@ class CorrectnessResult:
 
 
 @dataclass
+class EngineComparison:
+    """Timing deltas for one engine relative to a baseline engine."""
+
+    baseline_engine_id: int
+    kernel_mean_delta_pct: Optional[float] = None
+    kernel_median_delta_pct: Optional[float] = None
+    e2e_mean_delta_pct: Optional[float] = None
+    e2e_median_delta_pct: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "baseline_engine_id": self.baseline_engine_id,
+            "kernel_mean_delta_pct": self.kernel_mean_delta_pct,
+            "kernel_median_delta_pct": self.kernel_median_delta_pct,
+            "e2e_mean_delta_pct": self.e2e_mean_delta_pct,
+            "e2e_median_delta_pct": self.e2e_median_delta_pct,
+        }
+
+
+@dataclass
 class ProviderEngineResult:
     """Result for one provider/engine combination on one graph.
 
@@ -151,6 +172,7 @@ class ProviderEngineResult:
     provider: str
     engine_id: int
     status: Literal["success", "error", "skipped"]
+    plugin_path: Optional[str] = None
     cpu_build_time_ms: Optional[float] = None
     gpu_kernel_stats: Optional[BenchmarkStats] = None
     e2e_stats: Optional[BenchmarkStats] = None
@@ -170,6 +192,7 @@ class ProviderEngineResult:
     vram_used_mb: Optional[float] = None
     # Opt-in profiling payload (rocprofv3 PMC / trace, perf, roofline).
     extra_metrics: Optional[Dict[str, Any]] = None
+    comparison: Optional[EngineComparison] = None
 
     def __post_init__(self) -> None:
         """Validate status field."""
@@ -195,6 +218,8 @@ class ProviderEngineResult:
             "engine_id": self.engine_id,
             "status": self.status,
         }
+        if self.plugin_path is not None:
+            d["plugin_path"] = self.plugin_path
         # extra_metrics is exclusively populated by the opt-in
         # profiling orchestrator, which the suite runner only fires on
         # the success path. Asserting the invariant here makes it
@@ -245,6 +270,8 @@ class ProviderEngineResult:
 
         if self.correctness is not None:
             d["correctness"] = self.correctness.to_dict()
+        if self.comparison is not None:
+            d["comparison_to_baseline"] = self.comparison.to_dict()
         return d
 
 

@@ -13,6 +13,7 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
+    _attach_engine_comparisons,
 )
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
 from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
@@ -333,10 +334,22 @@ class TestDiscoveryFailure:
         assert r.status == "skipped"
         assert "No engine configurations" in (r.skip_reason or "")
 
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    def test_engine_filter_excludes_everything(self, mock_exec_cls):
-        """When engine_filter excludes every discovered engine, surface as error."""
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_engine_filter_runs_explicit_id_without_discovery(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """Explicit --engine IDs run in CLI order without discovery filtering."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
         mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0, 1])
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -347,8 +360,8 @@ class TestDiscoveryFailure:
         )
 
         assert len(result.results) == 1
-        assert result.results[0].status == "error"
-        assert "filter" in result.results[0].error_message.lower()
+        assert result.results[0].status == "success"
+        assert result.results[0].engine_id == 99
 
 
 class TestSuiteConfigValidation:
@@ -454,7 +467,7 @@ class TestEngineFilter:
         mock_get_ref,
         mock_resolve_name,
     ):
-        """engine_filter=[1, 3, 99]: engines 1 and 3 run; 99 (not discovered) is dropped."""
+        """engine_filter=[1, 3, 99] runs exactly those IDs in caller order."""
         mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
@@ -469,8 +482,8 @@ class TestEngineFilter:
             handle=MagicMock(),
         )
 
-        engine_ids = sorted(r.engine_id for r in result.results)
-        assert engine_ids == [1, 3]
+        engine_ids = [r.engine_id for r in result.results]
+        assert engine_ids == [1, 3, 99]
 
 
 class TestNoRetryOnFailure:
@@ -676,6 +689,56 @@ class TestCheckCorrectnessOutputCount:
         assert result.execution_success is True
         assert "No output tensors to compare" in (result.error_message or "")
 
+
+class TestEngineComparisonDeltas:
+    """Tests for comparison deltas attached to engine rows."""
+
+    @staticmethod
+    def _stats(mean: float, median: float) -> BenchmarkStats:
+        return BenchmarkStats(
+            mean_ms=mean,
+            median_ms=median,
+            std_ms=0.0,
+            min_ms=mean,
+            max_ms=mean,
+            p95_ms=mean,
+            p99_ms=mean,
+        )
+
+    def test_first_success_is_baseline_and_all_four_deltas_are_set(self):
+        results = [
+            ProviderEngineResult(
+                provider="engine_2",
+                engine_id=2,
+                status="success",
+                gpu_kernel_stats=self._stats(mean=10.0, median=8.0),
+                e2e_stats=self._stats(mean=20.0, median=16.0),
+            ),
+            ProviderEngineResult(
+                provider="engine_1",
+                engine_id=1,
+                status="success",
+                gpu_kernel_stats=self._stats(mean=5.0, median=12.0),
+                e2e_stats=self._stats(mean=30.0, median=16.0),
+            ),
+        ]
+
+        _attach_engine_comparisons(results)
+
+        baseline = results[0].comparison
+        compared = results[1].comparison
+        assert baseline is not None
+        assert compared is not None
+        assert baseline.baseline_engine_id == 2
+        assert baseline.kernel_mean_delta_pct == 0.0
+        assert baseline.kernel_median_delta_pct == 0.0
+        assert baseline.e2e_mean_delta_pct == 0.0
+        assert baseline.e2e_median_delta_pct == 0.0
+        assert compared.baseline_engine_id == 2
+        assert compared.kernel_mean_delta_pct == -50.0
+        assert compared.kernel_median_delta_pct == 50.0
+        assert compared.e2e_mean_delta_pct == 50.0
+        assert compared.e2e_median_delta_pct == 0.0
 
 class TestResolveEngineName:
     """Tests for _resolve_engine_name fallback behavior."""

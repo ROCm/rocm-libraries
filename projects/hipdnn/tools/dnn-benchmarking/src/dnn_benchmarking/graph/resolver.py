@@ -20,6 +20,32 @@ def is_tarball(path: str) -> bool:
     return any(p.endswith(s) for s in _TARBALL_SUFFIXES)
 
 
+def _extract_json_members(
+    tf: tarfile.TarFile, destination: str, members: List[tarfile.TarInfo]
+) -> None:
+    """Extract JSON members using tarfile's data filter when available."""
+    try:
+        tf.extractall(path=destination, members=members, filter="data")
+        return
+    except TypeError:
+        # Python < 3.12 lacks the filter= argument. Keep the same safety
+        # property for the subset we extract: regular files only, no absolute
+        # paths, and no path traversal outside the temporary directory.
+        base = Path(destination).resolve()
+        for member in members:
+            if not member.isfile():
+                raise GraphLoadError(
+                    f"Refusing to extract non-file member: {member.name}"
+                )
+            target = (base / member.name).resolve()
+            if base != target and base not in target.parents:
+                raise GraphLoadError(
+                    "Refusing to extract tarball member outside destination: "
+                    f"{member.name}"
+                )
+            tf.extract(member, path=destination)
+
+
 def extract_tarball(tarball_path: str) -> Tuple[tempfile.TemporaryDirectory, List[str]]:
     """Extract JSON graph files from a tarball into a temporary directory.
 
@@ -41,10 +67,12 @@ def extract_tarball(tarball_path: str) -> Tuple[tempfile.TemporaryDirectory, Lis
     tmpdir = tempfile.TemporaryDirectory(prefix="dnn_benchmarking_")
     try:
         with tarfile.open(tarball_path) as tf:
-            json_members = [m for m in tf.getmembers() if m.name.endswith(".json")]
+            json_members = [
+                m for m in tf.getmembers() if m.name.endswith(".json") and m.isfile()
+            ]
             if not json_members:
                 raise GraphLoadError(f"No .json files found in tarball: {tarball_path}")
-            tf.extractall(path=tmpdir.name, members=json_members, filter="data")
+            _extract_json_members(tf, tmpdir.name, json_members)
     except GraphLoadError:
         tmpdir.cleanup()
         raise

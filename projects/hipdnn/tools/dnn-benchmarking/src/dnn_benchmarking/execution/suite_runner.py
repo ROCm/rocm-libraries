@@ -3,9 +3,9 @@
 
 """Suite runner for per-graph engine iteration with granular timing.
 
-Iterates the engine IDs discovered for a graph via
-``Graph.get_ranked_engine_ids`` (real runtime discovery, no hardcoded engine
-lists). For each engine, captures separated CPU build time, GPU kernel time,
+Uses explicit ``--engine`` IDs in caller order when provided; otherwise
+discovers ranked engine IDs for the graph via ``Graph.get_ranked_engine_ids``.
+For each engine, captures separated CPU build time, GPU kernel time,
 and E2E wall-clock time. Performs correctness validation by comparing GPU
 output against a reference provider via ArrayComparator.
 """
@@ -32,6 +32,7 @@ from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
     CorrectnessResult,
+    EngineComparison,
     GraphResult,
     ProviderEngineResult,
 )
@@ -76,6 +77,55 @@ def _resolve_engine_name(engine_id: int) -> str:
             "falling back to hex display string",
         )
     return f"engine_{engine_id:#x}"
+
+
+def _set_plugin_path(hipdnn: Any, plugin_path: Optional[Path]) -> None:
+    """Set the process-wide hipDNN plugin search path for the next handle."""
+    if plugin_path is None:
+        return
+    hipdnn.set_engine_plugin_paths([str(plugin_path)])
+
+
+def _delta_pct(value: Optional[float], baseline: Optional[float]) -> Optional[float]:
+    """Return percent delta from baseline, or None when comparison is undefined."""
+    if value is None or baseline is None or baseline == 0:
+        return None
+    return (value - baseline) / baseline * 100.0
+
+
+def _attach_engine_comparisons(results: List[ProviderEngineResult]) -> None:
+    """Attach comparison deltas using the first successful engine as baseline."""
+    baseline = next((r for r in results if r.status == "success"), None)
+    if baseline is None:
+        return
+
+    baseline_kernel = baseline.gpu_kernel_stats
+    baseline_e2e = baseline.e2e_stats
+    baseline_kernel_mean = baseline_kernel.mean_ms if baseline_kernel else None
+    baseline_kernel_median = baseline_kernel.median_ms if baseline_kernel else None
+    baseline_e2e_mean = baseline_e2e.mean_ms if baseline_e2e else None
+    baseline_e2e_median = baseline_e2e.median_ms if baseline_e2e else None
+
+    for result in results:
+        if result.status != "success":
+            continue
+        kernel = result.gpu_kernel_stats
+        e2e = result.e2e_stats
+        result.comparison = EngineComparison(
+            baseline_engine_id=baseline.engine_id,
+            kernel_mean_delta_pct=_delta_pct(
+                kernel.mean_ms if kernel else None, baseline_kernel_mean
+            ),
+            kernel_median_delta_pct=_delta_pct(
+                kernel.median_ms if kernel else None, baseline_kernel_median
+            ),
+            e2e_mean_delta_pct=_delta_pct(
+                e2e.mean_ms if e2e else None, baseline_e2e_mean
+            ),
+            e2e_median_delta_pct=_delta_pct(
+                e2e.median_ms if e2e else None, baseline_e2e_median
+            ),
+        )
 
 
 def _get_reference_provider(
@@ -251,59 +301,65 @@ def run_graph_all_providers(
 
     validation_requested = config.reference_provider != "none"
 
-    # Discover engines via real backend heuristics. A discovery failure
-    # is a graph-level error (record it and stop iterating engines), but
-    # "no engine configurations available" / "not supported" messages are
-    # really an unsupported-graph signal -- record as skipped so the
-    # suite exit code stays 0 when nothing is wrong, just nothing to run.
-    discovery_config = BenchmarkConfig(
-        graph_path=graph_path,
-        warmup_iters=config.warmup_iters,
-        benchmark_iters=config.benchmark_iters,
-    )
-    try:
-        discovery_executor = Executor(
-            graph_json_str=graph_json_str,
-            config=discovery_config,
-            gpu_backend=config.gpu_backend,
-        )
-        engine_ids = discovery_executor.discover_engines(handle)
-    except UnsupportedGraphError as e:
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider="unknown",
-                    engine_id=0,
-                    status="skipped",
-                    skip_reason=str(e),
-                    correctness=CorrectnessResult.failed(
-                        rtol=config.rtol, atol=config.atol, error_message=str(e)
-                    ),
-                )
-            ],
-        )
-    except (ExecutionError, RuntimeError) as e:
-        msg = str(e)
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider="unknown",
-                    engine_id=0,
-                    status="error",
-                    error_message=f"Engine discovery failed: {msg}",
-                    correctness=CorrectnessResult.failed(
-                        rtol=config.rtol, atol=config.atol, error_message=msg
-                    ),
-                )
-            ],
-        )
-
     if config.engine_filter is not None:
-        engine_ids = [e for e in engine_ids if e in config.engine_filter]
+        # Explicit --engine is a selection, not a post-discovery filter. Keep the
+        # caller's order so comparison baselines and per-engine plugin paths are
+        # deterministic.
+        engine_ids = list(config.engine_filter)
+    else:
+        # Discover engines via real backend heuristics. A discovery failure is a
+        # graph-level error (record it and stop iterating engines), but "no
+        # engine configurations available" / "not supported" messages are
+        # really an unsupported-graph signal.
+        discovery_config = BenchmarkConfig(
+            graph_path=graph_path,
+            warmup_iters=config.warmup_iters,
+            benchmark_iters=config.benchmark_iters,
+        )
+        try:
+            if handle is None:
+                import hipdnn_frontend as hipdnn
+
+                handle = hipdnn.Handle()
+            discovery_executor = Executor(
+                graph_json_str=graph_json_str,
+                config=discovery_config,
+                gpu_backend=config.gpu_backend,
+            )
+            engine_ids = discovery_executor.discover_engines(handle)
+        except UnsupportedGraphError as e:
+            return GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="skipped",
+                        skip_reason=str(e),
+                        correctness=CorrectnessResult.failed(
+                            rtol=config.rtol, atol=config.atol, error_message=str(e)
+                        ),
+                    )
+                ],
+            )
+        except (ExecutionError, RuntimeError) as e:
+            msg = str(e)
+            return GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="error",
+                        error_message=f"Engine discovery failed: {msg}",
+                        correctness=CorrectnessResult.failed(
+                            rtol=config.rtol, atol=config.atol, error_message=msg
+                        ),
+                    )
+                ],
+            )
 
     if not engine_ids:
         return GraphResult(
@@ -317,7 +373,7 @@ def run_graph_all_providers(
                     error_message=(
                         "No engines discovered for graph"
                         if config.engine_filter is None
-                        else "No discovered engines matched --engine filter"
+                        else "No engines selected for graph"
                     ),
                 )
             ],
@@ -344,6 +400,14 @@ def run_graph_all_providers(
 
     pe_results: List[ProviderEngineResult] = []
     for engine_id in engine_ids:
+        engine_plugin_path = config.plugin_path_for_engine(engine_id)
+        engine_handle = handle
+        if engine_handle is None:
+            import hipdnn_frontend as hipdnn
+
+            _set_plugin_path(hipdnn, engine_plugin_path)
+            engine_handle = hipdnn.Handle()
+
         engine_name = _resolve_engine_name(engine_id)
         if reporter is not None:
             reporter.print_engine_start(engine_name)
@@ -354,7 +418,7 @@ def run_graph_all_providers(
                 graph_name=graph_name,
                 tensor_infos=tensor_infos,
                 config=config,
-                handle=handle,
+                handle=engine_handle,
                 provider=engine_name,
                 engine_id=engine_id,
                 ref_provider=ref_provider,
@@ -365,9 +429,14 @@ def run_graph_all_providers(
                 analytical_io_bytes=analytical_io_bytes,
             )
         pe_result.elapsed_time_ms = t.elapsed_ms
+        if engine_plugin_path is not None:
+            pe_result.plugin_path = str(engine_plugin_path)
         if reporter is not None:
             reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
+
+    if config.compare_engines:
+        _attach_engine_comparisons(pe_results)
 
     return GraphResult(
         graph_name=graph_name,
@@ -586,7 +655,7 @@ def _run_single_provider_engine(
                     warmup_iters=config.warmup_iters,
                     benchmark_iters=config.benchmark_iters,
                     metrics_config=config.metrics,
-                    plugin_path=config.plugin_path,
+                    plugin_path=config.plugin_path_for_engine(engine_id),
                 )
                 if extra:
                     result.extra_metrics = extra

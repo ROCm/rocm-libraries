@@ -89,6 +89,23 @@ class TestParserGlobAndFilters:
         args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
         assert args.engine == [3, 1, 2]
 
+    def test_plugin_path_accepts_comma_separated_list(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(
+            ["--graph", "g.json", "--plugin-path", "/plugins/a,/plugins/b"]
+        )
+        assert args.plugin_path == [Path("/plugins/a"), Path("/plugins/b")]
+
+    def test_compare_engines_default_false(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json"])
+        assert args.compare_engines is False
+
+    def test_compare_engines_flag_sets_true(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "--compare-engines"])
+        assert args.compare_engines is True
+
     def test_verbose_flag_default_false(self) -> None:
         """No -v / --verbose => args.verbose is False."""
         parser = create_parser()
@@ -213,6 +230,60 @@ class TestMainRouting:
 
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [1, 2]
+
+    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_compare_and_plugin_paths_propagate_to_suite_config(
+        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    paths[0],
+                    "--engine",
+                    "2,1",
+                    "--plugin-path",
+                    "/plugins/b,/plugins/a",
+                    "--compare-engines",
+                ],
+            ):
+                main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        assert suite_config.engine_filter == [2, 1]
+        assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
+        assert suite_config.compare_engines is True
+
+    def test_plugin_path_count_mismatch_rejected_at_cli_layer(self) -> None:
+        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
+
+        parser = create_parser()
+        args = parser.parse_args(
+            [
+                "--graph",
+                "g.json",
+                "--engine",
+                "1,2,3",
+                "--plugin-path",
+                "/plugins/a,/plugins/b",
+            ]
+        )
+        reporter = MagicMock(spec=Reporter)
+
+        rc = run_suite_cli(args, graph_paths=[Path("g.json")], reporter=reporter)
+
+        assert rc == 1
+        reporter.print_error.assert_called_once()
+        assert "entry count" in reporter.print_error.call_args[0][0]
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_pytorch_cli")
@@ -664,63 +735,33 @@ class TestRunSuiteWorkflow:
         assert result == 1
 
 
-class TestEngineFlagModeRejection:
-    """--engine list is incompatible with A/B and PyTorch single-engine modes."""
+class TestRemovedABFlags:
+    """Old A/B flags are no longer part of the CLI."""
+
+    def test_old_ab_engine_flags_are_unknown(self) -> None:
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--graph", "g.json", "--AId", "1", "--BId", "2"])
+
+    def test_old_ab_plugin_flags_are_unknown(self) -> None:
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "--graph",
+                    "g.json",
+                    "--APath",
+                    "/path/pluginA",
+                    "--BPath",
+                    "/path/pluginB",
+                ]
+            )
+
 
     def _create_graph(self, tmpdir: Path) -> Path:
         p = tmpdir / "g.json"
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
-
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_engine_list_with_ab_mode_rejected(self, mock_gpu: MagicMock) -> None:
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = self._create_graph(Path(tmpdir))
-            with patch(
-                "sys.argv",
-                [
-                    "dnn-benchmark",
-                    "--graph",
-                    str(graph),
-                    "--engine",
-                    "1,2",
-                    "--AId",
-                    "1",
-                    "--BId",
-                    "2",
-                ],
-            ):
-                result = main()
-        assert result == 1
-
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_single_engine_with_ab_mode_also_rejected(
-        self, mock_gpu: MagicMock
-    ) -> None:
-        """Even a single-element --engine list is rejected in A/B (it has --AId/--BId)."""
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = self._create_graph(Path(tmpdir))
-            with patch(
-                "sys.argv",
-                [
-                    "dnn-benchmark",
-                    "--graph",
-                    str(graph),
-                    "--engine",
-                    "5",
-                    "--AId",
-                    "1",
-                    "--BId",
-                    "2",
-                ],
-            ):
-                result = main()
-        assert result == 1
-
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     def test_engine_list_with_pytorch_backend_rejected(
         self, mock_gpu: MagicMock

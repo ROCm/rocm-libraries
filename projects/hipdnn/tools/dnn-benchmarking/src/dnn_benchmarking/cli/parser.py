@@ -40,6 +40,13 @@ def _parse_engine_list(s: str) -> List[int]:
             deduped.append(i)
     return deduped
 
+def _parse_plugin_path_list(s: str) -> List[Path]:
+    """Parse --plugin-path as a comma-separated list of plugin directories."""
+    parts = [p.strip() for p in s.split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        raise argparse.ArgumentTypeError("--plugin-path requires at least one path")
+    return [Path(p) for p in parts]
 
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for dnn-benchmark CLI.
@@ -61,7 +68,7 @@ Examples:
   dnn-benchmark --graph ./graphs/conv1_fwd.json --warmup 20 --iters 200
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
   dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
-  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2    # compare engines 1 and 2
+  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2 --compare-engines
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch
@@ -71,9 +78,9 @@ Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
   dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
 
-A/B Testing:
-  dnn-benchmark -g ./graph.json --AId 1 --BId 2
-  dnn-benchmark -g ./graph.json --APath /path/pluginA --AId 1 --BPath /path/pluginB --BId 2
+Engine Comparison:
+  dnn-benchmark -g ./graph.json --engine 1,2,3 --compare-engines
+  dnn-benchmark -g ./graph.json --engine 1,2 --plugin-path /path/pluginA,/path/pluginB --compare-engines
 
 Suite Mode (multiple graphs):
   dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
@@ -166,38 +173,18 @@ Tarball Input:
         "(default: summary table)",
     )
 
-    # A/B Testing arguments
-    ab_group = parser.add_argument_group("A/B Testing")
-    ab_group.add_argument(
-        "--APath",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Plugin path for configuration A (default: use system default)",
-    )
-    ab_group.add_argument(
-        "--AId",
-        type=int,
-        default=None,
-        metavar="ID",
-        help="Engine ID for configuration A",
-    )
-    ab_group.add_argument(
-        "--BPath",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Plugin path for configuration B (default: use system default)",
-    )
-    ab_group.add_argument(
-        "--BId",
-        type=int,
-        default=None,
-        metavar="ID",
-        help="Engine ID for configuration B",
-    )
-    # Comparison tolerances (used by A/B testing, validation, and suite mode)
+    # Comparison controls
     comparison_group = parser.add_argument_group("Comparison")
+    comparison_group.add_argument(
+        "--compare-engines",
+        action="store_true",
+        default=False,
+        help=(
+            "Add per-engine comparison columns. The first engine selected by "
+            "--engine is the baseline; when --engine is omitted, the backend's "
+            "first ranked engine is the baseline."
+        ),
+    )
     comparison_group.add_argument(
         "--rtol",
         type=float,
@@ -229,10 +216,14 @@ Tarball Input:
     suite_group = parser.add_argument_group("Suite Options")
     suite_group.add_argument(
         "--plugin-path",
-        type=Path,
+        type=_parse_plugin_path_list,
         default=None,
-        metavar="DIR",
-        help="Path to directory containing hipDNN engine plugin .so files",
+        metavar="PATHS",
+        help=(
+            "Directory containing hipDNN engine plugin .so files, or a "
+            "comma-separated list matching --engine order. A single path is "
+            "shared by all selected engines."
+        ),
     )
 
     # Metrics options

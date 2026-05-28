@@ -34,6 +34,7 @@ class TestBenchmarkStatsToDict:
         d = stats.to_dict()
         assert d == {
             "mean_ms": 1.0,
+            "median_ms": 0.0,
             "std_ms": 0.1,
             "min_ms": 0.5,
             "max_ms": 1.5,

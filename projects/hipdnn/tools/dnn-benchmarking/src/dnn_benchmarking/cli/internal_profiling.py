@@ -24,7 +24,7 @@ from pathlib import Path
 
 from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
-from ..execution.suite_runner import _run_single_provider_engine
+from ..execution.suite_runner import _run_single_provider_engine, _set_plugin_path
 from ..graph.loader import GraphLoader
 
 
@@ -50,8 +50,14 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         return 1
 
     try:
+        plugin_path = None
         if args.plugin_path is not None:
-            hipdnn.set_engine_plugin_paths([str(args.plugin_path)])
+            plugin_path = (
+                args.plugin_path[0]
+                if isinstance(args.plugin_path, list)
+                else args.plugin_path
+            )
+        _set_plugin_path(hipdnn, plugin_path)
         handle = hipdnn.Handle()
     except RuntimeError as e:
         print(
@@ -88,7 +94,7 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         reference_provider="none",
         verbose=False,
         metrics=MetricsConfig(tier="off"),
-        plugin_path=args.plugin_path,
+        plugin_path=plugin_path,
     )
 
     try:
