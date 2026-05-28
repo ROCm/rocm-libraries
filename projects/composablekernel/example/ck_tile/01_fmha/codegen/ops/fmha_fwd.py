@@ -1383,17 +1383,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx1250 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
-            # NOTE: bias and dropout are not yet implemented in qr_tdm —
-            # only emit bias="no", dropout="f" so those workloads fall through to qr.
+            # NOTE: dropout is not yet implemented in qr_tdm — only emit
+            # dropout="f" so dropout workloads fall through to qr.
             if hdim == 128 and hdim_v == 128:
-                for logits, mask, lse, sink in itertools.product(
+                for logits, mask, bias, lse, sink in itertools.product(
                     ["t", "f"],
                     get_mask_map(mask_impl).keys(),
+                    BIAS_MAP.keys(),
                     ["t", "f"],
                     ["t", "f"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, "no", lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, "no", lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
             # qr_tdm (e.g., bias, dropout, skip, d!=128).
@@ -1481,7 +1482,7 @@ def get_product(receipt: int) -> Product:
         def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
             cond = problem_ctx.dtype in ["fp16", "bf16"]
             cond &= kernel_ctx.pipeline.F_vlayout == "row"
-            cond &= kernel_ctx.pipeline.F_bias in ["no", "alibi"]
+            cond &= kernel_ctx.pipeline.F_bias in ["no", "alibi", "bias"]
             cond &= kernel_ctx.pipeline.F_qscale == "no"
             cond &= kernel_ctx.pipeline.F_skip == "f"
             return cond

@@ -73,10 +73,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                     !kHasLogitsSoftCap)) ||
                   (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
 
-    // Sink is now supported (mirrors baseline qr_ks_vs logic).
-    // Bias and dropout are deferred to follow-up tasks.
-    static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "qr_tdm pipeline does not yet support attention bias");
+    // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
+    // Dropout requires kernel dispatch interface expansion (dropout object +
+    // randval window) and is deferred to a follow-up task.
     static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
@@ -175,8 +174,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
                       "wrong!");
-        ignore = bias_dram_block_window_tmp;
-        ignore = position_encoding;
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
@@ -335,6 +332,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         const index_t physical_seqlen_k_start = logical_seqlen_k_start;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
 
+        // Bias tile window (ELEMENTWISE_BIAS or ALIBI — null window for NO_BIAS)
+        const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
+        auto bias_dram_window =
+            make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
+                             bias_dram_block_window_tmp.get_window_lengths(),
+                             {bias_origin.at(number<0>{}), kv_load_start},
+                             gemm_0.MakeCBlockTile().get_tile_distribution());
+
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
                              {kv_load_start, 0},
@@ -469,6 +474,47 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
+            // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
+                // Pre-scale s_acc by scale_s before adding bias
+                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+                const auto bias_tile = load_tile(bias_dram_window);
+                tile_elementwise_inout(
+                    [](auto& x, const auto& y) {
+#if !CK_TILE_FMHA_FWD_FAST_EXP2
+                        x += type_convert<SaccDataType>(y);
+#else
+                        x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
+#endif
+                    },
+                    s_acc,
+                    bias_tile);
+            }
+            else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
+                const auto current_k_origin = [&]() {
+                    const bool in_sink = (num_sink_loop > i_total_loops);
+                    if(in_sink)
+                        return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
+                    else
+                        return make_tuple(
+                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+                }();
+                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
+                    sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
+                        const auto tile_idx = get_x_indices_from_distributed_indices(
+                            s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
+                        const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                        const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        s_acc(i_j_idx) *= scale_s;
+                        position_encoding.update(s_acc(i_j_idx), row, col);
+                    });
+                });
+            }
+
             // Sink-aware k_origin: in sink phase, tiles start at 0;
             // in normal phase, tiles start at physical_seqlen_k_start.
             const auto k_origin = [&]() {
@@ -515,19 +561,21 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
 
             // Sink→normal window jump: at the boundary between sink region
-            // and normal region, jump K/V dram windows forward.
+            // and normal region, jump K/V/bias dram windows forward.
             if constexpr(kHasSink)
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
                     move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
 
-            // move K tile windows after current status checked
+            // move K and bias tile windows after current status checked
             // prefetch next-tile along [K]ey sequence length dimension
             move_tile_window(k_dram_window, {kN0, 0});
+            move_tile_window(bias_dram_window, {0, kN0});
 
             block_sync_lds();
             load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
@@ -765,9 +813,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
                       "wrong!");
-        ignore = bias_dram_block_window_tmp;
-        ignore = position_encoding;
-
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
@@ -923,6 +968,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         const index_t physical_seqlen_k_start = logical_seqlen_k_start;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
 
+        // Bias tile window (prefill path)
+        const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
+        auto bias_dram_window =
+            make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
+                             bias_dram_block_window_tmp.get_window_lengths(),
+                             {bias_origin.at(number<0>{}), kv_load_start},
+                             gemm_0.MakeCBlockTile().get_tile_distribution());
+
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
                              {kv_load_start, 0},
@@ -1052,6 +1105,46 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
+            // STAGE 2: scale_s, add bias (prefill path, mirrors baseline)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
+                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+                const auto bias_tile = load_tile(bias_dram_window);
+                tile_elementwise_inout(
+                    [](auto& x, const auto& y) {
+#if !CK_TILE_FMHA_FWD_FAST_EXP2
+                        x += type_convert<SaccDataType>(y);
+#else
+                        x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
+#endif
+                    },
+                    s_acc,
+                    bias_tile);
+            }
+            else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
+                const auto current_k_origin = [&]() {
+                    const bool in_sink = (num_sink_loop > i_total_loops);
+                    if(in_sink)
+                        return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
+                    else
+                        return make_tuple(
+                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+                }();
+                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
+                    sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
+                        const auto tile_idx = get_x_indices_from_distributed_indices(
+                            s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
+                        const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                        const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        s_acc(i_j_idx) *= scale_s;
+                        position_encoding.update(s_acc(i_j_idx), row, col);
+                    });
+                });
+            }
+
             // (h hybrid) wait for V async load to complete (V uses async path).
             block_sync_lds_direct_load<0>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -1108,8 +1201,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
+
+            // move bias window (prefill path)
+            move_tile_window(bias_dram_window, {0, kN0});
 
             // Gemm1
             auto s_new = [&]() {
