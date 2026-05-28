@@ -279,10 +279,40 @@ tile_distribution_encoding<
 >
 ```
 
+### Tensor Descriptor
+
+From `Input::MakeDramReadDescriptor()`, the DRAM tensor is described as a 4D naive descriptor
+with shape `[hi, wi, BLOCK_C8, 8]` and strides `[wi*C_total, C_total, 8, 1]`:
+
+```cpp
+make_naive_tensor_descriptor(
+    make_tuple(hi, wi, number<BLOCK_C8>{}, number<8>{}),
+    make_tuple(wi * C_total, C_total, number<8>{}, number<1>{}));
+```
+
+A spatial pad transform is then applied, extending `hi → hi + 2*py` and `wi → wi + 2*px`,
+with out-of-bounds accesses returning zero (for zero-padding). The channel dimensions pass
+through unchanged:
+
+```
+[hi + 2*py, wi + 2*px, BLOCK_C8, 8]    (= [hi_padded, wi_padded, BLOCK_C8, 8])
+```
+
+Optionally, an XOR or CyclicShift swizzle is applied across the `(wi_padded, BLOCK_C8)` pair
+to reduce LDS bank conflicts. The tile distribution operates on this final 4D shape, matching
+the X dimensions one-to-one:
+
+```
+X[0] <-> hi_padded    (size 1 for a single-row tile)
+X[1] <-> wi_padded    (spatial columns, distributed across threads)
+X[2] <-> BLOCK_C8     (channel groups of 8 fp16)
+X[3] <-> 8            (fp16 sub-elements within one 128-bit load)
+```
+
 ### RH Map
 
 ```
-RH_major=0 (R):   empty
+RH_major=0 (R):    empty
 RH_major=1 (X[0]): minor=0 → length 1
 RH_major=2 (X[1]): minor=0 → length NUM_WAVES
                    minor=1 → length LANES_PER_ROW
@@ -295,22 +325,22 @@ RH_major=4 (X[3]): minor=0 → length 8
 ```
 P[0] = warp_id:
     Ps2RHssMajor[0] = seq<2>    Ps2RHssMinor[0] = seq<0>
-    → controls (RH_major=2, RH_minor=0) = H[X[1]][0]  (length=NUM_WAVES)
-    → H[X[1]][0] = warp_id
+    → controls (RH_major=2, RH_minor=0) = H[1][0]  (length=NUM_WAVES)
+    → H[1][0] = warp_id
 
 P[1] = lane_id:
     Ps2RHssMajor[1] = seq<2, 3>    Ps2RHssMinor[1] = seq<1, 0>
     → controls (RH_major=2, RH_minor=1) [outer] and (RH_major=3, RH_minor=0) [inner]
     → factor sizes: LANES_PER_ROW (outer) and BLOCK_C8 (inner)
-    → H[X[1]][1] = lane_id / BLOCK_C8
-    → H[X[2]][0] = lane_id % BLOCK_C8
+    → H[1][1] = lane_id / BLOCK_C8
+    → H[2][0] = lane_id % BLOCK_C8
 ```
 
 ### Y Mapping
 
 ```
-Y[0]:  Ys2RHsMajor[0]=1, Ys2RHsMinor[0]=0  →  H[X[0]][0]  (length=1, always 0)
-Y[1]:  Ys2RHsMajor[1]=4, Ys2RHsMinor[1]=0  →  H[X[3]][0]  (length=8, fp16 sub-element)
+Y[0]:  Ys2RHsMajor[0]=1, Ys2RHsMinor[0]=0  →  H[0][0]  (length=1, always 0)
+Y[1]:  Ys2RHsMajor[1]=4, Ys2RHsMinor[1]=0  →  H[3][0]  (length=8, fp16 sub-element)
 ```
 
 ### Coordinate Reconstruction
@@ -349,9 +379,9 @@ tile_distribution_encoding<
 ```
 
 ```
-P[0] = warp_id → H[X[0]][0] (length=NUM_WAVES, outer factor)
-P[1] = lane_id → H[X[0]][1] (length=64, inner factor)
-Y[0]           → H[X[1]][0] (length=8, sub-element)
+P[0] = warp_id → H[0][0] (length=NUM_WAVES, outer factor)
+P[1] = lane_id → H[0][1] (length=64, inner factor)
+Y[0]           → H[1][0] (length=8, sub-element)
 ```
 
 ```
