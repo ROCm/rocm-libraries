@@ -148,8 +148,7 @@ class BufferManager:
         if not self._buffers:
             raise ExecutionError("Buffers not allocated. Call allocate_all() first.")
 
-        if seed is not None:
-            np.random.seed(seed)
+        rng = np.random.RandomState(seed)
 
         for tensor_info in self._tensor_infos:
             if tensor_info.is_output or tensor_info.is_virtual:
@@ -160,7 +159,7 @@ class BufferManager:
 
             if dtype_key == "bfloat16":
                 # bfloat16 = upper 16 bits of fp32; handled via uint16 bit shifts
-                raw_bytes = _generate_bfloat16_bytes(tensor_info.dims)
+                raw_bytes = _generate_bfloat16_bytes(tensor_info.dims, rng=rng)
                 # Store as float32 for host-side validation
                 self._host_data[tensor_info.uid] = _bfloat16_bytes_to_ndarray(
                     raw_bytes, tensor_info.dims
@@ -169,7 +168,7 @@ class BufferManager:
                     buffer.copy_from_host(raw_bytes)
             else:
                 dtype = DTYPE_MAP.get(dtype_key, np.float32)
-                data = np.random.uniform(0.0, 1.0, tensor_info.dims).astype(dtype)
+                data = rng.uniform(0.0, 1.0, tensor_info.dims).astype(dtype)
                 self._host_data[tensor_info.uid] = data
                 if buffer:
                     buffer.copy_from_host(data.tobytes())

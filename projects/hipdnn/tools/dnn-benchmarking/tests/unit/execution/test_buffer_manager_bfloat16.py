@@ -10,14 +10,18 @@ mantissa bits, NOT round-to-nearest-even (which is what
 torch round-trip by up to 1 ULP. See ``_f32_to_bf16_bytes`` docstring.
 """
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 
 from dnn_benchmarking.execution.buffer_manager import (
+    BufferManager,
     _bfloat16_bytes_to_ndarray,
     _f32_to_bf16_bytes,
     _generate_bfloat16_bytes,
 )
+from dnn_benchmarking.graph.tensor_info import TensorInfo
 
 
 def _truncate_f32_to_bf16(values: np.ndarray) -> np.ndarray:
@@ -139,3 +143,63 @@ class TestTorchParity:
         torch_bytes = torch_bf16.view(torch.uint8).numpy().tobytes()
 
         assert numpy_bytes == torch_bytes
+
+
+def _make_bf16_input_tensor(uid: int = 1) -> TensorInfo:
+    return TensorInfo(
+        uid=uid,
+        name=f"input_{uid}",
+        dims=[2, 4],
+        strides=[],
+        data_type="bfloat16",
+        is_virtual=False,
+        is_output=False,
+    )
+
+
+class TestFillInputsRandomReproducibility:
+    """``fill_inputs_random(seed=...)`` must be reproducible for all dtypes,
+    including the bfloat16 path. Regression test: earlier the bf16 branch
+    created its own unseeded ``RandomState``, ignoring the caller's seed.
+    """
+
+    def test_bfloat16_input_reproducible_across_runs(self) -> None:
+        tensor = _make_bf16_input_tensor(uid=42)
+
+        bm_a = BufferManager([tensor])
+        bm_b = BufferManager([tensor])
+        # Bypass allocate_all() (needs hipdnn). Seed buffer dict with mocks
+        # so fill_inputs_random does not raise and copy_from_host is callable.
+        bm_a._buffers[tensor.uid] = MagicMock()
+        bm_b._buffers[tensor.uid] = MagicMock()
+
+        bm_a.fill_inputs_random(seed=1234)
+        bm_b.fill_inputs_random(seed=1234)
+
+        data_a = bm_a.get_input_data(tensor.uid)
+        data_b = bm_b.get_input_data(tensor.uid)
+        np.testing.assert_array_equal(data_a, data_b)
+
+        # Sanity: a different seed produces different bytes.
+        bm_c = BufferManager([tensor])
+        bm_c._buffers[tensor.uid] = MagicMock()
+        bm_c.fill_inputs_random(seed=5678)
+        data_c = bm_c.get_input_data(tensor.uid)
+        assert not np.array_equal(data_a, data_c)
+
+    def test_bfloat16_copy_from_host_bytes_match_across_runs(self) -> None:
+        tensor = _make_bf16_input_tensor(uid=7)
+
+        bm_a = BufferManager([tensor])
+        bm_b = BufferManager([tensor])
+        mock_a = MagicMock()
+        mock_b = MagicMock()
+        bm_a._buffers[tensor.uid] = mock_a
+        bm_b._buffers[tensor.uid] = mock_b
+
+        bm_a.fill_inputs_random(seed=99)
+        bm_b.fill_inputs_random(seed=99)
+
+        bytes_a = mock_a.copy_from_host.call_args[0][0]
+        bytes_b = mock_b.copy_from_host.call_args[0][0]
+        assert bytes_a == bytes_b
