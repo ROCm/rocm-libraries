@@ -55,9 +55,22 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
         datatype,
         layout,
         config_json=None,
+        max_instances=None,
+        seed=None,
+        tier=None,
+        manifest_path=None,
     ):
         super().__init__(
-            kernel_name_prefix, working_path, gpu_target, datatype, layout, config_json
+            kernel_name_prefix,
+            working_path,
+            gpu_target,
+            datatype,
+            layout,
+            config_json,
+            max_instances=max_instances,
+            seed=seed,
+            tier=tier,
+            manifest_path=manifest_path,
         )
         self.group_size_k = self.config.get("group_size_k", 128)
         # group_size_n can be an int or a dict with "values" key
@@ -66,6 +79,89 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
             self.group_size_n_values = group_size_n_cfg.get("values", [1])
         else:
             self.group_size_n_values = [group_size_n_cfg]
+
+    def _apply_sampling(self, kernel_list):
+        """Apply RFC Sobol+LHS+maximin sampling for ABQuant kernels.
+
+        Overrides base class to handle ABQuant's 8-tuple trait_combo
+        and group_size_n field.
+        """
+        if self.max_instances is None or len(kernel_list) <= self.max_instances:
+            return kernel_list
+
+        import sys
+
+        sampling_parent = os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", ".."
+        )
+        if sampling_parent not in sys.path:
+            sys.path.insert(0, sampling_parent)
+
+        from sampling.sampler import sample_feasible_set
+        from sampling.seed import make_seed
+        from sampling.feasible_set import GEMM_ABQUANT_AXES
+
+        effective_seed = make_seed(
+            self.seed, self.gpu_target, self.datatype, self.layout
+        )
+
+        flat_items = []
+        for k in kernel_list:
+            flat = dict(k["tile_config"])
+            (
+                pipeline,
+                epilogue,
+                scheduler,
+                pad_m,
+                pad_n,
+                pad_k,
+                a_preshuffle_quant,
+                b_preshuffle_quant,
+            ) = k["trait_combo"]
+            flat.update(
+                {
+                    "pipeline": pipeline,
+                    "epilogue": epilogue,
+                    "scheduler": scheduler,
+                    "pad_m": pad_m,
+                    "pad_n": pad_n,
+                    "pad_k": pad_k,
+                    "a_preshuffle_quant": a_preshuffle_quant,
+                    "b_preshuffle_quant": b_preshuffle_quant,
+                    "group_size_n": k.get("group_size_n", 1),
+                }
+            )
+            flat_items.append(flat)
+
+        selected, method, selected_indices = sample_feasible_set(
+            flat_items,
+            self.max_instances,
+            effective_seed,
+            GEMM_ABQUANT_AXES,
+        )
+
+        kernel_list = [kernel_list[i] for i in selected_indices]
+
+        if self.manifest_path:
+            from sampling.manifest import write_manifest
+
+            write_manifest(
+                selected,
+                self.manifest_path,
+                self.kernel_name_prefix,
+                self.datatype,
+                self.layout,
+                self.gpu_target,
+                effective_seed,
+                self.tier or "daily",
+                method,
+            )
+
+        print(
+            f"Sampled {len(kernel_list)} from feasible set "
+            f"(budget={self.max_instances}, seed={effective_seed}, method={method})"
+        )
+        return kernel_list
 
     def _get_group_size_n_values(self):
         """Return the list of group_size_n values to generate kernels for."""
@@ -168,6 +264,9 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
                             "group_size_n": group_size_n,
                         }
                     )
+
+        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
+        kernel_list = self._apply_sampling(kernel_list)
 
         # Write kernel count
         with open(
@@ -562,6 +661,21 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
                             self.config_json,
                         )
                     )
+
+        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
+        if self.max_instances is not None and len(work_items) > self.max_instances:
+            kernel_dicts = [
+                {
+                    "tile_config": item[0],
+                    "trait_combo": item[1],
+                    "group_size_n": item[2],
+                    "_work_item": item,
+                }
+                for item in work_items
+            ]
+            sampled = self._apply_sampling(kernel_dicts)
+            work_items = [k["_work_item"] for k in sampled]
+
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
@@ -684,6 +798,28 @@ def main():
         action="store_true",
         help="List kernel configurations without generating files",
     )
+    parser.add_argument(
+        "--max-instances",
+        type=int,
+        default=None,
+        help="Maximum number of kernel instances to select via sampling",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for deterministic sampling; if omitted, derived from today's date",
+    )
+    parser.add_argument(
+        "--tier",
+        default=None,
+        help="Sampling tier name (e.g., 'daily')",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Directory to write chosen_instances manifest JSON",
+    )
 
     args = parser.parse_args()
 
@@ -710,6 +846,10 @@ def main():
         args.datatype,
         args.layout,
         args.config_json,
+        max_instances=args.max_instances,
+        seed=args.seed,
+        tier=args.tier,
+        manifest_path=args.manifest_path,
     )
 
     if args.list_kernels:

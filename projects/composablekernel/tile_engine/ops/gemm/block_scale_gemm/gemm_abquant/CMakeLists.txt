@@ -126,6 +126,19 @@ function(build_individual_gemm_abquant_targets datatype layout)
     # Create working directory
     file(MAKE_DIRECTORY ${working_path})
 
+    # Build sampling arguments
+    set(extra_list_args "")
+    if(NOT "${GEMM_ABQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_ABQUANT_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # List kernels
     message(VERBOSE "  Listing ABQuant kernel configurations for ${datatype} ${layout}...")
     execute_process(
@@ -136,6 +149,7 @@ function(build_individual_gemm_abquant_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target "${GEMM_ABQUANT_GPU_TARGETS_INDIVIDUAL}"
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -228,6 +242,19 @@ else()
     foreach(pipeline IN LISTS GEMM_ABQUANT_PIPELINES)
         add_custom_target(benchmark_gemm_abquant_${pipeline}_pipeline)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap.
+    if(NOT "${GEMM_ABQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_ABQUANT_DATATYPE _abq_n_dt)
+        list(LENGTH GEMM_ABQUANT_LAYOUT _abq_n_lay)
+        math(EXPR _abq_n_combos "${_abq_n_dt} * ${_abq_n_lay}")
+        if(_abq_n_combos GREATER 0)
+            math(EXPR GEMM_ABQUANT_MAX_INSTANCES
+                "${GEMM_ABQUANT_MAX_INSTANCES} / ${_abq_n_combos}")
+            message(STATUS "  gemm_abquant: per-combo budget = ${GEMM_ABQUANT_MAX_INSTANCES} (${_abq_n_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_ABQUANT_DATATYPE)
