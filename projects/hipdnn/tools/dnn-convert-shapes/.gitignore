@@ -22,9 +22,3 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Converted shape JSON artifacts produced by running the tool against
-# sample miopen shape inputs (e.g. conv_fwd_*.json, conv_dgrad_*.json,
-# conv_wgrad_*.json, bnorm_*.json). These are test-run outputs, not source.
-conv_*.json
-bnorm_*.json
