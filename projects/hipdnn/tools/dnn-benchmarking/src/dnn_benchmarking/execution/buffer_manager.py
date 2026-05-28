@@ -21,13 +21,35 @@ DTYPE_MAP = {
 }
 
 
+def _f32_to_bf16_bytes(data_f32: np.ndarray) -> bytes:
+    """Convert a float32 numpy array to raw bfloat16 bytes.
+
+    bfloat16 is the upper 16 bits of an IEEE-754 float32. This helper
+    truncates each f32 word to its high half-word.
+
+    Note: this is a plain **truncation** (round-toward-zero of the low
+    16 mantissa bits), not round-to-nearest-even. PyTorch's
+    ``Tensor.bfloat16()`` uses RNE, so outputs from this helper can
+    differ from a torch round-trip by up to 1 ULP for the same input.
+
+    Args:
+        data_f32: Float32 numpy array.
+
+    Returns:
+        Raw bytes in bfloat16 format.
+    """
+    f32_bits = data_f32.astype(np.float32).view(np.uint32)
+    bf16 = (f32_bits >> np.uint32(16)).astype(np.uint16)
+    return bf16.tobytes()
+
+
 def _generate_bfloat16_bytes(
     dims: List[int], rng: np.random.RandomState = None
 ) -> bytes:
     """Generate random data in bfloat16 format using numpy bit manipulation.
 
-    bfloat16 is the upper 16 bits of an IEEE-754 float32, so we truncate
-    float32 samples to their high half-words.
+    Samples uniformly in [0, 1) as float32, then truncates to bfloat16
+    via :func:`_f32_to_bf16_bytes`.
 
     Args:
         dims: Tensor dimensions.
@@ -38,9 +60,8 @@ def _generate_bfloat16_bytes(
     """
     if rng is None:
         rng = np.random.RandomState()
-    f32_bits = rng.uniform(0.0, 1.0, dims).astype(np.float32).view(np.uint32)
-    bf16 = (f32_bits >> np.uint32(16)).astype(np.uint16)
-    return bf16.tobytes()
+    data_f32 = rng.uniform(0.0, 1.0, dims).astype(np.float32)
+    return _f32_to_bf16_bytes(data_f32)
 
 
 def _bfloat16_bytes_to_ndarray(data_bytes: bytes, dims: List[int]) -> np.ndarray:
