@@ -25,6 +25,7 @@ add_executable(
     IntegrationGpuBatchnormFwdTrainingActiv.cpp
     IntegrationGpuBatchnormUnsupportedDataTypes.cpp
     IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
+    IntegrationGpuBatchnormUnhappyActivation.cpp
     IntegrationGpuConvForward.cpp
     IntegrationGpuConvFwdBiasActiv.cpp
     IntegrationGpuConvBackwardData.cpp
