@@ -900,12 +900,12 @@ try
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
 
-    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride > 0 && arg.batch_mode == 0 && arg.bias_stride != arg.M[0])
-        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be equal to M when bias source is A and batch_mode is 0.");
-    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride > 0 && arg.batch_mode == 0 && arg.bias_stride != arg.N[0])
-        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be equal to N when bias source is B and batch_mode is 0.");
-    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > 0 && arg.batch_mode == 0 && arg.bias_stride != arg.M[0])
-        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be equal to M when bias source is D and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride < arg.N[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= N when bias source is B and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is D and batch_mode is 0.");
 
     if(!(aux_type == "" || aux_type == "default" || arg.use_e))
         hipblaslt_cerr << "warning: --use_e not set but --aux_type is provided" << std::endl;
