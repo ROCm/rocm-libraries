@@ -3526,32 +3526,32 @@ inline void host_bsrmm(J                     Mb,
         return;
     }
 
-    int M = Mb * block_dim;
+    J M = Mb * block_dim;
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(int i = 0; i < M; i++)
+    for(J i = 0; i < M; i++)
     {
-        int local_row = i % block_dim;
+        J local_row = i % block_dim;
 
-        int row_begin = bsr_row_ptr_A[i / block_dim] - base;
-        int row_end   = bsr_row_ptr_A[i / block_dim + 1] - base;
+        I row_begin = bsr_row_ptr_A[i / block_dim] - base;
+        I row_end   = bsr_row_ptr_A[i / block_dim + 1] - base;
 
-        for(int j = 0; j < N; j++)
+        for(J j = 0; j < N; j++)
         {
-            int idx_C = i + j * ldc;
+            int64_t idx_C = i + j * ldc;
 
             T sum = make_DataType<T>(0.0);
 
-            for(int s = row_begin; s < row_end; s++)
+            for(I s = row_begin; s < row_end; s++)
             {
-                for(int t = 0; t < block_dim; t++)
+                for(J t = 0; t < block_dim; t++)
                 {
-                    int idx_A = (dir == HIPSPARSE_DIRECTION_ROW)
+                    int64_t idx_A = (dir == HIPSPARSE_DIRECTION_ROW)
                                     ? block_dim * block_dim * s + block_dim * local_row + t
                                     : block_dim * block_dim * s + block_dim * t + local_row;
-                    int idx_B = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE)
+                    int64_t idx_B = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE)
                                     ? j * ldb + block_dim * (bsr_col_ind_A[s] - base) + t
                                     : (block_dim * (bsr_col_ind_A[s] - base) + t) * ldb + j;
 
