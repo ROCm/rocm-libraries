@@ -52,9 +52,9 @@ void register_tile_kernel(Registry& registry, const std::string& kernel_name)
     key.algorithm.warp_tile_shape.k = SelectedKernel::WarpTileK;
 
     // Extract pipeline, epilogue, scheduler from traits
-    key.algorithm.pipeline  = Pipeline::CompV4;  // Extract from kernel
-    key.algorithm.epilogue  = Epilogue::Default; // Extract from kernel
-    key.algorithm.scheduler = Scheduler::Auto;   // Extract from kernel
+    key.algorithm.pipeline  = Pipeline::CompV4;   // Extract from kernel
+    key.algorithm.epilogue  = Epilogue::Default;  // Extract from kernel
+    key.algorithm.scheduler = Scheduler::Default; // Extract from kernel
 
     key.algorithm.block_size      = SelectedKernel::BlockSize;
     key.algorithm.double_buffer   = SelectedKernel::DoubleSmemBuffer;

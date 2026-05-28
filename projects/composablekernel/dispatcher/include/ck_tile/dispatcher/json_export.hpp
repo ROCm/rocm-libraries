@@ -44,10 +44,10 @@ inline std::string datatype_to_string(DataType dtype)
     case DataType::FP16: return "fp16";
     case DataType::BF16: return "bf16";
     case DataType::FP32: return "fp32";
-    case DataType::FP8: return "fp8";
-    case DataType::BF8: return "bf8";
-    case DataType::INT8: return "int8";
-    case DataType::INT32: return "int32";
+    case DataType::FP8_FNUZ: return "fp8";
+    case DataType::BF8_FNUZ: return "bf8";
+    case DataType::I8: return "int8";
+    case DataType::I32: return "int32";
     default: return "unknown";
     }
 }
@@ -57,10 +57,10 @@ inline std::string layout_to_string(LayoutTag layout)
 {
     switch(layout)
     {
-    case LayoutTag::RowMajor: return "row_major";
-    case LayoutTag::ColMajor: return "col_major";
+    case LayoutTag::Row: return "row_major";
+    case LayoutTag::Col: return "col_major";
     case LayoutTag::PackedExternal: return "packed_external";
-    default: return "unknown";
+    case LayoutTag::Auto: return "auto";
     }
 }
 
@@ -99,7 +99,7 @@ inline std::string scheduler_to_string(Scheduler scheduler)
 {
     switch(scheduler)
     {
-    case Scheduler::Auto: return "auto";
+    case Scheduler::Default: return "auto";
     case Scheduler::Intrawave: return "intrawave";
     case Scheduler::Interwave: return "interwave";
     default: return "unknown";

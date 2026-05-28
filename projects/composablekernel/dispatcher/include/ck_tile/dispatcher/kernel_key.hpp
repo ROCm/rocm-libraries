@@ -3,6 +3,12 @@
 
 #pragma once
 
+#include <ck_common/datatype.hpp>
+#include <ck_common/epilogue.hpp>
+#include <ck_common/layout.hpp>
+#include <ck_common/pipeline.hpp>
+#include <ck_common/pipeline_scheduler.hpp>
+
 #include <array>
 #include <cstdint>
 #include <sstream>
@@ -12,64 +18,21 @@
 namespace ck_tile {
 namespace dispatcher {
 
-/// Data types supported by CK Tile GEMM kernels
-/// Matches tile_engine DATA_TYPE_MAP for full compatibility
-enum class DataType : std::uint8_t
-{
-    FP16,  // ck_tile::half_t
-    BF16,  // ck_tile::bf16_t
-    FP32,  // float
-    FP64,  // double
-    FP8,   // ck_tile::fp8_t (E4M3)
-    BF8,   // ck_tile::bf8_t (E5M2)
-    INT8,  // ck_tile::int8_t
-    INT4,  // ck_tile::pk_int4_t (packed int4)
-    INT32, // ck_tile::int32_t
-    UNKNOWN
-};
+/// Data types — uses canonical ck_common definition.
+using DataType = ck_common::DataType;
 
-/// Memory layout tags for tensors
-enum class LayoutTag : std::uint8_t
-{
-    RowMajor,
-    ColMajor,
-    PackedExternal
-};
+/// Memory layout tags for tensors — uses canonical ck_common definition.
+/// Dispatcher names: RowMajor=Row, ColMajor=Col. PackedExternal preserved as-is.
+using LayoutTag = ck_common::Layout;
 
-/// Pipeline variants for memory/compute optimization
-/// Matches tile_engine PIPELINE_MAP for full compatibility
-enum class Pipeline : std::uint8_t
-{
-    Mem,          // Memory-bound pipeline
-    CompV1,       // Compute pipeline v1
-    CompV2,       // Compute pipeline v2
-    CompV3,       // Compute pipeline v3
-    CompV4,       // Compute pipeline v4 (double buffering)
-    CompV5,       // Compute pipeline v5
-    CompV6,       // Compute pipeline v6
-    PreShuffleV1, // Weight preshuffle pipeline v1
-    PreShuffleV2  // Weight preshuffle pipeline v2 (optimized)
-};
+/// Pipeline variants — uses canonical ck_common definition.
+using Pipeline = ck_common::Pipeline;
 
-/// Epilogue strategies for output processing
-/// Matches tile_engine epilogue options for full compatibility
-enum class Epilogue : std::uint8_t
-{
-    None,
-    Default,       // DefaultGemm2DEpilogue
-    CShuffle,      // CShuffleEpilogue (cross-shuffle)
-    Bias,          // Bias addition
-    Activation,    // Fused activation
-    BiasActivation // Fused bias + activation
-};
+/// Epilogue strategies — uses canonical ck_common definition.
+using Epilogue = ck_common::Epilogue;
 
-/// Scheduler types for wave coordination
-enum class Scheduler : std::uint8_t
-{
-    Auto,
-    Intrawave,
-    Interwave
-};
+/// Scheduler types for wave coordination — uses canonical ck_common definition.
+using Scheduler = ck_common::PipelineScheduler;
 
 /// KernelKey: Compile-time kernel configuration metadata
 /// Organized into Signature (what operation) and Algorithm (how it's implemented)
@@ -220,11 +183,11 @@ inline std::string to_string(DataType dtype)
     case DataType::BF16: return "bf16";
     case DataType::FP32: return "fp32";
     case DataType::FP64: return "fp64";
-    case DataType::FP8: return "fp8";
-    case DataType::BF8: return "bf8";
-    case DataType::INT8: return "int8";
-    case DataType::INT4: return "int4";
-    case DataType::INT32: return "int32";
+    case DataType::FP8_FNUZ: return "fp8";
+    case DataType::BF8_FNUZ: return "bf8";
+    case DataType::I8: return "int8";
+    case DataType::I4: return "int4";
+    case DataType::I32: return "int32";
     default: return "unknown";
     }
 }
@@ -241,15 +204,15 @@ inline DataType string_to_dtype(const std::string& str)
     if(str == "fp64")
         return DataType::FP64;
     if(str == "fp8")
-        return DataType::FP8;
+        return DataType::FP8_FNUZ;
     if(str == "bf8")
-        return DataType::BF8;
+        return DataType::BF8_FNUZ;
     if(str == "int8")
-        return DataType::INT8;
+        return DataType::I8;
     if(str == "int4")
-        return DataType::INT4;
+        return DataType::I4;
     if(str == "int32")
-        return DataType::INT32;
+        return DataType::I32;
     return DataType::UNKNOWN;
 }
 
@@ -258,9 +221,10 @@ inline std::string to_string(LayoutTag layout)
 {
     switch(layout)
     {
-    case LayoutTag::RowMajor: return "r";
-    case LayoutTag::ColMajor: return "c";
+    case LayoutTag::Row: return "r";
+    case LayoutTag::Col: return "c";
     case LayoutTag::PackedExternal: return "p";
+    case LayoutTag::Auto: return "?";
     default: return "?";
     }
 }
@@ -269,12 +233,12 @@ inline std::string to_string(LayoutTag layout)
 inline LayoutTag string_to_layout(const std::string& str)
 {
     if(str == "r" || str == "row" || str == "RowMajor")
-        return LayoutTag::RowMajor;
+        return LayoutTag::Row;
     if(str == "c" || str == "col" || str == "ColMajor")
-        return LayoutTag::ColMajor;
+        return LayoutTag::Col;
     if(str == "p" || str == "packed")
         return LayoutTag::PackedExternal;
-    return LayoutTag::RowMajor; // Default
+    return LayoutTag::Row; // Default
 }
 
 /// Convert Pipeline to string
@@ -357,7 +321,7 @@ inline std::string to_string(Scheduler scheduler)
 {
     switch(scheduler)
     {
-    case Scheduler::Auto: return "auto";
+    case Scheduler::Default: return "auto";
     case Scheduler::Intrawave: return "intrawave";
     case Scheduler::Interwave: return "interwave";
     default: return "unknown";
@@ -368,7 +332,7 @@ inline std::string to_string(Scheduler scheduler)
 inline Scheduler string_to_scheduler(const std::string& str)
 {
     if(str == "auto")
-        return Scheduler::Auto;
+        return Scheduler::Default;
     if(str == "intrawave")
         return Scheduler::Intrawave;
     if(str == "interwave")

@@ -133,9 +133,9 @@ class CommonTypeMappings:
         "fp16": "DataType::FP16",
         "bf16": "DataType::BF16",
         "fp32": "DataType::FP32",
-        "fp8": "DataType::FP8",
-        "bf8": "DataType::BF8",
-        "int8": "DataType::INT8",
+        "fp8": "DataType::FP8_FNUZ",
+        "bf8": "DataType::BF8_FNUZ",
+        "int8": "DataType::I8",
     }
 
     # GEMM-specific layout mappings ("r"/"c" for row/column major).
@@ -148,8 +148,8 @@ class CommonTypeMappings:
     LAYOUT_TO_CK = GEMM_LAYOUT_TO_CK  # backward compat alias
 
     GEMM_LAYOUT_TO_DISPATCHER = {
-        "r": "LayoutTag::RowMajor",
-        "c": "LayoutTag::ColMajor",
+        "r": "LayoutTag::Row",
+        "c": "LayoutTag::Col",
     }
     LAYOUT_TO_DISPATCHER = GEMM_LAYOUT_TO_DISPATCHER  # backward compat alias
 
@@ -192,7 +192,7 @@ class CommonTypeMappings:
     SCHEDULER_TO_DISPATCHER = {
         "intrawave": "Scheduler::Intrawave",
         "interwave": "Scheduler::Interwave",
-        "default": "Scheduler::Auto",
+        "default": "Scheduler::Default",
     }
 
     EPILOGUE_TO_DISPATCHER = {

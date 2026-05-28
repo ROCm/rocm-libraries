@@ -47,9 +47,9 @@ void test_grouped_conv_algorithm_info()
     assert(algo.tile.n == 128);
     assert(algo.tile.k == 64);
     assert(algo.pipeline == PipelineVersion::V4);
-    assert(algo.scheduler == PipelineScheduler::INTRAWAVE);
+    assert(algo.scheduler == PipelineScheduler::Intrawave);
     assert(GroupedConvAlgorithmInfo::pipeline_str(PipelineVersion::V4) == std::string("compv4"));
-    assert(GroupedConvAlgorithmInfo::scheduler_str(PipelineScheduler::INTRAWAVE) ==
+    assert(GroupedConvAlgorithmInfo::scheduler_str(PipelineScheduler::Intrawave) ==
            std::string("intrawave"));
     std::cout << "PASSED\n";
 }

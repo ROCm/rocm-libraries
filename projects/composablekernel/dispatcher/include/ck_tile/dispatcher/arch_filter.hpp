@@ -98,7 +98,7 @@ inline std::vector<WarpTileConfig> get_supported_warp_tiles(GpuArch arch,
             return {};       // Not supported on RDNA4
         return fp16_configs; // Same as FP16
     }
-    if(dtype_a == DataType::FP8 || dtype_a == DataType::BF8)
+    if(dtype_a == DataType::FP8_FNUZ || dtype_a == DataType::BF8_FNUZ)
     {
         if(arch == GpuArch::GFX_950)
             return fp8_gfx950;
@@ -107,7 +107,7 @@ inline std::vector<WarpTileConfig> get_supported_warp_tiles(GpuArch arch,
         if(arch == GpuArch::GFX_90A)
             return {{32, 32, 16}, {32, 32, 32}};
     }
-    if(dtype_a == DataType::INT8 && dtype_b == DataType::INT8)
+    if(dtype_a == DataType::I8 && dtype_b == DataType::I8)
     {
         if(arch == GpuArch::GFX_942)
             return int8_configs;

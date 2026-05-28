@@ -29,13 +29,14 @@ TEST_F(DataTypeTest, AllDataTypesExist)
                                        DataType::BF16,
                                        DataType::FP32,
                                        DataType::FP64,
-                                       DataType::INT8,
-                                       DataType::INT4,
-                                       DataType::INT32,
-                                       DataType::FP8,
-                                       DataType::BF8,
+                                       DataType::I8,
+                                       DataType::I4,
+                                       DataType::I32,
+                                       DataType::FP8_FNUZ,
+                                       DataType::BF8_FNUZ,
                                        DataType::UNKNOWN};
 
+    // Dispatcher-used subset only; ck_common::DataType has more values.
     EXPECT_EQ(all_types.size(), 10);
 }
 
@@ -43,7 +44,7 @@ TEST_F(DataTypeTest, DataTypesAreDifferent)
 {
     EXPECT_NE(DataType::FP16, DataType::BF16);
     EXPECT_NE(DataType::FP16, DataType::FP32);
-    EXPECT_NE(DataType::INT8, DataType::INT4);
+    EXPECT_NE(DataType::I8, DataType::I4);
 }
 
 // =============================================================================
@@ -103,7 +104,7 @@ class SchedulerTest : public ::testing::Test
 TEST_F(SchedulerTest, AllSchedulersExist)
 {
     std::vector<Scheduler> all_schedulers = {
-        Scheduler::Auto, Scheduler::Intrawave, Scheduler::Interwave};
+        Scheduler::Default, Scheduler::Intrawave, Scheduler::Interwave};
 
     EXPECT_EQ(all_schedulers.size(), 3);
 }
@@ -171,7 +172,7 @@ TEST_F(SignatureTest, AllDataTypeCombinations)
         {DataType::FP16, DataType::FP16, DataType::FP16, DataType::FP32},
         {DataType::BF16, DataType::BF16, DataType::BF16, DataType::FP32},
         {DataType::FP32, DataType::FP32, DataType::FP32, DataType::FP32},
-        {DataType::INT8, DataType::INT8, DataType::INT8, DataType::INT32},
+        {DataType::I8, DataType::I8, DataType::I8, DataType::I32},
     };
 
     for(const auto& [a, b, c, acc] : valid_combos)

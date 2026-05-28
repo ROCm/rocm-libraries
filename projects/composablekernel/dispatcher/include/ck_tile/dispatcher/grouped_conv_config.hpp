@@ -19,6 +19,8 @@
 // Use common kernel_key types for DataType, Pipeline, etc.
 #include "ck_tile/dispatcher/kernel_key.hpp"
 
+#include <ck_common/pipeline_scheduler.hpp>
+
 #include <string>
 #include <sstream>
 #include <array>
@@ -160,12 +162,8 @@ enum class PipelineVersion
     PRESHUFFLE_V2  // Preshuffle V2 pipeline
 };
 
-enum class PipelineScheduler
-{
-    DEFAULT,
-    INTRAWAVE,
-    INTERWAVE
-};
+/// Pipeline scheduler — uses canonical ck_common definition.
+using PipelineScheduler = ck_common::PipelineScheduler;
 
 enum class GemmPadding
 {
@@ -277,7 +275,7 @@ struct GroupedConvAlgorithmInfo
     VectorSizeInfo vector_size;
 
     PipelineVersion pipeline    = PipelineVersion::V4;
-    PipelineScheduler scheduler = PipelineScheduler::INTRAWAVE;
+    PipelineScheduler scheduler = PipelineScheduler::Intrawave;
     GemmPadding padding         = GemmPadding::MNK_PADDING;
     MemoryOperation memory_op   = MemoryOperation::SET;
     EpilogueType epilogue       = EpilogueType::CSHUFFLE;
@@ -310,9 +308,9 @@ struct GroupedConvAlgorithmInfo
     {
         switch(ps)
         {
-        case PipelineScheduler::DEFAULT: return "default";
-        case PipelineScheduler::INTRAWAVE: return "intrawave";
-        case PipelineScheduler::INTERWAVE: return "interwave";
+        case PipelineScheduler::Default: return "default";
+        case PipelineScheduler::Intrawave: return "intrawave";
+        case PipelineScheduler::Interwave: return "interwave";
         default: return "unknown";
         }
     }

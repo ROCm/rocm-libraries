@@ -53,7 +53,7 @@ inline int encode_epilogue(Epilogue e)
 }
 inline int encode_layout(LayoutTag a, LayoutTag b, LayoutTag c)
 {
-    bool ra = (a == LayoutTag::RowMajor), rb = (b == LayoutTag::RowMajor);
+    bool ra = (a == LayoutTag::Row), rb = (b == LayoutTag::Row);
     if(ra && !rb)
         return 0; // RCR
     if(ra && rb)
@@ -69,10 +69,10 @@ inline double dtype_bytes_ml(DataType dt)
     case DataType::FP32: return 4;
     case DataType::FP16:
     case DataType::BF16: return 2;
-    case DataType::FP8:
-    case DataType::BF8:
-    case DataType::INT8: return 1;
-    case DataType::INT4: return 0.5;
+    case DataType::FP8_FNUZ:
+    case DataType::BF8_FNUZ:
+    case DataType::I8: return 1;
+    case DataType::I4: return 0.5;
     default: return 2;
     }
 }

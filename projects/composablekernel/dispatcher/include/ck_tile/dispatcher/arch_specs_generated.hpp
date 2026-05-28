@@ -90,11 +90,11 @@ inline float element_size(DataType dtype)
     case DataType::BF16: return 2.0f;
     case DataType::FP32: return 4.0f;
     case DataType::FP64: return 8.0f;
-    case DataType::FP8: return 1.0f;
-    case DataType::BF8: return 1.0f;
-    case DataType::INT8: return 1.0f;
-    case DataType::INT4: return 0.5f;
-    case DataType::INT32: return 4.0f;
+    case DataType::FP8_FNUZ: return 1.0f;
+    case DataType::BF8_FNUZ: return 1.0f;
+    case DataType::I8: return 1.0f;
+    case DataType::I4: return 0.5f;
+    case DataType::I32: return 4.0f;
     default: return 2.0f;
     }
 }

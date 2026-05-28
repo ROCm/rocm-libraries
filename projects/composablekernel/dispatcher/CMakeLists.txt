@@ -43,6 +43,13 @@ target_include_directories(ck_tile_dispatcher
         $<INSTALL_INTERFACE:include>
 )
 
+# Common types shared across CK Tile, rocm_ck, and dispatcher
+target_include_directories(ck_tile_dispatcher
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/include>
+        $<INSTALL_INTERFACE:include>
+)
+
 # CK project root -- needed only for FMHA generated wrappers that include
 # "example/ck_tile/01_fmha/fmha_fwd.hpp". PRIVATE to avoid exposing the
 # entire project tree to downstream consumers.

@@ -18,6 +18,7 @@ enum class Pipeline : uint8_t
     CompV3,       // Compute pipeline v3
     CompV4,       // Compute pipeline v4 (double buffering)
     CompV5,       // Compute pipeline v5
+    CompV6,       // Compute pipeline v6
     PreShuffleV1, // Weight preshuffle pipeline v1
     PreShuffleV2  // Weight preshuffle pipeline v2 (optimized)
 };
