@@ -576,6 +576,8 @@ def runCodeQLTestCommand (platform, project)
                 CODEQL_INSTALL_DIR=\$PWD/codeql/install
                 export PATH="\${CODEQL_INSTALL_DIR}/codeql:\$PATH"
 
+                source .venv/bin/activate
+
                 # Run CodeQL unit tests
                 ./codeql/run_tests
 
