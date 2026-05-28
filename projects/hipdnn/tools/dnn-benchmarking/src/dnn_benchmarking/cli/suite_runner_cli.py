@@ -157,11 +157,28 @@ def run_suite_cli(
     """Validate suite CLI args, build config, and delegate to run_suite_benchmark."""
     try:
         metrics_config = MetricsConfig(
-            tier=getattr(args, "metrics_tier", "basic"),
-            emit_trace=getattr(args, "emit_trace", None),
-            perf=getattr(args, "perf", False),
-            profiling_output_dir=getattr(args, "profiling_output_dir", None),
+            tier=args.metrics_tier,
+            emit_trace=args.emit_trace,
+            pmc_set=args.pmc,
+            perf=args.perf,
+            roofline=args.roofline,
+            pmc_allow_multipass=args.pmc_allow_multipass,
+            profiling_output_dir=args.profiling_output_dir,
+            profiling_timeout_s=args.profiling_timeout,
         )
+        # --profiling-output-dir is only meaningful when at least one
+        # opt-in profiling source fires. Passing it solo is a silent
+        # no-op today; surface that as a soft warning so the user
+        # knows to add --pmc / --emit-trace / --perf / --roofline.
+        if (
+            metrics_config.profiling_output_dir is not None
+            and not metrics_config.opt_in_pass_requested
+        ):
+            reporter.print_warning(
+                "--profiling-output-dir set but no opt-in profiling "
+                "source requested (--pmc, --emit-trace, --perf, "
+                "--roofline); the directory will not be written to"
+            )
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
