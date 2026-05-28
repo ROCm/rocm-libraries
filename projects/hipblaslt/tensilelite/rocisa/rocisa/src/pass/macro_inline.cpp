@@ -310,6 +310,14 @@ namespace rocisa
                 if(branch.back())
                     output.push_back(cloneAndSubstitute(instruction, params));
             }
+            else if(std::dynamic_pointer_cast<TextBlock>(item))
+            {
+                // Drop: TextBlock items (e.g. addComment0 inside a Macro body
+                // like PRND_GENERATOR) are not emitted at inline sites. This
+                // matches the original release-build behavior, where the assert
+                // below was elided (NDEBUG) and no branch handled TextBlock so
+                // it silently fell through.
+            }
             else
             {
                 assert(false && "macroToInstruction: unexpected item type in macro body");
