@@ -12,10 +12,11 @@ _DISPATCHER_CODEGEN = _THIS_DIR.parents[1] / "dispatcher" / "codegen"
 if str(_DISPATCHER_CODEGEN) not in sys.path:
     sys.path.insert(0, str(_DISPATCHER_CODEGEN))
 
-from grouped_config_rules import (  # noqa E402
+from grouped_config_rules import (
     check_vectors as _shared_check_vectors,
     check_warp_coverage,
     check_bwd_data_vec_coverage,
+    WARP_SIZE,
 )
 
 

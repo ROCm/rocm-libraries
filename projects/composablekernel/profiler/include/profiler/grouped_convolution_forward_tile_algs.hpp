@@ -178,8 +178,8 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                     std::cout << "\tNumber of incorrect values: " << error.wrong_elements
                               << " Is all zero:" << error.is_all_zero()
                               << " max err: " << error.max_error << std::endl;
-                    // Check with cpu verification to get a values
-                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                    run_cpu_validation<SIGNATURE, ConvBuffer::Output>(
+                        args, outputs, reference.get());
                 }
             }
         }
