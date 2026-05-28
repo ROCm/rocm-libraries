@@ -611,6 +611,13 @@ using enable_if_target_family_gfx12_t =
     enable_if_target_family_id_t<CompilerTarget, amdgcn_target_family_id::GFX12>;
 
 /**
+ * @brief SFINAE enabler for GFX1250 target
+ * @tparam CompilerTarget The compiler target to check
+ */
+template <typename CompilerTarget>
+using enable_if_target_gfx1250_t = enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX1250>;
+
+/**
  * @brief SFINAE enabler for CDNA architecture targets
  * @tparam CompilerTarget The compiler target to check
  */
