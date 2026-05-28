@@ -53,20 +53,24 @@ void rocsparse::roctx_variables_st::set_roctx_enabled(bool value)
 
 extern "C" {
 
-// LCOV_EXCL_START
 void rocsparse_enable_roctx()
 {
+    // LCOV_EXCL_START
     rocsparse_roctx_variables.set_roctx_enabled(true);
+    // LCOV_EXCL_STOP
 }
 
 void rocsparse_disable_roctx()
 {
+    // LCOV_EXCL_START
     rocsparse_roctx_variables.set_roctx_enabled(false);
+    // LCOV_EXCL_STOP
 }
 
 int rocsparse_state_roctx()
 {
+    // LCOV_EXCL_START
     return rocsparse_roctx_variables.get_roctx_enabled() ? 1 : 0;
+    // LCOV_EXCL_STOP
 }
-// LCOV_EXCL_STOP
 }
