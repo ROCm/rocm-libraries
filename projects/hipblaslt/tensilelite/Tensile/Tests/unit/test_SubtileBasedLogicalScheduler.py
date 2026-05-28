@@ -1499,8 +1499,6 @@ class TestBuildPreloop:
         sched.build_preloop()
 
         preloop = sched._preloop_emitted
-        all_ops = [em.opType for partition in preloop
-                   for group in partition for em in group]
 
         grs = [em.source for partition in preloop
                for group in partition for em in group if em.opType == 'gr']
