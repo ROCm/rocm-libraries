@@ -22,15 +22,16 @@ DTYPE_MAP = {
 
 
 def _f32_to_bf16_bytes(data_f32: np.ndarray) -> bytes:
-    """Convert a float32 numpy array to raw bfloat16 bytes.
+    """Convert a float32 numpy array to raw bfloat16 bytes (round-to-nearest-even).
 
     bfloat16 is the upper 16 bits of an IEEE-754 float32. This helper
-    truncates each f32 word to its high half-word.
+    rounds each f32 word to its high half-word using round-to-nearest,
+    ties-to-even (RNE), matching ``torch.Tensor.bfloat16()``.
 
-    Note: this is a plain **truncation** (round-toward-zero of the low
-    16 mantissa bits), not round-to-nearest-even. PyTorch's
-    ``Tensor.bfloat16()`` uses RNE, so outputs from this helper can
-    differ from a torch round-trip by up to 1 ULP for the same input.
+    NaN inputs are preserved as NaN: the quiet bit (high mantissa bit
+    of the bf16) is forced on so truncation cannot collapse the value
+    into an infinity, and the rounding bias is skipped so the exponent
+    cannot overflow.
 
     Args:
         data_f32: Float32 numpy array.
@@ -38,8 +39,18 @@ def _f32_to_bf16_bytes(data_f32: np.ndarray) -> bytes:
     Returns:
         Raw bytes in bfloat16 format.
     """
-    f32_bits = data_f32.astype(np.float32).view(np.uint32)
-    bf16 = (f32_bits >> np.uint32(16)).astype(np.uint16)
+    f32_bits = data_f32.astype(np.float32).view(np.uint32).copy()
+    exp_mask = np.uint32(0x7F800000)
+    mant_mask = np.uint32(0x007FFFFF)
+    is_nan = ((f32_bits & exp_mask) == exp_mask) & ((f32_bits & mant_mask) != 0)
+    # RNE bias: 0x7FFF rounds half away from zero; adding the LSB of
+    # the eventual bf16 word ties to even.
+    lsb = (f32_bits >> np.uint32(16)) & np.uint32(1)
+    rounding_bias = lsb + np.uint32(0x7FFF)
+    rounded = f32_bits + rounding_bias
+    # Preserve NaN: keep original exponent, set the bf16 quiet bit.
+    rounded = np.where(is_nan, f32_bits | np.uint32(0x00400000), rounded)
+    bf16 = (rounded >> np.uint32(16)).astype(np.uint16)
     return bf16.tobytes()
 
 
@@ -48,8 +59,8 @@ def _generate_bfloat16_bytes(
 ) -> bytes:
     """Generate random data in bfloat16 format using numpy bit manipulation.
 
-    Samples uniformly in [0, 1) as float32, then truncates to bfloat16
-    via :func:`_f32_to_bf16_bytes`.
+    Samples uniformly in [0, 1) as float32, then converts to bfloat16
+    via :func:`_f32_to_bf16_bytes` (round-to-nearest-even).
 
     Args:
         dims: Tensor dimensions.

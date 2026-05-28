@@ -63,5 +63,5 @@ Each converted graph is written as `<stem>_conv_<direction>_n<N>c<C>H<H>W<W>_...
 
 ## Exit Codes
 
-- `0` -- All shapes converted successfully
-- `1` -- Error (file not found, parse failure, unsupported operation)
+- `0` -- Shape file mode: file was readable and processing finished, even if individual lines failed to parse (per-line failures are reported as warnings on stderr but do not abort the run). Inline `--args` mode: the single invocation converted successfully.
+- `1` -- Fatal error: input file not found, no shape files provided, output path could not be written, or (inline `--args` mode only) the argument string failed to parse or used an unsupported operation.

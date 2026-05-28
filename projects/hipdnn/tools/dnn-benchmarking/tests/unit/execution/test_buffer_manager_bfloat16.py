@@ -4,10 +4,9 @@
 """Tests for bfloat16 byte conversion helpers in buffer_manager.
 
 These tests lock in the numpy bit-manipulation behaviour of the bf16
-helpers. The forward conversion is plain truncation of the low 16
-mantissa bits, NOT round-to-nearest-even (which is what
-``torch.Tensor.bfloat16()`` does). Outputs can therefore differ from a
-torch round-trip by up to 1 ULP. See ``_f32_to_bf16_bytes`` docstring.
+helpers. The forward conversion is round-to-nearest, ties-to-even
+(RNE), matching ``torch.Tensor.bfloat16()``. NaN inputs are preserved
+as NaN with the bf16 quiet bit forced on.
 """
 
 from unittest.mock import MagicMock
@@ -24,24 +23,49 @@ from dnn_benchmarking.execution.buffer_manager import (
 from dnn_benchmarking.graph.tensor_info import TensorInfo
 
 
-def _truncate_f32_to_bf16(values: np.ndarray) -> np.ndarray:
-    """Reference implementation: zero the low 16 bits of each f32 word."""
-    bits = values.astype(np.float32).view(np.uint32)
-    truncated_bits = bits & np.uint32(0xFFFF0000)
-    return truncated_bits.view(np.float32).copy()
+def _bf16_uint16(values: np.ndarray) -> np.ndarray:
+    """Decode raw bf16 bytes from ``_f32_to_bf16_bytes(values)`` into a uint16 array."""
+    raw = _f32_to_bf16_bytes(values)
+    return np.frombuffer(raw, dtype=np.uint16).reshape(values.shape)
 
 
-class TestF32ToBf16Roundtrip:
-    """Roundtrip identity tests for the truncation conversion."""
+class TestF32ToBf16RoundtripRNE:
+    """Roundtrip and exactness tests for the RNE conversion."""
 
-    def test_roundtrip_matches_truncated_f32(self) -> None:
-        """f32 -> bf16 bytes -> f32 equals f32 with low 16 mantissa bits zeroed."""
-        x = np.array([1.0, -1.0, 0.0, 3.14, 0.5, 100.0, 1e-30, -7.5], dtype=np.float32)
+    def test_values_with_zero_low_bits_roundtrip_exactly(self) -> None:
+        """Values whose f32 low 16 bits are already zero roundtrip exactly."""
+        x = np.array([1.0, -1.0, 0.0, 0.5, 2.0, 4.0, 100.0, -7.5], dtype=np.float32)
         raw = _f32_to_bf16_bytes(x)
-        result = _bfloat16_bytes_to_ndarray(raw, [8])
+        result = _bfloat16_bytes_to_ndarray(raw, list(x.shape))
+        np.testing.assert_array_equal(result, x)
 
-        expected = _truncate_f32_to_bf16(x)
-        np.testing.assert_array_equal(result, expected)
+    def test_round_up_when_low_bits_above_half(self) -> None:
+        """Low 16 bits > 0x8000 round up (toward larger magnitude)."""
+        # f32 bit pattern 0x3F8080FF: low half-word 0x80FF > 0x8000 -> round up.
+        # Result bf16 = 0x3F81.
+        bits = np.array([0x3F8080FF], dtype=np.uint32)
+        x = bits.view(np.float32)
+        assert _bf16_uint16(x)[0] == 0x3F81
+
+    def test_round_down_when_low_bits_below_half(self) -> None:
+        """Low 16 bits < 0x8000 round down (toward zero)."""
+        bits = np.array([0x3F807FFF], dtype=np.uint32)
+        x = bits.view(np.float32)
+        assert _bf16_uint16(x)[0] == 0x3F80
+
+    def test_tie_rounds_to_even_lsb_zero(self) -> None:
+        """Exact tie (low bits == 0x8000) with even bf16 LSB stays put."""
+        # 0x3F800000 has bf16 word 0x3F80 (LSB=0, even). Tie -> stay at 0x3F80.
+        bits = np.array([0x3F808000], dtype=np.uint32)
+        x = bits.view(np.float32)
+        assert _bf16_uint16(x)[0] == 0x3F80
+
+    def test_tie_rounds_to_even_lsb_one(self) -> None:
+        """Exact tie with odd bf16 LSB rounds up to even."""
+        # 0x3F810000 has bf16 word 0x3F81 (LSB=1, odd). Tie -> round up to 0x3F82.
+        bits = np.array([0x3F818000], dtype=np.uint32)
+        x = bits.view(np.float32)
+        assert _bf16_uint16(x)[0] == 0x3F82
 
     def test_zero_and_negative_zero_preserved(self) -> None:
         """Both +0.0 and -0.0 roundtrip with sign bit intact."""
@@ -59,8 +83,7 @@ class TestReversePathSpecialValues:
     """Tests for the reverse (bf16 bytes -> f32) path on special values.
 
     These craft raw uint16 buffers directly rather than going through
-    ``_f32_to_bf16_bytes`` because truncation can corrupt NaN payloads
-    (a quiet NaN's signalling bit may sit in the low 16 mantissa bits).
+    ``_f32_to_bf16_bytes`` to exercise the decoder in isolation.
     """
 
     def test_positive_infinity_decoded(self) -> None:
@@ -84,25 +107,44 @@ class TestReversePathSpecialValues:
         assert np.isnan(result[0])
 
 
-class TestSubnormalTruncation:
-    """Behaviour-locking test for subnormal/tiny-value flush behaviour.
+class TestForwardPathNaNPreservation:
+    """NaN inputs must encode to a bf16 NaN (not overflow to infinity).
 
-    Picks an f32 value far below the bf16 normal range. Plain
-    truncation flushes the value to zero. If someone later switches the
-    conversion to round-to-nearest-even, this test will fail and force
-    them to consider the behavioural change.
+    The forward path forces the bf16 quiet bit on for NaN inputs and
+    skips rounding so the exponent cannot overflow.
     """
 
-    def test_tiny_f32_flushes_to_zero_under_truncation(self) -> None:
-        # Smallest positive normal f32 (~1.175e-38) — well below the
-        # smallest bf16 normal (~1.175e-38 has top 16 bits 0x0080,
-        # but a value just under it has top 16 bits 0x0000).
-        x = np.array([1e-40], dtype=np.float32)  # subnormal f32
+    def test_quiet_nan_input_encodes_to_nan(self) -> None:
+        x = np.array([np.float32(np.nan)], dtype=np.float32)
         raw = _f32_to_bf16_bytes(x)
         result = _bfloat16_bytes_to_ndarray(raw, [1])
+        assert np.isnan(result[0])
 
-        # Truncation: subnormal f32 has exponent bits all zero, and the
-        # significant bits live in the low 23. Top 16 bits are 0 -> 0.0.
+    def test_signaling_nan_payload_still_nan(self) -> None:
+        # Craft a signalling NaN whose payload is entirely in the low
+        # 16 mantissa bits — naive truncation would corrupt this to inf.
+        bits = np.array([0x7F800001], dtype=np.uint32)
+        x = bits.view(np.float32)
+        raw = _f32_to_bf16_bytes(x)
+        result = _bfloat16_bytes_to_ndarray(raw, [1])
+        assert np.isnan(result[0])
+
+
+class TestRNETinyValues:
+    """Subnormal-input behaviour under RNE.
+
+    f32 values smaller than half the smallest bf16 subnormal round to
+    zero because the RNE bias cannot lift their bit pattern past the
+    bf16 LSB.
+    """
+
+    def test_smallest_f32_subnormal_rounds_to_zero(self) -> None:
+        # 0x00000001 is the smallest positive f32 subnormal (~1.4e-45).
+        # +bias 0x7FFF = 0x00008000; lsb=0 so no even-up; >>16 -> 0x0000.
+        bits = np.array([0x00000001], dtype=np.uint32)
+        x = bits.view(np.float32)
+        raw = _f32_to_bf16_bytes(x)
+        result = _bfloat16_bytes_to_ndarray(raw, [1])
         assert result[0] == 0.0
 
 
