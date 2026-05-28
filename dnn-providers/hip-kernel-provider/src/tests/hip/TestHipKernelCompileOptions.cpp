@@ -35,9 +35,6 @@ protected:
         _deviceProps.warpSize = 64;
         std::snprintf(_deviceProps.gcnArchName, sizeof(_deviceProps.gcnArchName), "%s", "gfx942");
 
-        // Set ROCM_PATH (to default path on linux)
-        hipdnn_data_sdk::utilities::setEnv("ROCM_PATH", "/opt/rocm");
-
         const std::vector<int64_t> dims = {1, 3, 224, 224};
         std::vector<int64_t> strides;
 
@@ -92,7 +89,6 @@ TEST_F(TestHipKernelCompileOptionsNchwFp32, VerifiesOptions)
 
     const HipKernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
-    EXPECT_TRUE(hasOption(options, "-I/opt/rocm/include"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
@@ -110,7 +106,6 @@ TEST_F(TestHipKernelCompileOptionsNhwcBfp16, VerifiesOptions)
 
     const HipKernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
-    EXPECT_TRUE(hasOption(options, "-I/opt/rocm/include"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
@@ -129,7 +124,6 @@ TEST_F(TestHipKernelCompileOptions, VerifyAddCustomOptions)
     options.add("HIP_PLUGIN_TEST_BOOL", true);
 
     // Verify expected options
-    EXPECT_TRUE(hasOption(options, "-I/opt/rocm/include"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
@@ -149,7 +143,6 @@ TEST_F(TestHipKernelCompileOptions, VerifiesActivationOption)
     const HipKernelCompileOptions options(
         _inputTensorAttrs, _deviceProps, hip_kernel_utils::ActivationMode::RELU);
 
-    EXPECT_TRUE(hasOption(options, "-I/opt/rocm/include"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=1"));

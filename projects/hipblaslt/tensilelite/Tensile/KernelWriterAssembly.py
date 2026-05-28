@@ -1087,6 +1087,11 @@ class KernelWriterAssembly(KernelWriter):
             for iui in range(0, kernel["InnerUnroll"]):
               moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
               ri += self.states.a.numVgprValuPerBlock
+          if kernel["HalfPLRA"]:
+            ri = 0
+            for bi in range(3): # buffer indices
+                moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_G%u"%(bi), "vgprValuA_X0_I0_BASE", ri))
+                ri += self.states.a.numVgprValuPerBlock // 2
           ri = 0
           if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
             moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
@@ -1128,6 +1133,11 @@ class KernelWriterAssembly(KernelWriter):
             for iui in range(0, kernel["InnerUnroll"]):
               moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
               ri += self.states.b.numVgprValuPerBlock
+          if kernel["HalfPLRB"]:
+            ri = 0
+            for bi in range(3): # buffer indices
+                moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_G%u"%(bi), "vgprValuB_X0_I0_BASE", ri))
+                ri += self.states.b.numVgprValuPerBlock // 2
           ri = 0
           if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
             moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
@@ -6490,22 +6500,50 @@ class KernelWriterAssembly(KernelWriter):
         loopCounterName = self.loopCounterName(kernel, loopIdx)
         module.addSpaceLine()
         if kernel["SuppressNoLoadLoop"]:
-          # If the tail loop is suppressed, then final iterations will have moved the Srd base forward
-          # (and also moved back the srd shadow limit) and slammed Limit to 0, so need to 'undo'
-          # those increments - see setTailSrd
-          assert(kernel["PrefetchGlobalRead"] == 1) #if >1 would need a multiply here
-          module.add(SCmpEQU32(src0=sgpr("OrigLoopCounter"), src1=0, comment="completely skipped unroll loop?"))
-          module.add(SCSelectB32(dst=sgpr(tmpSgpr+0), src0=0, src1=sgpr("GlobalReadIncsA"), comment="force to 0?"))
-          module.add(SCSelectB32(dst=sgpr(tmpSgpr+1), src0=0, src1=sgpr("GlobalReadIncsB"), comment="force to 0?"))
-          module.add(self.setTailSrd(tPA, sgpr(tmpSgpr+0)))
-          module.addSpaceLine()
-          module.add(self.setTailSrd(tPB, sgpr(tmpSgpr+1)))
-          module.addSpaceLine()
-          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr+0), src0=0, src1=sgpr("GlobalReadIncsMetadata"), comment="force to 0?"))
-            tP = tPB if kernel["ProblemType"]["Sparse"] == 2 else tPA
-            module.add(self.setTailSrd(tP, sgpr(tmpSgpr+0)))
+          if kernel["HalfPLR"]:
+            # In HalfPLR case, TDM will be disabled in the last unroll loop iterations. Also LDS buffer
+            # is not aligned for TDM & local read address. So we need to re-enable TDM & align LDS buffer
+            SkipHalfPLRAdjustLabel = Label("Skip_HPLR_Adjust", "")
+            module.add(SCmpEQU32(src0=sgpr("OrigLoopCounter"), src1=0, comment="skip if main loop was not executed"))
+            module.add(SCBranchSCC1(labelName=SkipHalfPLRAdjustLabel.getLabelName(), comment=""))
+            module.addComment0("HalfPLR: re-enable TDM & align LDS buffer")
+            if prod(kernel["MIWaveGroup"]) > 1:
+              module.add(SMovB32(dst=sgpr("tdmAGroup0+0"), src=1, comment=""))
+              module.add(self.tdmSwapLdsOffset(kernel, tPA))
+              if kernel["ProblemType"]["MXBlockA"]:
+                module.add(SMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=1, comment=""))
+                module.add(self.tdmSwapLdsOffset(kernel, tPA["MX"]))
+            else:
+              module.add(SMovB32(dst=sgpr("tdmAGroup0+0"), src=1, comment=""))
+              module.add(self.tdmSwapLdsOffset(kernel, tPA))
+              module.add(SMovB32(dst=sgpr("tdmBGroup0+0"), src=1, comment=""))
+              module.add(self.tdmSwapLdsOffset(kernel, tPB))
+              if kernel["ProblemType"]["MXBlockA"]:
+                module.add(SMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=1, comment=""))
+                module.add(self.tdmSwapLdsOffset(kernel, tPA["MX"]))
+              if kernel["ProblemType"]["MXBlockB"]:
+                module.add(SMovB32(dst=sgpr("tdmMXSBGroup0+0"), src=1, comment=""))
+                module.add(self.tdmSwapLdsOffset(kernel, tPB["MX"]))
+            module.add((SWaitCnt(dscnt=0, comment="HalfPLR: prevent dummy ds_load from polluting LDS buffer")))
+            module.add((SBarrier()))
+            module.add(SkipHalfPLRAdjustLabel)
+          else:
+            # If the tail loop is suppressed, then final iterations will have moved the Srd base forward
+            # (and also moved back the srd shadow limit) and slammed Limit to 0, so need to 'undo'
+            # those increments - see setTailSrd
+            assert(kernel["PrefetchGlobalRead"] == 1) #if >1 would need a multiply here
+            module.add(SCmpEQU32(src0=sgpr("OrigLoopCounter"), src1=0, comment="completely skipped unroll loop?"))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr+0), src0=0, src1=sgpr("GlobalReadIncsA"), comment="force to 0?"))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr+1), src0=0, src1=sgpr("GlobalReadIncsB"), comment="force to 0?"))
+            module.add(self.setTailSrd(tPA, sgpr(tmpSgpr+0)))
             module.addSpaceLine()
+            module.add(self.setTailSrd(tPB, sgpr(tmpSgpr+1)))
+            module.addSpaceLine()
+            if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+              module.add(SCSelectB32(dst=sgpr(tmpSgpr+0), src0=0, src1=sgpr("GlobalReadIncsMetadata"), comment="force to 0?"))
+              tP = tPB if kernel["ProblemType"]["Sparse"] == 2 else tPA
+              module.add(self.setTailSrd(tP, sgpr(tmpSgpr+0)))
+              module.addSpaceLine()
 
         # LOCAL_SPLITU * min(sizeL % LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)
         module.addComment("numIter%s = LOCAL_SPLITU * min(size%s %% LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)" \
@@ -6697,7 +6735,7 @@ class KernelWriterAssembly(KernelWriter):
         endCounter = 1
     elif kernel["PrefetchGlobalRead"] >= 2:
       if kernel["SuppressNoLoadLoop"]:
-        endCounter =  1
+        endCounter =  0 if kernel["HalfPLR"] else 1
       else:
         endCounter = 2
     else:
@@ -6712,7 +6750,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if loopIdx == self.states.unrollIdx:
         # 1 loop check is necessary only when AssertSummationElementMultiple % (DepthU * 2) != 0
-        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0:
+        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 and not kernel["SuppressNoLoadLoop"]:
           module.add(SCmpEQU32(
               src0=loopCounter, \
               src1=hex(endCounter-1), \
@@ -7485,10 +7523,10 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # src A,B str for MFMA
   ##############################################################################
-  def generateSrcStrForMFMAshiftK(self, kernel, tP, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, idxAB, bk=None):
-    return self.generateSrcStrForMFMA(kernel, tP, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, idxAB, bk=bk, shiftK=True)
+  def generateSrcStrForMFMAshiftK(self, kernel, tP, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, idxAB, lc=0, bk=None):
+    return self.generateSrcStrForMFMA(kernel, tP, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, idxAB, lc=lc, bk=bk, shiftK=True)
 
-  def generateSrcStrForMFMA(self, kernel, tP, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, idxAB, bk=None, shiftK=False):
+  def generateSrcStrForMFMA(self, kernel, tP, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, idxAB, lc=0, bk=None, shiftK=False):
     tc = tP["tensorChar"]
 
     if tc == "A":
@@ -7563,6 +7601,13 @@ class KernelWriterAssembly(KernelWriter):
         abStr += "+%u"%(adjustedBk)
       else:
         abStr += "+%u"%(bk)
+
+    # halfPLR
+    halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c"%tc]
+    if halfPLR:
+        halfPLRGroups = self.getHalfPLRGroups(kernel, lc, u)
+        bkVal = 0 if bk == None else bk
+        abStr = self.getHalfPLRValuStr(halfPLRGroups, ab_new + vgprBuffer_new_offset + iui_new_offset + bkVal, tc)
     return abStr
 
   ##############################################################################
@@ -7972,7 +8017,7 @@ class KernelWriterAssembly(KernelWriter):
             for a in range(0, kernel["MIWaveTileA"]):
               for ti in range(0, numTileInInstA):
                 for iui in range(0, innerUnroll):
-                  aStr = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a)
+                  aStr = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, unrollLoopIdx)
                   shiftK.add(_shiftLrElements(aStr, vgprPerInUnrollA, a))
 
           numSet0GroupA = vgprPerInUnrollA // vgprPerSet0Group
@@ -8037,7 +8082,7 @@ class KernelWriterAssembly(KernelWriter):
                   for ti in range(0, numTileInInstA):
                     for iui in range(0, innerUnroll):
                       bk = se + group * vgprPerSet0Group + ti * vgprPerInUnrollA
-                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk), 1)
+                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, lc=unrollLoopIdx, bk=bk), 1)
                       shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
               # separate code for gfx950 mx
               if group == 0 and kernel["ProblemType"]["MXBlockA"] and isgfx950:
@@ -8072,7 +8117,7 @@ class KernelWriterAssembly(KernelWriter):
             for b in range(0, kernel["MIWaveTileB"]):
               for ti in range(0, numTileInInstB):
                 for iui in range(0, innerUnroll):
-                  bStr = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b)
+                  bStr = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, unrollLoopIdx)
                   shiftK.add(_shiftLrElements(bStr, vgprPerInUnrollB, b))
 
           numSet0GroupB = vgprPerInUnrollB//vgprPerSet0Group
@@ -8133,7 +8178,7 @@ class KernelWriterAssembly(KernelWriter):
                 for ti in range(0, numTileInInstB):
                   for iui in range(0, innerUnroll):
                     bk = se + group * vgprPerSet0Group + ti * vgprPerInUnrollB
-                    bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk), 1)
+                    bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, lc=unrollLoopIdx, bk=bk), 1)
                     shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
             # separate code for gfx950 mx
             if group == 0 and kernel["ProblemType"]["MXBlockB"] and isgfx950:
@@ -8177,7 +8222,7 @@ class KernelWriterAssembly(KernelWriter):
             for a in range(0, kernel["MIWaveTileA"]):
               for ti in range(0, numTileInInstA):
                 for iui in range(0, innerUnroll):
-                  aStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=ti*vgprPerInputA)
+                  aStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, lc=unrollLoopIdx, bk=ti*vgprPerInputA)
                   aStr = vgpr(aStr_base, min(2, vgprPerInUnrollA))
                   if is_wmma_v2:
                     if vgprPerInUnrollA == 4:
@@ -8227,25 +8272,25 @@ class KernelWriterAssembly(KernelWriter):
 
                     for ir in range(0, vgprPerInUnrollA):
                       bk = ir + ti * vgprPerInUnrollA
-                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk), 1)
+                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, lc=unrollLoopIdx, bk=bk), 1)
                       shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+ir), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
 
                   else: # mfma or wmma_v3
 
                     if kernel["ProblemType"]["Sparse"]:
                       if vgprPerInUnrollA == 2:
-                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=ti*vgprPerInUnroll), 2)
+                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, lc=unrollLoopIdx, bk=ti*vgprPerInUnroll), 2)
                         shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInUnrollA), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
                     elif vgprPerInUnroll <= 2:
                       shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInUnrollA), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
                     if vgprPerInUnrollA >= 4 and vgprPerInUnrollA % 2 == 0:
                       for ivgpr in range(0, vgprPerInUnrollA, 2):
                         bk = ivgpr + ti * vgprPerInUnrollA
-                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk), 2)
+                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, lc=unrollLoopIdx, bk=bk), 2)
                         shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
                     for ir in range(0, vgprPerInUnrollA):
                       bk = ir + ti * vgprPerInUnrollA
-                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk), 1)
+                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, lc=unrollLoopIdx, bk=bk), 1)
                       elemIdx = ir * self.states.bpr // tPA["bpe"]
                       if is_wmma_v3: # may check 64 bit
                         vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
@@ -8280,7 +8325,7 @@ class KernelWriterAssembly(KernelWriter):
             for b in range(0, kernel["MIWaveTileB"]):
               for ti in range(0, numTileInInstB):
                 for iui in range(0, innerUnroll):
-                  bStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=ti*vgprPerInUnrollB)
+                  bStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, lc=unrollLoopIdx, bk=ti*vgprPerInUnrollB)
                   bStr = vgpr(bStr_base, min(2, vgprPerInUnrollB))
                   if is_wmma_v2:
                     if vgprPerInUnrollB == 4:
@@ -8325,25 +8370,25 @@ class KernelWriterAssembly(KernelWriter):
                       shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInUnrollB), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
                     for ir in range(0, vgprPerInUnrollB):
                       bk = ir + ti * vgprPerInUnrollB
-                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk), 1)
+                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, lc=unrollLoopIdx, bk=bk), 1)
                       shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+ir), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
 
                   else: # mfma or wmma_v3
 
                     if kernel["ProblemType"]["Sparse"]:
                       if vgprPerInUnrollB == 2:
-                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, a, bk=ti*vgprPerInUnrollB), 2)
+                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, a, lc=unrollLoopIdx, bk=ti*vgprPerInUnrollB), 2)
                         shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInUnrollB), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
                     elif vgprPerInUnrollB <= 2:
                       shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInUnrollB), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
                     if vgprPerInUnrollB >= 4 and vgprPerInUnrollB % 2 == 0:
                       for ivgpr in range(0, vgprPerInUnrollB, 2):
                         bk = ivgpr + ti * vgprPerInUnrollB
-                        bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk), 2)
+                        bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, lc=unrollLoopIdx, bk=bk), 2)
                         shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
                     for ir in range(0, vgprPerInUnrollB):
                       bk = ir + ti * vgprPerInUnrollB
-                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk), 1)
+                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, lc=unrollLoopIdx, bk=bk), 1)
                       elemIdx = ir * self.states.bpr // tPB["bpe"]
                       if is_wmma_v3:
                         vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
@@ -8481,7 +8526,7 @@ class KernelWriterAssembly(KernelWriter):
       loopSwap = False
       # complex case, swap inner loop and outer loop so that idxA comes outer
       # this is to re-use same tmp vgpr to nagate ai or ar
-      if kernel["ProblemType"]["DataType"].isComplex() and tPB["tile01Idx"]:
+      if (kernel["ProblemType"]["DataType"].isComplex() and tPB["tile01Idx"]) or kernel["HalfPLRA"]:
         outer = 0
         loopSwap = True
       inner = 1 - outer # inner is the opposite of outer
@@ -8523,8 +8568,8 @@ class KernelWriterAssembly(KernelWriter):
 
           idxA     = idx0 if tPB["tile01Idx"] else idx1
           idxB     = idx1 if tPB["tile01Idx"] else idx0
-          aStr_base = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, idxA)
-          bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB)
+          aStr_base = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, idxA, unrollLoopIdx)
+          bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB, unrollLoopIdx)
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
 
@@ -8772,7 +8817,7 @@ class KernelWriterAssembly(KernelWriter):
             loopChar = self.states.indexChars[ \
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
             lastIterEnd = Label("LoopEnd%s"%loopChar, "")
-            module.add(SCBranchSCC1(labelName=lastIterEnd, \
+            module.add(SCBranchSCC1(labelName=lastIterEnd.getLabelName(), \
                        comment="skip to unrollLoop end loop%s iter b/c numIter==0" % loopChar))
           else:
             lastIterEnd = Label("PrefetchGlobalLastIterEnd", "")
@@ -9270,6 +9315,8 @@ class KernelWriterAssembly(KernelWriter):
     if tdmA and tdmB and tPA and tPB and numWaves > 1:
       #TODO: TDM refactor, empty module is not required
       incCodeA = imod.add(Module("globalReadIncrementA"))
+      if kernel["HalfPLR"] and prefetchIndex == 0:
+        incCodeA.add(self.graIncrementMask(kernel, tPA, tPB))
       incCodeA.add(self.tdmIncrementABWaveSperated(kernel, tPA, tPB))
       incCodeB = imod.add(Module("globalReadIncrementB"))
       # if "MX" in tPA:
@@ -9285,6 +9332,8 @@ class KernelWriterAssembly(KernelWriter):
       if not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA, prefetchIndex)
       else:
+        if kernel["HalfPLR"] and prefetchIndex == 0:
+          incCodeA.add(self.graIncrementMask(kernel, tPA, tPB))
         incCodeA.add(self.tdmIncrementAB(kernel, tPA))
       if "MX" in tPA and not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
@@ -10199,6 +10248,39 @@ class KernelWriterAssembly(KernelWriter):
     if not self.do["GlobalRead%s"%tP["tensorChar"]]:
       return imod
 
+    loopIdx = self.states.unrollIdx # TODO - does this handle multiple summation indices?
+    if kernel["SuppressNoLoadLoop"]:
+      if mode==1 and tP["isA"]:
+        if kernel["HalfPLR"]: # only support TDM
+          if kernel["PrefetchGlobalRead"] > 0:
+            imod.header.addComment0("HalfPLR: disable TDM in last #PGR loops")
+            imod.header.add(SCmpLeI32(
+              src0=self.loopCounter(kernel, loopIdx), \
+              src1=kernel["PrefetchGlobalRead"], \
+              comment="%s"%"is this the last iters"))
+            if prod(kernel["MIWaveGroup"]) > 1:
+              imod.header.add(SCMovB32(dst=sgpr("tdmAGroup0+0"), src=0, comment=""))
+              if kernel["ProblemType"]["MXBlockA"]:
+                imod.header.add(SCMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=0, comment=""))
+            else:
+              imod.header.add(SCMovB32(dst=sgpr("tdmAGroup0+0"), src=0, comment=""))
+              imod.header.add(SCMovB32(dst=sgpr("tdmBGroup0+0"), src=0, comment=""))
+              if kernel["ProblemType"]["MXBlockA"]:
+                imod.header.add(SCMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=0, comment=""))
+              if kernel["ProblemType"]["MXBlockB"]:
+                imod.header.add(SCMovB32(dst=sgpr("tdmMXSBGroup0+0"), src=0, comment=""))
+        else:
+          imod.header.add(SCmpEQI32(
+                src0=self.loopCounter(kernel, loopIdx), \
+                src1=1, \
+                comment="%s"%"is this the last iteration"))
+          imod.header.add(SCMovB32(
+                dst=sgpr("SrdA+2"), src=0,
+                comment="Set limit to 0 for last iteration"))
+          imod.header.add(SCMovB32(
+                dst=sgpr("SrdB+2"), src=0,
+                comment="Set limit to 0 for last iteration"))
+    
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
@@ -10280,20 +10362,6 @@ class KernelWriterAssembly(KernelWriter):
 
     # sizeK % LOCAL_DEPTHU
     guardK = (mode==2)
-
-    loopIdx = self.states.unrollIdx # TODO - does this handle multiple summation indices?
-    if kernel["SuppressNoLoadLoop"]:
-      if mode==1 and tP["isA"]:
-        imod.header.add(SCmpEQI32(
-              src0=self.loopCounter(kernel, loopIdx), \
-              src1=1, \
-              comment="%s"%"is this the last iteration"))
-        imod.header.add(SCMovB32(
-              dst=sgpr("SrdA+2"), src=0,
-              comment="Set limit to 0 for last iteration"))
-        imod.header.add(SCMovB32(
-              dst=sgpr("SrdB+2"), src=0,
-              comment="Set limit to 0 for last iteration"))
 
     # set the first tc for below wait code for DirectToLds
     tc1st = 'A'
@@ -17849,6 +17917,42 @@ class KernelWriterAssembly(KernelWriter):
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPB, wOfstSgprId))
       mod.add(tdmResetTailLblEnd)
+    return mod
+
+  def getHalfPLRGroups(self, kernel, lc, u):
+    # 2: each subIter use 2 vgpr groups. 3: HalfPLR has 3 vgpr groups
+    g0 = ((lc * kernel["LoopIters"] + u) * 2) % 3
+    g1 = (g0 + 1) % 3
+    return [g0, g1]
+
+  def getHalfPLRValuStr(self, vgprGroups, offset, tc) -> str:
+    assert(tc == 'A' or tc == 'B')
+    offset = int(offset)
+    numVgprPerGroup = (self.states.a.numVgprValuPerBlock if tc == 'A' else self.states.b.numVgprValuPerBlock) // 2
+    gIdx = offset // numVgprPerGroup
+    newOffset = offset % numVgprPerGroup
+    valuStr = "Valu%s_G%u+%u"%(tc, vgprGroups[gIdx], newOffset)
+    return valuStr
+  
+  def graIncrementMask(self, kernel, tPA, tPB) -> Module:
+    mod = Module("graIncrementMask")
+    if not kernel["HalfPLR"]:
+      return mod
+    # Only support TDM
+    mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
+      src1=1, \
+      comment="%s"%"is this the last iters"))
+    if prod(kernel["MIWaveGroup"]) > 1:
+      mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
+      if kernel["ProblemType"]["MXBlockA"]:
+        mod.add(SCMovB32(dst=sgpr("tdmMXSAMXSBIncs"), src=0, comment=""))
+    else:
+      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsA"), src=0, comment=""))
+      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsB"), src=0, comment=""))
+      if kernel["ProblemType"]["MXBlockA"]:
+        mod.add(SCMovB32(dst=sgpr("GlobalReadIncsMXSA"), src=0, comment=""))
+      if kernel["ProblemType"]["MXBlockB"]:
+        mod.add(SCMovB32(dst=sgpr("GlobalReadIncsMXSB"), src=0, comment=""))
     return mod
 
 def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):
