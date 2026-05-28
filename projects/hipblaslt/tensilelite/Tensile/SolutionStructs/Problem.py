@@ -749,6 +749,56 @@ def problemTypeToEnum(problemType):
   else:
       problemType["DataTypeMXSB"] = DataTypeEnum.E8
 
+# Pre-compute expected types for ProblemType parameters from _defaultProblemType.
+# Note: For _defaultProblemType, the values are defaults (not lists of allowed values),
+# so we just take type(defaultValue) directly.
+_expectedProblemTypeParamTypes = {
+    key: {type(value)} for key, value in _defaultProblemType.items()
+}
+
+
+def validateProblemTypeParameterTypes(state, srcFile=""):
+  """Validate that every ProblemType parameter has the correct Python type.
+
+  Similar to validateParameterTypes (in Solution.py), but checks ProblemType
+  parameters against the types implied by ``_defaultProblemType``.  A ``bool``
+  where ``int`` is expected (or vice versa) is the most common error.
+
+  Mismatches are collected into the module-level ``_typeMismatchCollector``
+  dict (shared with Solution validation). Call ``printTypeMismatchSummary()``
+  at the end of the build to emit a consolidated warning.
+
+  Args:
+      state: The ProblemType state dict (parameter name -> value).
+      srcFile: The YAML source file path, included in warning messages.
+  """
+  # Import collector infrastructure from Solution inside the function to avoid
+  # circular dependency (Naming → Problem → Solution → Naming).
+  # The collector is shared between Solution and ProblemType validation.
+  from Tensile.SolutionStructs.Solution import _typeMismatchCollector, _skipTypeCheck
+
+  for key, value in state.items():
+    if key not in _expectedProblemTypeParamTypes or key in _skipTypeCheck:
+      continue
+    expectedTypes = _expectedProblemTypeParamTypes[key]
+    actualType = type(value)
+    # Use type() not isinstance() so that bool and int are distinguished
+    if actualType not in expectedTypes:
+      expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
+      collectorKey = (key, actualType.__name__, expectedStr)
+      if collectorKey not in _typeMismatchCollector:
+        _typeMismatchCollector[collectorKey] = {
+          "count": 0,
+          "values": set(),
+          "files": set(),
+        }
+      entry = _typeMismatchCollector[collectorKey]
+      entry["count"] += 1
+      entry["values"].add(repr(value))
+      if srcFile:
+        entry["files"].add(srcFile)
+
+
 class ProblemType(Mapping):
   ########################################
 
@@ -756,11 +806,14 @@ class ProblemType(Mapping):
   def FromDefaultConfig(printIndexAssignmentInfo: bool):
     return ProblemType(_defaultProblemType, printIndexAssignmentInfo)
 
-  def __init__(self, config, printIndexAssignmentInfo: bool):
+  def __init__(self, config, printIndexAssignmentInfo: bool, srcFile: str = ""):
     self.state = {}
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
+
+    # Validate parameter types against the _defaultProblemType registry
+    validateProblemTypeParameterTypes(self.state, srcFile=srcFile)
 
     # adjusting all data types
     if "DataType" in config:

@@ -151,6 +151,75 @@ std::vector<StinkyInstruction*> lowerRocisaSchedulingFence(rocisa::Instruction& 
     return {irBuilder.createFence()};
 }
 
+// Lower a rocisa::SBarrier into the matching stinkytofu instruction(s).
+//
+// SBarrier's ctor accepts (separate, wait, clusterBarrier) and, depending
+// on the asm caps captured at construction time, decides between the
+// legacy `s_barrier` form and the new split signal/wait form (optionally
+// with a cluster barrier id of -3). We read those flags back via the
+// dedicated accessors instead of parsing instStr.
+//
+//   !hasNewBarrier:                 s_barrier
+//    hasNewBarrier && !separate:    s_barrier_signal <code>
+//                                   s_barrier_wait   <code>
+//    hasNewBarrier &&  separate &&  wait: s_barrier_wait   <code>
+//    hasNewBarrier &&  separate && !wait: s_barrier_signal <code>
+//
+// <code> = -3 if (hasClusterBarrier && clusterBarrier), else -1.
+//
+// For the split form we append signal then wait into the BB (textual
+// order) but return {wait, signal}. The caller in ToStinkyTofuUtils.cpp
+// only attaches the rocisa comment and mem token to the first returned
+// inst; that matches rocisa's formatWithComment output (comment after
+// the last line) and legalizeBarrier's behavior. We mirror the mem
+// token onto signal manually so the implicit-dependency pass groups
+// both halves with the fenced memory ops (see BarrierTest::TokenGrouped_*).
+std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
+                                                    AsmIRBuilder& irBuilder) {
+    auto* sBarrier = dynamic_cast<rocisa::SBarrier*>(&inst);
+    assert(sBarrier != nullptr && "lowerRocisaSBarrier: expected rocisa::SBarrier");
+
+    // Legacy form: emit s_barrier and let legalizeBarrier expand it on
+    // architectures that need split signal/wait (gfx1250).
+    if (!sBarrier->getHasNewBarrier()) {
+        const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier, irBuilder.arch);
+        assert(desc != nullptr && "s_barrier not available on this arch");
+        return {irBuilder.create(desc)};
+    }
+
+    const int code = (sBarrier->getHasClusterBarrier() && sBarrier->getClusterBarrier()) ? -3 : -1;
+
+    auto createSignal = [&]() {
+        const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal, irBuilder.arch);
+        assert(desc != nullptr && "s_barrier_signal not available on this arch");
+        StinkyInstruction* s = irBuilder.create(desc);
+        s->addSrcReg(StinkyRegister(code));
+        return s;
+    };
+    auto createWait = [&]() {
+        const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_wait, irBuilder.arch);
+        assert(desc != nullptr && "s_barrier_wait not available on this arch");
+        StinkyInstruction* s = irBuilder.create(desc);
+        s->addSrcReg(StinkyRegister(code));
+        return s;
+    };
+
+    // Separate signal-only or wait-only form: emit a single instruction.
+    if (sBarrier->getSeparate()) {
+        return {sBarrier->getWait() ? createWait() : createSignal()};
+    }
+
+    // Default split form: signal then wait in BB, but return {wait, signal}
+    // so the caller attaches comment/mem token to wait. Mirror mem token
+    // onto signal here.
+    StinkyInstruction* signalInst = createSignal();
+    StinkyInstruction* waitInst = createWait();
+    if (auto memToken = inst.getMemToken()) {
+        signalInst->addModifier<MemTokenData>(MemTokenData{memToken->tokens});
+    }
+    return {waitInst, signalInst};
+}
+
 };  // anonymous namespace
 
 // Include all Rocisa hardware mapping tables
