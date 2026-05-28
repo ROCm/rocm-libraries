@@ -24,11 +24,11 @@
 
 ## 1. Executive Summary
 
-This RFC adds **structured engine-support claims** to each per-engine integration-test config. Claims are scoped per-asic and live in a machine-managed sidecar (`<EngineName>.supported.toml`) paired with the hand-edited main TOML. Each claim asserts a cross-product of `(op_chain, io_dtype, layout)` tuples the engine must support on the named arch. The verifier runs after `RUN_ALL_TESTS()` and fails the build when a claimed test loses engine support.
+This RFC adds **structured engine-support claims** to each per-engine integration-test config. Within this per-engine config, claims are scoped per-asic and live in a machine-managed sidecar (`<EngineName>.supported.toml`) paired with the hand-edited main TOML. Each claim asserts a cross-product of `(op_chain, io_dtype, layout)` tuples the engine must support on the named arch. The verifier runs after `RUN_ALL_TESTS()` and fails the build when a claimed test loses engine support.
 
 Claims are exact-string lists, not globs — no wildcards. The `op_chain` strings are produced by the existing `describeGraph()`; `io_dtypes` and `layouts` are enumerations. This eliminates an entire class of test-name glob hazards (platform-divergent matchers, char-class collisions, fixture-naming fragility, `TEST_F`/`TYPED_TEST` format misclassification, `DISABLED_` prefix).
 
-The auto-generation tool (`--write-support-claims`, embedded in `hipdnn_integration_tests`, C++-only) observes runtime support and rewrites the sidecar for the current asic. Engineer reviews via `git diff`. v1 is single-engine and unsharded — multi-engine attribution (per RFC 0006) and sharded enforcement are deferred (§9, §13).
+The auto-generation tool (`--write-support-claims`, embedded in `hipdnn_integration_tests`, C++-only) observes runtime support and rewrites the sidecar for the current asic. Engineer reviews via `git diff`.
 
 ## 2. Problem Statement
 
@@ -46,7 +46,7 @@ This section is the scope statement. Reviewers should anchor here on what the sy
 |------------|-----------------|
 | A previously-supported test silently loses engine support on a claimed asic. | Observed `(op_chain, io_dtype, layout)` is in some matcher's cross-product; engine returned no support → **FAIL**. |
 | An issue occurs before the test runs. | Test errored before it could record its graph properties → **FAIL** with "errored before record; fix the error first." |
-| A matcher is too wide and claims support the engine doesn't have. | Some test in the matcher's cross-product runs and the engine returns no support → **FAIL** pointing at the specific `(op_chain, io_dtype, layout)` triple. Engineer narrows the matcher or adds a `[[test_skips]]`. |
+| A matcher is too wide and claims support the engine doesn't have. | Some test in the matcher's cross-product runs and the engine returns no support → **FAIL** pointing at the specific `(op_chain, io_dtype, layout)` triple. Engineer narrows the matcher or adds a `[[test_skips]]` for known issues. |
 | A matcher matches zero observed tests. | Something has gone wrong with the test suite and we are finding no tests for a particular matcher.  If this occurs and is not a bug, we need to revise the matchers for an asic so they are up to date. |
 | The engine claims support for a test that no matcher covers, then the test fails. | The engine states it supports a graph then fails verification.  This is the current behaviour of the test suite today. |
 
@@ -111,7 +111,7 @@ reason  = "Engine returns wrong results on gfx90a — ROCm/rocm-libraries#6979"
 
 ```toml
 # MIOPEN_ENGINE.supported.toml — wholesale rewritten by --write-support-claims.
-# Do not hand-edit. Both files MUST be committed together (CI lints this).
+# Do not hand-edit.
 
 [meta]
 version = 1
@@ -193,15 +193,11 @@ Schema versioning: `[meta] version = 1`. Unknown keys are logged-and-ignored for
 
 ### 6.1 The five rules
 
-**Rule A — claim broken.** Observed claimed test with empty `supportingEngineIds` → **FAIL**.
-
-**Rule B — issue before the test runs.** Post-`RUN_ALL_TESTS()`, walk `UnitTest::GetInstance()`. Any registered test with status != `PASSED` / `SKIPPED` and no record in `SupportMatrixCollector` → **FAIL** ("errored before record; fix the underlying error first"). Conservative: a test that crashed in `SetUp` has unknown graph properties, so we treat unknown as broken. To support this, `recordGraphSupport` is moved to the **very first statement** of `verifyGraph` (before any `ASSERT_*`).
-
-**Rule C — zero-coverage matcher.** Any `[[supported.matchers]]` whose cross-product matches zero observed tests → **FAIL** in full unfiltered CI runs (informational only in filtered/sharded local runs, where partial coverage is expected). Either test detection broke or the matcher is stale; engineer regenerates via `--write-support-claims` or hand-edits.
-
-**Rule D — engine over-claim on a failing test.** When a test fails AND the engine returned non-empty `supportingEngineIds` AND no matcher covers it, the verifier annotates the existing test-failure report with an "engine over-claim" note. No new failure mechanism — the test failure itself already fails CI; the annotation sharpens triage toward `get_ranked_engine_ids` rather than test data.
-
-**Rule E — unclaimed gain on a passing test (warning).** When a test passes AND the engine returned support AND no matcher covers it, log a **warning** ("claimed support != actual support for `<op_chain, io_dtype, layout>` on `<arch>`; consider adding it to the matcher list"). Not a failure — avoids forcing TOML PRs on every new test family — but surfaces the gap with concrete fix steps.
+- **Rule A — claim broken.** Claimed test with empty `engineIds` → **FAIL**.
+- **Rule B — issue before test runs.** Walk `UnitTest::GetInstance` post-`RUN_ALL_TESTS`; any registered, non-skipped test with no `recordGraphSupport` entry → **FAIL**. Requires moving `recordGraphSupport` to the first statement of `verifyGraph` so crashes after that point still produce records.
+- **Rule C — zero-coverage matcher.** Matcher with no observed tests in its cross-product → **FAIL** in full unfiltered CI runs; informational otherwise (§6.2).
+- **Rule D — engine over-claim** *(note on existing test failure, not a new failure)*. Failed test + engine returned support + no matcher → annotate the test failure to point at `get_ranked_engine_ids`.
+- **Rule E — unclaimed gain** *(warning, not a failure)*. Passing test + engine returned support + no matcher → log "claimed support != actual support" with fix steps.
 
 ### 6.2 Local partial runs
 
