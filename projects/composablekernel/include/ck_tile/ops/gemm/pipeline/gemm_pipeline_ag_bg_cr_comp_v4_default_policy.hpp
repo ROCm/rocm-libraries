@@ -184,7 +184,8 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
         constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
         static_assert(ndims == 2, "only support 2D tensor");
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
-        const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
+        const auto& orig_desc   = tensor_view_tmp.get_tensor_descriptor();
+        const auto [rows, cols] = orig_desc.get_lengths();
 
         constexpr index_t K2 = MaxVecSize / sizeof(ADataType) * APackedSize;
         constexpr index_t K1 = KPerBlock / K2;
@@ -196,9 +197,23 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
         const index_t M0                = integer_divide_ceil(rows, M1);
         const auto row_lens             = make_tuple(M0, number<M1>{});
 
-        const auto d0 = make_naive_tensor_descriptor_packed(container_concat(row_lens, col_lens));
-        const auto desc_0 = decltype(d0)(
-            d0.get_transforms(), tensor_view_tmp.get_tensor_descriptor().get_element_space_size());
+        // Use the actual row stride from the source descriptor rather than packed strides.
+        // Packed strides assume row stride == K0*K1*K2 (= the window's K extent), which is
+        // only true when the window covers the matrix's full K dimension. StreamK CTAs own
+        // a sub-range of K, so the real row stride is larger; using packed strides there
+        // would compute wrong global addresses for every row beyond row 0.
+        // The K2 vector-length/stride hints are required so that async_load can pick a
+        // dwordx4-sized buffer load instead of falling back to scalar element loads.
+        const index_t row_stride = orig_desc.calculate_offset(make_tuple(1, 0));
+        const auto desc_0        = make_naive_tensor_descriptor(
+            container_concat(row_lens, col_lens),
+            make_tuple(M1 * row_stride,
+                       row_stride,
+                       number<K1 * K2>{},
+                       number<K2>{},
+                       number<1>{}),
+            number<K2>{},
+            number<1>{});
         const auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(M0),
@@ -271,7 +286,8 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
         constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
         static_assert(ndims == 2, "only support 2D tensor");
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
-        const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
+        const auto& orig_desc   = tensor_view_tmp.get_tensor_descriptor();
+        const auto [rows, cols] = orig_desc.get_lengths();
 
         constexpr index_t K2 = MaxVecSize / sizeof(BDataType) * BPackedSize;
         constexpr index_t K1 = KPerBlock / K2;
@@ -283,9 +299,19 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
         const index_t N0                = integer_divide_ceil(rows, N1);
         const auto row_lens             = make_tuple(N0, number<N1>{});
 
-        const auto d0 = make_naive_tensor_descriptor_packed(container_concat(row_lens, col_lens));
-        const auto desc_0 = decltype(d0)(
-            d0.get_transforms(), tensor_view_tmp.get_tensor_descriptor().get_element_space_size());
+        // See MakeAAsyncLoadBytesDramWindow for why we use the source's actual row stride
+        // here instead of a packed descriptor — StreamK CTAs see a K sub-range, and packed
+        // strides would compute wrong global addresses for every N beyond N=0.
+        const index_t row_stride = orig_desc.calculate_offset(make_tuple(1, 0));
+        const auto desc_0        = make_naive_tensor_descriptor(
+            container_concat(row_lens, col_lens),
+            make_tuple(N1 * row_stride,
+                       row_stride,
+                       number<K1 * K2>{},
+                       number<K2>{},
+                       number<1>{}),
+            number<K2>{},
+            number<1>{});
         const auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(N0),
