@@ -102,41 +102,6 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 
 template <typename CompilerTarget>
 // clang-format off
-//               |A B C DataTypes           |MNK            |
-struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-//                                                          |WS  |AParams  |BPar |CPar |
-: amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
-// clang-format on
-{
-    static constexpr const char* instruction_name =
-        "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4";
-
-    template <typename... Params>
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int32_t scale_A,
-                                        int32_t scale_B)
-    {
-        using P         = WarpGemmParamsParser<Params...>;
-        int32x4_t arg_a = bit_cast<int32x4_t>(aVec);
-        int32x4_t arg_b = bit_cast<int32x4_t>(bVec);
-
-        return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
-            int32x8_t{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
-            int32x8_t{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
-            cVec,
-            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
-            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
-            P::op_sel_a,
-            scale_A,
-            P::op_sel_b,
-            scale_B)};
-    }
-};
-
-template <typename CompilerTarget>
-// clang-format off
 //               |A B C DataTypes                 |MNK            |
 struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 //                                                                |WS  |AParams  |BPar |CPar |
@@ -201,6 +166,41 @@ struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, CompilerTarg
 
 template <typename CompilerTarget>
 // clang-format off
+//               |A B C DataTypes           |MNK            |
+struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+//                                                          |WS  |AParams  |BPar |CPar |
+: amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
+// clang-format on
+{
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
+                                        BVecType const& bVec,
+                                        CVecType const& cVec,
+                                        int32_t scale_A,
+                                        int32_t scale_B)
+    {
+        using P         = WarpGemmParamsParser<Params...>;
+        int32x4_t arg_a = bit_cast<int32x4_t>(aVec);
+        int32x4_t arg_b = bit_cast<int32x4_t>(bVec);
+
+        return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
+            int32x8_t{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
+            int32x8_t{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
+            cVec,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
+            P::op_sel_a,
+            scale_A,
+            P::op_sel_b,
+            scale_B)};
+    }
+};
+
+template <typename CompilerTarget>
+// clang-format off
 //               |A B C DataTypes     |MNK           |
 struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 //                                                   |WS  |AParams  |BPar |CPar  |
@@ -256,41 +256,6 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFami
             cVec,
             scale::detail::ScaleDataTypeToFlag_v<bf8_t>,
             scale::detail::ScaleDataTypeToFlag_v<bf8_t>,
-            P::op_sel_a,
-            scale_A,
-            P::op_sel_b,
-            scale_B)};
-    }
-};
-
-template <typename CompilerTarget>
-// clang-format off
-//               |A B C DataTypes           |MNK           |
-struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-//                                                         |WS  |AParams  |BPar |CPar  |
-: amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
-// clang-format on
-{
-    static constexpr const char* instruction_name =
-        "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4";
-
-    template <typename... Params>
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int32_t scale_A,
-                                        int32_t scale_B)
-    {
-        using P         = WarpGemmParamsParser<Params...>;
-        int32x4_t arg_a = bit_cast<int32x4_t>(aVec);
-        int32x4_t arg_b = bit_cast<int32x4_t>(bVec);
-
-        return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-            int32x8_t{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
-            int32x8_t{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
-            cVec,
-            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
-            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
             P::op_sel_a,
             scale_A,
             P::op_sel_b,
@@ -361,6 +326,41 @@ struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 32u, 32u, 64u, CompilerTarge
     }
 };
 // clang-format on
+
+template <typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes           |MNK           |
+struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+//                                                         |WS  |AParams  |BPar |CPar  |
+: amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
+// clang-format on
+{
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
+                                        BVecType const& bVec,
+                                        CVecType const& cVec,
+                                        int32_t scale_A,
+                                        int32_t scale_B)
+    {
+        using P         = WarpGemmParamsParser<Params...>;
+        int32x4_t arg_a = bit_cast<int32x4_t>(aVec);
+        int32x4_t arg_b = bit_cast<int32x4_t>(bVec);
+
+        return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+            int32x8_t{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
+            int32x8_t{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
+            cVec,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
+            P::op_sel_a,
+            scale_A,
+            P::op_sel_b,
+            scale_B)};
+    }
+};
 
 /** @} */ // scale_mfma_gfx9
 
