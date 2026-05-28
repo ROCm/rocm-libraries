@@ -694,8 +694,8 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
     for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
-        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank);
-        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank);
+        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
         streams[r]   = agents[r].stream;
     }
 
@@ -785,10 +785,11 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
             {
                 rocfft_scoped_device dev(t.local_location.device);
 
-                void* data_ptr = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank),
-                                            t.offset,
-                                            precision,
-                                            arrayType);
+                void* data_ptr
+                    = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                                 t.offset,
+                                 precision,
+                                 arrayType);
 
                 // translate peer location to its RCCL rank (single-process RCCL:
                 // peer device belongs to the same local communicator)

@@ -1306,6 +1306,17 @@ struct CommRCCLAllToAll : public MultiPlanItem
         return false;
     }
 
+    // the collective consumes each per-agent send buffer.
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& a : agents)
+        {
+            if(ptr == a.sendBuffer)
+                return true;
+        }
+        return false;
+    }
+
     // single-process RCCL: all participating devices belong to the local
     // process, so the collective runs on local_comm_rank only.
     bool ExecutesOnRank(int comm_rank) const override
@@ -1396,6 +1407,18 @@ struct CommRCCLGrouped : public MultiPlanItem
         for(const auto& t : transfers)
         {
             if(t.op == rccl_op::recv && ptr == t.buffer)
+                return true;
+        }
+        return false;
+    }
+
+    // send transfers read from their pack buffer before launching the
+    // ncclSend; recv transfers do not read from t.buffer.
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::send && ptr == t.buffer)
                 return true;
         }
         return false;
