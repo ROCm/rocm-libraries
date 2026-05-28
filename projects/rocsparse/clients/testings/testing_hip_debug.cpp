@@ -49,94 +49,80 @@ static int32_t                            get_local_id()
 template <typename T>
 void testing_hip_debug_task_thread(void* usr)
 {
-    if(1)
+    static constexpr bool verbose = false;
+    if(verbose)
     {
         int32_t           local_id = get_local_id();
         std::stringstream s;
         s << "// rocsparse_clients: " << __FUNCTION__ << ", local_id = " << local_id
-          << ", tid = " << std::this_thread::get_id() << std::endl;
-        std::cout << s.str();
+          << ", tid = " << std::this_thread::get_id();
+        std::cout << s.str() << std::endl;
     }
 
     const Arguments& arg = *(const Arguments*)usr;
-    //    printf("Thread #%ld is working...\n", tid);
 
     rocsparse_int        M    = arg.M;
     rocsparse_int        nnz  = arg.nnz;
     rocsparse_index_base base = arg.baseA;
-    std::cout << "nnz " << nnz << std::endl;
-    std::cout << "M " << M << std::endl;
+    if(verbose)
+    {
+        std::cout << "nnz " << nnz << std::endl;
+        std::cout << "M " << M << std::endl;
+    }
     T h_alpha = arg.get_alpha<T>();
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
     // Allocate host memory
-    std::cout << "aaaaaaa " << __LINE__ << std::endl;
     host_vector<rocsparse_int> hx_ind(nnz);
     host_vector<T>             hx_val(nnz);
     host_vector<T>             hy_1(M);
     host_vector<T>             hy_2(M);
     host_vector<T>             hy_gold(M);
-    std::cout << "aaaaaaa " << __LINE__ << std::endl;
     rocsparse_init_index(hx_ind, nnz, base, M + base);
-
-#if 0
 
     // Initialize data on CPU
     // rocsparse_seedrand();
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
     rocsparse_init<T>(hx_val, 1, nnz, 1, arg.convert_to_int);
     rocsparse_init<T>(hy_1, 1, M, 1, arg.convert_to_int);
     hy_2    = hy_1;
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
     hy_gold = hy_1;
 
     // Allocate device memory
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
     device_vector<rocsparse_int> dx_ind(nnz);
     device_vector<T>             dx_val(nnz);
     device_vector<T>             dy_1(M);
     device_vector<T>             dy_2(M);
     device_vector<T>             d_alpha(1);
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
 
     // Copy data from CPU to device
     CHECK_HIP_ERROR(hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dx_val, hx_val, sizeof(T) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1, sizeof(T) * M, hipMemcpyHostToDevice));
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
     if(arg.unit_check)
     {
         // Copy data from CPU to device
         CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2, sizeof(T) * M, hipMemcpyHostToDevice));
         CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
 
         // Pointer mode host
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_ERROR(
-			      rocsparse_axpyi<T>(handle, nnz, &h_alpha, dx_val, dx_ind, dy_1, base));
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
+            rocsparse_axpyi<T>(handle, nnz, &h_alpha, dx_val, dx_ind, dy_1, base));
 
         // Pointer mode device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_axpyi<T>(handle, nnz, d_alpha, dx_val, dx_ind, dy_2, base));
+        CHECK_ROCSPARSE_ERROR(rocsparse_axpyi<T>(handle, nnz, d_alpha, dx_val, dx_ind, dy_2, base));
 
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(hy_1, dy_1, sizeof(T) * M, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2, dy_2, sizeof(T) * M, hipMemcpyDeviceToHost));
 
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
-
         // CPU axpyi
         host_axpby<T, rocsparse_int, T, T>(M, nnz, h_alpha, hx_val, hx_ind, (T)1.0, hy_gold, base);
 
-    std::cout << "aaaaaaa " << __LINE__ <<  std::endl;
         hy_gold.unit_check(hy_1);
         hy_gold.unit_check(hy_2);
     }
-#endif
 }
 
 template <typename T>

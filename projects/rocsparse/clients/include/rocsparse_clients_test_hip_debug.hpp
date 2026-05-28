@@ -54,7 +54,7 @@ namespace rocsparse_clients_test
         bool                enabled() const;
         void                enable();
         void                disable();
-        void                set_sync_report_filename(const char* filename);
+        void                set_hip_debug_report_filename(const char* filename);
     };
 }
 

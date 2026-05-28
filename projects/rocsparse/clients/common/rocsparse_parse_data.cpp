@@ -335,13 +335,14 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
                           << std::endl;
 
                 std::cout << "" << std::endl;
-                std::cout << "Rocsparse synchronicity testing options:" << std::endl;
-                std::cout << "--test-sync      enable rocsparse synchronicity testing."
+                std::cout << "Rocsparse HIP debug testing options:" << std::endl;
+                std::cout << "--test-hip-debug      enable rocsparse HIP debug testing."
                           << std::endl;
-                std::cout << "--test-sync-full enable rocsparse hip debug testing, as opposed to "
-                             "'--test-sync' all checks regarding results must be consistent"
-                          << std::endl;
-                std::cout << "--test-sync-o    output filename for synchronicity report."
+                std::cout
+                    << "--test-hip-debug-full enable rocsparse hip debug testing, as opposed to "
+                       "'--test-hip-debug' all checks regarding results must be consistent"
+                    << std::endl;
+                std::cout << "--test-hip-debug-o    output filename for HIP debug report."
                           << std::endl;
                 std::cout << "Rocsparse reproducibility options:" << std::endl;
                 std::cout << "--r          enable rocsparse reproducibility testing" << std::endl;

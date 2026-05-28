@@ -43,17 +43,17 @@ namespace rocsparse_clients_test
 #define PSYNC_ONLY PSYNC
 #define ASYNC_ONLY ASYNC
 
-#define SYNC_OR_ASYNC SYNC | ASYNC
-#define NONE_OR_SYNC NONE | SYNC
-#define NONE_OR_SYNC_OR_ASYNC NONE | SYNC | ASYNC
-#define NONE_OR_SYNC_OR_PSYNC NONE | SYNC | PSYNC
-#define NONE_OR_SYNC_OR_PSYNC_OR_ASYNC NONE | SYNC | PSYNC | ASYNC
-#define NONE_OR_PSYNC NONE | PSYNC
-#define NONE_OR_PSYNC_OR_ASYNC NONE | PSYNC | ASYNC
-#define NONE_OR_ASYNC NONE | ASYNC
-#define SYNC_OR_PSYNC SYNC | PSYNC
-#define SYNC_OR_PSYNC_OR_ASYNC SYNC | PSYNC | ASYNC
-#define PSYNC_OR_ASYNC PSYNC | ASYNC
+#define SYNC_OR_ASYNC (SYNC | ASYNC)
+#define NONE_OR_SYNC (NONE | SYNC)
+#define NONE_OR_SYNC_OR_ASYNC (NONE | SYNC | ASYNC)
+#define NONE_OR_SYNC_OR_PSYNC (NONE | SYNC | PSYNC)
+#define NONE_OR_SYNC_OR_PSYNC_OR_ASYNC (NONE | SYNC | PSYNC | ASYNC)
+#define NONE_OR_PSYNC (NONE | PSYNC)
+#define NONE_OR_PSYNC_OR_ASYNC (NONE | PSYNC | ASYNC)
+#define NONE_OR_ASYNC (NONE | ASYNC)
+#define SYNC_OR_PSYNC (SYNC | PSYNC)
+#define SYNC_OR_PSYNC_OR_ASYNC (SYNC | PSYNC | ASYNC)
+#define PSYNC_OR_ASYNC (PSYNC | ASYNC)
 
     std::map<std::string, hip_debug_api_history_t> hip_debug_t::s_map{
         {"axpby", {NONE_OR_ASYNC}},
@@ -835,7 +835,7 @@ namespace rocsparse_clients_test
         rocsparse_hip_debug_disable();
     }
 
-    void hip_debug_t::set_sync_report_filename(const char* value)
+    void hip_debug_t::set_hip_debug_report_filename(const char* value)
     {
         this->m_filename = value;
     }
@@ -953,8 +953,9 @@ namespace rocsparse_clients_test
         }
         if(failed)
         {
-            std::cout << "Consistency check failed." << std::endl;
-            //	exit(1);
+            std::cerr << "// rocsparse_clients_test_hip_debug error: Consistency check failed."
+                      << std::endl;
+            exit(1);
         }
     }
 

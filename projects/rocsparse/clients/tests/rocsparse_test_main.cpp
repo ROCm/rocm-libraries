@@ -150,7 +150,7 @@ int main(int argc, char** argv)
         {
             showSkippedOverride = 0;
         }
-        else if(strcmp(argv[i], "--test-sync-o") == 0)
+        else if(strcmp(argv[i], "--test-hip-debug-o") == 0)
         {
             if(i + 1 >= argc || !argv[i + 1][0])
             {
@@ -160,12 +160,12 @@ int main(int argc, char** argv)
             rocsparse_clients_test::hip_debug_t::instance().enable();
             hip_debug_filename = argv[++i];
         }
-        else if(strcmp(argv[i], "--test-sync") == 0)
+        else if(strcmp(argv[i], "--test-hip-debug") == 0)
         {
             rocsparse_clients_test::hip_debug_t::instance().enable();
             rocsparse_clients_test::hip_debug_t::instance().set_non_permissive(false);
         }
-        else if(strcmp(argv[i], "--test-sync-full") == 0)
+        else if(strcmp(argv[i], "--test-hip-debug-full") == 0)
         {
             rocsparse_clients_test::hip_debug_t::instance().enable();
             rocsparse_clients_test::hip_debug_t::instance().set_non_permissive(true);
@@ -174,7 +174,7 @@ int main(int argc, char** argv)
 
     if(rocsparse_clients_test::hip_debug_t::instance().enabled())
     {
-        rocsparse_clients_test::hip_debug_t::instance().set_sync_report_filename(
+        rocsparse_clients_test::hip_debug_t::instance().set_hip_debug_report_filename(
             (hip_debug_filename) ? hip_debug_filename : "rocsparse_hip_debug.json");
     }
 
