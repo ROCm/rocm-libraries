@@ -51,8 +51,11 @@ set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
     # dnn
     hipdnn
+    hipdnn-integration-tests
     miopen-provider
     hipblaslt-provider
+    hip-kernel-provider
+    hipdnn-samples
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -100,6 +103,19 @@ foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
         message(FATAL_ERROR "Unknown component: ${component}.")
     endif()
 endforeach()
+
+# Determine if CTest should be enabled at the root superbuild project level.
+# If enabled, this must be done BEFORE any add_subdirectory() calls so that tests
+# registered in subprojects are visible to root-level ctest.
+# Note: The environment variable is checked for only the FIRST configure; the cache
+# value is used exclusively after that.
+set(_root_ctest_env_default "$ENV{ROCM_LIBS_ENABLE_ROOT_CTEST}")
+option(ROCM_LIBS_ENABLE_ROOT_CTEST "Enable CTest at the root superbuild level" "${_root_ctest_env_default}")
+if(ROCM_LIBS_ENABLE_ROOT_CTEST)
+    message(STATUS "CTest test aggregation is enabled at the root superbuild level")
+    enable_testing()
+    include(CTest)
+endif()
 
 # --- Add subdirectories ---
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
@@ -171,6 +187,14 @@ if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
+if("hipdnn-integration-tests" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT integration-tests
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipdnn_integration_tests
+    )
+endif()
+
 if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT miopen-provider
@@ -185,6 +209,29 @@ if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         PREFIX_PATH dnn-providers
         EXPECT_TARGET hipblaslt_plugin
     )
+endif()
+
+if("hip-kernel-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hip-kernel-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hip_kernel_provider
+    )
+endif()
+
+if("hipdnn-samples" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT samples
+        PREFIX_PATH projects/hipdnn
+        EXPECT_TARGET hipdnn_samples
+    )
+
+    # Ensure the supported provider plugins are built before samples (needed at test runtime)
+    foreach(_provider_target miopen_plugin hipblaslt_plugin hip_kernel_provider)
+        if(TARGET ${_provider_target})
+            add_dependencies(hipdnn_samples ${_provider_target})
+        endif()
+    endforeach()
 endif()
 
 # --- Projects not yet configured for superbuild ---

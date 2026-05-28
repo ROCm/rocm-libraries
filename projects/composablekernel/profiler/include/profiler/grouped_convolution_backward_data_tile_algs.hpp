@@ -63,9 +63,12 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                          const index_t instance_index,
                                          const ckt::Inputs<SIGNATURE>& inputs,
                                          const ckt::Outputs<SIGNATURE>& outputs,
-                                         const ck_tile::stream_config& s_conf)
+                                         const ck_tile::stream_config& s_conf,
+                                         bool do_verification = true)
 {
-    float best_avg_time = std::numeric_limits<float>::max();
+    // Run first instance as dummy to get proper time from the first instance
+    bool dummy_run_executed = false;
+    float best_avg_time     = std::numeric_limits<float>::max();
     std::string best_op_name, op_name;
     int best_split_k                = 0;
     ck::index_t best_instance_index = -1;
@@ -80,20 +83,23 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::half_t,
                                               ck_tile::bfloat16_t>>;
 
-    auto reference = ckt::alloc_outputs(args);
-    using ReferenceInstance =
-        typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
-    auto ref_conv   = ReferenceInstance{};
-    auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
+    const auto conv_param       = args.to_ck_tile_conv_param();
+    float max_accumulated_value = 0.f;
+    auto reference              = ckt::alloc_outputs(args);
+    if(do_verification)
+    {
+        using ReferenceInstance =
+            typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
+        auto ref_conv                    = ReferenceInstance{};
+        [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
 
-    const auto conv_param = args.to_ck_tile_conv_param();
-
-    // Get max possible value in the output
-    const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
-    std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
-    HIP_CHECK_ERROR(
-        hipMemcpy(&ref.data()[0], reference.get().input, input_bytes_num, hipMemcpyDeviceToHost));
-    const float max_accumulated_value = *std::max_element(ref.begin(), ref.end());
+        // Get max possible value in the output
+        const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
+        std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
+        HIP_CHECK_ERROR(hipMemcpy(
+            &ref.data()[0], reference.get().input, input_bytes_num, hipMemcpyDeviceToHost));
+        max_accumulated_value = *std::max_element(ref.begin(), ref.end());
+    }
 
     const index_t num_accums = conv_param.K_;
 
@@ -121,18 +127,42 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                 run_alg_func(args_k_batch, inputs, outputs, s_conf);
             if(is_supported)
             {
-                ckt::ValidationReport report;
-                auto&& [rtol, atol] =
-                    get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
-                ckt::Outputs<SIGNATURE>::reflect(
-                    args_k_batch,
-                    [&](std::string_view name,
-                        const auto& desc,
-                        void* ckt::Outputs<SIGNATURE>::*ptr) {
-                        report.check(name, desc, outputs.*ptr, reference.get().*ptr, rtol, atol);
-                    });
+                if((s_conf.time_kernel_ || s_conf.flush_cache_) && !dummy_run_executed)
+                {
+                    // Run first instance twice
+                    std::tie(is_supported, avg_time, op_name) =
+                        run_alg_func(args_k_batch, inputs, outputs, s_conf);
+                    dummy_run_executed = true;
+                }
+                bool valid = true;
+                if(do_verification)
+                {
+                    ckt::ValidationReport report;
+                    auto&& [rtol, atol] =
+                        get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
+                    ckt::Outputs<SIGNATURE>::reflect(
+                        args_k_batch,
+                        [&](std::string_view name,
+                            const auto& desc,
+                            void* ckt::Outputs<SIGNATURE>::*ptr) {
+                            report.check(
+                                name, desc, outputs.*ptr, reference.get().*ptr, rtol, atol);
+                        });
 
-                const bool valid = report.get_errors().empty();
+                    valid = report.get_errors().empty();
+                    if(!valid)
+                    {
+                        std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
+                        for(const auto& error : report.get_errors())
+                        {
+                            std::cout << "\tNumber of incorrect values: " << error.wrong_elements
+                                      << " Is all zero:" << error.is_all_zero()
+                                      << " max err: " << error.max_error << std::endl;
+                            run_cpu_validation<SIGNATURE>(args_k_batch, outputs, reference.get());
+                        }
+                        all_instances_valid = false;
+                    }
+                }
                 if(valid)
                 {
                     if(avg_time < best_avg_time)
@@ -145,19 +175,6 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                     std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
                               << op_name << " (instance " << num_kernel - 1 << "), SplitK "
                               << k_batch << std::endl;
-                }
-                else
-                {
-                    std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
-                    for(const auto& error : report.get_errors())
-                    {
-                        std::cout << "\tNumber of incorrect values: " << error.wrong_elements
-                                  << " Is all zero:" << error.is_all_zero()
-                                  << " max err: " << error.max_error << std::endl;
-                        // Check with cpu verification to get a values
-                        run_cpu_validation<SIGNATURE>(args_k_batch, outputs, reference.get());
-                    }
-                    all_instances_valid = false;
                 }
             }
             else

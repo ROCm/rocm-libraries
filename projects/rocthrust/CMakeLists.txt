@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
@@ -8,13 +8,13 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.3.0")
+set(VERSION_STRING "4.4.0")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
 set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependencies rocPRIM and rocRAND
-set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.12" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.13" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix
@@ -80,7 +80,8 @@ include(CheckCXXCompilerFlag)
 if(BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+    # Some test will raise an unused-command-line-argument warning while building when they have no kernel code.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress -Wno-unused-command-line-argument")
   else()
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
@@ -213,6 +214,7 @@ endif()
 
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
+  add_compile_definitions(ADDRESS_SANITIZER_BUILD)
   list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()

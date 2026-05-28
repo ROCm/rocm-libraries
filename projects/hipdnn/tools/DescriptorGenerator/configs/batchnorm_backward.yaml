@@ -48,6 +48,7 @@ operation:
     graph_return_type: "array"
     graph_return_outputs:
       - "dx"
+    node_type_enum: "NodeType::BATCHNORM_BACKWARD"
 
   tensor_fields:
     - name: "dy"
@@ -112,7 +113,7 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT"
 
   test_data:
     tensor_uids: { dy: 60, x: 61, scale: 62, dx: 63, dscale: 64, dbias: 65, mean: 66, inv_variance: 67 }

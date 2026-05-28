@@ -22,7 +22,8 @@ enum class bf16_rounding_mode
     truncate_with_nan,
     truncate,
     standard_asm,
-    rta_asm, // round to nearest away
+    rta_asm,       // round to nearest away
+    standard_cnan, // rtn with canonical NaN
 };
 
 template <bf16_rounding_mode rounding =
@@ -226,6 +227,39 @@ uint16_t float_to_bf16_rta_asm(float f)
     return u.hi;
 }
 
+CK_TILE_HOST_DEVICE
+constexpr bool float_is_nan_raw(float f)
+{
+#if defined(__has_builtin) && __has_builtin(__builtin_isnan)
+    return __builtin_isnan(f);
+#else
+    uint32_t bits                = bit_cast<uint32_t>(f);
+    constexpr uint32_t exp_mask  = 0x7f800000;
+    constexpr uint32_t mant_mask = 0x007fffff;
+
+    return (bits & exp_mask) == exp_mask && (bits & mant_mask);
+#endif
+}
+
+// Round to nearest even, but canonicalize any NaN input to the canonical quiet bf16 NaN
+// (`0x7fff`). Unlike `float_to_bf16_rtn_raw`, this does not preserve signaling NaN
+// payload/state.
+CK_TILE_HOST_DEVICE
+constexpr uint16_t float_to_bf16_rtn_cnan_raw(float f)
+{
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__)
+    // Fast/finite-math can fold the NaN predicate away, so fall back to standard RTN.
+    return float_to_bf16_rtn_raw(f);
+#else
+    // `-fgpu-flush-denormals-to-zero` only affects denormals, not NaN handling.
+    uint32_t bits = bit_cast<uint32_t>(f);
+    uint32_t tmp  = (bits >> 16) & 1;
+    uint32_t res  = float_is_nan_raw(f) ? 0x7fff0000 : bits + tmp + 0x7fff;
+
+    return uint16_t(res >> 16);
+#endif
+}
+
 // Truncate instead of rounding, preserving SNaN
 CK_TILE_HOST_DEVICE
 constexpr uint16_t float_to_bf16_truc_nan_raw(float f)
@@ -249,6 +283,8 @@ CK_TILE_HOST_DEVICE constexpr uint16_t float_to_bf16_raw(float f, constant<round
         return float_to_bf16_rtn_raw(f);
     else if constexpr(rounding == bf16_rounding_mode::standard_asm)
         return float_to_bf16_rtn_asm(f);
+    else if constexpr(rounding == bf16_rounding_mode::standard_cnan)
+        return float_to_bf16_rtn_cnan_raw(f);
     else if constexpr(rounding == bf16_rounding_mode::truncate_with_nan)
         return float_to_bf16_truc_nan_raw(f);
     else if constexpr(rounding == bf16_rounding_mode::rta_asm)
@@ -280,14 +316,19 @@ constexpr double bf16_to_double_raw(uint16_t x)
     return static_cast<double>(bf16_to_float_raw(x));
 }
 
+// Convert float to bfloat16 with specified rounding mode.
+// Note: Overflow behavior is platform-dependent when converting values near float::max:
+// - gfx950: Rounds to infinity (IEEE-754 RTN compliant)
+// - gfx9/gfx11/gfx12: Saturates to bf16::max (0x7f7f)
+// In practice, this affects < 0.00001% of conversions in ML workloads.
 template <bf16_rounding_mode rounding =
               static_cast<bf16_rounding_mode>(CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT)>
 CK_TILE_HOST_DEVICE constexpr bfloat16_t float_to_bf16(float f, constant<rounding> = {})
 {
-// Use builtin bfloat16 conversion only on gfx950 as its predecessors do not support bf16 cvt
-// instructions, resulting in suboptimal performance; Add host side marcro check for consistency
-// during accuracy tests.
-#if CK_TILE_USE_LLVM_BUILTIN_BF16 && (defined(__gfx950__) || defined(CK_GFX950_SUPPORT))
+// Use builtin bfloat16 conversion on gfx950 and gfx12 as they support native bf16 cvt
+// instructions; Add host side macro check for consistency during accuracy tests.
+#if CK_TILE_USE_LLVM_BUILTIN_BF16 && (defined(__gfx950__) || defined(__gfx12__) || \
+                                      defined(CK_GFX950_SUPPORT) || defined(CK_GFX12_SUPPORT))
     return static_cast<bfloat16_t>(f);
 #else
     return bit_cast<bfloat16_t>(float_to_bf16_raw(f, constant<rounding>{}));
@@ -302,10 +343,25 @@ CK_TILE_HOST_DEVICE constexpr bfloat16_t double_to_bf16(double f, constant<round
 }
 
 CK_TILE_HOST_DEVICE
-constexpr float bf16_to_float(bfloat16_t x) { return bf16_to_float_raw(bit_cast<uint16_t>(x)); }
+constexpr float bf16_to_float(bfloat16_t x)
+{
+#if CK_TILE_USE_CUSTOM_DATA_TYPE
+    return bf16_to_float_raw(bit_cast<uint16_t>(x));
+#elif CK_TILE_USE_LLVM_BUILTIN_BF16
+    // When bfloat16_t is __bf16, use bit_cast to extract bits
+    return bf16_to_float_raw(bit_cast<bf16_raw_t>(x));
+#else
+    // When bfloat16_t is ushort, it's already the raw type
+    // ushort is typically uint16_t, so we can cast directly
+    return bf16_to_float_raw(static_cast<bf16_raw_t>(x));
+#endif
+}
 
 CK_TILE_HOST_DEVICE
-constexpr double bf16_to_double(bfloat16_t x) { return static_cast<double>(bf16_to_float_raw(x)); }
+constexpr double bf16_to_double(bfloat16_t x)
+{
+    return static_cast<double>(bf16_to_float_raw(bit_cast<uint16_t>(x)));
+}
 
 template <bf16_rounding_mode rounding =
               static_cast<bf16_rounding_mode>(CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT)>
@@ -341,10 +397,11 @@ struct numeric<bfloat16_t>
         return bit_cast<bfloat16_t>(static_cast<bf16_raw_t>(0x7f7f));
     }
 
-    // difference between 1.0 and next value representable by float
+    // difference between 1.0 and next value representable by bf16
+    // 1.0 = 0x3F80, next value = 0x3F81, difference = 2^-7 = 0.0078125
     CK_TILE_HOST_DEVICE static constexpr bfloat16_t epsilon()
     {
-        return bit_cast<bfloat16_t>(static_cast<bf16_raw_t>(0x1000));
+        return bit_cast<bfloat16_t>(static_cast<bf16_raw_t>(0x3C00));
     }
 
     // maximum rounding error
@@ -390,9 +447,20 @@ struct numeric<bfloat16_t>
 template <>
 struct numeric_traits<bfloat16_t>
 {
-    static constexpr int exp        = 8;
-    static constexpr int mant       = 7;
-    static constexpr int PackedSize = 1;
+    static constexpr int exp            = 8;
+    static constexpr int mant           = 7;
+    static constexpr int bias           = 127;
+    static constexpr uint16_t nan_mask  = 0x7F80;
+    static constexpr uint16_t head_mask = 0xFF80;
+    static constexpr uint16_t mant_mask = 0x007F;
+    static constexpr uint16_t exp_mask  = 0xFF;
+    static constexpr uint16_t abs_mask  = 0x7FFF;
+    static constexpr uint16_t Inf       = 0x7F80;
+    static constexpr uint16_t NegInf    = 0xFF80;
+    static constexpr uint16_t NaN       = 0x7F81;
+    static constexpr uint16_t Neg0      = 0x8000;
+    static constexpr int PackedSize     = 1;
+    using bitwise_type                  = uint16_t;
 };
 
 #if CK_TILE_USE_CUSTOM_DATA_TYPE
@@ -409,8 +477,17 @@ bfloat16_t abs(const bfloat16_t& x)
 CK_TILE_HOST_DEVICE
 bool isnan(const bfloat16_t& x)
 {
+    // BF16 has 8-bit exponent (same as float32), so NaN is when:
+    // - exponent = 0xFF (all 1s) AND mantissa != 0
+    // - exponent mask for bf16 is 0x7F80, so NaN when (bits & 0x7FFF) > 0x7F80
+#if CK_TILE_USE_CUSTOM_DATA_TYPE
     uint16_t xx = bit_cast<bf16_raw_t>(x);
-    return (xx & 0x7FFF) > 0x7C00;
+#elif CK_TILE_USE_LLVM_BUILTIN_BF16
+    uint16_t xx = bit_cast<bf16_raw_t>(x);
+#else
+    uint16_t xx = static_cast<bf16_raw_t>(x);
+#endif
+    return (xx & 0x7FFF) > 0x7F80;
 }
 
 CK_TILE_DEVICE

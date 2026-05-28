@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -214,6 +214,35 @@ void cpu_getrs(rocblas_operation trans,
                rocblas_int* ipiv,
                T* B,
                rocblas_int ldb);
+
+template <typename T>
+void cpu_sytrs2(rocblas_fill uplo,
+                rocblas_int n,
+                rocblas_int nrhs,
+                T* A,
+                rocblas_int lda,
+                rocblas_int* ipiv,
+                T* B,
+                rocblas_int ldb);
+
+template <typename T>
+void cpu_sytrs(rocblas_fill uplo,
+               rocblas_int n,
+               rocblas_int nrhs,
+               T* A,
+               rocblas_int lda,
+               rocblas_int* ipiv,
+               T* B,
+               rocblas_int ldb);
+
+template <typename T>
+void cpu_getrs_npvt(rocblas_operation trans,
+                    rocblas_int n,
+                    rocblas_int nrhs,
+                    T* A,
+                    rocblas_int lda,
+                    T* B,
+                    rocblas_int ldb);
 
 template <typename T>
 void cpu_gesv(rocblas_int n,

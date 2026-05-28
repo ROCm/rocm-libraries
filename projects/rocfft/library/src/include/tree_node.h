@@ -41,6 +41,7 @@
 #include "compute_scheme.h"
 #include "data_layout.h"
 #include "enum_printer.h"
+#include "exec_info.h"
 #include "function_map_key.h"
 #include "function_pool.h"
 #include "kargs.h"
@@ -177,25 +178,78 @@ class TreeNode;
 class LeafNode;
 class function_pool;
 
-// Internally-allocated temporary buffers (as opposed to
-// user-provided work/in/out buffers)
+// Identifier for a location that a buffer lives on, or that a kernel
+// will execute on.  this specifies a multi-process rank as well as a
+// device ID.
+struct rocfft_location_t
+{
+    rocfft_location_t() = default;
+    rocfft_location_t(int _comm_rank, int _device)
+        : comm_rank(_comm_rank)
+        , device(_device)
+    {
+    }
+
+    // return a location for the current device on comm rank 0
+    static rocfft_location_t rank0_current_device()
+    {
+        rocfft_location_t id;
+        if(hipGetDevice(&id.device) != hipSuccess)
+            throw std::runtime_error("hipGetDevice failed");
+        return id;
+    }
+
+    // allow locations to be sorted
+    bool operator<(const rocfft_location_t& other) const
+    {
+        if(comm_rank != other.comm_rank)
+            return comm_rank < other.comm_rank;
+        return device < other.device;
+    }
+
+    bool operator==(const rocfft_location_t& other) const
+    {
+        return comm_rank == other.comm_rank && device == other.device;
+    }
+
+    std::string str() const
+    {
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
+    }
+
+    int comm_rank = 0;
+    int device    = 0;
+};
+
+// Conceptual representation of temporary buffers, e.g., for
+// workspaces or communications.
 class InternalTempBuffer
 {
 public:
-    InternalTempBuffer(int comm_rank)
-        : comm_rank(comm_rank)
+    InternalTempBuffer(rocfft_location_t _location)
+        : location(_location)
     {
     }
     InternalTempBuffer(const InternalTempBuffer&) = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
 
-    void set_size_bytes(size_t in)
+    void ensure_size_bytes(size_t in)
     {
-        if(buf)
-            throw std::runtime_error("cannot set internal buffer size after allocation");
         if(in > size_bytes)
+        {
             size_bytes = in;
+            // Round size up to nearest multiple of 16 bytes, to
+            // ensure that if we satisfy two temp buffer requests
+            // with a single allocation, neither one will be
+            // unexpectedly misaligned.
+            auto remainder = size_bytes % 16;
+            size_bytes += remainder ? 16 - remainder : 0;
+        }
     }
 
     size_t get_size_bytes() const
@@ -203,27 +257,14 @@ public:
         return size_bytes;
     }
 
-    void alloc(int deviceID)
+    const rocfft_location_t& get_location() const
     {
-        rocfft_scoped_device device(deviceID);
-        if(buf.alloc(size_bytes) != hipSuccess)
-            throw std::runtime_error("internal temp buffer allocation failure");
-    }
-
-    void* data()
-    {
-        return buf.data();
-    }
-
-    int get_comm_rank() const
-    {
-        return comm_rank;
+        return location;
     }
 
 private:
-    int    comm_rank  = 0;
-    size_t size_bytes = 0;
-    gpubuf buf;
+    rocfft_location_t location;
+    size_t            size_bytes = 0;
 };
 
 // Class representing a buffer in a multi-plan item.
@@ -273,14 +314,17 @@ public:
         BufferPtr ret;
         ret.type      = PTR_TEMP;
         ret.temp_ptr  = ptr;
-        ret.comm_rank = ptr->get_comm_rank();
+        ret.comm_rank = ptr->get_location().comm_rank;
         return ret;
     }
 
     // Get a pointer to the buffer.  The buffer might be an
     // user-provided input or output buffer that's only known at
     // execute time.
-    void* get(void* in_buffer[], void* out_buffer[], int local_comm_rank) const
+    void* get(void*                                 in_buffer[],
+              void*                                 out_buffer[],
+              int                                   local_comm_rank,
+              const rocfft_execution_info_internal& info) const
     {
         if(comm_rank != local_comm_rank)
             return nullptr;
@@ -293,7 +337,7 @@ public:
         case PTR_USER_OUT:
             return out_buffer[idx];
         case PTR_TEMP:
-            return temp_ptr->data();
+            return info.get_concrete_ptr(temp_ptr.get());
         }
     }
 
@@ -318,9 +362,9 @@ public:
         case PTR_TEMP:
         {
             std::stringstream ss;
-            ss << "temp buffer on rank " << comm_rank << " ";
             if(temp_ptr)
-                ss << temp_ptr->data();
+                ss << "temp buffer handle " << temp_ptr.get() << " size "
+                   << temp_ptr->get_size_bytes() << " on rank " << comm_rank;
             else
                 ss << "(null)";
             return ss.str();
@@ -375,13 +419,13 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    int                     direction    = -1;
-    rocfft_result_placement placement    = rocfft_placement_inplace;
-    rocfft_precision        precision    = rocfft_precision_single;
-    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp   = {};
-    bool                    rootIsC2C;
+    int                     direction         = -1;
+    rocfft_result_placement placement         = rocfft_placement_inplace;
+    rocfft_precision        precision         = rocfft_precision_single;
+    rocfft_array_type       inArrayType       = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType      = rocfft_array_type_unset;
+    rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
+    hipDeviceProp_t         deviceProp        = {};
     BufferPtr               input_buffer, output_buffer;
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
@@ -399,6 +443,13 @@ struct NodeMetaData
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
         }
+    };
+
+    inline bool is_using_default_contiguous_layout_for(io_data_label io) const
+    {
+        return layout_for(io)
+               == data_layout_t::default_full_layout(
+                   io == io_data_label::INPUT ? length : outputLength, batch);
     };
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -710,7 +761,7 @@ public:
     // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
     {
-        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+        return (scheme == CS_3D_PP || scheme == CS_REAL_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
                 || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
     }
 
@@ -752,7 +803,7 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    TreeNode* GetPlanRoot();
+    const TreeNode* GetPlanRoot() const;
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -762,7 +813,14 @@ public:
     // Return ancestor node of 'this' that is real-even (1D/2D/3D), or
     // nullptr if there is no such ancestor
     TreeNode* GetRealEvenAncestor();
-    bool      IsRootPlanC2CTransform();
+
+    // Return true if the root plan is C2C, R2C, or C2R
+    bool IsRootPlanC2CTransform() const;
+    bool IsRootPlanR2CTransform() const;
+    bool IsRootPlanC2RTransform() const;
+
+    // Return the transform type of the root plan
+    rocfft_transform_type GetRootPlanTransformType() const;
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -810,7 +868,7 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
-    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // Partial pass parent nodes, e.g., CS_3D_PP or CS_REAL_3D_PP, have
     // two kernels associated with them. The key for
     // querying the function pool is different from the
     // the standard kernel key.
@@ -827,6 +885,7 @@ public:
                        pp_parent_node->length[1],
                        pp_parent_node->length[2],
                        precision,
+                       GetRootPlanTransformType(),
                        pp_parent_node->scheme);
     }
 
@@ -1014,53 +1073,6 @@ public:
     }
 };
 
-// Identifier for a location that a buffer lives on, or that a kernel
-// will execute on.  this specifies a multi-process rank as well as a
-// device ID.
-struct rocfft_location_t
-{
-    rocfft_location_t() = default;
-    rocfft_location_t(int _comm_rank, int _device)
-        : comm_rank(_comm_rank)
-        , device(_device)
-    {
-    }
-
-    // return a location for the current device on comm rank 0
-    static rocfft_location_t rank0_current_device()
-    {
-        rocfft_location_t id;
-        if(hipGetDevice(&id.device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failed");
-        return id;
-    }
-
-    // allow locations to be sorted
-    bool operator<(const rocfft_location_t& other) const
-    {
-        if(comm_rank != other.comm_rank)
-            return comm_rank < other.comm_rank;
-        return device < other.device;
-    }
-
-    bool operator==(const rocfft_location_t& other) const
-    {
-        return comm_rank == other.comm_rank && device == other.device;
-    }
-
-    std::string str() const
-    {
-        std::string ret = "comm rank ";
-        ret += std::to_string(comm_rank);
-        ret += " device ";
-        ret += std::to_string(device);
-        return ret;
-    }
-
-    int comm_rank = 0;
-    int device    = 0;
-};
-
 struct rocfft_mp_request_t;
 
 // Abstract base class for all items in a multi-node/device plan
@@ -1092,13 +1104,6 @@ struct MultiPlanItem
     // wait for outstanding communication requests to finish
     void WaitCommRequests();
 
-    // Get work buffer requirements for this item.  Only ExecPlans
-    // should need this, as data movement shouldn't need temp buffers.
-    virtual void WorkBufBytesPerDevice(size_t               base_type_size,
-                                       std::vector<size_t>& workBufBytes) const
-    {
-    }
-
     // Print a description of this item to the plan log
     virtual void Print(rocfft_ostream& os, const int indent) const = 0;
 
@@ -1108,6 +1113,8 @@ struct MultiPlanItem
 
     // Check if this item writes to the specified BufferPtr
     virtual bool WritesToBuffer(const BufferPtr& ptr) const = 0;
+    // Check if this item reads from the specified BufferPtr
+    virtual bool ReadsFromBuffer(const BufferPtr& ptr) const = 0;
 
     // Check if the specified rank will execute this item
     virtual bool ExecutesOnRank(int rank) const = 0;
@@ -1187,6 +1194,11 @@ struct CommPointToPoint : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == destPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1292,6 +1304,11 @@ struct CommScatter : public MultiPlanItem
         return false;
     }
 
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
+    }
+
     bool ExecutesOnRank(int comm_rank) const override
     {
         return srcLocation.comm_rank == comm_rank
@@ -1390,6 +1407,16 @@ struct CommGather : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == destPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& op : ops)
+        {
+            if(ptr == op.srcPtr)
+                return true;
+        }
+        return false;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1494,6 +1521,12 @@ struct CommAllToAll : public MultiPlanItem
         return ptr == recvBuf;
     }
 
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        // only reads from send buffer
+        return ptr == sendBuf;
+    }
+
     bool ExecutesOnRank(int comm_rank) const override
     {
         // runs on all ranks
@@ -1554,6 +1587,7 @@ struct ExecPlan : public MultiPlanItem
     // are pointers to those temp buffers.
     BufferPtr inputPtr;
     BufferPtr outputPtr;
+    BufferPtr workPtr;
 
     void ExecuteAsync(const rocfft_plan                       plan,
                       void*                                   in_buffer[],
@@ -1615,15 +1649,6 @@ struct ExecPlan : public MultiPlanItem
     // OB_IN refers to iStride, OB_OUT refers to oStride
     std::map<OperatingBuffer, bool> isUnitStride;
 
-    void WorkBufBytesPerDevice(size_t               base_type_size,
-                               std::vector<size_t>& workBufBytes) const override
-    {
-        // base type is the size of one real, work buf counts in
-        // complex numbers
-        workBufBytes[location.device]
-            = std::max(workBufSize * 2 * base_type_size, workBufBytes[location.device]);
-    }
-
     // for callbacks, work out which nodes of the plan are loading data
     // from global memory, and storing data to global memory
     std::pair<TreeNode*, TreeNode*> get_load_store_nodes() const;
@@ -1631,6 +1656,11 @@ struct ExecPlan : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == outputPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == inputPtr;
     }
 
     bool ExecutesOnRank(int comm_rank) const override

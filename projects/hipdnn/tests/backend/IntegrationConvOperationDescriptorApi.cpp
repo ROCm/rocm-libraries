@@ -4,7 +4,7 @@
 #include "BackendTestHelpers.hpp"
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
@@ -48,11 +48,11 @@ protected:
 TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
 {
     auto xDesc = createAndTrackTensor(
-        K_TENSOR_X_UID, "X", toVec(K_TENSOR_X_DIMS), toVec(K_TENSOR_X_STRIDES));
+        K_FPROP_TENSOR_X_UID, "X", toVec(K_FPROP_TENSOR_X_DIMS), toVec(K_FPROP_TENSOR_X_STRIDES));
     auto wDesc = createAndTrackTensor(
-        K_TENSOR_W_UID, "W", toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
+        K_FPROP_TENSOR_W_UID, "W", toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
     auto yDesc = createAndTrackTensor(
-        K_TENSOR_Y_UID, "Y", toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+        K_FPROP_TENSOR_Y_UID, "Y", toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     hipdnnBackendDescriptor_t opDesc = nullptr;
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
@@ -81,9 +81,9 @@ TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
               HIPDNN_STATUS_SUCCESS);
 
     // Set convolution parameters
-    auto padding = toVec(K_CONV_PADDING);
-    auto stride = toVec(K_CONV_STRIDE);
-    auto dilation = toVec(K_CONV_DILATION);
+    auto padding = toVec(K_FPROP_CONV_PADDING);
+    auto stride = toVec(K_FPROP_CONV_STRIDE);
+    auto dilation = toVec(K_FPROP_CONV_DILATION);
 
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
@@ -110,7 +110,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
                                         dilation.data()),
               HIPDNN_STATUS_SUCCESS);
 
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     EXPECT_EQ(
         hipdnnBackendSetAttribute(
             opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode),
@@ -128,11 +128,11 @@ TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
 TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
 {
     auto xDesc = createAndTrackTensor(
-        K_TENSOR_X_UID, "X", toVec(K_TENSOR_X_DIMS), toVec(K_TENSOR_X_STRIDES));
+        K_FPROP_TENSOR_X_UID, "X", toVec(K_FPROP_TENSOR_X_DIMS), toVec(K_FPROP_TENSOR_X_STRIDES));
     auto wDesc = createAndTrackTensor(
-        K_TENSOR_W_UID, "W", toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
+        K_FPROP_TENSOR_W_UID, "W", toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
     auto yDesc = createAndTrackTensor(
-        K_TENSOR_Y_UID, "Y", toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+        K_FPROP_TENSOR_Y_UID, "Y", toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     hipdnnBackendDescriptor_t opDesc = nullptr;
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
@@ -161,9 +161,9 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
               HIPDNN_STATUS_SUCCESS);
 
     // Set convolution parameters
-    auto padding = toVec(K_CONV_PADDING);
-    auto stride = toVec(K_CONV_STRIDE);
-    auto dilation = toVec(K_CONV_DILATION);
+    auto padding = toVec(K_FPROP_CONV_PADDING);
+    auto stride = toVec(K_FPROP_CONV_STRIDE);
+    auto dilation = toVec(K_FPROP_CONV_DILATION);
 
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
@@ -190,7 +190,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         dilation.data()),
               HIPDNN_STATUS_SUCCESS);
 
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     EXPECT_EQ(
         hipdnnBackendSetAttribute(
             opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode),
@@ -305,7 +305,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         &retrievedConvMode),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
-    EXPECT_EQ(retrievedConvMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    EXPECT_EQ(retrievedConvMode, HIPDNN_CROSS_CORRELATION);
 
     // Verify compute type
     hipdnnDataType_t retrievedCompType = {};
@@ -330,9 +330,9 @@ TEST_F(IntegrationConvOperationDescriptorApi, ConvOperationFailsWithoutTensorRef
     _descriptors.push_back(opDesc);
 
     // Set conv params but omit tensor references
-    auto padding = toVec(K_CONV_PADDING);
-    auto stride = toVec(K_CONV_STRIDE);
-    auto dilation = toVec(K_CONV_DILATION);
+    auto padding = toVec(K_FPROP_CONV_PADDING);
+    auto stride = toVec(K_FPROP_CONV_STRIDE);
+    auto dilation = toVec(K_FPROP_CONV_DILATION);
 
     hipdnnBackendSetAttribute(opDesc,
                               HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
@@ -355,7 +355,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, ConvOperationFailsWithoutTensorRef
                               static_cast<int64_t>(dilation.size()),
                               dilation.data());
 
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendSetAttribute(
         opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
 

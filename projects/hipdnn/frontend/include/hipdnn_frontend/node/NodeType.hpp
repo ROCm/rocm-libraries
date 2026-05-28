@@ -23,12 +23,14 @@ enum class NodeType
     MATMUL = 9,
     LAYER_NORM = 10,
     RMS_NORM = 11,
-    SDPA_FPROP = 12,
-    SDPA_BPROP = 13,
+    SDPA_FWD = 12,
+    SDPA_BWD = 13,
     BLOCK_SCALE_QUANTIZE = 14,
     BLOCK_SCALE_DEQUANTIZE = 15,
     CUSTOM_OP = 16,
-    REDUCTION = 17
+    REDUCTION = 17,
+    RESAMPLE_FWD = 18,
+    RMS_NORM_BACKWARD = 19
 };
 
 } // namespace hipdnn_frontend::graph

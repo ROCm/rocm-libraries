@@ -12,9 +12,10 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/numeric/numeric.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 // Transforms: Tuple<transforms...>
@@ -376,9 +377,10 @@ CK_TILE_HOST_DEVICE constexpr auto make_single_stage_tensor_adaptor(const Transf
     constexpr auto all_up_dim_new_top_ids = unpack(
         [](auto&&... xs) constexpr { return merge_sequences(xs...); }, UpperDimensionNewTopIdss{});
 
-    static_assert(is_valid_sequence_map<decltype(all_low_dim_old_top_ids)>::value &&
-                      is_valid_sequence_map<decltype(all_up_dim_new_top_ids)>::value,
-                  "wrong!");
+    static_assert(
+        is_valid_sequence_map<remove_cvref_t<decltype(all_low_dim_old_top_ids)>>::value &&
+            is_valid_sequence_map<remove_cvref_t<decltype(all_up_dim_new_top_ids)>>::value,
+        "wrong!");
 
     constexpr index_t ndim_old_top = all_low_dim_old_top_ids.size();
     constexpr index_t ndim_new_top = all_up_dim_new_top_ids.size();
@@ -443,8 +445,8 @@ transform_tensor_adaptor(const OldTensorAdaptor& old_tensor_adaptor,
         constexpr auto all_new_top_ids = unpack([](auto... xs) { return merge_sequences(xs...); },
                                                 NewUpperDimensionNewTopIdss{});
 
-        static_assert(is_valid_sequence_map<decltype(all_old_top_ids)>::value &&
-                          is_valid_sequence_map<decltype(all_new_top_ids)>::value,
+        static_assert(is_valid_sequence_map<remove_cvref_t<decltype(all_old_top_ids)>>::value &&
+                          is_valid_sequence_map<remove_cvref_t<decltype(all_new_top_ids)>>::value,
                       "wrong!");
     }
 
@@ -953,4 +955,6 @@ CK_TILE_HOST_DEVICE constexpr auto chain_tensor_adaptors(const X& x, const Xs&..
                               remove_cvref_t<decltype(bottom_dim_ids)>,                            \
                               remove_cvref_t<decltype(top_dim_ids)>>{trans};                       \
     }()
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

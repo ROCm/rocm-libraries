@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,12 +79,6 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(bitwise_repro_test);
 // Transform parameters for manual test:
 fft_params manual_params;
 
-// Host memory limitation for tests (GiB):
-size_t ramgb;
-
-// Device memory limitation for tests (GiB):
-size_t vramgb;
-
 // Number of hip devices to use.
 int ngpus{};
 
@@ -116,7 +110,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Number of devices to distribute the FFT to for manual tests
 int manual_devices = 1;
@@ -304,6 +298,10 @@ int main(int argc, char* argv[])
     // we re-parse the arguments with gtest and CLI.
     std::string argv0 = argv[0];
 
+    // Unless specified otherwise by the user, no limit on host/device memory usage
+    // (see corresponding default values)
+    size_t ramgb_limit, vramgb_limit;
+
     CLI::App app{
         "\n"
         "rocFFT Runtime Test command line options\n"
@@ -329,7 +327,11 @@ int main(int argc, char* argv[])
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
     app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
-
+    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
+        ->default_val(system_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
+        ->default_val(DivRoundingUp(
+            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
     app.add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
         ->default_val(-1)
         ->check(CLI::NonNegativeNumber);
@@ -362,19 +364,22 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::PositiveNumber);
 
-    constexpr std::array<std::string_view, 4> emulation_types
-        = {"none", "smoke", "regression", "extended"};
-    app.add_option("--emulation", "Run emulation tests")
-        ->check(CLI::IsMember(emulation_types))
+    constexpr auto emulation_smoke      = "smoke";
+    constexpr auto emulation_regression = "regression";
+    constexpr auto emulation_extended   = "extended";
+    app.add_option("--emulation", "Run emulation tests only (targeted scopes)")
+        ->check(CLI::IsMember({emulation_smoke, emulation_regression, emulation_extended}))
+        ->expected(1)
+        ->excludes("--test_prob",
+                   "--emulation_prob",
+                   "--unittest_prob",
+                   "--nrand",
+                   "--callback_prob",
+                   "--R")
         ->each([&](const std::string& emulationtype) {
-            constexpr auto nidx = [emulation_types](const auto name) {
-                return std::find(emulation_types.begin(), emulation_types.end(), name)
-                       - emulation_types.begin();
-            };
-
             // Emulation test suites focus on well-established software paths; we are looking for
             // information about the hardware, which means that we aren't trying to find out a lot
             // of information about the software.  Thus, no randomly-generated tests.
@@ -386,29 +391,28 @@ int main(int argc, char* argv[])
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
 
-            // We can do a switch on nidx(emulationtype) when we have C++20
-            // switch(nidx(emulationtype))
-            // {
-            // case nidx("smoke"):
-            // etc.
-
-            if(nidx(emulationtype) == nidx("smoke"))
+            if(emulationtype == emulation_smoke)
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
-                vramgb         = 2;
-                test_prob      = 0;
+                vramgb_limit   = 2;
                 emulation_prob = 0.005;
+                test_prob      = 0;
+                unittest_prob  = 0;
             }
-            if(nidx(emulationtype) == nidx("regression"))
+            else if(emulationtype == emulation_regression)
             {
-                vramgb         = 16;
+                vramgb_limit   = 16;
                 emulation_prob = 1;
                 test_prob      = 0.01;
+                unittest_prob  = 0.01;
             }
-            if(nidx(emulationtype) == nidx("extended"))
+            else
             {
+                // emulationtype == emulation_extended given CLI11's check above
+                assert(emulationtype == emulation_extended);
                 emulation_prob = 1;
                 test_prob      = 0.02;
+                unittest_prob  = 0.02;
             }
         });
 
@@ -437,8 +441,9 @@ int main(int argc, char* argv[])
         ->needs("--mp_lib");
 
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
+        ->excludes("--emulation", "--test_prob", "--emulation_prob", "--unittest_prob", "--nrand")
         ->each([&](const std::string&) {
-            // The objective is to have an test that takes about 5 minutes, so just set the
+            // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
             test_prob      = 0.0005;
             emulation_prob = 0.005;
@@ -533,9 +538,6 @@ int main(int argc, char* argv[])
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
-    app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
     app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
@@ -647,12 +649,25 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options (if more restrictive)
-    const auto usable_bytes = host_memory::singleton().get_usable_bytes();
-    if(ramgb * ONE_GiB < usable_bytes)
-        host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Usable host memory: " << bytes_to_GiB(host_memory::singleton().get_usable_bytes())
-              << " GiB" << std::endl;
+    system_memory::singleton().set_limit_bytes(ramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than "
+              << byte_size_to_str(system_memory::singleton().get_limit_bytes())
+              << " of system memory." << std::endl;
+    device_memory_accountant::singleton().set_limit_bytes_for_all_devices(vramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than ";
+    for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices(); dev_id++)
+    {
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << "\n\t";
+        std::cout << byte_size_to_str(
+            device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id))
+                  << " of device memory";
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << " on device ID " << dev_id;
+        std::cout << (dev_id == device_memory_accountant::singleton().num_devices() - 1 ? "."
+                                                                                        : ";");
+    }
+    std::cout << std::endl;
 
     if(use_fftw_wisdom)
     {
@@ -827,10 +842,14 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
         // explicitly clear test cache
-        last_cpu_fft_data = last_cpu_fft_cache();
+        reference_fft_data_t::clear_cache();
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
         GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
@@ -880,6 +899,10 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }

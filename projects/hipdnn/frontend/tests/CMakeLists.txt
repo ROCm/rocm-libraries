@@ -39,17 +39,16 @@ add_executable(
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
-    TestEngineOverrideConfig.cpp
     TestError.cpp
     TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
-    TestGraphGenerated.cpp
-    TestGraphSerialization.cpp
+    TestGraphOverrideValidation.cpp
     TestHandle.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
+    TestKnobUnpacker.cpp
     TestLayernormAttributes.cpp
     TestLayerNormNode.cpp
     TestMatmulAttributes.cpp
@@ -58,14 +57,16 @@ add_executable(
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
     TestSdpaBackwardAttributes.cpp
-    TestSdpaBpropNode.cpp
-    TestSdpaFpropNode.cpp
+    TestSdpaBwdNode.cpp
+    TestSdpaFwdNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp
     TestReductionNode.cpp
     TestRMSNormAttributes.cpp
     TestRMSNormNode.cpp
+    TestRMSNormBackwardAttributes.cpp
+    TestRMSNormBackwardNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
     TestSetEnginePluginPaths.cpp
     TestTensorAttributes.cpp

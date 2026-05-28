@@ -129,6 +129,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/rtc_radix_functions/radix_17.h
 
      # extra files for generating standalone test harnesses for kernels
+     ${CMAKE_SOURCE_DIR}/shared/sys_mem.h
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
@@ -403,10 +404,15 @@ add_library( rocfft
   )
 rocfft_add_coverage_flags( rocfft )
 
+if( WIN32 )
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rocfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+  target_sources(rocfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+endif()
+
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
-if (NOT WIN32)
+if( NOT WIN32 AND NOT BUILD_CODE_COVERAGE )
   target_compile_options( rocfft PRIVATE -fgpu-rdc )
   target_link_options( rocfft PRIVATE -fgpu-rdc )
 endif()

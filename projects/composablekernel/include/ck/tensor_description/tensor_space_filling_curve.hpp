@@ -10,9 +10,10 @@
 #include "ck/utility/tuple_helper.hpp"
 #include "ck/tensor_description/tensor_adaptor.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 namespace detail {
@@ -24,6 +25,7 @@ struct IndexLookupTable
     MultiIndex<nDim> data[NumAccesses > 0 ? NumAccesses : 1];
 
     __host__ __device__ constexpr const MultiIndex<nDim>& operator[](index_t i) const
+        [[clang::lifetimebound]]
     {
         return data[i];
     }
@@ -195,4 +197,6 @@ struct SpaceFillingCurve
 
 } // namespace ck
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

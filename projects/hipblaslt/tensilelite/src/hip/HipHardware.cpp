@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,22 +25,41 @@
  *******************************************************************************/
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+
+#include <iostream>
+#include <stdexcept>
 
 namespace TensileLite
 {
     namespace hip
     {
-        HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop)
+        HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop,
+                             int                    deviceId,
+                             std::optional<int>     pciChipId)
             : AMDGPU(AMDGPU::toProcessor(prop.gcnArchName),
                      prop.multiProcessorCount,
-                     std::string(prop.name))
+                     std::string(prop.name),
+                     pciChipId)
             , properties(prop)
+            , deviceId(deviceId)
         {
             if(origami::hardware_t::is_hardware_supported(prop))
             {
-                analyticalHardware = std::make_shared<origami::hardware_t>(prop);
+                // Route analyticalHardware construction through Origami's device-id
+                // entry point so selection uses the runtime-queried XCC count
+                // (hipDeviceAttributeNumberOfXccs on HIP 7+) instead of the hardcoded
+                // per-architecture default in get_default_num_xcds().
+                //
+                // Pass the caller-provided `prop` so any adjustments made upstream
+                // (e.g. overriding multiProcessorCount with
+                // hipDeviceAttributePhysicalMultiProcessorCount on multi-XCC
+                // architectures) are preserved. The int-only overload re-queries
+                // `hipGetDeviceProperties` and would discard those adjustments.
+                analyticalHardware = std::make_shared<origami::hardware_t>(
+                    origami::hardware_t::get_hardware_for_device(deviceId, prop));
             }
         }
 
@@ -70,13 +89,32 @@ namespace TensileLite
                                                     deviceId));
             }
 #endif
-
-            return GetDevice(prop);
+            return GetDevice(prop, deviceId);
         }
 
-        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop)
+        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId)
         {
-            return std::make_shared<HipAMDGPU>(prop);
+            const auto processor = AMDGPU::toProcessor(prop.gcnArchName);
+            if(!ChipIdRegistry::supportsChipIdPredicate(processor))
+            {
+                return std::make_shared<HipAMDGPU>(prop, deviceId);
+            }
+
+            int        pciChipId = 0;
+            hipError_t chipIdResult
+                = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId);
+
+            // Check hip runtime support for PCI Chip ID attribute
+            if(chipIdResult == hipErrorInvalidValue)
+                throw std::runtime_error(pciChipIdUnsupportedErrorMessage(prop));
+
+            // For any other error, use standard error checking
+            HIP_CHECK_EXC(chipIdResult);
+
+            if(!ChipIdRegistry::isKnownChipId(pciChipId))
+                logUnregisteredPciChipIdWarningOnce(prop, pciChipId);
+
+            return std::make_shared<HipAMDGPU>(prop, deviceId, std::make_optional(pciChipId));
         }
     } // namespace hip
 } // namespace TensileLite

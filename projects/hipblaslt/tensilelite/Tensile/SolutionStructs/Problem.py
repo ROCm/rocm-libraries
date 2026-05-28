@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,6 @@ from Tensile.Common import fastdeepcopy as deepcopy
 from Tensile.Common.Constants import INDEX_CHARS
 from Tensile.Common.DataType import DataType
 from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
-
 
 
 
@@ -374,6 +373,30 @@ class ProblemSizes:
     for sizeRange in self.ranges:
       s += "  %s" % sizeRange
     return s
+# Get real Dataype for A and B when using mix-types (i.g. Float8BFloat8);
+def getRealDataTypeA(dataType):
+    if dataType.isFloat8BFloat8():
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.isBFloat8Float8():
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.isFloat8BFloat8_fnuz():
+        return DataType(DataTypeEnum.Float8_fnuz)
+    elif dataType.isBFloat8Float8_fnuz():
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    else:
+        return dataType
+    
+def getRealDataTypeB(dataType):
+    if dataType.isFloat8BFloat8():
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.isBFloat8Float8():
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.isFloat8BFloat8_fnuz():
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    elif dataType.isBFloat8Float8_fnuz():
+        return DataType(DataTypeEnum.Float8_fnuz)
+    else:
+        return dataType
 
 ################################################################################
 # ProblemType
@@ -389,6 +412,8 @@ _defaultProblemType = {
     "DataType": 0,  # data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeA": 0,  # A data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeB": 0,  # B data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
+    "MacDataTypeA": 0, # A data type which is used for mac/mfma/wmma computation.
+    "MacDataTypeB": 0, # B data type which is used for mac/mfma/wmma computation.
     "DataTypeE": 0,  # E data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeAmaxD": 0,  # AmaxD data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DestDataType": 0,  # destination data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
@@ -453,7 +478,9 @@ _defaultProblemType = {
     "SetConstStrideBias": [],
     # Summation dimension indices
     "MirrorDimsA": [],
+    "MirrorDimsMXSA": [],
     "MirrorDimsB": [],
+    "MirrorDimsMXSB": [],
     "MirrorDimsMetadata": [],
     # for LD description
     "NumIndicesLD": 4,
@@ -469,6 +496,13 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
+    "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
+    "MetadataLayout": 0,
+    # MX Block
+    "MXBlockA": 0,
+    "MXBlockB": 0,
+    "DataTypeMXSA": "E8",
+    "DataTypeMXSB": "E8",
 }
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
@@ -478,65 +512,107 @@ _defaultProblemType = {
 # Cinternal: basically should == ComputeDataType
 # This is used in _checkIfSupportedGEMMType()
 _validGEMMTypes = [
-    ("H", "H", "H"),
-    ("S", "S", "S"),
-    ("D", "D", "D"),
-    ("C", "C", "C"),
-    ("Z", "Z", "Z"),
-    ("H", "H", "S"),
-    ("H", "S", "S"),
-    ("B", "B", "S"),
-    ("B", "S", "S"),
-    ("B", "H", "S"),
-    ("I8", "I", "I"),
-    ("4xi8", "I", "I"),
-    ("I8", "I8", "I"),
-    ("I8", "I", "S"),
-    ("I8", "I8", "S"),
-    ("I8", "H", "S"),
-    ("I8", "B", "S"),
-    ("F8", "S", "S"),
-    ("B8", "S", "S"),
-    ("F8B8", "S", "S"),
-    ("B8F8", "S", "S"),
-    ("F8", "H", "S"),
-    ("B8", "H", "S"),
-    ("F8B8", "H", "S"),
-    ("B8F8", "H", "S"),
-    ("B8", "B", "S"),
-    ("H", "F8", "S"),
-    ("F8", "B", "S"),
-    ("F8B8", "B", "S"),
-    ("B8F8", "B", "S"),  # in/out are both R8
-    ("F8", "F8", "S"),
-    ("B8", "B8", "S"),
-    ("F8B8", "B8", "S"),
-    ("B8F8", "B8", "S"),
-    ("F8", "B8", "S"),
-    ("B8", "F8", "S"),
-    ("F8B8", "F8", "S"),
-    ("B8F8", "F8", "S"),  # F8 NANOO
-    ("F8N", "S", "S"),
-    ("B8N", "S", "S"),
-    ("F8B8N", "S", "S"),
-    ("B8F8N", "S", "S"),
-    ("F8N", "H", "S"),
-    ("B8N", "H", "S"),
-    ("F8B8N", "H", "S"),
-    ("B8F8N", "H", "S"),
-    ("B8N", "B", "S"),
-    ("H", "F8N", "S"),
-    ("F8N", "B", "S"),
-    ("F8B8N", "B", "S"),
-    ("B8F8N", "B", "S"),  # in/out are both R8
-    ("F8N", "F8N", "S"),
-    ("B8N", "B8N", "S"),
-    ("F8B8N", "B8N", "S"),
-    ("B8F8N", "B8N", "S"),
-    ("F8N", "B8N", "S"),
-    ("B8N", "F8N", "S"),
-    ("F8B8N", "F8N", "S"),
-    ("B8F8N", "F8N", "S"),
+    ("H", "H", "H", "H"),
+    ("S", "S", "S", "S"),
+    ("D", "D", "D", "D"),
+    ("C", "C", "C", "C"),
+    ("Z", "Z", "Z", "Z"),
+    ("H", "H", "H", "S"),
+    ("H", "H", "S", "S"),
+    ("B", "B", "B", "S"),
+    ("B", "B", "S", "S"),
+    ("B", "B", "H", "S"),
+    ("I8", "I8", "I", "I"),
+    ("4xi8", "4xi8", "I", "I"),
+    ("I8", "I8", "I8", "I"),
+    ("I8", "I8", "I", "S"),
+    ("I8", "I8", "I8", "S"),
+    ("I8", "I8", "H", "S"),
+    ("I8", "I8", "B", "S"),
+    ("F8", "F8", "S", "S"),
+    ("B8", "B8", "S", "S"),
+    ("F8", "B8", "S", "S"),
+    ("B8", "F8", "S", "S"),
+    ("F8", "F8", "H", "S"),
+    ("B8", "B8", "H", "S"),
+    ("F8", "B8", "H", "S"),
+    ("B8", "F8", "H", "S"),
+    ("B8", "B8", "B", "S"),
+    ("H", "H", "F8", "S"),
+    ("F8", "F8", "B", "S"),
+    ("F8", "B8", "B", "S"),
+    ("B8", "F8", "B", "S"),  # in/out are both R8
+    ("F8", "F8", "F8", "S"),
+    ("B8", "B8", "B8", "S"),
+    ("F8", "B8", "B8", "S"),
+    ("B8", "F8", "B8", "S"),
+    ("F8", "F8", "B8", "S"),
+    ("B8", "B8", "F8", "S"),
+    ("F8", "B8", "F8", "S"),
+    ("B8", "F8", "F8", "S"),  # F8 NANOO
+    ("F8N", "F8N", "S", "S"),
+    ("B8N", "B8N", "S", "S"),
+    ("F8N", "B8N", "S", "S"),
+    ("B8N", "F8N", "S", "S"),
+    ("F8N", "F8N", "H", "S"),
+    ("B8N", "B8N", "H", "S"),
+    ("F8N", "B8N", "H", "S"),
+    ("B8N", "F8N", "H", "S"),
+    ("B8N", "B8N", "B", "S"),
+    ("H", "H", "F8N", "S"),
+    ("F8N", "F8N", "B", "S"),
+    ("F8N", "B8N", "B", "S"),
+    ("B8N", "F8N", "B", "S"),  # in/out are both R8
+    ("F8N", "F8N", "F8N", "S"),
+    ("B8N", "B8N", "B8N", "S"),
+    ("F8N", "B8N", "B8N", "S"),
+    ("B8N", "F8N", "B8N", "S"),
+    ("F8N", "F8N", "B8N", "S"),
+    ("B8N", "B8N", "F8N", "S"),
+    ("F8N", "B8N", "F8N", "S"),
+    ("B8N", "F8N", "F8N", "S"),
+    ("F6", "F6", "S", "S"),
+    ("B6", "B6", "S", "S"),
+    ("F6", "B6", "S", "S"),
+    ("B6", "F6", "S", "S"),
+    ("F8", "F6", "S", "S"),
+    ("F6", "F8", "S", "S"),
+    ("F8", "F4", "S", "S"),
+    ("F4", "F8", "S", "S"),
+    ("F6", "F4", "S", "S"),
+    ("F4", "F6", "S", "S"),
+    ("F6", "F4", "B", "S"),
+    ("F4", "F6", "B", "S"),
+    ("B6", "F4", "S", "S"),
+    ("F4", "B6", "S", "S"),
+    ("B6", "F4", "B", "S"),
+    ("F4", "B6", "B", "S"),
+    ("F8", "B6", "S", "S"),
+    ("B6", "F8", "S", "S"),
+    ("F6", "B8", "S", "S"),
+    ("B8", "F6", "S", "S"),
+    ("F4", "B8", "S", "S"),
+    ("B8", "F4", "S", "S"),
+    ("F4", "F4", "S", "S"),
+    ("F4", "F4", "H", "S"),
+    ("F4", "F4", "B", "S"),
+    ("F4", "F4", "F8", "S"),
+    ("F6", "F6", "H", "S"),
+    ("F6", "F6", "B", "S"),
+    ("F6", "F6", "F8", "S"),
+    ("F6", "F6", "B8", "S"),
+    ("B6", "B6", "H", "S"),
+    ("B6", "B6", "B", "S"),
+    ("B6", "B6", "F8", "S"),
+    ("B6", "B6", "B8", "S"),
+    ("F6", "B6", "H", "S"),
+    ("F6", "B6", "B", "S"),
+    ("F6", "B6", "F8", "S"),
+    ("F6", "B6", "B8", "S"),
+    ("B6", "F6", "H", "S"),
+    ("B6", "F6", "B", "S"),
+    ("B6", "F6", "F8", "S"),
+    ("B6", "F6", "B8", "S"),
 ]
 
 
@@ -544,60 +620,101 @@ _validGEMMTypes = [
 # *_TiToTc_BH*.yaml where Ti, To, and Tc are the data types of A/B, C/D, and computation, respectively.
 # The name of the library logic files for non-HPA (HPA=F) types is: *_TiB*.yaml.
 _HPATypes = [
-    ("H", "S", "S"),
-    ("H", "H", "S"),
-    ("B", "B", "S"),
-    ("B", "S", "S"),
-    ("B", "H", "S"),
-    ("I8", "I", "I"),
-    ("4xi8", "I", "I"),
-    ("I8", "I", "S"),
-    ("I8", "I8", "S"),
-    ("I8", "H", "S"),
-    ("I8", "B", "S"),
-    ("F8", "S", "S"),
-    ("B8", "S", "S"),
-    ("F8B8", "S", "S"),
-    ("B8F8", "S", "S"),
-    ("F8", "H", "S"),
-    ("B8", "H", "S"),
-    ("F8B8", "H", "S"),
-    ("B8F8", "H", "S"),
-    ("H", "F8", "S"),
-    ("F8", "B", "S"),
-    ("F8B8", "B", "S"),  # in/out are both R8
-    ("F8", "F8", "S"),
-    ("B8", "B8", "S"),
-    ("F8B8", "B8", "S"),
-    ("B8F8", "B8", "S"),
-    ("F8", "B8", "S"),
-    ("B8", "F8", "S"),
-    ("F8B8", "F8", "S"),
-    ("B8F8", "F8", "S"),
-    ("F8N", "S", "S"),
-    ("B8N", "S", "S"),
-    ("F8B8N", "S", "S"),
-    ("B8F8N", "S", "S"),
-    ("F8N", "H", "S"),
-    ("B8N", "H", "S"),
-    ("F8B8N", "H", "S"),
-    ("B8F8N", "H", "S"),
-    ("H", "F8N", "S"),
-    ("F8N", "B", "S"),
-    ("F8B8N", "B", "S"),  # in/out are both R8
-    ("F8N", "F8N", "S"),
-    ("B8N", "B8N", "S"),
-    ("F8B8N", "B8N", "S"),
-    ("B8F8N", "B8N", "S"),
-    ("F8N", "B8N", "S"),
-    ("B8N", "F8N", "S"),
-    ("F8B8N", "F8N", "S"),
-    ("B8F8N", "F8N", "S"),
+    ("H", "H", "S", "S"),
+    ("H", "H", "H", "S"),
+    ("B", "B", "B", "S"),
+    ("B", "B", "S", "S"),
+    ("B", "B", "H", "S"),
+    ("I8", "I8", "I", "I"),
+    ("4xi8", "4xi8", "I", "I"),
+    ("I8", "I8", "I", "S"),
+    ("I8", "I8", "I8", "S"),
+    ("I8", "I8", "H", "S"),
+    ("I8", "I8", "B", "S"),
+    ("F8", "F8", "S", "S"),
+    ("B8", "B8", "S", "S"),
+    ("F8", "B8", "S", "S"),
+    ("B8", "F8", "S", "S"),
+    ("F8", "F8", "H", "S"),
+    ("B8", "B8", "H", "S"),
+    ("F8", "B8", "H", "S"),
+    ("B8", "F8", "H", "S"),
+    ("H", "H", "F8", "S"),
+    ("F8", "F8", "B", "S"),
+    ("F8", "B8", "B", "S"),  # in/out are both R8
+    ("F8", "F8", "F8", "S"),
+    ("B8", "B8", "B8", "S"),
+    ("F8", "B8", "B8", "S"),
+    ("B8", "F8", "B8", "S"),
+    ("F8", "F8", "B8", "S"),
+    ("B8", "B8", "F8", "S"),
+    ("F8", "B8", "F8", "S"),
+    ("B8", "F8", "F8", "S"),
+    ("F8N", "F8N", "S", "S"),
+    ("B8N", "B8N", "S", "S"),
+    ("F8N", "B8N", "S", "S"),
+    ("B8N", "F8N", "S", "S"),
+    ("F8N", "F8N", "H", "S"),
+    ("B8N", "B8N", "H", "S"),
+    ("F8N", "B8N", "H", "S"),
+    ("B8N", "F8N", "H", "S"),
+    ("H", "H", "F8N", "S"),
+    ("F8N", "F8N", "B", "S"),
+
+    ("F8N", "B8N", "B", "S"),  # in/out are both R8
+    ("F8N", "F8N", "F8N", "S"),
+    ("B8N", "B8N", "B8N", "S"),
+    ("F8N", "B8N", "B8N", "S"),
+    ("B8N", "F8N", "B8N", "S"),
+    ("F8N", "F8N", "B8N", "S"),
+    ("B8N", "B8N", "F8N", "S"),
+    ("F8N", "B8N", "F8N", "S"),
+    ("B8N", "F8N", "F8N", "S"),
+    ("F6", "F6", "S", "S"),
+    ("B6", "B6", "S", "S"),
+    ("F6", "B6", "S", "S"),
+    ("B6", "F6", "S", "S"),
+    ("F8", "F6", "S", "S"),
+    ("F6", "F8", "S", "S"),
+    ("F8", "F4", "S", "S"),
+    ("F4", "F8", "S", "S"),
+    ("F6", "F4", "S", "S"),
+    ("F4", "F6", "S", "S"),
+    ("F6", "F4", "B", "S"),
+    ("F4", "F6", "B", "S"),
+    ("B6", "F4", "S", "S"),
+    ("F4", "B6", "S", "S"),
+    ("B6", "F4", "B", "S"),
+    ("F4", "B6", "B", "S"),
+    ("F4", "F4", "S", "S"),
+    ("F4", "F4", "H", "S"),
+    ("F4", "F4", "B", "S"),
+    ("F4", "F4", "F8", "S"),
+    ("F6", "F6", "H", "S"),
+    ("F6", "F6", "B", "S"),
+    ("F6", "F6", "F8", "S"),
+    ("F6", "F6", "B8", "S"),
+    ("B6", "B6", "H", "S"),
+    ("B6", "B6", "B", "S"),
+    ("B6", "B6", "F8", "S"),
+    ("B6", "B6", "B8", "S"),
+    ("F6", "B6", "H", "S"),
+    ("F6", "B6", "B", "S"),
+    ("F6", "B6", "F8", "S"),
+    ("F6", "B6", "B8", "S"),
+    ("B6", "F6", "H", "S"),
+    ("B6", "F6", "B", "S"),
+    ("B6", "F6", "F8", "S"),
+    ("B6", "F6", "B8", "S"),
 ]
 
 def problemTypeToEnum(problemType):
   problemType["DataType"] = \
           problemType["DataType"].value
+  problemType["MacDataTypeA"] = \
+          problemType["MacDataTypeA"].value
+  problemType["MacDataTypeB"] = \
+          problemType["MacDataTypeB"].value
   problemType["DataTypeA"] = \
           problemType["DataTypeA"].value
   problemType["DataTypeB"] = \
@@ -621,6 +738,66 @@ def problemTypeToEnum(problemType):
   if "DataTypeMetadata" in problemType:
       problemType["DataTypeMetadata"] = \
           problemType["DataTypeMetadata"].value
+  if "DataTypeMXSA" in problemType:
+      problemType["DataTypeMXSA"] = \
+          problemType["DataTypeMXSA"].value
+  else:
+      problemType["DataTypeMXSA"] = DataTypeEnum.E8
+  if "DataTypeMXSB" in problemType:
+      problemType["DataTypeMXSB"] = \
+          problemType["DataTypeMXSB"].value
+  else:
+      problemType["DataTypeMXSB"] = DataTypeEnum.E8
+
+# Pre-compute expected types for ProblemType parameters from _defaultProblemType.
+# Note: For _defaultProblemType, the values are defaults (not lists of allowed values),
+# so we just take type(defaultValue) directly.
+_expectedProblemTypeParamTypes = {
+    key: {type(value)} for key, value in _defaultProblemType.items()
+}
+
+
+def validateProblemTypeParameterTypes(state, srcFile=""):
+  """Validate that every ProblemType parameter has the correct Python type.
+
+  Similar to validateParameterTypes (in Solution.py), but checks ProblemType
+  parameters against the types implied by ``_defaultProblemType``.  A ``bool``
+  where ``int`` is expected (or vice versa) is the most common error.
+
+  Mismatches are collected into the module-level ``_typeMismatchCollector``
+  dict (shared with Solution validation). Call ``printTypeMismatchSummary()``
+  at the end of the build to emit a consolidated warning.
+
+  Args:
+      state: The ProblemType state dict (parameter name -> value).
+      srcFile: The YAML source file path, included in warning messages.
+  """
+  # Import collector infrastructure from Solution inside the function to avoid
+  # circular dependency (Naming → Problem → Solution → Naming).
+  # The collector is shared between Solution and ProblemType validation.
+  from Tensile.SolutionStructs.Solution import _typeMismatchCollector, _skipTypeCheck
+
+  for key, value in state.items():
+    if key not in _expectedProblemTypeParamTypes or key in _skipTypeCheck:
+      continue
+    expectedTypes = _expectedProblemTypeParamTypes[key]
+    actualType = type(value)
+    # Use type() not isinstance() so that bool and int are distinguished
+    if actualType not in expectedTypes:
+      expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
+      collectorKey = (key, actualType.__name__, expectedStr)
+      if collectorKey not in _typeMismatchCollector:
+        _typeMismatchCollector[collectorKey] = {
+          "count": 0,
+          "values": set(),
+          "files": set(),
+        }
+      entry = _typeMismatchCollector[collectorKey]
+      entry["count"] += 1
+      entry["values"].add(repr(value))
+      if srcFile:
+        entry["files"].add(srcFile)
+
 
 class ProblemType(Mapping):
   ########################################
@@ -629,28 +806,49 @@ class ProblemType(Mapping):
   def FromDefaultConfig(printIndexAssignmentInfo: bool):
     return ProblemType(_defaultProblemType, printIndexAssignmentInfo)
 
-  def __init__(self, config, printIndexAssignmentInfo: bool):
+  def __init__(self, config, printIndexAssignmentInfo: bool, srcFile: str = ""):
     self.state = {}
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
+
+    # Validate parameter types against the _defaultProblemType registry
+    validateProblemTypeParameterTypes(self.state, srcFile=srcFile)
 
     # adjusting all data types
     if "DataType" in config:
       self["DataType"]  = DataType(config["DataType"])
       self["DataTypeA"] = self["DataType"]
       self["DataTypeB"] = self["DataType"]
+      self["MacDataTypeA"] = self["DataType"]
+      self["MacDataTypeB"] = self["DataType"]
     else:
       raise Exception("NO data type specified")
       self["DataType"]  = DataType(0)
       self["DataTypeA"] = DataType(0)
       self["DataTypeB"] = DataType(0)
+      self["MacDataTypeA"] = DataType(0)
+      self["MacDataTypeB"] = DataType(0)
+
+    if "MacDataTypeA" in config:
+      self["MacDataTypeA"] = DataType(config["MacDataTypeA"])
+    self["MacDataTypeA"] = getRealDataTypeA(self["MacDataTypeA"])
+
+    if "MacDataTypeB" in config:
+      self["MacDataTypeB"] = DataType(config["MacDataTypeB"])
+    self["MacDataTypeB"] = getRealDataTypeB(self["MacDataTypeB"])
 
     if "DataTypeA" in config:
       self["DataTypeA"] = DataType(config["DataTypeA"])
+    else:
+      self["DataTypeA"] = self["MacDataTypeA"]
+    self["DataTypeA"] = getRealDataTypeA(self["DataTypeA"])
 
     if "DataTypeB" in config:
       self["DataTypeB"] = DataType(config["DataTypeB"])
+    else:
+      self["DataTypeB"] = self["MacDataTypeB"]
+    self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
 
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
@@ -676,6 +874,16 @@ class ProblemType(Mapping):
         else:
           raise Exception("NO compute data type, or dest data type, or data type specified")
           self["DataType"] = DataType(0)
+    self["isMixMode"] = True if not self["Sparse"] and self["MacDataTypeA"].value != self["MacDataTypeB"].value else False
+    if "DataTypeMXSA" in config:
+      self["DataTypeMXSA"] = DataType(config["DataTypeMXSA"])
+    else:
+      self["DataTypeMXSA"] = DataType(DataTypeEnum.E8)
+
+    if "DataTypeMXSB" in config:
+      self["DataTypeMXSB"] = DataType(config["DataTypeMXSB"])
+    else:
+      self["DataTypeMXSB"] = DataType(DataTypeEnum.E8)
 
     # Just like DataTypeE is DestDataType by default; DataTypeAmaxD if ComputeDataType by default.
     # So far we don't have to set it in config yamls
@@ -785,7 +993,7 @@ class ProblemType(Mapping):
         if self["ActivationType"] != 'none' and self["UseE"] == False:
           printWarning("Use E is enabled cause Activation is enabled.")
           self["UseE"] = True
-        elif self["ActivationType"] != 'none' and self["UseE"] == False:
+        elif self["ActivationType"] == 'none' and self["UseE"] == True:
           printWarning("Use E is disabled cause Activation is disabled.")
           self["UseE"] = False
         # if self["UseScaleAlphaVec"]:
@@ -822,11 +1030,12 @@ class ProblemType(Mapping):
   #   See the discussion in ValidParameters.py for validGEMMTypes
   ################################################################################
   def _checkIfSupportedGEMMType(self):
-    inType = self["DataType"]
+    inTypeA = self["MacDataTypeA"]
+    inTypeB = self["MacDataTypeB"]
     outType = self["DestDataType"]
     computeType = self["ComputeDataType"]
 
-    gemmType = ( inType.toChar(), outType.toChar(), computeType.toChar() )
+    gemmType = ( inTypeA.toChar(), inTypeB.toChar(), outType.toChar(), computeType.toChar() )
     if gemmType not in _validGEMMTypes:
       raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
 
@@ -836,9 +1045,15 @@ class ProblemType(Mapping):
     self["IndexAssignmentsA"] = [0, sumIdx] # N
     self["IndexAssignmentsB"] = [sumIdx, 1] # N
     if self.state["Sparse"] == 2:
-      self["IndexAssignmentsMetadata"] = [sumIdx, 1] # N (ref B)
+      if self.state["MetadataLayout"]:
+        self["IndexAssignmentsMetadata"] = [1, sumIdx] # T (ref B)
+      else:
+        self["IndexAssignmentsMetadata"] = [sumIdx, 1] # N (ref B)
     else:
-      self["IndexAssignmentsMetadata"] = [sumIdx, 0] # T (ref A)
+      if self.state["MetadataLayout"]:
+        self["IndexAssignmentsMetadata"] = [0, sumIdx] # N (ref A)
+      else:
+        self["IndexAssignmentsMetadata"] = [sumIdx, 0] # T (ref A)
     if self["TransposeA"]:
       self["IndexAssignmentsA"] = [sumIdx, 0] # T
     if self["TransposeB"]:
@@ -855,6 +1070,11 @@ class ProblemType(Mapping):
     self["IndexAssignmentsLD"][0] = self["NumIndicesC"] + 1
     for i in range(1, len(self["IndexAssignmentsLD"])):
       self["IndexAssignmentsLD"][i] = self["IndexAssignmentsLD"][i-1] + 1
+
+    if self["MXBlockA"]:
+      self["IndexAssignmentsMXSA"] = deepcopy(self["IndexAssignmentsA"])
+    if self["MXBlockB"]:
+      self["IndexAssignmentsMXSB"] = deepcopy(self["IndexAssignmentsB"])
 
   ########################################
   def isGEMM(self):
@@ -921,10 +1141,20 @@ class ProblemType(Mapping):
       if state["IndexAssignmentsA"][i] == state["IndexUnroll"]:
         state["IndexUnrollA"] = i
         break
+    if state["MXBlockA"]:
+      for i in range(0, len(state["IndexAssignmentsMXSA"])):
+        if state["IndexAssignmentsMXSA"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSA"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsB"])):
       if state["IndexAssignmentsB"][i] == state["IndexUnroll"]:
         state["IndexUnrollB"] = i
         break
+    if state["MXBlockB"]:
+      for i in range(0, len(state["IndexAssignmentsMXSB"])):
+        if state["IndexAssignmentsMXSB"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSB"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsMetadata"])):
       if state["IndexAssignmentsMetadata"][i] == state["IndexUnroll"]:
         state["IndexUnrollM"] = i
@@ -938,7 +1168,11 @@ class ProblemType(Mapping):
     else:
       dimList = state["IndicesFree"]
     state["Index01A"] = [i for i in state["IndexAssignmentsA"] if i in dimList][0]
+    if state["MXBlockA"]:
+      state["Index01MXSA"] = [i for i in state["IndexAssignmentsMXSA"] if i in dimList][0]
     state["Index01B"] = [i for i in state["IndexAssignmentsB"] if i in dimList][0]
+    if state["MXBlockB"]:
+      state["Index01MXSB"] = [i for i in state["IndexAssignmentsMXSB"] if i in dimList][0]
     #print2("Index01A: %u" % state["Index01A"])
     #print2("Index01B: %u" % state["Index01B"])
     # Store code is optimized for 0 as the fastest-moving in memory
@@ -964,14 +1198,18 @@ class ProblemType(Mapping):
     unrollIdxA = state["IndexAssignmentsA"].index(state["IndexUnroll"])
     unrollIdxB = state["IndexAssignmentsB"].index(state["IndexUnroll"])
     state["TLUA"] = strideIdxA < unrollIdxA
+    if state["MXBlockA"]:
+      state["TLUMXSA"] = state["TLUA"]
     state["TLUB"] = strideIdxB < unrollIdxB
+    if state["MXBlockB"]:
+      state["TLUMXSB"] = state["TLUB"]
     #state["TLUB"] = True # hack
 
     if printIndexAssignmentInfo:
       print("TLUA:  %s (stridePosA(%d) <? unrollIdxA(%d)" % \
-			(state["TLUA"], strideIdxA, unrollIdxA))
+           (state["TLUA"], strideIdxA, unrollIdxA))
       print("TLUB:  %s (stridePosB(%d) <? unrollIdxB(%d)" % \
-	  		(state["TLUB"], strideIdxB, unrollIdxB))
+           (state["TLUB"], strideIdxB, unrollIdxB))
       print("Index01A:  %s" % state["Index01A"])
       print("Index01B:  %s" % state["Index01B"])
     #unrollDimStrideGreaterThanTileDimStrideA = TLUA = !transA = fast
@@ -1005,19 +1243,29 @@ class ProblemType(Mapping):
       name.append("C")
 
     # DataTypes
-    if self["DataType"] != self["DataTypeA"] or self["DataType"] != self["DataTypeB"]:
+    macTypeStr = self["MacDataTypeA"].toChar()
+    if self["MacDataTypeA"] != self["MacDataTypeB"]:
+      macTypeStr = self["MacDataTypeA"].toChar() + self["MacDataTypeB"].toChar()
+    if self["MacDataTypeA"] != self["DataTypeA"] or self["MacDataTypeB"] != self["DataTypeB"]:
       name.append(self["DataTypeA"].toChar() + self["DataTypeB"].toChar())
-    name.append(self["DataType"].toChar()) # Type of A/B
+    name.append(macTypeStr) # Type of A/B, split Type of A/B when A!=B
 
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
-    gemmType = (self["DataType"].toChar(),self["DestDataType"].toChar(),self["ComputeDataType"].toChar() )
+    gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
+                self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
     if gemmType in _HPATypes:
       name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
+
+    if self["MXBlockA"]:
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+
+    if self["MXBlockB"]:
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
 
     if self["SwizzleTensorA"]:
       name.append("STA")
@@ -1054,9 +1302,9 @@ class ProblemType(Mapping):
       name.append("AmaxD")
     if self["Sparse"]:
       if self["Sparse"] == 2:
-        name.append("SPB")
+        name.append("SPBML%d"%(self["MetadataLayout"]))
       else:
-        name.append("SPA")
+        name.append("SPAML%d"%(self["MetadataLayout"]))
 
     # precision and other
     # name += "_SB" if self["StridedBatched"] else "_GB"
@@ -1126,9 +1374,8 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   bList = []
   for d in ["DataType", "ComputeDataType", "DestDataType"]:
     dtype = DataType(problem[d])
-    # filter out int8/f8/b8, because it is not supported by bias datatype
-    # TODO
-    if not dtype.isInt8() and not dtype.is8bitFloat():
+    # filter out sizeof(dtype) <= 1, because it is not supported by bias datatype
+    if dtype.numBytes() > 1:
       bList.append(dtype)
 
   biasDataTypeList = list(set(bList))

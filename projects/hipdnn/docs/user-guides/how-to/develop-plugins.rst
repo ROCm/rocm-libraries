@@ -34,11 +34,20 @@ hipDNN provides several C++ SDK libraries for plugin development.
 Data SDK (``data_sdk``)
 -----------------------
 
-The Data SDK contains the FlatBuffers schemas and data structures for graph representation. It includes:
+The Data SDK contains shared types and utilities used across hipDNN. It includes:
+
+- Type helpers (for example, ``half`` and ``bfloat16``).
+- Tensor and memory utilities.
+- The engine name registry.
+
+FlatBuffers SDK (``flatbuffers_sdk``)
+-------------------------------------
+
+The FlatBuffers SDK contains the FlatBuffers schemas, generated headers, and graph wrapper classes. It includes:
 
 - FlatBuffers schema definitions for graphs, nodes, and attributes.
-- Data structures for deserializing serialized graphs.
-- Utilities for working with graph data.
+- Generated headers under ``hipdnn_flatbuffers_sdk/data_objects/``.
+- Wrapper classes (``GraphWrapper``, ``NodeWrapper``, ``IEngineConfig``) for working with serialized graphs.
 
 Plugin SDK (``plugin_sdk``)
 ---------------------------
@@ -70,7 +79,7 @@ Plugin API
 The plugin API defines how kernel engine plugins interact with hipDNN:
 
 - **Graph processing**: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers.
-- **Data SDK objects**: Plugins use Data SDK objects to deserialize and process graphs.
+- **FlatBuffers SDK objects**: Plugins use FlatBuffers SDK objects to deserialize and process graphs.
 - **Capability reporting**: Plugins analyze graphs and report whether they can execute them.
 - **Execution interface**: Plugins provide execution methods for supported operations.
 
@@ -222,7 +231,7 @@ When building an external plugin, the hipDNN Data SDK provides CMake variables t
 
 - Absolute path: (``HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR``):
 
-  - Hardcoded at CMake configure time.
+  - Computed at ``find_package()`` time relative to the installed hipDNN location.
   - This is intended for *developer use only*.
 
 - Relative path (``HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR``):

@@ -667,6 +667,34 @@ namespace rocisa
         }
     };
 
+    struct SSubU64 : public CommonInstruction
+    {
+        SSubU64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_sub_u64");
+        }
+
+        SSubU64(const SSubU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSubU64>(*this);
+        }
+    };
+
     struct SGetPCB64 : public CommonInstruction
     {
         SGetPCB64(const std::shared_ptr<Container>& dst, const std::string& comment = "")
@@ -1033,6 +1061,22 @@ namespace rocisa
         {
             return std::make_shared<SCMovB32>(*this);
         }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src:
+            //   if (SCC == 1) {
+            //     s0 = s1
+            //   } else {
+            //     s0 = s0
+            //   }
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+            {
+                params.push_back(dst);
+            }
+            return params;
+        }
     };
 
     struct SCMovB64 : public CommonInstruction
@@ -1055,6 +1099,20 @@ namespace rocisa
         {
             return std::make_shared<SCMovB64>(*this);
         }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src:
+            //   if (SCC == 1) {
+            //     s0 = s1
+            //   } else {
+            //     s0 = s0
+            //   }
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
+        }
     };
 
     struct SFf1B32 : public CommonInstruction
@@ -1076,6 +1134,34 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SFf1B32>(*this);
+        }
+    };
+
+    struct SBfeU32 : public CommonInstruction
+    {
+        SBfeU32(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_bfe_u32");
+        }
+
+        SBfeU32(const SBfeU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBfeU32>(*this);
         }
     };
 
@@ -1110,15 +1196,10 @@ namespace rocisa
     struct SFlbitI32B32 : public CommonInstruction
     {
         SFlbitI32B32(const std::shared_ptr<Container>& dst,
-                const InstructionInput&           src,
-                const std::string&                comment = "")
-            : CommonInstruction(InstType::INST_B32,
-                                dst,
-                                {src},
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                comment)
+                     const InstructionInput&           src,
+                     const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_flbit_i32_b32");
         }
@@ -1291,6 +1372,16 @@ namespace rocisa
             return {prior};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {prior};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr + " " + std::to_string(prior));
@@ -1302,12 +1393,38 @@ namespace rocisa
 
     struct SBarrier : public Instruction
     {
-        SBarrier(const std::string& comment = "")
+        SBarrier(const bool separate = false, const bool wait = false,
+                 const bool clusterBarrier = false, const std::string& comment = "")
             : Instruction(InstType::INST_NOTYPE, comment)
+            , separate(separate)
+            , wait(wait)
+            , clusterBarrier(clusterBarrier)
+            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
+            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
         {
-            if(getAsmCaps()["HasNewBarrier"])
+            if(hasNewBarrier)
             {
-                setInst("s_barrier_signal -1 \ns_barrier_wait -1");
+                int code = -1;
+                if (hasClusterBarrier and clusterBarrier)
+                {
+                    code = -3;
+                }
+
+                if(separate)
+                {
+                    if(wait)
+                    {
+                        setInst("s_barrier_wait " + std::to_string(code));
+                    }
+                    else
+                    {
+                        setInst("s_barrier_signal " + std::to_string(code));
+                    }
+                }
+                else
+                {
+                    setInst("s_barrier_signal " + std::to_string(code) + "\ns_barrier_wait " + std::to_string(code));
+                }
             }
             else
             {
@@ -1317,6 +1434,11 @@ namespace rocisa
 
         SBarrier(const SBarrier& other)
             : Instruction(other)
+            , separate(other.separate)
+            , wait(other.wait)
+            , clusterBarrier(other.clusterBarrier)
+            , hasNewBarrier(other.hasNewBarrier)
+            , hasClusterBarrier(other.hasClusterBarrier)
         {
         }
 
@@ -1326,6 +1448,76 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+
+        bool getSeparate() const { return separate; }
+        bool getWait() const { return wait; }
+        bool getClusterBarrier() const { return clusterBarrier; }
+        bool getHasNewBarrier() const { return hasNewBarrier; }
+        bool getHasClusterBarrier() const { return hasClusterBarrier; }
+
+    private:
+        // Constructor arguments preserved so downstream consumers (e.g. the
+        // rocisa -> stinkytofu conversion) can recover the requested barrier
+        // form without parsing the textual instStr.
+        bool separate;
+        bool wait;
+        bool clusterBarrier;
+        // Snapshot of the asm caps at construction time so consumers see the
+        // exact form that was emitted into instStr.
+        bool hasNewBarrier;
+        bool hasClusterBarrier;
+    };
+
+    // Virtual scheduling fence: emits no assembly, but carries MemTokenData
+    // so the StinkyTofu DAG scheduler can enforce ordering between instruction
+    // groups.  Analogous to LLVM's 'fence' instruction.
+    struct SSchedulingFence : public Instruction
+    {
+        SSchedulingFence(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("scheduling_fence");
+        }
+
+        SSchedulingFence(const SSchedulingFence& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSchedulingFence>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {};
         }
@@ -1359,9 +1551,123 @@ namespace rocisa
             return {};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr);
+        }
+    };
+
+    // global_wb scope:SCOPE_DEV emits a device-scope writeback fence on
+    // archs that have an L2 partitioned across CUs/XCDs (e.g. gfx1250). It
+    // has no register operands; the only encoded modifier is the cache
+    // scope. Used by the StreamK partial-tile release sequence.
+    struct GlobalWb : public Instruction
+    {
+        CacheScope scope;
+
+        GlobalWb(CacheScope scope = CacheScope::SCOPE_DEV, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , scope(scope)
+        {
+            setInst("global_wb");
+        }
+
+        GlobalWb(const GlobalWb& other)
+            : Instruction(other)
+            , scope(other.scope)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalWb>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
+    // global_inv scope:SCOPE_DEV emits a device-scope invalidate fence on
+    // archs whose L2 is partitioned across CUs/XCDs (e.g. gfx1250). It has
+    // no register operands; the only encoded modifier is the cache scope.
+    // Used by the StreamK partial-tile acquire sequence.
+    struct GlobalInv : public Instruction
+    {
+        CacheScope scope;
+
+        GlobalInv(CacheScope scope = CacheScope::SCOPE_DEV, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , scope(scope)
+        {
+            setInst("global_inv");
+        }
+
+        GlobalInv(const GlobalInv& other)
+            : Instruction(other)
+            , scope(other.scope)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalInv>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            return formatWithComment(kStr);
         }
     };
 
@@ -1390,13 +1696,80 @@ namespace rocisa
             return {waitState};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {waitState};
+        }
+
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             return formatWithComment(instStr + " " + std::to_string(waitState));
         }
 
     private:
         int waitState;
+    };
+
+    struct VNop : public Instruction
+    {
+        VNop(int count, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , count(count)
+        {
+            setInst("v_nop");
+        }
+
+        VNop(const VNop& other)
+            : Instruction(other)
+            , count(other.count)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VNop>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {count};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {count};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr;
+            if(count > 0)
+            {
+                setMsb(kStr, {}, nullptr);
+            }
+
+            std::string resultStr = "";
+            for(int i = 0; i < count; i++)
+            {
+                resultStr += formatWithComment(instStr);
+            }
+            return resultStr;
+        }
+
+    private:
+        int count;
     };
 
     struct SEndpgm : public Instruction
@@ -1418,6 +1791,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {};
         }
@@ -1453,8 +1836,74 @@ namespace rocisa
             return {simm16};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {simm16};
+        }
+
         std::string toString() const override
         {
+            return formatWithComment(instStr + " " + std::to_string(simm16));
+        }
+
+    private:
+        int simm16;
+    };
+
+    struct SSetVgprMsb : public Instruction
+    {
+        SSetVgprMsb(const int simm16, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , simm16(simm16)
+        {
+            setInst("s_set_vgpr_msb");
+        }
+
+        SSetVgprMsb(const int          msbSrc0,
+                    const int          msbSrc1,
+                    const int          msbSrc2,
+                    const int          msbDst,
+                    const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , simm16((msbDst << 6) + (msbSrc2 << 4) + (msbSrc1 << 2) + msbSrc0)
+        {
+            setInst("s_set_vgpr_msb");
+        }
+
+        SSetVgprMsb(const SSetVgprMsb& other)
+            : Instruction(other)
+            , simm16(other.simm16)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSetVgprMsb>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {simm16};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {simm16};
+        }
+
+        std::string toString() const override
+        {
+            rocIsa::getInstance().setVgprMsb(simm16);
             return formatWithComment(instStr + " " + std::to_string(simm16));
         }
 
@@ -1531,7 +1980,7 @@ namespace rocisa
     struct _SWaitCnt : public Instruction
     {
         _SWaitCnt(int lgkmcnt = -1, int vmcnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , lgkmcnt(lgkmcnt)
             , vmcnt(vmcnt)
         {
@@ -1550,6 +1999,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {lgkmcnt, vmcnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {lgkmcnt, vmcnt};
         }
@@ -1578,6 +2037,16 @@ namespace rocisa
             return formatWithComment("s_waitcnt " + waitStr);
         }
 
+        int getLgkmcnt() const
+        {
+            return lgkmcnt;
+        }
+
+        int getVmcnt() const
+        {
+            return vmcnt;
+        }
+
     private:
         int lgkmcnt;
         int vmcnt;
@@ -1586,7 +2055,7 @@ namespace rocisa
     struct _SWaitCntVscnt : public Instruction
     {
         _SWaitCntVscnt(int vscnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , vscnt(vscnt)
         {
         }
@@ -1607,10 +2076,26 @@ namespace rocisa
             return {vscnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {vscnt};
+        }
+
         std::string toString() const override
         {
             int maxVscnt = getAsmCaps()["MaxVscnt"];
-            return formatWithComment("s_waitcnt_vscnt null " + std::to_string(std::min(vscnt, maxVscnt)));
+            return formatWithComment("s_waitcnt_vscnt null "
+                                     + std::to_string(std::min(vscnt, maxVscnt)));
+        }
+
+        int getVscnt() const
+        {
+            return vscnt;
         }
 
     private:
@@ -1620,7 +2105,7 @@ namespace rocisa
     struct _SWaitStorecnt : public Instruction
     {
         _SWaitStorecnt(int storecnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , storecnt(storecnt)
         {
         }
@@ -1641,10 +2126,28 @@ namespace rocisa
             return {storecnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {storecnt};
+        }
+
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxStorecnt = getAsmCaps()["MaxStorecnt"];
-            return formatWithComment("s_wait_storecnt " + std::to_string(std::min(storecnt, maxStorecnt)));
+            return formatWithComment("s_wait_storecnt "
+                                     + std::to_string(std::min(storecnt, maxStorecnt)));
+        }
+
+        int getStorecnt() const
+        {
+            return storecnt;
         }
 
     private:
@@ -1654,7 +2157,7 @@ namespace rocisa
     struct _SWaitLoadcnt : public Instruction
     {
         _SWaitLoadcnt(int loadcnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , loadcnt(loadcnt)
         {
         }
@@ -1675,10 +2178,28 @@ namespace rocisa
             return {loadcnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {loadcnt};
+        }
+
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxLoadcnt = getAsmCaps()["MaxLoadcnt"];
-            return formatWithComment("s_wait_loadcnt " + std::to_string(std::min(loadcnt, maxLoadcnt)));
+            return formatWithComment("s_wait_loadcnt "
+                                     + std::to_string(std::min(loadcnt, maxLoadcnt)));
+        }
+
+        int getLoadcnt() const
+        {
+            return loadcnt;
         }
 
     private:
@@ -1688,7 +2209,7 @@ namespace rocisa
     struct _SWaitKMcnt : public Instruction
     {
         _SWaitKMcnt(int kmcnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , kmcnt(kmcnt)
         {
         }
@@ -1709,8 +2230,25 @@ namespace rocisa
             return {kmcnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {kmcnt};
+        }
+
+        int getKmcnt() const
+        {
+            return kmcnt;
+        }
+
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxKmcnt = getAsmCaps()["MaxKmcnt"];
             return formatWithComment("s_wait_kmcnt " + std::to_string(std::min(kmcnt, maxKmcnt)));
         }
@@ -1722,7 +2260,7 @@ namespace rocisa
     struct _SWaitDscnt : public Instruction
     {
         _SWaitDscnt(int dscnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , dscnt(dscnt)
         {
         }
@@ -1743,14 +2281,91 @@ namespace rocisa
             return {dscnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dscnt};
+        }
+
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxDscnt = getAsmCaps()["MaxDscnt"];
             return formatWithComment("s_wait_dscnt " + std::to_string(std::min(dscnt, maxDscnt)));
         }
 
+        int getDscnt() const
+        {
+            return dscnt;
+        }
+
     private:
         int dscnt;
+    };
+
+    // s_wait_xcnt N drains in-flight VMEM ops to defeat XNACK-replay
+    // reordering before a subsequent volatile/atomic VMEM op. Required on
+    // archs whose `RequiresXCntForVolatileVMEM` arch capability is set
+    // (e.g. gfx1250). The default `xcnt = 0` ("wait for all in-flight
+    // XNACK-replay tracking to drain") differs from the `-1` sentinel used
+    // by sibling `_SWait*cnt` classes because those are only emitted as
+    // members of the `SWaitCnt` composite (which uses `-1` to mean "skip
+    // this counter"); `SWaitXCnt` is a standalone wait, so the most useful
+    // default is the actual drain-everything immediate.
+    struct SWaitXCnt : public Instruction
+    {
+        SWaitXCnt(int xcnt = 0, const std::string& comment = "")
+            : Instruction(InstType::INST_SWAIT, comment)
+            , xcnt(xcnt)
+        {
+        }
+
+        SWaitXCnt(const SWaitXCnt& other)
+            : Instruction(other)
+            , xcnt(other.xcnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitXCnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {xcnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {xcnt};
+        }
+
+        int getXcnt() const
+        {
+            return xcnt;
+        }
+
+        std::string toString() const override
+        {
+            const auto caps    = getAsmCaps();
+            const auto it      = caps.find("MaxXcnt");
+            const int  maxXcnt = (it != caps.end()) ? it->second : 63;
+            return formatWithComment("s_wait_xcnt " + std::to_string(std::min(xcnt, maxXcnt)));
+        }
+
+    private:
+        int xcnt;
     };
 
     struct SWaitCnt : public CompositeInstruction
@@ -1814,6 +2429,16 @@ namespace rocisa
             return {};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             int         vlcnt   = this->vlcnt;
@@ -1838,7 +2463,9 @@ namespace rocisa
 
             if(getAsmCaps()["SeparateVscnt"])
             {
-                int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
+                int lgkmcnt = (dscnt != -1 || kmcnt != -1)
+                                  ? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0)
+                                  : -1;
                 int vmcnt   = vlcnt; // With SeparateVscnt, vmcnt only counts load instructions
                 if(vlcnt != -1 || lgkmcnt != -1)
                 {
@@ -1870,8 +2497,12 @@ namespace rocisa
             }
             else
             {
-                int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
-                int vmcnt   = (vscnt != -1 || vlcnt != -1)? (vscnt != -1 ? vscnt : 0) + (vlcnt != -1 ? vlcnt : 0) : -1;
+                int lgkmcnt = (dscnt != -1 || kmcnt != -1)
+                                  ? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0)
+                                  : -1;
+                int vmcnt   = (vscnt != -1 || vlcnt != -1)
+                                  ? (vscnt != -1 ? vscnt : 0) + (vlcnt != -1 ? vlcnt : 0)
+                                  : -1;
                 if(vmcnt != -1 || lgkmcnt != -1)
                 {
                     instructions.push_back(std::make_shared<_SWaitCnt>(lgkmcnt, vmcnt, comment));
@@ -1882,6 +2513,50 @@ namespace rocisa
 
     private:
         bool waitAll;
+    };
+
+    struct SWaitTensorcnt : public Instruction
+    {
+        SWaitTensorcnt(int tensorcnt = 0, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , tensorcnt(tensorcnt)
+        {
+        }
+
+        SWaitTensorcnt(const SWaitTensorcnt& other)
+            : Instruction(other)
+            , tensorcnt(other.tensorcnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitTensorcnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {tensorcnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {tensorcnt};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
+            return formatWithComment("s_wait_tensorcnt " + std::to_string(tensorcnt));
+        }
+
+        int tensorcnt;
     };
 
     /*
@@ -1943,6 +2618,17 @@ namespace rocisa
             return {va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc, va_vcc, sa_sdst};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // ignore va_vdst..sa_sdst since they are not operands in s_wait_alu instruction.
+            return {};
+        }
+
         std::string toString() const override
         {
             if(!getArchCaps()["HasSchedMode"])
@@ -1968,6 +2654,41 @@ namespace rocisa
                 return "";
 
             return formatWithComment(instStr + result);
+        }
+
+        int getVaVdst() const
+        {
+            return va_vdst;
+        }
+
+        int getVaSdst() const
+        {
+            return va_sdst;
+        }
+
+        int getVaSsrc() const
+        {
+            return va_ssrc;
+        }
+
+        int getHoldCnt() const
+        {
+            return hold_cnt;
+        }
+
+        int getVmVsrc() const
+        {
+            return vm_vsrc;
+        }
+
+        int getVaVcc() const
+        {
+            return va_vcc;
+        }
+
+        int getSaSdst() const
+        {
+            return sa_sdst;
         }
 
     private:
@@ -2046,6 +2767,17 @@ namespace rocisa
             }
 
             return {static_cast<int>(instid0type), instid0cnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // s_delay_alu use a single immediate 16-bit encoded value.
+            return {};
         }
 
         std::string toString() const override
@@ -3086,6 +3818,15 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMacF32>(*this);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src: dst = src0 * src1 + dst
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
         }
 
     private:
@@ -4556,9 +5297,10 @@ namespace rocisa
         VMovB32(const std::shared_ptr<Container>&   dst,
                 const InstructionInput&             src,
                 const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
-                const std::string&                  comment = "")
+                const std::string&                  comment = "",
+                const std::optional<DPPModifiers>&  dpp     = std::nullopt)
             : CommonInstruction(
-                InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, dpp, sdwa, std::nullopt, comment)
         {
             setInst("v_mov_b32");
         }
@@ -4657,9 +5399,9 @@ namespace rocisa
     struct VSwapB32 : public CommonInstruction
     {
         VSwapB32(const std::shared_ptr<Container>&   dst,
-                const InstructionInput&             src,
-                const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
-                const std::string&                  comment = "")
+                 const InstructionInput&             src,
+                 const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
+                 const std::string&                  comment = "")
             : CommonInstruction(
                 InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
         {
@@ -4674,6 +5416,67 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VSwapB32>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // both dst and src are in dsts.
+            auto dsts = CommonInstruction::getDstParams();
+            dsts.insert(dsts.end(), srcs.begin(), srcs.end());
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // both dst and src are in srcs.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
+        }
+    };
+
+    struct VPermlane16SwapB32 : public CommonInstruction
+    {
+        VPermlane16SwapB32(const std::shared_ptr<Container>&   dst,
+                const InstructionInput&             src,
+                const std::string&                  comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_permlane16_swap_b32");
+        }
+
+        VPermlane16SwapB32(const VPermlane16SwapB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPermlane16SwapB32>(*this);
+        }
+    };
+
+    struct VPermlane32SwapB32 : public CommonInstruction
+    {
+        VPermlane32SwapB32(const std::shared_ptr<Container>&   dst,
+                const InstructionInput&             src,
+                const std::string&                  comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_permlane32_swap_b32");
+        }
+
+        VPermlane32SwapB32(const VPermlane32SwapB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPermlane32SwapB32>(*this);
         }
     };
 
@@ -4884,11 +5687,16 @@ namespace rocisa
     struct VReadlaneB32 : public CommonInstruction
     {
         VReadlaneB32(const std::shared_ptr<Container>& dst,
-                          const InstructionInput&           src0,
-                          const InstructionInput&           src1,
-                          const std::string&                comment = "")
-            : CommonInstruction(
-                                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+                     const InstructionInput&           src0,
+                     const InstructionInput&           src1,
+                     const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
         {
             setInst("v_readlane_b32");
         }
@@ -4907,11 +5715,16 @@ namespace rocisa
     struct VWritelaneB32 : public CommonInstruction
     {
         VWritelaneB32(const std::shared_ptr<Container>& dst,
-                          const InstructionInput&           src0,
-                          const InstructionInput&           src1,
-                          const std::string&                comment = "")
-            : CommonInstruction(
-                                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+                      const InstructionInput&           src0,
+                      const InstructionInput&           src1,
+                      const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
         {
             setInst("v_writelane_b32");
         }

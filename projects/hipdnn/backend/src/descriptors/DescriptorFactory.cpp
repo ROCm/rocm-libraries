@@ -24,11 +24,18 @@
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "RMSNormBackwardOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
-#include "SdpaBpropOperationDescriptor.hpp"
-#include "SdpaFpropOperationDescriptor.hpp"
+#include "ReductionOperationDescriptor.hpp"
+#include "ResampleFwdOperationDescriptor.hpp"
+#include "SdpaBwdOperationDescriptor.hpp"
+#include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
+// Required: EngineHeuristicDescriptor holds std::unique_ptr<SelectionHeuristic>
+// via forward declaration, so the complete type must be visible where
+// make_shared<EngineHeuristicDescriptor>() instantiates the destructor.
+#include "heuristics/SelectionHeuristic.hpp"
 #include "logging/Logging.hpp"
 
 namespace hipdnn_backend
@@ -85,7 +92,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
         privateDesc = std::make_shared<PointwiseOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
+    case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT:
@@ -94,17 +101,17 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormInferenceVarianceExtOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT:
+    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR:
         privateDesc = std::make_shared<BlockScaleQuantizeOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT:
+    case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR:
         privateDesc = std::make_shared<MatmulOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT:
-        privateDesc = std::make_shared<SdpaFpropOperationDescriptor>();
+    case HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR:
+        privateDesc = std::make_shared<SdpaFwdOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<LayernormOperationDescriptor>();
@@ -112,14 +119,23 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT:
+    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR:
         privateDesc = std::make_shared<BlockScaleDequantizeOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<CustomOpOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT:
-        privateDesc = std::make_shared<SdpaBpropOperationDescriptor>();
+    case HIPDNN_BACKEND_OPERATION_SDPA_BWD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<SdpaBwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
+        privateDesc = std::make_shared<ReductionOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
+        privateDesc = std::make_shared<ResampleFwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<RMSNormBackwardOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -148,6 +164,23 @@ void DescriptorFactory::createGraphExt(hipdnnBackendDescriptor_t* descriptor,
     *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
 
     HIPDNN_BACKEND_LOG_INFO("Created graph descriptor: {:p}", static_cast<void*>(*descriptor));
+}
+
+void DescriptorFactory::createGraphFromJsonExt(hipdnnBackendDescriptor_t* descriptor,
+                                               const char* jsonGraph,
+                                               size_t jsonByteSize)
+{
+    THROW_IF_NULL(
+        descriptor, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "hipdnnBackendDescriptor_t* is null.");
+    THROW_IF_NULL(jsonGraph, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "jsonGraph is null.");
+    THROW_IF_TRUE(jsonByteSize == 0, HIPDNN_STATUS_BAD_PARAM, "jsonByteSize is 0.");
+
+    auto graphDescriptor = std::make_shared<GraphDescriptor>();
+    GraphDescriptor::createFromJsonGraph(*graphDescriptor, jsonGraph, jsonByteSize);
+    *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
+
+    HIPDNN_BACKEND_LOG_INFO("Created graph descriptor from JSON: {:p}",
+                            static_cast<void*>(*descriptor));
 }
 
 void DescriptorFactory::destroy(hipdnnBackendDescriptor_t descriptor)

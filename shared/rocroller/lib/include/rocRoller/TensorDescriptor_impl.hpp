@@ -394,7 +394,6 @@ namespace rocRoller
                                     T                                          value)
     {
         commandArgs.setArgument(tag, ArgumentType::Value, value);
-        commandArgs.setArgument(tag, ArgumentType::Limit, desc.totalLogicalElements());
 
         auto const& sizes = desc.sizes();
         for(size_t i = 0; i < sizes.size(); i++)

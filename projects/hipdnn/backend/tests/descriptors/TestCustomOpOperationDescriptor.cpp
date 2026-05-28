@@ -9,9 +9,10 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/custom_op_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/CustomOpConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <algorithm>
 #include <array>
@@ -23,8 +24,9 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestCustomOpOperationDescriptor : public ::testing::Test
 {
@@ -100,10 +102,18 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<CustomOpOperationDescriptor>();
-        _input0 = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_0, {2, 3}, {3, 1});
-        _input1 = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_1, {2, 3}, {3, 1});
-        _output0 = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0, {2, 3}, {3, 1});
-        _output1 = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_1, {2, 3}, {3, 1});
+        _input0 = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_0,
+                                        toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                        toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+        _input1 = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_1,
+                                        toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                        toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+        _output0 = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
+                                         toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                         toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+        _output1 = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_1,
+                                         toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                         toVec(K_CUSTOM_OP_TENSOR_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -137,16 +147,16 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizeWithRequiredAttributes)
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
-TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutInputs)
+TEST_F(TestCustomOpOperationDescriptor, FinalizeSucceedsWithoutInputs)
 {
     setAllAttributesExcept({HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 }
 
-TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutOutputs)
+TEST_F(TestCustomOpOperationDescriptor, FinalizeSucceedsWithoutOutputs)
 {
     setAllAttributesExcept({HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 }
 
 TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutCustomOpId)
