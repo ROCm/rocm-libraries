@@ -195,6 +195,8 @@ Real precisions: &real_precisions
     { x_type: i8_r, y_type: i8_r, compute_type: f32_r }
   - &float16_float16_float32_xyt_precision
     { x_type: f16_r, y_type: f16_r, compute_type: f32_r }
+  - &bfloat16_bfloat16_float32_xyt_precision
+    { x_type: bf16_r, y_type: bf16_r, compute_type: f32_r }
   - &int8_int8_int32_int32_axyt_precision
     { a_type: i8_r, x_type: i8_r, y_type: i32_r, compute_type: i32_r }
   - &int8_int8_float32_float32_axyt_precision
@@ -276,6 +278,12 @@ C precisions complex and real: &double_only_precisions_complex_real
   - *double_precision
   - *double_precision_complex
 
+C spvv mixed precisions: &spvv_mixed_precisions
+  - *int8_int8_int32_xyt_precision
+  - *int8_int8_float32_xyt_precision
+  - *float16_float16_float32_xyt_precision
+  - *bfloat16_bfloat16_float32_xyt_precision
+  
 C precisions scatter: &scatter_precisions
   - *int8_precision
   - *half_precision
