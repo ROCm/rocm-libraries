@@ -27,6 +27,7 @@
 #pragma once
 
 #include "hipblaslt_vector.hpp"
+#include <cmath>
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
@@ -524,16 +525,70 @@ typename std::enable_if<std::is_same<int8_t, T>::value, T>::type saturate_cast(A
     }
 }
 
+std::vector<void*> benchmark_allocation();
+int32_t            hipblaslt_get_arch_major();
+// Full arch number: gfx1201 -> 1201, gfx1250 -> 1250, gfx950 -> 950, etc.
+int32_t            hipblaslt_get_arch_full();
+
+// gfx12 sets MODE.FP16_OVFL=1 via .amdhsa_fp16_overflow=1. This affects two
+// HW paths differently:
+//
+//   VALU cvt rule (v_cvt_f16_f32, v_cvt_pk_f16_f32):
+//     finite overflow -> +/- fp16_max; +/-Inf preserved; NaN preserved.
+//     Applies on every gfx12 arch.
+//
+//   WMMA/SWMMAC rule (v_wmma_f32_*_f16 etc.):
+//     a *large result* (including the Inf produced by Inf input) becomes
+//     +/- maxValue. So fp16 Inf input -> fp32_max in the accumulator.
+//     Applies on gfx12 arches whose fp16 GEMM kernels lower to WMMA --
+//     gfx1250 today. gfx1200/1201 fp16 GEMM uses VALU FMA (preserves Inf)
+//     so the WMMA rule does NOT apply there.
+//
+// Cached because saturate_cast runs in the CPU reference inner loop.
+
+// True when fp32->fp16/bf16 finite overflow on the GPU saturates to +/-max
+// (VALU cvt rule). All gfx12.
+inline bool hipblaslt_fp16_hw_saturation_enabled()
+{
+    static const bool enabled = hipblaslt_get_arch_major() == 12;
+    return enabled;
+}
+
+// True when the GPU GEMM path also turns +/-Inf into +/-max (WMMA rule).
+// Currently gfx1250 only. Add other arches here as their fp16/bf16 kernels
+// migrate to WMMA. Always implies hipblaslt_fp16_hw_saturation_enabled().
+inline bool hipblaslt_fp16_wmma_inf_clamp_enabled()
+{
+    static const bool enabled = []() {
+        if(!hipblaslt_fp16_hw_saturation_enabled())
+            return false;
+        const int32_t arch = hipblaslt_get_arch_full();
+        return arch == 1250;
+    }();
+    return enabled;
+}
+
 /* ==================================================================== */
 /*! \brief For common numerical types, to convert a value to such type. */
 template <typename T, typename Accumulator>
 typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(Accumulator val)
 {
+    if constexpr(std::is_same_v<T, hipblasLtHalf>
+                 && (std::is_same_v<Accumulator, float> || std::is_same_v<Accumulator, double>))
+    {
+        return hipblaslt_cvt_float_to_half(static_cast<float>(val),
+                                           hipblaslt_fp16_hw_saturation_enabled(),
+                                           hipblaslt_fp16_wmma_inf_clamp_enabled());
+    }
+    if constexpr(std::is_same_v<T, hipblasLtBfloat16>
+                 && (std::is_same_v<Accumulator, float> || std::is_same_v<Accumulator, double>))
+    {
+        return hipblaslt_cvt_float_to_bfloat16(static_cast<float>(val),
+                                               hipblaslt_fp16_hw_saturation_enabled(),
+                                               hipblaslt_fp16_wmma_inf_clamp_enabled());
+    }
     return static_cast<T>(val);
 }
-
-std::vector<void*> benchmark_allocation();
-int32_t            hipblaslt_get_arch_major();
 void hipblaslt_print_version();
 
 /* ==================================================================== */
