@@ -7,8 +7,9 @@ Unit tests for TensileUpdateLibrary.py
 
 import pytest
 import os
+import yaml
 import tempfile
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from enum import Enum
 
 
@@ -35,15 +36,8 @@ class MockF32XdlMathOp(Enum):
 class TestUpdateLogic:
     """Test UpdateLogic function"""
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.writeYAML')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.readYAML')
-    def test_updates_logic_file_basic(self, mock_read, mock_parse, mock_ensure, mock_write):
-        """UpdateLogic should read, update, and write library logic file"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
-
-        # Create mock problem type
+    def create_mock_problem_type(self):
+        """Helper to create mock problem type with state"""
         mock_problem_type = Mock()
         mock_problem_type.state = {
             "DataType": MockDataType.Float,
@@ -60,237 +54,206 @@ class TestUpdateLogic:
             "ActivationType": MockActivationType.None_,
             "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
         }
+        return mock_problem_type
 
-        # Create mock solution
+    def create_mock_solution(self, isa=(9, 0, 6)):
+        """Helper to create mock solution"""
         mock_solution = Mock()
-        mock_solution_problem_type = Mock()
-        mock_solution_problem_type.state = {
-            "DataType": MockDataType.Float,
-            "MacDataTypeA": MockDataType.Float,
-            "MacDataTypeB": MockDataType.Float,
-            "DataTypeA": MockDataType.Float,
-            "DataTypeB": MockDataType.Float,
-            "DataTypeE": MockDataType.Float,
-            "DataTypeAmaxD": MockDataType.Float,
-            "DestDataType": MockDataType.Float,
-            "ComputeDataType": MockDataType.Float,
-            "BiasDataTypeList": [MockDataType.Float],
-            "ActivationComputeDataType": MockDataType.Float,
-            "ActivationType": MockActivationType.None_,
-            "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
-        }
+        mock_solution_problem_type = self.create_mock_problem_type()
 
         mock_solution.getAttributes.return_value = {
             "ProblemType": mock_solution_problem_type,
-            "ISA": (9, 0, 6),
-            "KernelLanguage": "Assembly"
+            "ISA": isa,
+            "KernelLanguage": "Assembly",
+            "SolutionIndex": 0,
         }
+        return mock_solution
+
+    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    def test_updates_logic_file_basic(self, mock_parse):
+        """UpdateLogic should convert enums to values and write updated YAML"""
+        from Tensile.TensileUpdateLibrary import UpdateLogic
+
+        mock_problem_type = self.create_mock_problem_type()
+        mock_solution = self.create_mock_solution()
 
         # Mock parseLibraryLogicData return
         mock_parse.return_value = (None, None, mock_problem_type, [mock_solution], None, None, None)
 
-        # Mock readYAML return
-        mock_read.return_value = [
-            {"MinimumRequiredVersion": "4.0.0"},
-            {},
-            {},
-            {},
-            {},
-            []
-        ]
-
         with tempfile.TemporaryDirectory() as tmpdir:
-            filename = os.path.join(tmpdir, "logic.yaml")
-            logicPath = tmpdir
-            outputPath = ""
+            # Create input YAML file with real data
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = [
+                {"MinimumRequiredVersion": "4.0.0"},
+                {"schedule": "data"},
+                {"arch": "data"},
+                {"devices": "data"},
+                {"problem_type": "old"},
+                [{"solution": "old"}],
+            ]
 
-            UpdateLogic(filename, logicPath, outputPath)
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
 
-            # Verify functions were called
-            mock_read.assert_called_once_with(filename)
-            mock_parse.assert_called_once()
-            mock_ensure.assert_called_once()
-            mock_write.assert_called_once()
+            # Run UpdateLogic
+            UpdateLogic(input_file, tmpdir, "")
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.writeYAML')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
+            # Verify output file was written
+            assert os.path.exists(input_file)
+
+            # Read and verify the updated YAML
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
+
+            # Verify version was updated
+            assert "MinimumRequiredVersion" in updated_data[0]
+
+            # Verify problem type was converted to state with enum values
+            assert updated_data[4]["DataType"] == MockDataType.Float.value
+            assert updated_data[4]["ActivationType"] == MockActivationType.None_.value
+
+            # Verify solution was converted
+            assert len(updated_data[5]) == 1
+            assert updated_data[5][0]["ISA"] == [9, 0, 6]  # Tuple converted to list
+
     @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.readYAML')
-    def test_updates_with_output_path(self, mock_read, mock_parse, mock_ensure, mock_write):
-        """UpdateLogic should use output path when provided"""
+    def test_updates_with_output_path(self, mock_parse):
+        """UpdateLogic should write to output path when provided"""
         from Tensile.TensileUpdateLibrary import UpdateLogic
 
-        # Create mock problem type
-        mock_problem_type = Mock()
-        mock_problem_type.state = {
-            "DataType": MockDataType.Float,
-            "MacDataTypeA": MockDataType.Float,
-            "MacDataTypeB": MockDataType.Float,
-            "DataTypeA": MockDataType.Float,
-            "DataTypeB": MockDataType.Float,
-            "DataTypeE": MockDataType.Float,
-            "DataTypeAmaxD": MockDataType.Float,
-            "DestDataType": MockDataType.Float,
-            "ComputeDataType": MockDataType.Float,
-            "BiasDataTypeList": [MockDataType.Float],
-            "ActivationComputeDataType": MockDataType.Float,
-            "ActivationType": MockActivationType.None_,
-            "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
-        }
+        mock_problem_type = self.create_mock_problem_type()
+        mock_parse.return_value = (None, None, mock_problem_type, [], None, None, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_dir = os.path.join(tmpdir, "input")
+            output_dir = os.path.join(tmpdir, "output")
+            os.makedirs(input_dir)
+
+            input_file = os.path.join(input_dir, "logic.yaml")
+            input_data = [
+                {"MinimumRequiredVersion": "4.0.0"},
+                {}, {}, {}, {}, []
+            ]
+
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
+
+            # Run UpdateLogic with output path
+            UpdateLogic(input_file, input_dir, output_dir)
+
+            # Verify output file was created in output directory
+            expected_output = os.path.join(output_dir, "logic.yaml")
+            assert os.path.exists(expected_output)
+
+            # Verify original file is unchanged
+            with open(input_file, 'r') as f:
+                original_data = yaml.safe_load(f)
+            assert original_data == input_data
+
+    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    def test_handles_data_type_metadata(self, mock_parse):
+        """UpdateLogic should convert DataTypeMetadata when present"""
+        from Tensile.TensileUpdateLibrary import UpdateLogic
+
+        mock_problem_type = self.create_mock_problem_type()
+        mock_problem_type.state["DataTypeMetadata"] = MockDataType.Int8
 
         mock_parse.return_value = (None, None, mock_problem_type, [], None, None, None)
-        mock_read.return_value = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            filename = os.path.join(tmpdir, "input", "logic.yaml")
-            logicPath = os.path.join(tmpdir, "input")
-            outputPath = os.path.join(tmpdir, "output")
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
 
-            UpdateLogic(filename, logicPath, outputPath)
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
 
-            # Verify write was called with replaced path
-            write_call_args = mock_write.call_args
-            written_filename = write_call_args[0][0]
-            assert outputPath in written_filename
+            UpdateLogic(input_file, tmpdir, "")
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.writeYAML')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
+            # Verify DataTypeMetadata was converted
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
+
+            assert updated_data[4]["DataTypeMetadata"] == MockDataType.Int8.value
+
     @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.readYAML')
-    def test_handles_data_type_metadata(self, mock_read, mock_parse, mock_ensure, mock_write):
-        """UpdateLogic should handle DataTypeMetadata when present"""
+    def test_converts_isa_tuple_to_list(self, mock_parse):
+        """UpdateLogic should convert ISA tuple to list in solution"""
         from Tensile.TensileUpdateLibrary import UpdateLogic
 
-        # Create mock problem type with metadata
-        mock_problem_type = Mock()
-        mock_problem_type.state = {
-            "DataType": MockDataType.Float,
-            "MacDataTypeA": MockDataType.Float,
-            "MacDataTypeB": MockDataType.Float,
-            "DataTypeA": MockDataType.Float,
-            "DataTypeB": MockDataType.Float,
-            "DataTypeE": MockDataType.Float,
-            "DataTypeAmaxD": MockDataType.Float,
-            "DestDataType": MockDataType.Float,
-            "ComputeDataType": MockDataType.Float,
-            "BiasDataTypeList": [MockDataType.Float],
-            "ActivationComputeDataType": MockDataType.Float,
-            "ActivationType": MockActivationType.None_,
-            "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
-            "DataTypeMetadata": MockDataType.Int8,
-        }
-
-        mock_parse.return_value = (None, None, mock_problem_type, [], None, None, None)
-        mock_read.return_value = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filename = os.path.join(tmpdir, "logic.yaml")
-            logicPath = tmpdir
-            outputPath = ""
-
-            UpdateLogic(filename, logicPath, outputPath)
-
-            # Verify writeYAML was called with updated data
-            mock_write.assert_called_once()
-            written_data = mock_write.call_args[0][1]
-            assert written_data[4]["DataTypeMetadata"] == MockDataType.Int8.value
-
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.writeYAML')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.readYAML')
-    def test_converts_isa_tuple_to_list(self, mock_read, mock_parse, mock_ensure, mock_write):
-        """UpdateLogic should convert ISA tuple to list in solution state"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
-
-        mock_problem_type = Mock()
-        mock_problem_type.state = {
-            "DataType": MockDataType.Float,
-            "MacDataTypeA": MockDataType.Float,
-            "MacDataTypeB": MockDataType.Float,
-            "DataTypeA": MockDataType.Float,
-            "DataTypeB": MockDataType.Float,
-            "DataTypeE": MockDataType.Float,
-            "DataTypeAmaxD": MockDataType.Float,
-            "DestDataType": MockDataType.Float,
-            "ComputeDataType": MockDataType.Float,
-            "BiasDataTypeList": [MockDataType.Float],
-            "ActivationComputeDataType": MockDataType.Float,
-            "ActivationType": MockActivationType.None_,
-            "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
-        }
-
-        # Create solution with ISA tuple
-        mock_solution = Mock()
-        mock_solution_problem_type = Mock()
-        mock_solution_problem_type.state = {
-            "DataType": MockDataType.Float,
-            "MacDataTypeA": MockDataType.Float,
-            "MacDataTypeB": MockDataType.Float,
-            "DataTypeA": MockDataType.Float,
-            "DataTypeB": MockDataType.Float,
-            "DataTypeE": MockDataType.Float,
-            "DataTypeAmaxD": MockDataType.Float,
-            "DestDataType": MockDataType.Float,
-            "ComputeDataType": MockDataType.Float,
-            "BiasDataTypeList": [MockDataType.Float],
-            "ActivationComputeDataType": MockDataType.Float,
-            "ActivationType": MockActivationType.None_,
-            "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
-        }
-
-        mock_solution.getAttributes.return_value = {
-            "ProblemType": mock_solution_problem_type,
-            "ISA": (9, 0, 6),  # Tuple
-        }
+        mock_problem_type = self.create_mock_problem_type()
+        mock_solution = self.create_mock_solution(isa=(9, 4, 2))
 
         mock_parse.return_value = (None, None, mock_problem_type, [mock_solution], None, None, None)
-        mock_read.return_value = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            filename = os.path.join(tmpdir, "logic.yaml")
-            UpdateLogic(filename, tmpdir, "")
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
+
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
+
+            UpdateLogic(input_file, tmpdir, "")
+
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
 
             # Verify ISA was converted to list
-            written_data = mock_write.call_args[0][1]
-            assert isinstance(written_data[5][0]["ISA"], list)
-            assert written_data[5][0]["ISA"] == [9, 0, 6]
+            assert isinstance(updated_data[5][0]["ISA"], list)
+            assert updated_data[5][0]["ISA"] == [9, 4, 2]
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.writeYAML')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
     @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.readYAML')
-    def test_converts_bias_data_type_list(self, mock_read, mock_parse, mock_ensure, mock_write):
+    def test_converts_bias_data_type_list(self, mock_parse):
         """UpdateLogic should convert BiasDataTypeList enums to values"""
         from Tensile.TensileUpdateLibrary import UpdateLogic
 
-        mock_problem_type = Mock()
-        mock_problem_type.state = {
-            "DataType": MockDataType.Float,
-            "MacDataTypeA": MockDataType.Float,
-            "MacDataTypeB": MockDataType.Float,
-            "DataTypeA": MockDataType.Float,
-            "DataTypeB": MockDataType.Float,
-            "DataTypeE": MockDataType.Float,
-            "DataTypeAmaxD": MockDataType.Float,
-            "DestDataType": MockDataType.Float,
-            "ComputeDataType": MockDataType.Float,
-            "BiasDataTypeList": [MockDataType.Float, MockDataType.Half],
-            "ActivationComputeDataType": MockDataType.Float,
-            "ActivationType": MockActivationType.None_,
-            "F32XdlMathOp": MockF32XdlMathOp.FLOAT32,
-        }
+        mock_problem_type = self.create_mock_problem_type()
+        mock_problem_type.state["BiasDataTypeList"] = [MockDataType.Float, MockDataType.Half]
 
         mock_parse.return_value = (None, None, mock_problem_type, [], None, None, None)
-        mock_read.return_value = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            filename = os.path.join(tmpdir, "logic.yaml")
-            UpdateLogic(filename, tmpdir, "")
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
+
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
+
+            UpdateLogic(input_file, tmpdir, "")
+
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
 
             # Verify BiasDataTypeList was converted
-            written_data = mock_write.call_args[0][1]
-            assert written_data[4]["BiasDataTypeList"] == [MockDataType.Float.value, MockDataType.Half.value]
+            assert updated_data[4]["BiasDataTypeList"] == [MockDataType.Float.value, MockDataType.Half.value]
+
+    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    def test_handles_multiple_solutions(self, mock_parse):
+        """UpdateLogic should handle multiple solutions correctly"""
+        from Tensile.TensileUpdateLibrary import UpdateLogic
+
+        mock_problem_type = self.create_mock_problem_type()
+        mock_solution1 = self.create_mock_solution(isa=(9, 0, 6))
+        mock_solution2 = self.create_mock_solution(isa=(10, 1, 0))
+        mock_solution2.getAttributes.return_value["SolutionIndex"] = 1
+
+        mock_parse.return_value = (None, None, mock_problem_type, [mock_solution1, mock_solution2], None, None, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = [{"MinimumRequiredVersion": "4.0.0"}, {}, {}, {}, {}, []]
+
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
+
+            UpdateLogic(input_file, tmpdir, "")
+
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
+
+            # Verify both solutions were processed
+            assert len(updated_data[5]) == 2
+            assert updated_data[5][0]["ISA"] == [9, 0, 6]
+            assert updated_data[5][1]["ISA"] == [10, 1, 0]
 
 
 @pytest.mark.unit
@@ -298,77 +261,112 @@ class TestTensileUpdateLibrary:
     """Test TensileUpdateLibrary main function"""
 
     @patch('Tensile.TensileUpdateLibrary.ParallelMap')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
     @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.restoreDefaultGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.print1')
-    @patch('os.walk')
-    def test_basic_execution(
+    def test_finds_and_processes_logic_files(
         self,
-        mock_walk,
         mock_print1,
         mock_restore,
         mock_assign,
         mock_arg_updated,
-        mock_ensure,
         mock_parallel
     ):
-        """TensileUpdateLibrary should execute basic workflow"""
+        """TensileUpdateLibrary should find logic files and process them"""
         from Tensile.TensileUpdateLibrary import TensileUpdateLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Mock os.walk to return some yaml files
-            mock_walk.return_value = [
-                (tmpdir, [], ["logic_gfx908.yaml", "logic_gfx90a.yaml", "other.txt"])
-            ]
+            # Create test logic files
+            logic_file1 = os.path.join(tmpdir, "logic_gfx908.yaml")
+            logic_file2 = os.path.join(tmpdir, "logic_gfx90a.yaml")
+            other_file = os.path.join(tmpdir, "other.txt")
+
+            for f in [logic_file1, logic_file2, other_file]:
+                with open(f, 'w') as file:
+                    file.write("test")
 
             mock_arg_updated.return_value = {}
-            mock_ensure.return_value = tmpdir
 
             args = ["--logic_path", tmpdir]
             TensileUpdateLibrary(args)
 
-            # Verify key functions were called
-            mock_restore.assert_called_once()
-            mock_assign.assert_called_once()
-            mock_parallel.assert_called_once()
+            # Verify ParallelMap was called
+            assert mock_parallel.called
+
+            # Get the files that were passed to ParallelMap
+            call_args = mock_parallel.call_args
+            files_iter = list(call_args[0][1])
+
+            # Verify correct files were found (should find the gfx files, not other.txt)
+            file_paths = [f[0] for f in files_iter]
+            assert len(file_paths) >= 2  # At least the two logic files
+            assert any("gfx908" in f for f in file_paths)
+            assert any("gfx90a" in f for f in file_paths)
+            assert not any("other.txt" in f for f in file_paths)
 
     @patch('Tensile.TensileUpdateLibrary.ParallelMap')
-    @patch('Tensile.TensileUpdateLibrary.ensurePath')
     @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.restoreDefaultGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.print1')
-    @patch('os.walk')
     def test_handles_output_path(
         self,
-        mock_walk,
         mock_print1,
         mock_restore,
         mock_assign,
         mock_arg_updated,
-        mock_ensure,
         mock_parallel
     ):
-        """TensileUpdateLibrary should use output_path when provided"""
+        """TensileUpdateLibrary should create output directory when specified"""
         from Tensile.TensileUpdateLibrary import TensileUpdateLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = os.path.join(tmpdir, "output")
+            logic_file = os.path.join(tmpdir, "logic_gfx908.yaml")
 
-            mock_walk.return_value = [
-                (tmpdir, [], ["logic_gfx908.yaml"])
-            ]
+            with open(logic_file, 'w') as f:
+                f.write("test")
 
             mock_arg_updated.return_value = {}
-            mock_ensure.return_value = output_dir
 
             args = ["--logic_path", tmpdir, "--output_path", output_dir]
             TensileUpdateLibrary(args)
 
-            # Verify ensurePath was called
-            mock_ensure.assert_called()
+            # Verify output directory was created
+            assert os.path.exists(output_dir)
+            assert os.path.isdir(output_dir)
+
+    @patch('Tensile.TensileUpdateLibrary.ParallelMap')
+    @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
+    @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')
+    @patch('Tensile.TensileUpdateLibrary.restoreDefaultGlobalParameters')
+    @patch('Tensile.TensileUpdateLibrary.print1')
+    def test_applies_global_parameter_overrides(
+        self,
+        mock_print1,
+        mock_restore,
+        mock_assign,
+        mock_arg_updated,
+        mock_parallel
+    ):
+        """TensileUpdateLibrary should apply argument-based parameter overrides"""
+        from Tensile.TensileUpdateLibrary import TensileUpdateLibrary, globalParameters
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logic_file = os.path.join(tmpdir, "logic_gfx908.yaml")
+            with open(logic_file, 'w') as f:
+                f.write("test")
+
+            # Return some overrides
+            mock_arg_updated.return_value = {"TestParam": "TestValue"}
+
+            args = ["--logic_path", tmpdir]
+            TensileUpdateLibrary(args)
+
+            # Verify globalParameters was updated
+            assert "TestParam" in globalParameters
+            assert globalParameters["TestParam"] == "TestValue"
 
 
 @pytest.mark.unit
@@ -377,11 +375,11 @@ class TestMain:
 
     @patch('Tensile.TensileUpdateLibrary.TensileUpdateLibrary')
     @patch('sys.argv', ['prog', '--logic_path', '/some/path'])
-    def test_main_calls_tensile_update_library(self, mock_func):
-        """main should call TensileUpdateLibrary with sys.argv[1:]"""
+    def test_main_passes_arguments_correctly(self, mock_func):
+        """main should pass command line arguments to TensileUpdateLibrary"""
         from Tensile.TensileUpdateLibrary import main
 
         main()
 
+        # Verify TensileUpdateLibrary was called with correct arguments
         mock_func.assert_called_once_with(['--logic_path', '/some/path'])
-
