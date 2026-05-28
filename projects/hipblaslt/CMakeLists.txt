@@ -566,16 +566,6 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
         COMPONENT tests
     )
 
-    # Install CTestTestfile.cmake to bin/hipblaslt/ for TheRock (relocatable tests; run ctest from that dir)
-    if(HIPBLASLT_CTEST_INSTALL_FILE)
-        install(
-            FILES "${HIPBLASLT_CTEST_INSTALL_FILE}"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}/hipblaslt"
-            COMPONENT tests
-            RENAME "CTestTestfile.cmake"
-        )
-    endif()
-
     rocm_package_setup_client_component(tests
         DEPENDS
         COMPONENT clients-common
