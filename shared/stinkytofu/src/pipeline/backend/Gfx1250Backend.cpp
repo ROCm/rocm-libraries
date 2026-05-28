@@ -40,11 +40,14 @@
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
+#include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
@@ -66,6 +69,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
         pm.addPass(createStinkyRemoveWaitCntPass());
+        pm.addPass(createStinkyRemoveNopPass());
     }
 
     // addPeepholeOptPasses(pm, optLevel);
@@ -125,9 +129,11 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
 
     // -- kernel --
     pm.addPass(createInsertVgprMsbPass());
+    pm.addPass(createCFGBuilderPass());
+    pm.addPass(createMemTokenConsistencyCheckPass());
     if (optLevel != OptLevel::O0) {
-        pm.addPass(createCFGBuilderPass());
         pm.addPass(createInsertDelayAluPass());
+        pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
     if (moduleOptions.EnableSwPrefetchInsertion) {

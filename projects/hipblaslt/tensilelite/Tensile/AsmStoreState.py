@@ -83,7 +83,7 @@ class StoreState:
             if ss.optSGPRUsage == 'BufferLoad_Mask':
                 self.numMaskSgprPerElement = 0
                 self.numMaskSgprPerBatch   = 0
-                self.numTempSgprPerBatch   = kernelWriter.states.laneSGPRCount
+                self.numTempSgprPerBatch = (2 if getattr(kernelWriter.states, 'storeAlign8', False) else 1) * kernelWriter.states.laneSGPRCount
             elif ss.optSGPRUsage == 'BufferLoad_Edge_Mask':
                 self.numMaskSgprPerElement = 0
                 self.numMaskSgprPerBatch   = kernelWriter.states.laneSGPRCount
