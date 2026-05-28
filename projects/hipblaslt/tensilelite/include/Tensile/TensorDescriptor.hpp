@@ -346,35 +346,23 @@ namespace TensileLite
         }
         size_t totalAllocatedBytes() const
         {
-            // Cannot use elementSize directly as elementSize is
-            // packed size for MX data types.
+            // info.elementSize is the per-element segment size in bytes
+            // (post-PR #6499: ElementSize = sizeof(T) / Packing). The
+            // total byte count is integral as long as the element count
+            // is a whole number of packed containers.
             auto const info = DataTypeInfo::Get(m_dataType);
-            auto const totalSize
-                = multiplyElementSize(totalAllocatedElements(), info.elementSize);
-            assert(totalSize % info.packing == 0);
-            return totalSize / info.packing;
+            assert(totalAllocatedElements() % info.packing == 0);
+            return multiplyElementSize(totalAllocatedElements(), info.elementSize);
         }
 
         float elementBytes() const
         {
-            // TODO:Need to enhance this to support segment type in tensileLite.
-            // tensileLite currently maps MX data types to unsegmented
-            // types in DataTypeInfo, i.e., Float4 -> Float4x2,
-            // Float6 -> Float6x32. As a result, return elementSize is
-            // incorrect for MX data types because elementSize represents
-            // unsegmented size in bytes not segment size.
-            //
-            // To get element size (in bytes) for f4/f6/bf6, use
-            //
-            //   auto const info = DataTypeInfo::Get(m_dataType);
-            //   auto elementSize = info.elementSize / info.packing
-            //
-            // tensileLite returns sizeof(Float4x2), sizeof(Float6x32),
-            // sizeof(BFloat6x32) for rocisa::f4,f6,bf6.
-            //
-            assert(m_dataType != rocisa::DataType::Float6  &&
-                   m_dataType != rocisa::DataType::BFloat6 &&
-                   m_dataType != rocisa::DataType::Float4);
+            // info.elementSize is already the per-element segment size in
+            // bytes (post-PR #6499: BaseTypeInfo::ElementSize = sizeof(T) /
+            // Packing), so this returns 0.5 for Float4 and 0.75 for
+            // Float6/BFloat6. Callers should pair this with
+            // multiplyElementSize() from Utils.hpp when converting element
+            // counts to byte counts.
             return DataTypeInfo::Get(m_dataType).elementSize;
         }
 

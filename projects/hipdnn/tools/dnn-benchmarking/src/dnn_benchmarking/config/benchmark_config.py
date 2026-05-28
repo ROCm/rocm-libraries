@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 @dataclass
@@ -121,6 +121,152 @@ class ValidationConfig:
 
 
 @dataclass
+class MetricsConfig:
+    """Controls which metric sources are collected during benchmarking.
+
+    Two collection modes:
+
+    * Always-on (``tier``) — zero-overhead probes wrapped around the
+      timed loop: analytical FLOPs/IO, workspace, host rusage + RAM,
+      amdsmi GPU snapshot, machine metadata.
+    * Opt-in profiling pass (``pmc_set``, ``emit_trace``, ``perf``,
+      ``roofline``) — each runs the workload again under an external
+      profiling tool. Kept separate from the timed pass so PMC sampling
+      and roofline replay don't pollute the headline timing.
+
+    Attributes:
+        tier: ``basic`` enables always-on probes. ``off`` disables all
+            metric collection — useful for clean A/B timing comparisons.
+        emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
+            ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
+            trace file. ``kineto`` falls back to pftrace if the rocpd
+            Python module is not importable.
+        pmc_set: ``basic`` | ``memory`` | ``flops`` | ``all`` — re-run
+            under ``rocprofv3 --pmc <set>`` and fold per-kernel counter
+            aggregates into ``extra_metrics["pmc"]``. ``all`` requires
+            ``pmc_allow_multipass`` because the union of sets crosses the
+            single-pass replay budget on most arches.
+        perf: Re-run wrapped in ``perf stat -x,`` to collect CPU cycles
+            and instructions. Kernel-space events are dropped silently
+            when ``/proc/sys/kernel/perf_event_paranoid > 1``.
+        roofline: Re-run under ``rocprof-compute profile --roof-only``
+            to capture empirical HBM/compute ceilings at rocprof-
+            compute's default datatype (FP32). The CSV outputs
+            (``roofline.csv``, ``sysinfo.csv``) and the workload
+            directory land in ``extra_metrics["roofline"]`` as
+            ``roofline_csv`` / ``sysinfo_csv`` / ``workload_path``. The
+            PDF/HTML plot is rendered post-hoc by the user via
+            ``rocprof-compute analyze --path <workload_path>
+            [--roofline-data-type FP16]``; we don't expose a profile-
+            time datatype knob because rocprof-compute's ``profile``
+            mode doesn't accept one.
+        pmc_allow_multipass: Required for ``--pmc all``. Without it,
+            ``all`` is rejected at config-build time because the rocprofv3
+            multi-pass replay budget is easy to exceed and the resulting
+            multi-pass replay has been observed to hang for minutes on
+            sub-second workloads.
+        profiling_output_dir: Root directory for profiling artefacts.
+            ``None`` until the orchestrator resolves a default
+            (``./profiling-output/<utc-timestamp>/``) at suite start.
+        profiling_timeout_s: Wall-clock budget (seconds) for each external
+            profiler subprocess. Default 600 s; ``0`` disables. Sized to
+            absorb a heavy graph under multi-pass PMC replay on a slow
+            host while still bounding a wedged child so the suite doesn't
+            block indefinitely.
+    """
+
+    tier: Literal["basic", "off"] = "basic"
+    emit_trace: Optional[Literal["pftrace", "kineto"]] = None
+    pmc_set: Optional[Literal["basic", "memory", "flops", "all"]] = None
+    perf: bool = False
+    roofline: bool = False
+    pmc_allow_multipass: bool = False
+    profiling_output_dir: Optional[Path] = None
+    profiling_timeout_s: int = 600
+
+    def __post_init__(self) -> None:
+        # Normalise empty / whitespace-only strings to None. The CLI
+        # uses argparse `choices=` so this only matters for programmatic
+        # / TOML callers, but the `Optional[Literal[...]]` annotation
+        # isn't enforced at runtime: without this, ``pmc_set=""`` slips
+        # past every downstream check (the `is not None` guards see a
+        # truthy-empty string, `== "all"` is false, and the empty value
+        # rides into the orchestrator as ``--pmc ""``).
+        if isinstance(self.emit_trace, str) and not self.emit_trace.strip():
+            self.emit_trace = None
+        if isinstance(self.pmc_set, str) and not self.pmc_set.strip():
+            self.pmc_set = None
+
+        valid_tiers = {"basic", "off"}
+        if self.tier not in valid_tiers:
+            raise ValueError(
+                f"Invalid metrics tier: '{self.tier}'. " f"Valid options: {valid_tiers}"
+            )
+        if self.emit_trace is not None and self.emit_trace not in {
+            "pftrace",
+            "kineto",
+        }:
+            raise ValueError(
+                f"Invalid emit_trace: '{self.emit_trace}'. "
+                "Valid options: pftrace, kineto"
+            )
+        if self.pmc_set is not None and self.pmc_set not in {
+            "basic",
+            "memory",
+            "flops",
+            "all",
+        }:
+            raise ValueError(
+                f"Invalid pmc_set: '{self.pmc_set}'. "
+                "Valid options: basic, memory, flops, all"
+            )
+        # The 'all' PMC set unions every counter group; rocprofv3 falls
+        # back to multi-pass replay, which has been observed to hang for
+        # minutes on what should be a sub-second run. Require the explicit
+        # opt-in so users discover the cost.
+        if self.pmc_set == "all" and not self.pmc_allow_multipass:
+            raise ValueError(
+                "--pmc all requires --pmc-allow-multipass: rocprofv3 "
+                "falls back to multi-pass replay for the unioned counter "
+                "set, which can hang on small workloads. Pick "
+                "--pmc basic|memory|flops for a single-pass run."
+            )
+        if isinstance(self.profiling_output_dir, str):
+            self.profiling_output_dir = Path(self.profiling_output_dir)
+        if self.profiling_timeout_s < 0:
+            raise ValueError(
+                f"profiling_timeout_s must be >= 0 (0 disables); "
+                f"got {self.profiling_timeout_s}"
+            )
+
+    @property
+    def basic_enabled(self) -> bool:
+        """True when always-on probes should run."""
+        return self.tier == "basic"
+
+    @property
+    def opt_in_pass_requested(self) -> bool:
+        """True when any opt-in profiling source was requested."""
+        return bool(self.emit_trace or self.pmc_set or self.perf or self.roofline)
+
+    @property
+    def extra_runs_per_engine(self) -> int:
+        """How many additional workload runs each opt-in source contributes.
+
+        Each opt-in profiling source re-runs the workload once under its
+        external tool. The basic always-on tier wraps the timed pass and
+        does not add a run. Used by the reporter to give the user an
+        upfront cost estimate.
+        """
+        return (
+            int(self.pmc_set is not None)
+            + int(self.emit_trace is not None)
+            + int(self.perf)
+            + int(self.roofline)
+        )
+
+
+@dataclass
 class SuiteConfig:
     """Configuration for suite execution mode.
 
@@ -137,6 +283,8 @@ class SuiteConfig:
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
+        metrics: Metric collection configuration. Defaults to ``basic`` tier
+            (always-on probes, no extra runs).
     """
 
     warmup_iters: int = 10
@@ -148,6 +296,11 @@ class SuiteConfig:
     gpu_backend: str = "auto"
     reference_provider: str = "none"
     verbose: bool = False
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    # Forwarded to the orchestrator's inner subprocess so the child
+    # picks up the same plugin .so directory the parent loaded. Not used
+    # outside of the opt-in profiling path.
+    plugin_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
         """Validate configuration values."""

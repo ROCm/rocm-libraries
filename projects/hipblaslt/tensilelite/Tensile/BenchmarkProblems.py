@@ -41,7 +41,7 @@ from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
-from Tensile.SolutionStructs.Solution import Solution
+from Tensile.SolutionStructs.Solution import Solution, printTypeMismatchSummary
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
 from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
@@ -356,6 +356,7 @@ def writeBenchmarkFiles(
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
+                            removeTemporaries=not globalParameters["KeepBuildTmp"],
                         )
     # ^ this is where solutions is mutated
     with timing_context("python_kernel_bench_postprocess"):
@@ -731,6 +732,9 @@ def main(
             else:
                 print1("# {}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), idx) )
+
+    # Print summary of any parameter type mismatches found during ProblemType creation
+    printTypeMismatchSummary()
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

@@ -5,10 +5,6 @@ Documentation for rocThrust available at
 
 ## Since last release ROCm 7.12
 
-### Added
-
-* Improved documentation on relevant environment variables.
-
 ### Resolved issues
 
 * Fixed memory leak in unit test.

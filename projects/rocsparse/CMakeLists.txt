@@ -191,6 +191,18 @@ set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
 rocm_setup_version(VERSION ${VERSION_STRING})
 set(rocsparse_SOVERSION ${SOVERSION_STRING})
 
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP ROCSPARSE_COPYRIGHT_YEAR "%Y")
+    if(rocsparse_VERSION_TWEAK)
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR} (${rocsparse_VERSION_TWEAK})")
+    else()
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
+
 # Find rocprim package
 find_package(rocprim REQUIRED)
 if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_VERSION})
