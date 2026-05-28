@@ -62,9 +62,9 @@ struct TileDistrEncCalc
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize * kIter>>,
-        tuple<sequence<0, 2, 1>>,
-        tuple<sequence<0, 1, 0>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize>>,
+        tuple<sequence<2, 0, 1>>,
+        tuple<sequence<1, 0, 0>>,
         sequence<2, 2>,
         sequence<0, 2>>;
 
@@ -98,8 +98,8 @@ struct TileDistrEncCalc
         {
             return tile_distribution_encoding<sequence<1>,
                                               MatDims,
-                                              tuple<sequence<MInx, NInx, MInx, NInx>>,
-                                              tuple<sequence<0, 0, 2, 1>>,
+                                              tuple<sequence<MInx, MInx, NInx, NInx>>,
+                                              tuple<sequence<2, 0, 0, 1>>,
                                               sequence<MInx, MInx>,
                                               sequence<1, 3>>{};
         }
