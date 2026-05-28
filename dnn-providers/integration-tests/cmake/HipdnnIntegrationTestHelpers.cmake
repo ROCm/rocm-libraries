@@ -101,29 +101,16 @@ function(add_external_integration_test_target)
     # can include this test in the installed CTestTestfile.cmake. Required for
     # CI flows that invoke ctest from the install tree (e.g. TheRock).
     if(ARG_INSTALL_SUBDIR)
-        # TOML install destination — TheRock workaround.
-        #
-        # The "natural" location is bin/${INSTALL_SUBDIR}/<filename> (alongside
-        # the installed CTestTestfile), but TheRock's artifact-<provider>.toml
-        # descriptors only include `bin/<plugin>*_test*` and the CTestTestfile
-        # itself in the test artifact — an arbitrary .toml in the subdir is
-        # orphaned and never packaged. Until artifact-<provider>.toml learns
-        # about test config TOMLs (e.g. `bin/${INSTALL_SUBDIR}/*.toml`), name
-        # the installed file `<plugin>_external_test_<engine>.toml` and put it
-        # directly in bin/ so it matches the existing `bin/<plugin>*_test*`
-        # include glob and rides through unchanged.
-        set(_config_install_basename
-            "${ARG_PLUGIN_TARGET}_external_test_${ARG_ENGINE_NAME}.toml"
-        )
         if(ARG_TEST_CONFIG)
+            get_filename_component(_install_config "${ARG_TEST_CONFIG}" NAME)
             install(FILES "${ARG_TEST_CONFIG}"
-                DESTINATION "${CMAKE_INSTALL_BINDIR}"
-                RENAME "${_config_install_basename}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
             )
         endif()
 
-        # Install-tree paths are relative to the directory ctest runs from,
-        # which is ${CMAKE_INSTALL_BINDIR}/${INSTALL_SUBDIR}/. Compute via
+        # Install-tree paths for the test binary and plugin are relative to the
+        # directory ctest runs from, which is
+        # ${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}/. Compute via
         # file(RELATIVE_PATH) against the real install locations so the result
         # tracks the platform layout — the plugin lives under bin/ on Windows
         # but lib/ on Linux (HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR encodes
@@ -140,12 +127,8 @@ function(add_external_integration_test_target)
         set(_plugin_abs
             "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${ARG_PLUGIN_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
-        set(_config_abs
-            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${_config_install_basename}"
-        )
         file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
-        file(RELATIVE_PATH _install_config "${_install_cwd_abs}" "${_config_abs}")
 
         set(_install_cmd "add_test([=[${ARG_TARGET_NAME}]=] \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
         if(ARG_TEST_CONFIG)
