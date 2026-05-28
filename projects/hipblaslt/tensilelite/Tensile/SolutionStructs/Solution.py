@@ -888,6 +888,22 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
+    else:
+      if state["ClusterBarrier"] == True:
+        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
+
+    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
+    # when TDM is enabled.
+    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
+      reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
+
+    # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
+    # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
+    # falls back to code -1 and produces incorrect cluster-scope synchronization.
+    if state["ClusterBarrier"] == True \
+       and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+      reject(state, printRejectionReason,
+             "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1494,7 +1510,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      if state["_ScheduleIterAlg"] != 2 and state["_ScheduleIterAlg"] != 3:
+      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
+        and state["TDMInst"] == 3 \
+        and state["PrefetchGlobalRead"] in (1, 2)
+      if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
         if not state["ProblemType"]["DataType"].isSingle():
