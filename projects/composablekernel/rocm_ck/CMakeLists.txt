@@ -16,6 +16,7 @@ target_include_directories(rocm_ck INTERFACE
 # We should remove this once the library fully migrates to c++20.
 target_compile_features(rocm_ck INTERFACE cxx_std_20)
 target_compile_options(rocm_ck INTERFACE -Wno-c++20-compat)
+target_link_libraries(rocm_ck INTERFACE ck_common)
 
 # CK Tile headers — required for device code compilation
 if(NOT TARGET ck_tile_headers)

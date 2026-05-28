@@ -6,8 +6,9 @@
 
 #pragma once
 
-#ifdef _MSC_VER
-#define ROCM_CK_UNREACHABLE() __assume(false)
-#else
-#define ROCM_CK_UNREACHABLE() __builtin_unreachable()
+#include <ck_common/platform.hpp>
+
+// Backward-compatible alias — canonical definition is CK_COMMON_UNREACHABLE().
+#ifndef ROCM_CK_UNREACHABLE
+#define ROCM_CK_UNREACHABLE() CK_COMMON_UNREACHABLE()
 #endif

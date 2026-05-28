@@ -39,6 +39,7 @@ inline const char* schedulerName(PipelineScheduler s)
 {
     switch(s)
     {
+    case PipelineScheduler::Default: return "Default";
     case PipelineScheduler::Intrawave: return "Intrawave";
     case PipelineScheduler::Interwave: return "Interwave";
     }

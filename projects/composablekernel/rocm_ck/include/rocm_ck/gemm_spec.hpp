@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <ck_common/pipeline_scheduler.hpp>
 #include <rocm_ck/arch_properties.hpp>
 #include <rocm_ck/datatype.hpp>
 #include <rocm_ck/gpu_target.hpp>
@@ -99,25 +100,8 @@ enum class Pipeline
     Preshuffle
 };
 
-/// Instruction scheduling strategy within a wavefront.
-///
-/// Controls how MFMA/WMMA instructions are scheduled relative to memory
-/// operations within each wave. This is instruction-level scheduling,
-/// not spatial decomposition (which is TilePartitioner's concern).
-///
-/// Intrawave: Synchronous — all waves in a workgroup synchronize after each
-///     k-iteration. Memory loads and compute are interleaved within a single wave.
-///     Two block_sync_lds() calls per iteration.
-///
-/// Interwave: Asynchronous — waves proceed independently with minimal
-///     synchronization. Only one block_sync_lds() per iteration. Overlaps
-///     compute from one wave with memory loads from another.
-///     Only valid with Pipeline::Memory.
-enum class PipelineScheduler
-{
-    Intrawave,
-    Interwave
-};
+/// Instruction scheduling strategy — uses common definition.
+using PipelineScheduler = ck_common::PipelineScheduler;
 
 /// Tile-to-workgroup distribution strategy.
 ///
@@ -302,7 +286,7 @@ struct GemmSpec
 /// Lookup a physical tensor by name. consteval — compile-time only.
 /// Used in static_asserts and consteval makeSpec() result inspection.
 /// For runtime access, use GemmSpec::output() or physical_tensors[] directly.
-consteval PhysicalTensor tensor(const GemmSpec& k, std::string_view name)
+consteval PhysicalTensor tensor(GemmSpec k, std::string_view name)
 {
     for(int i = 0; i < k.num_physical_tensors; ++i)
         if(k.physical_tensors[i].name == name)
@@ -311,13 +295,13 @@ consteval PhysicalTensor tensor(const GemmSpec& k, std::string_view name)
 }
 
 /// Slot index lookup by name. consteval — compile-time only.
-consteval int slot(const GemmSpec& k, std::string_view name) { return tensor(k, name).args_slot; }
+consteval int slot(GemmSpec k, std::string_view name) { return tensor(k, name).args_slot; }
 
 /// Dtype lookup by name. consteval — compile-time only.
-consteval DataType dtype(const GemmSpec& k, std::string_view name) { return tensor(k, name).dtype; }
+consteval DataType dtype(GemmSpec k, std::string_view name) { return tensor(k, name).dtype; }
 
 /// Layout lookup by name. consteval — compile-time only.
-consteval Layout layout(const GemmSpec& k, std::string_view name) { return tensor(k, name).layout; }
+consteval Layout layout(GemmSpec k, std::string_view name) { return tensor(k, name).layout; }
 
 // ============================================================================
 // Epilogue op helpers
@@ -401,8 +385,7 @@ consteval std::pair<DataType, Layout> extractDTensorMeta(const ResolvedSignature
 ///   - Block tile is divisible by (block_waves x wave_tile) in each dimension
 ///
 /// Derives workgroup_size = block_waves.m x block_waves.n x block_waves.k x wavefront_size.
-consteval GemmSpec
-makeSpec(const Signature& sig, const GemmAlgorithm& algo, const TargetSet& targets)
+consteval GemmSpec makeSpec(Signature sig, GemmAlgorithm algo, TargetSet targets)
 {
     ResolvedSignature resolved = resolve(sig);
 
