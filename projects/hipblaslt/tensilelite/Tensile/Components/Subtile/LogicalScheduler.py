@@ -446,7 +446,6 @@ class LRIncOp(BaseOp):
     """LDS buffer swap for local reads on a specific tensor."""
     tensor: str = ""
     uid_swap: bool = False
-    alt_unroll: bool = False
 
     def __post_init__(self):
         self.kind = 'lr_inc'
