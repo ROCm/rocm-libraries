@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import enum
 import re
 import subprocess
 import sys
@@ -15,11 +16,16 @@ import numpy as np
 DIRECT_TILE_PREFIX = "direct_tile_conv"
 IGEMM_PREFIX = "GroupedConvolutionForwardKernel"
 
+
+class DirectConvStatus(enum.Enum):
+    OK = "ok"
+    INCORRECT = "incorrect"   # stderr was non-empty -> wrong results
+    NO_INSTANCE = "no_instance"  # ran cleanly but no applicable direct conv kernel
+
 # Extracts TFLOPS and instance name from a [Valid] Perf line
 PERF_NAME_RE = re.compile(
     r"\[Valid\]\s+Perf:\s+[\d.]+ ms,\s+([\d.]+) TFlops,\s+[\d.]+ GB/s,\s+(\S+)"
 )
-
 
 def parse_test_cases(test_cases_path: Path) -> list[list[str]]:
     """Return a list of argument lists, one per non-empty, non-comment line."""
@@ -38,7 +44,6 @@ def parse_test_cases(test_cases_path: Path) -> list[list[str]]:
             cases.append(args)
     return cases
 
-
 def make_label(args: list[str]) -> str:
     """Create a short human-readable label for a test case from its arguments.
 
@@ -53,26 +58,24 @@ def make_label(args: list[str]) -> str:
     except (IndexError, ValueError):
         return " ".join(args)
 
-
-def run_profiler(binary_dir: Path, args: list[str]) -> tuple[str, bool]:
-    """Run ckProfiler with args and return (stdout+stderr, had_error)."""
+def run_profiler(binary_dir: Path, args: list[str]) -> tuple[str, str, bool]:
+    """Run ckProfiler with args and return (stdout, stderr, had_error)."""
     exe = binary_dir / "ckProfiler"
     cmd = [str(exe)] + ["grouped_conv_fwd_tile"] + args
     try:
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=300,
         )
-        output = result.stdout
         had_error = result.returncode != 0
-        return output, had_error
+        return result.stdout, result.stderr, had_error
     except subprocess.TimeoutExpired:
-        return "TIMEOUT", True
+        return "TIMEOUT", "", True
     except Exception as e:
-        return f"ERROR: {e}", True
+        return f"ERROR: {e}", "", True
 
 
 def parse_best(output: str, instance_prefix: str) -> tuple[float, str] | tuple[None, None]:
@@ -93,21 +96,26 @@ def parse_best(output: str, instance_prefix: str) -> tuple[float, str] | tuple[N
 
     return best_val, best_name
 
+def direct_conv_status(stdout: str, stderr: str, dc_tflops: float | None) -> DirectConvStatus:
+    """Classify the direct conv outcome for a single run.
 
-def check_output_for_errors(output: str) -> bool:
-    """Return True if the output contains signs of an error beyond 'returncode != 0'."""
-    lower = output.lower()
-    error_keywords = ["error:", "exception", "segfault", "illegal instruction", "timeout"]
-    for kw in error_keywords:
-        if kw in lower:
-            return True
-    return False
+    Priority:
+      1. Non-empty stderr -> profiler reported incorrect results.
+      2. No [Valid] direct conv line in stdout -> no applicable instance.
+      3. Otherwise -> OK.
+    """
+    if stderr.strip():
+        return DirectConvStatus.INCORRECT
+    if dc_tflops is None:
+        return DirectConvStatus.NO_INSTANCE
+    return DirectConvStatus.OK
 
 
 def make_figure(
     labels: list[str],
     igemm_values: list[float | None],
     direct_values: list[float | None],
+    direct_statuses: list[DirectConvStatus],
     output_path: Path,
 ) -> None:
     """Save a grouped bar chart comparing CK Tile iGEMM vs CK Tile Direct Conv TFLOPS."""
@@ -118,15 +126,14 @@ def make_figure(
     igemm_vals = [v if v is not None else 0.0 for v in igemm_values]
     direct_vals = [v if v is not None else 0.0 for v in direct_values]
     igemm_failed = [v is None for v in igemm_values]
-    direct_failed = [v is None for v in direct_values]
 
     fig, ax = plt.subplots(figsize=(max(10, n * 0.8), 6))
 
     bars_igemm = ax.bar(x - width / 2, igemm_vals, width, label="iGEMM", color="steelblue")
     bars_direct = ax.bar(x + width / 2, direct_vals, width, label="Direct Conv", color="darkorange")
 
-    # Mark failed bars
-    for i, (bar, failed) in enumerate(zip(bars_igemm, igemm_failed)):
+    # Mark failed iGEMM bars
+    for bar, failed in zip(bars_igemm, igemm_failed):
         if failed:
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
@@ -138,17 +145,34 @@ def make_figure(
                 color="red",
                 rotation=90,
             )
-    for i, (bar, failed) in enumerate(zip(bars_direct, direct_failed)):
-        if failed:
+
+    # Mark direct conv bars by status, and annotate relative perf on OK bars
+    _status_label = {
+        DirectConvStatus.INCORRECT: ("INCORRECT", "red"),
+        DirectConvStatus.NO_INSTANCE: ("N/A", "gray"),
+    }
+    for bar, status, ig, dc in zip(bars_direct, direct_statuses, igemm_values, direct_values):
+        if status in _status_label:
+            text, color = _status_label[status]
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
                 0.5,
-                "FAIL",
+                text,
                 ha="center",
                 va="bottom",
                 fontsize=7,
-                color="red",
+                color=color,
                 rotation=90,
+            )
+        elif status == DirectConvStatus.OK and ig and dc:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f"{dc / ig:.2f}x",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                color="black",
             )
 
     ax.set_xlabel("Test case")
@@ -170,26 +194,32 @@ def _write_markdown(
     igemm_names: list[str | None],
     direct_best: list[float | None],
     direct_names: list[str | None],
+    direct_statuses: list[DirectConvStatus],
     md_path: Path,
 ) -> None:
     """Write the summary table as a Markdown file."""
     header = (
         "| Test case | iGEMM (TFlops) | Best iGEMM kernel"
-        " | Direct Conv (TFlops) | Best Direct kernel | Improvement |\n"
+        " | Direct Conv (TFlops) | Best Direct kernel | Direct status | Improvement |\n"
         "|-----------|---------------:|-------------------|"
-        "---------------------:|--------------------|------------:|"
+        "---------------------:|--------------------|---------------|------------:|"
     )
     rows = [header]
-    for label, ig, ig_name, dc, dc_name in zip(
-        labels, igemm_best, igemm_names, direct_best, direct_names
+    for label, ig, ig_name, dc, dc_name, dc_status in zip(
+        labels, igemm_best, igemm_names, direct_best, direct_names, direct_statuses
     ):
         ig_str = f"{ig:.4f}" if ig else "FAIL"
-        dc_str = f"{dc:.4f}" if dc else "FAIL"
+        dc_str = f"{dc:.4f}" if dc else "—"
         ig_name_str = f"`{ig_name}`" if ig_name else "—"
         dc_name_str = f"`{dc_name}`" if dc_name else "—"
+        status_str = {
+            DirectConvStatus.OK: "✓ ok",
+            DirectConvStatus.INCORRECT: "✗ incorrect",
+            DirectConvStatus.NO_INSTANCE: "— no instance",
+        }[dc_status]
         improvement_str = f"{dc/ig:.3f}x" if ig and dc else "N/A"
         rows.append(
-            f"| {label} | {ig_str} | {ig_name_str} | {dc_str} | {dc_name_str} | {improvement_str} |"
+            f"| {label} | {ig_str} | {ig_name_str} | {dc_str} | {dc_name_str} | {status_str} | {improvement_str} |"
         )
 
     with open(md_path, "w") as f:
@@ -243,6 +273,7 @@ def main():
     igemm_names = []
     direct_best = []
     direct_names = []
+    direct_statuses = []
 
     for i, case_args in enumerate(cases):
         label = make_label(case_args)
@@ -255,45 +286,60 @@ def main():
             igemm_names.append(None)
             direct_best.append(None)
             direct_names.append(None)
+            direct_statuses.append(DirectConvStatus.NO_INSTANCE)
             continue
 
-        output, had_error = run_profiler(binary_dir, case_args)
-
-        if had_error or check_output_for_errors(output):
+        stdout, stderr, had_error = run_profiler(binary_dir, case_args)
+        if had_error:
             print(f"  ERROR detected — case marked as failed.")
             igemm_best.append(None)
             igemm_names.append(None)
             direct_best.append(None)
             direct_names.append(None)
+            direct_statuses.append(DirectConvStatus.INCORRECT)
             continue
 
-        ig, ig_name = parse_best(output, IGEMM_PREFIX)
-        dc, dc_name = parse_best(output, DIRECT_TILE_PREFIX)
+        ig, ig_name = parse_best(stdout, IGEMM_PREFIX)
+        dc, dc_name = parse_best(stdout, DIRECT_TILE_PREFIX)
+        dc_status = direct_conv_status(stdout, stderr, dc)
 
         print(f"  iGEMM best:       {ig:.4f} TFlops  ({ig_name})" if ig else "  iGEMM best:       N/A")
-        print(f"  Direct conv best: {dc:.4f} TFlops  ({dc_name})" if dc else "  Direct conv best: N/A")
+        if dc_status == DirectConvStatus.INCORRECT:
+            print(f"  Direct conv best: INCORRECT (stderr: {stderr.strip()[:120]})")
+        elif dc_status == DirectConvStatus.NO_INSTANCE:
+            print(f"  Direct conv best: no applicable instance")
+        else:
+            print(f"  Direct conv best: {dc:.4f} TFlops  ({dc_name})")
 
         igemm_best.append(ig)
         igemm_names.append(ig_name)
         direct_best.append(dc)
         direct_names.append(dc_name)
+        direct_statuses.append(dc_status)
 
     if not args.dry_run:
-        make_figure(labels, igemm_best, direct_best, output_path)
+        make_figure(labels, igemm_best, direct_best, direct_statuses, output_path)
 
         md_path = output_path.with_suffix(".md")
-        _write_markdown(labels, igemm_best, igemm_names, direct_best, direct_names, md_path)
+        _write_markdown(
+            labels, igemm_best, igemm_names, direct_best, direct_names, direct_statuses, md_path
+        )
 
         # Print summary table to stdout
-        print("\n" + "=" * 80)
-        print(f"{'Test case':<30} {'iGEMM (TF)':>12} {'Direct (TF)':>12} {'Improvement':>12}")
-        print("=" * 80)
-        for label, ig, dc in zip(labels, igemm_best, direct_best):
+        print("\n" + "=" * 90)
+        print(f"{'Test case':<30} {'iGEMM (TF)':>12} {'Direct (TF)':>12} {'Direct status':<16} {'Improvement':>12}")
+        print("=" * 90)
+        for label, ig, dc, dc_status in zip(labels, igemm_best, direct_best, direct_statuses):
             ig_str = f"{ig:.4f}" if ig else "FAIL"
-            dc_str = f"{dc:.4f}" if dc else "FAIL"
+            dc_str = f"{dc:.4f}" if dc else "—"
+            status_str = {
+                DirectConvStatus.OK: "ok",
+                DirectConvStatus.INCORRECT: "INCORRECT",
+                DirectConvStatus.NO_INSTANCE: "no instance",
+            }[dc_status]
             improvement_str = f"{dc/ig:.3f}x" if ig and dc else "N/A"
-            print(f"{label:<30} {ig_str:>12} {dc_str:>12} {improvement_str:>12}")
-        print("=" * 80)
+            print(f"{label:<30} {ig_str:>12} {dc_str:>12} {status_str:<16} {improvement_str:>12}")
+        print("=" * 90)
 
 
 if __name__ == "__main__":
