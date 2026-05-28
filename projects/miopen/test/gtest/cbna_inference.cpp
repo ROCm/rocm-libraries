@@ -1,27 +1,16 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <algorithm>
-#include <cctype>
-#include <limits>
-#include <vector>
-
 #include <gtest/gtest.h>
-#include <half/half.hpp>
-#include <miopen/fusion.hpp>
-#include <miopen/fusion/fusion_invoke_params.hpp>
-#include <miopen/miopen.h>
 
-#include "../conv_common.hpp"
-#include "../fusionHost.hpp"
-#include "conv_test_base.hpp"
+#include <miopen/batch_norm.hpp>
+#include <miopen/fusionHost.hpp>
+#include <miopen/verify.hpp>
+
 #include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "tensor_util.hpp"
+#include "network_data.hpp"
 
 namespace {
-
-using float16 = half_float::half;
 
 struct CbnaParamNameGenerator
 {

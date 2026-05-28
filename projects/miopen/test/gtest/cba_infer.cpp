@@ -1,23 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <algorithm>
-#include <cctype>
-#include <string>
-
-#include <gtest/gtest.h>
-#include <half/half.hpp>
-#include <miopen/fusion.hpp>
-#include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/fusion/solvers.hpp>
-#include <miopen/miopen.h>
+#include <miopen/fusion/fusion_invoke_params.hpp>
 
-#include "cba.hpp"
 #include "get_handle.hpp"
-#include "gtest_common.hpp"
-#include "tensor_util.hpp"
-
-#include <half/half.hpp>
+#include "cba.hpp"
 
 namespace {
 
