@@ -497,7 +497,12 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         // rocm_ck's historical slot names are inverted relative to CK Tile's
         // kargs naming: P_UNDROP stores the reciprocal keep probability used
         // as CK Tile's rp_undrop, while RP_UNDROP stores the keep probability
-        // used for the uint8 dropout threshold.
+        // used for the uint8 dropout threshold. (Prior to PR #7534 these two
+        // slots were assigned reversed -- kargs.rp_undrop received the keep
+        // probability instead of its reciprocal -- which produced incorrect
+        // gradient scaling for any non-trivial dropout rate. The bug was
+        // masked because every landed host caller wrote 1.0 to both slots,
+        // making the swap unobservable in tests.)
         const float rp_undrop = args.scalars[S::P_UNDROP].f32;
         const float p_undrop  = args.scalars[S::RP_UNDROP].f32;
         kargs.rp_undrop       = rp_undrop;
