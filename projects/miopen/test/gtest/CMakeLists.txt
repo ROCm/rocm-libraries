@@ -133,9 +133,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     #       To work around this limitation, we are passing the environment variables in the format ENVIRONMENT;value1=${value1};ENVIRONMENT;value2=${value2}.
     # bn tests are run sequentially since running tests in parallel was causing large tensor case fail with insufficient memory error.
     if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run")
-      gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} PROPERTIES RUN_SERIAL TRUE ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
+      gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES RUN_SERIAL TRUE ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     else()
-      gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
+      gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     endif()
   else()
     set(MIOPEN_GTEST_PREFIX)
@@ -182,7 +182,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
       add_test(NAME ${TEST_NAME}_shard${i}
         COMMAND ${TEST_NAME} --gtest_filter=${MIOPEN_GTEST_FILTER}
-        WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}"
+        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
       math(EXPR SHARD_INDEX "${i} - 1")
       set_tests_properties(${TEST_NAME}_shard${i} PROPERTIES
@@ -289,7 +289,7 @@ file(WRITE "${INSTALL_TEST_FILE}"
 include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         message(STATUS "YAML-based test categorization")
-        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}" "${INSTALL_TEST_FILE}")
+        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}")
 else()
         message(STATUS "No test categorization (YAML missing)")
 endif()
