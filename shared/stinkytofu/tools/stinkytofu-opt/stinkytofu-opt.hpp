@@ -33,7 +33,11 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
+#include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
@@ -41,6 +45,7 @@
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
@@ -59,6 +64,7 @@ const std::vector<PassInfo> availablePasses = {
     {"StinkyBuildImplicitDependencyPass",
      []() { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", []() { return createStinkyRemoveWaitCntPass(); }},
+    {"StinkyRemoveNopPass", []() { return createStinkyRemoveNopPass(); }},
     {"StinkyWaitCntInsertionPass", []() { return createStinkyWaitCntInsertionPass(); }},
     {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
     {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
@@ -71,6 +77,10 @@ const std::vector<PassInfo> availablePasses = {
     {"StinkyIRVerifierPass", []() { return createStinkyIRVerifierPass(); }},
     {"RemoveDelayAluPass", []() { return createRemoveDelayAluPass(); }},
     {"InsertDelayAluPass", []() { return createInsertDelayAluPass(); }},
+    {"LoopRegionRemarkPass", []() { return createLoopRegionRemarkPass(); }},
+    {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
+    {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
+    {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
 };
 
 /**
