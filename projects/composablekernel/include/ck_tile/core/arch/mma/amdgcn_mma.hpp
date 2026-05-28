@@ -309,7 +309,7 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 {
     // This is a default pass-through implementation that doesn't do anything practical.
     template <typename... Params>
-    CK_TILE_DEVICE static auto
+    CK_TILE_DEVICE static CVecType
     exec(AVecType const& regsA, BVecType const& regsB, CVecType const& regsC)
     {
         // Prints once across all thread blocks and threads.
