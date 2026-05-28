@@ -39,6 +39,7 @@ from ..helpers.tensor_view import (
     make_tile_window,
 )
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -98,6 +99,7 @@ class FusedGateUpSiluGemmSpec:
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
     wave_size: int = 64
     block_size: int = 0
+    dtype: str = "fp16"
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -108,6 +110,10 @@ class FusedGateUpSiluGemmSpec:
                 t.warp_m * t.warp_n * t.warp_k * self.wave_size,
             )
 
+    def _data_spec(self) -> DataSpec:
+        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
+        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+
     def to_universal_spec(self) -> UniversalGemmSpec:
         # Reuse universal GEMM validation / helper conventions. The
         # actual builder below has two B pointers and a custom epilogue,
@@ -117,6 +123,7 @@ class FusedGateUpSiluGemmSpec:
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self._data_spec(),
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -570,12 +577,13 @@ def _emit_gate_up_silu_epilogue_default(
 def moe_gate_up_silu_gemm_signature(spec: FusedGateUpSiluGemmSpec):
     from ..helpers.spec import SignatureBuilder
 
+    dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("WGate", "f16")
-        .ptr("WUp", "f16")
-        .ptr("Hidden", "f16")
+        .ptr("A", dt)
+        .ptr("WGate", dt)
+        .ptr("WUp", dt)
+        .ptr("Hidden", dt)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
@@ -620,6 +628,7 @@ class FusedInterleavedGateUpSiluGemmSpec:
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
     wave_size: int = 64
     block_size: int = 0
+    dtype: str = "fp16"
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -630,11 +639,16 @@ class FusedInterleavedGateUpSiluGemmSpec:
                 t.warp_m * t.warp_n * t.warp_k * self.wave_size,
             )
 
+    def _data_spec(self) -> DataSpec:
+        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
+        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self._data_spec(),
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -1108,11 +1122,12 @@ def moe_interleaved_gate_up_silu_gemm_signature(
 ):
     from ..helpers.spec import SignatureBuilder
 
+    dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
     sig = (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("WGateUp", "f16")
-        .ptr("Hidden", "f16")
+        .ptr("A", dt)
+        .ptr("WGateUp", dt)
+        .ptr("Hidden", dt)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
@@ -1156,6 +1171,7 @@ class FusedDownReduceGemmSpec:
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
     wave_size: int = 64
     block_size: int = 0
+    dtype: str = "fp16"
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1166,11 +1182,16 @@ class FusedDownReduceGemmSpec:
                 t.warp_m * t.warp_n * t.warp_k * self.wave_size,
             )
 
+    def _data_spec(self) -> DataSpec:
+        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
+        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self._data_spec(),
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,
@@ -1544,10 +1565,11 @@ def _emit_down_reduce_epilogue_atomic(
 def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
     from ..helpers.spec import SignatureBuilder
 
+    dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("WDown", "f16")
+        .ptr("A", dt)
+        .ptr("WDown", dt)
         .ptr("SortedTokenIds", "i32")
         .ptr("SortedWeights", "f32")
         .ptr("Y", "f32")
@@ -1592,6 +1614,7 @@ class FusedDownSiluReduceGemmSpec:
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
     wave_size: int = 64
     block_size: int = 0
+    dtype: str = "fp16"
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1602,11 +1625,16 @@ class FusedDownSiluReduceGemmSpec:
                 t.warp_m * t.warp_n * t.warp_k * self.wave_size,
             )
 
+    def _data_spec(self) -> DataSpec:
+        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
+        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self._data_spec(),
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=True,

@@ -524,32 +524,152 @@ def moe_sorting_workspace_bytes(spec: MoeSortingSpec) -> int:
 
 
 def build_moe_sort_persistent(spec: MoeSortingSpec) -> KernelDef:
-    """Persistent / fused MP variant of MoE sorting (P63).
+    """Single-kernel MoE sort: histogram + scan + scatter in one CTA.
 
-    Replicates AITER's ``moe_sorting_opus_kernel_*`` single-launch
-    pipeline: LDS counters → LDS cumsum → LDS scatter, all in one
-    persistent kernel. Eliminates 2 of 3 kernel launches and the
-    2 host-side ``Hist.zero_()`` / ``Counter.zero_()`` memsets.
+    AITER ``moe_sorting_opus_kernel_*`` parity. The whole pipeline
+    runs in a single CTA holding the histogram, exclusive-scan, and
+    scatter state in LDS — no global atomic traffic between phases.
 
-    Reference: AITER ``csrc/include/moe_sorting_opus.h::
-    moe_sorting_opus_kernel_*``.
+    Eliminates two of the three host-side kernel launches in
+    :class:`MoeSortingLauncher`. The launch-overhead saving dominates
+    for the typical decode case (T*K small, e.g. T=2 K=8 ⇒ 16 pairs)
+    where the actual sort work is trivial.
 
-    Minimum-viable implementation: emits the per-CTA histogram
-    + scan + scatter as a single bounded ``scf.for`` over the input
-    pairs, with the cross-CTA aggregation handled via the persistent
-    counter helper (P35) so the histogram, scan, and scatter all run
-    inside one kernel. The actual kernel body is a copy of the three
-    phase kernels' bodies wired together; for now the helper builds
-    the histogram + scan portion and the call site (the launcher in
-    :func:`moe_sorting_chain`) opts in by setting
-    ``MoeSortingSpec.persistent = True``.
+    Constraints (enforced by :func:`is_valid_spec`):
 
-    For this phase the build returns the canonical scatter kernel —
-    persistent dispatch is wired in via the launcher. Once the
-    end-to-end persistent fast-path is validated, a v2 hoist can
-    inline phases 1+2 into the same builder.
+    * ``experts <= block_size`` — every expert bin maps to one lane
+      for the in-block scan + the Counts/Offsets global stores.
+    * The CTA processes all ``tokens * topk`` pairs (no inter-CTA
+      coordination), so this is only profitable when the per-block
+      work fits the block-size sweep — which is the only regime the
+      decode/persistent path targets anyway.
     """
-    return build_moe_sort_scatter(spec)
+    ok, why = is_valid_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid moe_sorting spec: {why}")
+
+    BS = spec.block_size
+    E = spec.experts
+    NP = spec.total_pairs
+
+    b = IRBuilder(spec.kernel_name("persistent"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    # ABI: superset of the three split kernels — single launch consumes
+    # the inputs and emits Counts/Offsets/Sorted* in one go.
+    TopkIds = b.param(
+        "TopkIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+    )
+    TopkWeights = b.param(
+        "TopkWeights",
+        PtrType(F32, "global"),
+        noalias=True,
+        readonly=True,
+        align=4,
+    )
+    Offsets = b.param("Offsets", PtrType(I32, "global"), align=4)
+    Counts = b.param("Counts", PtrType(I32, "global"), writeonly=True, align=4)
+    SortedTokenIds = b.param(
+        "SortedTokenIds", PtrType(I32, "global"), writeonly=True, align=4
+    )
+    SortedTopkIds = b.param(
+        "SortedTopkIds", PtrType(I32, "global"), writeonly=True, align=4
+    )
+    SortedWeights = b.param(
+        "SortedWeights", PtrType(F32, "global"), writeonly=True, align=4
+    )
+    _tokens = b.param("tokens", I32)  # noqa: F841 — ABI
+    topk = b.param("topk", I32)
+    num_experts = b.param("num_experts", I32)
+
+    tid = b.thread_id_x()
+    c_one = b.const_i32(1)
+    c_zero = b.const_i32(0)
+    c_E = b.const_i32(E)
+    c_BS = b.const_i32(BS)
+    c_NP = b.const_i32(NP)
+
+    # ── Phase 1: LDS histogram ───────────────────────────────────────
+    # lds_zero_i32 already issues a trailing b.sync() so the atomic
+    # adds below see a cleared buffer.
+    lds_hist = b.smem_alloc(I32, [E], name_hint="lds_hist")
+    lds_zero_i32(b, lds_hist, tid=tid, block_size=BS, length=E)
+
+    pairs_per_thread = (NP + BS - 1) // BS
+    for i in range(pairs_per_thread):
+        pair_idx = b.add(b.mul(b.const_i32(i), c_BS), tid)
+        in_bounds = b.cmp_lt(pair_idx, c_NP)
+        with b.scf_if(in_bounds):
+            eid = b.global_load_i32(TopkIds, pair_idx)
+            valid_e = b.land(b.cmp_ge(eid, c_zero), b.cmp_lt(eid, num_experts))
+            with b.scf_if(valid_e):
+                b.lds_atomic_add(lds_hist, [eid], c_one)
+    b.sync()
+
+    # ── Write Counts to global before the scan overwrites lds_hist ──
+    with b.scf_if(b.cmp_lt(tid, c_E)):
+        cnt = b.vec_extract(b.smem_load_vN(lds_hist, tid, dtype=I32, n=1), 0)
+        b.global_store(Counts, tid, cnt, align=4)
+
+    # ── Phase 2: in-place exclusive scan over lds_hist ──────────────
+    block_exclusive_scan_i32(b, lds_hist, tid=tid, block_size=BS, length=E)
+    # block_exclusive_scan_i32 finishes with a b.sync() already.
+
+    # Write Offsets to global.
+    with b.scf_if(b.cmp_lt(tid, c_E)):
+        off = b.vec_extract(b.smem_load_vN(lds_hist, tid, dtype=I32, n=1), 0)
+        b.global_store(Offsets, tid, off, align=4)
+
+    # ── Phase 3: LDS scatter ────────────────────────────────────────
+    # Per-expert next-free counter held in a second LDS buffer; the
+    # pre-add value returned by lds_atomic_add is the local bucket
+    # index, which we add to the scan base in lds_hist to get the
+    # global write offset.
+    lds_counter = b.smem_alloc(I32, [E], name_hint="lds_counter")
+    lds_zero_i32(b, lds_counter, tid=tid, block_size=BS, length=E)
+
+    for i in range(pairs_per_thread):
+        pair_idx = b.add(b.mul(b.const_i32(i), c_BS), tid)
+        in_bounds = b.cmp_lt(pair_idx, c_NP)
+        with b.scf_if(in_bounds):
+            eid = b.global_load_i32(TopkIds, pair_idx)
+            valid_e = b.land(b.cmp_ge(eid, c_zero), b.cmp_lt(eid, num_experts))
+            with b.scf_if(valid_e):
+                local_off = b.lds_atomic_add(lds_counter, [eid], c_one)
+                base = b.vec_extract(b.smem_load_vN(lds_hist, eid, dtype=I32, n=1), 0)
+                global_off = b.add(base, local_off)
+
+                t_idx = b.div(pair_idx, topk)
+                k_idx = b.mod(pair_idx, topk)
+                w = b.global_load_f32(TopkWeights, pair_idx)
+
+                b.global_store(SortedTokenIds, global_off, t_idx, align=4)
+                b.global_store(SortedTopkIds, global_off, k_idx, align=4)
+                b.global_store(SortedWeights, global_off, w, align=4)
+
+    return b.kernel
+
+
+def moe_sort_persistent_grid(spec: MoeSortingSpec) -> Tuple[int, int, int]:
+    """Grid for the single-kernel path: one CTA handles everything."""
+    return (1, 1, 1)
+
+
+def moe_sort_persistent_signature(spec: MoeSortingSpec):
+    return (
+        SignatureBuilder()
+        .ptr("TopkIds", "i32")
+        .ptr("TopkWeights", "f32")
+        .ptr("Offsets", "i32")
+        .ptr("Counts", "i32")
+        .ptr("SortedTokenIds", "i32")
+        .ptr("SortedTopkIds", "i32")
+        .ptr("SortedWeights", "f32")
+        .scalar("tokens", "i32")
+        .scalar("topk", "i32")
+        .scalar("num_experts", "i32")
+        .build()
+    )
 
 
 # ---------------------------------------------------------------------
@@ -620,6 +740,7 @@ class MoeSortingLauncher:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_launchers", None)
+        object.__setattr__(self, "_persistent", None)
 
     def _stages(
         self,
@@ -741,6 +862,58 @@ class MoeSortingLauncher:
             *callables,
         )
 
+    def _ensure_persistent(self) -> "tuple[Any, Any]":
+        """Lazily compile + cache the single-kernel persistent variant.
+
+        Returns ``(KernelLauncher, LaunchConfig)``. The launch config is
+        built once and the stream is overridden per call in
+        :meth:`run_persistent`.
+        """
+        if self._persistent is not None:  # type: ignore[has-type]
+            return self._persistent  # type: ignore[has-type]
+        from ..helpers.compile import compile_kernel
+        from ..runtime.launcher import KernelLauncher, LaunchConfig
+
+        s = self.spec
+        kernel_def = build_moe_sort_persistent(s)
+        artifact = compile_kernel(kernel_def, capture_ir_text=False)
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=moe_sort_persistent_signature(s),
+            cache_key=("moe_sorting", "persistent", s.kernel_name("persistent")),
+        )
+        cfg = LaunchConfig(
+            grid=moe_sort_persistent_grid(s),
+            block=(s.block_size, 1, 1),
+        )
+        bundle = (launcher, cfg)
+        object.__setattr__(self, "_persistent", bundle)
+        return bundle
+
+    def run_persistent(
+        self,
+        vals_flat: Mapping[str, Any],
+        *,
+        stream: int = 0,
+    ) -> None:
+        """Single-kernel path: histogram + scan + scatter in one CTA.
+
+        ``vals_flat`` must contain the persistent kernel's full ABI
+        (see :func:`moe_sort_persistent_signature`). No host-side
+        pre-zeroing of Counts/Offsets is required — the kernel manages
+        its histogram + per-expert next-free counter in LDS.
+        """
+        from ..runtime.launcher import LaunchConfig
+
+        launcher, base_cfg = self._ensure_persistent()
+        cfg = LaunchConfig(
+            grid=base_cfg.grid,
+            block=base_cfg.block,
+            stream=int(stream),
+        )
+        launcher(vals_flat, config=cfg)
+
 
 # Convenience: the underlying ``lds_zero_i32`` helper is re-exported
 # for callers building custom MoE pipelines that want to zero their
@@ -761,5 +934,7 @@ __all__ = [
     "moe_sort_scan_signature",
     "moe_sort_scatter_grid",
     "moe_sort_scatter_signature",
+    "moe_sort_persistent_grid",
+    "moe_sort_persistent_signature",
     "moe_sorting_workspace_bytes",
 ]
