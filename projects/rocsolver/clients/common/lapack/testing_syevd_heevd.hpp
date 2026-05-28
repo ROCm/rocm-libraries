@@ -624,7 +624,7 @@ void syevd_heevd_getError(const rocblas_handle handle,
     // input data initialization
     syevd_heevd_initData<true, true, T>(handle, matrix, evect, n, dA, lda, bc, hA, A);
 
-    if (verbose == 2) {
+    if (verbose >= 2) {
         print_matrix( "A", n, n, dA[0], lda );
     }
 
