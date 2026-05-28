@@ -57,6 +57,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
+    unit/asm/LoopRegionRemarkPassTest.cpp
 )
 
 # High-Level IR Tests

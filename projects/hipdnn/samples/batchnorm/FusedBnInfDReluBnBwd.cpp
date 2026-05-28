@@ -63,7 +63,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     activBwdAttributes.set_name("activation_backward_node");
     activBwdAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_BWD);
 
-    auto dxDrelu = graph->pointwise(bnY, dy, activBwdAttributes);
+    auto dxDrelu = graph->pointwise(dy, bnY, activBwdAttributes);
     dxDrelu->set_name("dx_drelu");
 
     // Step 3: Batchnorm Backward

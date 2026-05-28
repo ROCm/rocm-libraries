@@ -33,12 +33,66 @@
 
 namespace stinkytofu {
 
-/// Parsed instruction node from IR text format.
-/// This is a lightweight structure that holds the parsed instruction data
-/// before it's converted to StinkyInstruction or used by other components.
-/// Parsed modifier: attrKey (e.g. "mod.ds") -> field name -> value string
-using ParsedModifierDict =
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>>;
+/// Modifier map for a parsed instruction: outer key (e.g. "mod.ds") ->
+/// inner field name -> value string. Outer keys iterate in insertion order,
+/// which matches the trailing-modifier ordering the assembler enforces, so
+/// parse -> deserialize -> emit round-trips unchanged.
+///
+/// API surface mirrors what the parsers use (operator[] find-or-insert,
+/// range-based iteration). The inner FieldMap stays unordered — each
+/// modifier's serializeVisit emits its fields in a fixed order, so inner-key
+/// order is not observable.
+class ParsedModifierDict {
+   public:
+    using FieldMap = std::unordered_map<std::string, std::string>;
+    using Entry = std::pair<std::string, FieldMap>;
+    using Entries = std::vector<Entry>;
+
+    /// Find-or-insert by outer key. Insertion appends a new entry at the back;
+    /// repeated access to an existing key returns the same FieldMap.
+    FieldMap& operator[](const std::string& key) {
+        auto [it, inserted] = index_.try_emplace(key, entries_.size());
+        if (inserted) entries_.emplace_back(key, FieldMap{});
+        return entries_[it->second].second;
+    }
+
+    typename Entries::iterator begin() noexcept {
+        return entries_.begin();
+    }
+    typename Entries::iterator end() noexcept {
+        return entries_.end();
+    }
+    typename Entries::const_iterator begin() const noexcept {
+        return entries_.begin();
+    }
+    typename Entries::const_iterator end() const noexcept {
+        return entries_.end();
+    }
+
+    /// Lookup by outer key. Returns end() on miss; otherwise an iterator into
+    /// the insertion-ordered entries vector (iterator yields {key, FieldMap}).
+    typename Entries::iterator find(const std::string& key) {
+        auto it = index_.find(key);
+        if (it == index_.end()) return entries_.end();
+        return entries_.begin() + it->second;
+    }
+    typename Entries::const_iterator find(const std::string& key) const {
+        auto it = index_.find(key);
+        if (it == index_.end()) return entries_.end();
+        return entries_.begin() + it->second;
+    }
+
+    bool empty() const noexcept {
+        return entries_.empty();
+    }
+    std::size_t size() const noexcept {
+        return entries_.size();
+    }
+
+   private:
+    Entries entries_;                                     // insertion-ordered storage
+    std::unordered_map<std::string, std::size_t> index_;  // outer key -> entries_ index
+};
 
 struct ParsedInstruction {
     std::string opcodeStr;

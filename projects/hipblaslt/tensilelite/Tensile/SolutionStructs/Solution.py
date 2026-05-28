@@ -186,7 +186,16 @@ _expectedParamTypes = _getExpectedTypes(validParameters)
 # Parameters to skip during type validation because YAML serialization
 # inherently produces a different type (e.g. [9, 0, 10] -> list) and the
 # conversion to the canonical type happens downstream in the pipeline.
-_skipTypeCheck = {"ISA"}
+# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
 
 
 # Module-level collector that accumulates type mismatches across all Solution
@@ -274,7 +283,7 @@ def validateParameterTypes(state, srcFile=""):
 
 
 def printTypeMismatchSummary(numFiles=0):
-  """Print a summary of all collected type mismatches.
+  """Print a summary of all collected type mismatches to stdout.
 
   If no mismatches have been collected, prints a confirmation message
   showing how many files were checked cleanly, and returns 0.  Otherwise
@@ -865,6 +874,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+      if state["DebugStreamK"] != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
 
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
@@ -875,6 +888,22 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
+    else:
+      if state["ClusterBarrier"] == True:
+        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
+
+    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
+    # when TDM is enabled.
+    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
+      reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
+
+    # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
+    # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
+    # falls back to code -1 and produces incorrect cluster-scope synchronization.
+    if state["ClusterBarrier"] == True \
+       and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+      reject(state, printRejectionReason,
+             "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1481,7 +1510,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      if state["_ScheduleIterAlg"] != 2 and state["_ScheduleIterAlg"] != 3:
+      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
+        and state["TDMInst"] == 3 \
+        and state["PrefetchGlobalRead"] in (1, 2)
+      if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
         if not state["ProblemType"]["DataType"].isSingle():

@@ -43,7 +43,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: b8a0e8bc8999356b44a57719ac7f29986ad28128 # tmp bump
+          ref: 09796322b89aa5239d03700c4ad3976da6cc689d
 
       - name: Setting up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
