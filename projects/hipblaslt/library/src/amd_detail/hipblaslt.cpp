@@ -795,6 +795,89 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+/* =========================================================================
+ * FP64 emulation handle-level API
+ * ========================================================================= */
+
+hipblasStatus_t hipblasLtSetEmulationStrategy(hipblasLtHandle_t            handle,
+                                              hipblasLtEmulationStrategy_t strategy)
+try
+{
+    if(handle == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
+    auto* h = reinterpret_cast<_rocblaslt_handle*>(handle);
+    if(strategy < HIPBLASLT_EMULATION_STRATEGY_DEFAULT
+       || strategy > HIPBLASLT_EMULATION_STRATEGY_EAGER)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    h->emulation.strategy = static_cast<int>(strategy);
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtGetEmulationStrategy(hipblasLtHandle_t             handle,
+                                              hipblasLtEmulationStrategy_t* strategy)
+try
+{
+    if(handle == nullptr || strategy == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
+    auto* h    = reinterpret_cast<_rocblaslt_handle*>(handle);
+    int   raw  = h->emulation.strategy;
+    *strategy  = (raw < 0)
+                     ? HIPBLASLT_EMULATION_STRATEGY_DEFAULT
+                     : static_cast<hipblasLtEmulationStrategy_t>(raw);
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtSetFixedPointEmulationMantissaControl(
+    hipblasLtHandle_t                 handle,
+    hipblasEmulationMantissaControl_t control)
+try
+{
+    if(handle == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
+    auto* h = reinterpret_cast<_rocblaslt_handle*>(handle);
+    h->emulation.mantissa_control = static_cast<int>(control);
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtSetFixedPointEmulationMaxMantissaBitCount(hipblasLtHandle_t handle,
+                                                                    int               maxBits)
+try
+{
+    if(handle == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
+    if(maxBits != -1 && (maxBits < 16 || maxBits > 110))
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    auto* h = reinterpret_cast<_rocblaslt_handle*>(handle);
+    h->emulation.max_mantissa_bits = maxBits;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtSetEmulationSpecialValuesSupport(hipblasLtHandle_t handle,
+                                                          unsigned int      mask)
+try
+{
+    if(handle == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
+    auto* h = reinterpret_cast<_rocblaslt_handle*>(handle);
+    h->emulation.special_values_mask = mask;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 #ifdef __cplusplus
 }
 #endif

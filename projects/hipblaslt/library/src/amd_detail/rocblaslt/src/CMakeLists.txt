@@ -21,6 +21,17 @@ target_sources(hipblaslt
 )
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
+# FP64 emulation via Ozaki Scheme II (INT8 tensor cores + CRT).
+# This file contains __global__ HIP kernels and must be compiled as HIP,
+# even though the rest of the sources in this directory are plain C++.
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/fp64_emulation.cpp"
+    PROPERTIES LANGUAGE HIP
+)
+target_sources(hipblaslt
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/fp64_emulation.cpp"
+)
 if(HIPBLASLT_ENABLE_ROCROLLER)
     add_subdirectory(rocroller)
 endif()

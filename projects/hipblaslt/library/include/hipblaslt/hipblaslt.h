@@ -82,6 +82,26 @@
 /*! \ingroup types_module
  *  \brief Specifies the enumeration type to set the postprocessing options for the epilogue.
  */
+/*! \ingroup types_module
+ *  \brief Emulation strategy for FP64 GEMM via Ozaki Scheme II.
+ */
+typedef enum {
+    HIPBLASLT_EMULATION_STRATEGY_DEFAULT    = 0, /**<Use the process-wide default (from HIPBLASLT_EMULATION_STRATEGY env var). */
+    HIPBLASLT_EMULATION_STRATEGY_PERFORMANT = 1, /**<Emulate only when the arithmetic-intensity heuristic predicts a speedup. */
+    HIPBLASLT_EMULATION_STRATEGY_EAGER      = 2, /**<Emulate whenever the data types and epilogue are supported, regardless of problem size. */
+} hipblasLtEmulationStrategy_t;
+
+/*! \ingroup types_module
+ *  \brief Mantissa precision control for FP64 fixed-point emulation.
+ */
+typedef enum {
+    HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC = 0, /**<Automatically choose the number of INT8 GEMMs (ADP; default). */
+    HIPBLAS_EMULATION_MANTISSA_CONTROL_FIXED   = 1, /**<Use the fixed bit count set by hipblasLtSetFixedPointEmulationMaxMantissaBitCount(). */
+} hipblasEmulationMantissaControl_t;
+
+/*! \ingroup types_module
+ *  \brief Specifies the enumeration type to set the postprocessing options for the epilogue.
+ */
 typedef enum {
   HIPBLASLT_EPILOGUE_DEFAULT = 1,                 /**<No special postprocessing. Scale and quantize the results if necessary.*/
   HIPBLASLT_EPILOGUE_RELU = 2,                    /**<Apply ReLU pointwise transform to the results (``x:=max(x, 0)``)*/
@@ -1116,6 +1136,92 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
                                          void*                   C,
                                          hipblasLtMatrixLayout_t Cdesc,
                                          hipStream_t             stream);
+/*! \ingroup library_module
+ *  \brief Set the FP64 emulation strategy for a hipBLASLt handle.
+ *
+ *  \details
+ *  Controls whether FP64 GEMM emulation via Ozaki Scheme II is applied only
+ *  when it is projected to be faster than native FP64 (``PERFORMANT``) or
+ *  for every supported call regardless of problem size (``EAGER``).  The
+ *  ``DEFAULT`` value defers to the ``HIPBLASLT_EMULATION_STRATEGY``
+ *  environment variable (default: ``PERFORMANT``).
+ *
+ *  Handle settings take precedence over environment variables.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p strategy
+ *                                         is out of range.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetEmulationStrategy(hipblasLtHandle_t            handle,
+                                              hipblasLtEmulationStrategy_t strategy);
+
+/*! \ingroup library_module
+ *  \brief Query the FP64 emulation strategy for a hipBLASLt handle.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       \p *strategy has been written.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p handle or \p strategy is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetEmulationStrategy(hipblasLtHandle_t             handle,
+                                              hipblasLtEmulationStrategy_t* strategy);
+
+/*! \ingroup library_module
+ *  \brief Set the mantissa precision control mode for FP64 emulation.
+ *
+ *  \details
+ *  ``DYNAMIC`` (default): the library automatically selects the minimum
+ *  number of INT8 GEMMs needed to achieve the requested precision level.
+ *  ``FIXED``: use the bit count set by
+ *  hipblasLtSetFixedPointEmulationMaxMantissaBitCount().
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetFixedPointEmulationMantissaControl(
+    hipblasLtHandle_t                 handle,
+    hipblasEmulationMantissaControl_t control);
+
+/*! \ingroup library_module
+ *  \brief Set the maximum CRT mantissa bit count for FP64 fixed-point emulation.
+ *
+ *  \details
+ *  Specifies the total CRT capacity in bits (sum of log2 of all moduli used).
+ *  The library selects the minimum number of moduli s such that
+ *  log2(prod(moduli)) >= maxBits.  Notable values: 55→7 GEMMs,
+ *  79→10 GEMMs, 110→14 GEMMs (default maximum).
+ *
+ *  Only effective when mantissa control is ``FIXED`` or when the env var
+ *  HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT has not been set.
+ *  Set to -1 to revert to the process-wide default.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p maxBits
+ *                                         is out of range (must be -1 or
+ *                                         in [16, 110]).
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetFixedPointEmulationMaxMantissaBitCount(hipblasLtHandle_t handle,
+                                                                    int               maxBits);
+
+/*! \ingroup library_module
+ *  \brief Set the Inf/NaN special-values support mask for FP64 emulation.
+ *
+ *  \details
+ *  Bit 0: Inf detection enabled (fall back to native FP64 if Inf found).
+ *  Bit 1: NaN detection enabled (fall back to native FP64 if NaN found).
+ *  Default (both bits set): fall back for any non-finite input.
+ *  Set to 0 to disable all detection (faster for guaranteed-clean inputs).
+ *  Set to -1 (all bits) to use the environment variable default.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetEmulationSpecialValuesSupport(hipblasLtHandle_t handle,
+                                                          unsigned int      mask);
+
 #ifdef __cplusplus
 }
 #endif

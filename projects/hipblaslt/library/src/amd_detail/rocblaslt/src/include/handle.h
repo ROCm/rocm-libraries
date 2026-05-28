@@ -109,6 +109,15 @@ struct _rocblaslt_handle
     int   useRocRoller     = -1;
 #endif
 
+    /* FP64 emulation (Ozaki Scheme II) — per-handle overrides for env vars.
+     * Sentinel values (-1 / ~0u) mean "use the process-wide env var default". */
+    struct {
+        int          strategy;              /* 0=DEFAULT, 1=PERFORMANT, 2=EAGER; -1=env var */
+        int          mantissa_control;      /* 0=DYNAMIC, 1=FIXED */
+        int          max_mantissa_bits;     /* bit target for FIXED mode; -1=env var */
+        unsigned int special_values_mask;   /* Inf/NaN mask; ~0u=env var */
+    } emulation = {-1, 0, -1, ~0u};
+
     // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
     // See check_numerics_matrix.hpp for the scanner protocol.
     hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
