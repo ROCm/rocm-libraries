@@ -1,5 +1,5 @@
+import copy
 from pathlib import Path
-import importlib
 import os
 import sys
 import unittest
@@ -9,10 +9,6 @@ import therock_matrix
 
 
 class TheRockMatrixTest(unittest.TestCase):
-    def setUp(self):
-        # collect_projects_to_run mutates module-level project_map; reset between tests.
-        importlib.reload(therock_matrix)
-
     def test_collect_projects_to_run_without_additional_option(self):
         subtrees = ["projects/hipblaslt"]
 
@@ -51,6 +47,30 @@ class TheRockMatrixTest(unittest.TestCase):
         combined = project_to_run[0]
         self.assertIn("rocwmma", combined["projects_to_test"].split(","))
         self.assertIn("miopen", combined["projects_to_test"].split(","))
+
+    def test_collect_projects_to_run_does_not_mutate_module_state(self):
+        # Snapshot module-level dicts, run a series of representative calls, and
+        # confirm the originals are untouched. This guards against the
+        # mutate-globals regression that previously required importlib.reload
+        # between tests.
+        project_map_before = copy.deepcopy(therock_matrix.project_map)
+        additional_options_before = copy.deepcopy(therock_matrix.additional_options)
+
+        therock_matrix.collect_projects_to_run(["projects/hipblaslt"])
+        therock_matrix.collect_projects_to_run(
+            ["projects/rocsparse", "projects/hipblaslt"]
+        )
+        therock_matrix.collect_projects_to_run(
+            ["projects/miopen", "projects/hipblaslt"]
+        )
+        therock_matrix.collect_projects_to_run(
+            ["projects/miopen", "projects/rocwmma"]
+        )
+
+        self.assertEqual(therock_matrix.project_map, project_map_before)
+        self.assertEqual(
+            therock_matrix.additional_options, additional_options_before
+        )
 
 
 if __name__ == "__main__":
