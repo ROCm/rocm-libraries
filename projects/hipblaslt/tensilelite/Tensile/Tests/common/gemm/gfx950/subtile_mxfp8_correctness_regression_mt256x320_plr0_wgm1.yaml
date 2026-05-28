@@ -1,0 +1,138 @@
+########################################
+# MXFP8 correctness regression — MT256x320x128 / PLR0 / WGM1 / DUMX256 path
+#                                (R=2 swizzled-scale subtile, N-asym tile)
+#
+# Coverage gap from the 927-row validator sweep
+# (/home/bnemanic/mxfp8_correctness_run9339.csv) and the bench-with-verify
+# rollup in /home/bnemanic/MXFP8_BUG_HANDOFF_kernels.csv (row 1).
+#
+# Cluster regime: PLR0 / WGM1 / DUMX=256 / DU=128 (R = DepthUMX/DepthU = 2).
+# Dominant uncovered tile in this regime:
+#
+#     MT256x320x128 / MIWT=[8,10] / MIWG=[2,2] / PGR2 / PLR0 / WGM1
+#                  → 24/51 bench fail (47.1%)
+#                  → 141/144 validator fail (97.9%)
+#                  → max norm_error = 4.02e+18  (catastrophic NaN-class
+#                                                blowup at (45312,64384,7936))
+#
+# Other uncovered tiles that share this PLR0/WGM1/DUMX256 regime and should
+# light up (or stay green) together once the bug is fixed:
+#     MT448x128x128 / MIWT[14,4] / MIWG[2,2]    (3/3 fail; norm_err≤0.260)
+#     MT128x192x128 / MIWT[4,6]  / MIWG[2,2]    (2/2 fail; norm_err≤1.016)
+#     MT128x256x128 / MIWT[4,8]  / MIWG[2,2]    (2/2 fail; norm_err≤0.547)
+#     MT256x288x128 / MIWT[4,18] / MIWG[4,1]    (2/13 fail; norm_err≤0.032)
+#
+# Expected behaviour:
+#   - Before the bug is fixed: verify FAILS on the failing sizes, including
+#     the catastrophic (45312,64384,7936) → ~4e+18 NaN-class blowup case.
+#   - After the bug is fixed: every size PASSes verify.
+#
+# NumElementsToValidate=-1 forces TensileLite to validate every element.
+#
+# Pinned ForkParameter values (mirror the dominant uncovered kernel name):
+#   MatrixInstruction:    [16, 16, 128, 1, 1, 8, 10, 2, 2]
+#                                  → MT256x320, MIWT=[8,10], MIWG=[2,2]
+#   PrefetchGlobalRead:   [2]      → PGR2
+#   PrefetchLocalRead:    [0]      → PLR0
+#   DepthU:               [128]
+#   DepthUMX:             [256]    → DUMX256 (R=2)
+#   ScheduleIterAlg:      [3]      → SIA3
+#   DirectToLds:          [1]      → DTLA1 / DTLB1
+#   StreamK:              [3]      → SK3
+#   StaggerU:             [0]      → SU0
+#   UseSubtileImpl:       [1]
+#   WorkGroupMapping:     [1]      → WGM1
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # MT256x320x128 / MIWT=[8,10] / MIWG=[2,2] / PLR0 / WGM1 — dominant
+  # uncovered failing tile in the PLR0/WGM1/DUMX256 regime.
+  #
+  # Failing sizes ordered by norm_error desc. The (45312,64384,7936) row is
+  # the largest finite-norm fail across the entire 927-shape validator
+  # sweep (4.02e+18; NaN-class memory-corruption signature).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 10,  2, 2]   # MT256x320, MIWT=[8,10], MIWG=[2,2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead:  [0]
+        - DepthU: [128]
+        - DepthUMX: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ===== Failing sizes (validator norm_error desc) =====
+          - Exact: [   45312,  64384, 1,  7936]   # bench norm_error = 4.02e+18  (catastrophic NaN-class; K=62*DU)
+          - Exact: [    1536,   4480, 1, 667648]  # bench norm_error = 0.177     (very deep K=5216*DU, skinny)
+          - Exact: [    3712,   1280, 1, 933632]  # bench norm_error = 0.107     (very deep K=7294*DU, skinny)
+          - Exact: [   13696,  15488, 1,  8448]   # bench norm_error = 0.101     (medium square-ish, K=66*DU)
+          - Exact: [   14336,  10880, 1,  9472]   # bench norm_error = 0.100     (medium rectangular, K=74*DU)
+          - Exact: [    4608,  64000, 1, 39936]   # bench norm_error = 0.0984    (N-asym, deep K=312*DU)
+          - Exact: [    9728,   9600, 1, 13824]   # bench norm_error = 0.0914    (square, K=108*DU)
+          - Exact: [  173312,   3200, 1,  2560]   # bench norm_error = 0.0768    (skinny, K=20*DU)
+          # ===== Control sizes (PASS at this tile in the validator) =====
+          # Smoke probes to confirm the codegen path is not broken in trivial
+          # ways at small K. After the bug is fixed these should still PASS.
+          - Exact: [    2048,   4480, 1,   768]   # validator PASS smoke (K=6*DU)
+          - Exact: [    7680,   5760, 1,   256]   # validator PASS smoke (K=2*DU)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:

@@ -1,0 +1,127 @@
+########################################
+# MXFP8 correctness regression — MT192x256x128 / PLR1 / WGM4 / DUMX256 path
+#                                (R=2 swizzled-scale subtile, WGM=4 scheduler)
+#
+# Coverage gap from /home/bnemanic/MXFP8_BUG_HANDOFF_kernels.csv (row 6).
+#
+# Cluster regime: PLR1 / WGM4 / DUMX=256 / DU=128 (R = DepthUMX/DepthU = 2).
+# This matches the WGM=4 scheduler bucket of the existing
+# `..._regression_depthumx.yaml` but at smaller MT (192x256 vs 320x256).
+# Useful for isolating whether the bug is MT-size-dependent or just
+# scheduler-bucket-dependent on the PLR1/WGM4 cluster.
+#
+# Dominant uncovered tile in this regime:
+#
+#     MT192x256x128 / MIWT=[6,8] / MIWG=[2,2] / PGR2 / PLR1 / WGM4
+#                  → 5/5 bench fail (100.0%)
+#                  → max norm_error = 0.0585
+#
+# Note: MIWT_M=6 is non-power-of-two — exactly the case
+# LogicalScheduler.py:749's MAX_UNROLL=32 raise was meant to cover ("need
+# up to lcm of MIWT components iterations to close the cycle"). If the bug
+# is in the cycle convergence, this tile will exercise it.
+#
+# Expected behaviour:
+#   - Before the bug is fixed: verify FAILS on every failing size (100% rate).
+#   - After the bug is fixed: every size PASSes verify.
+#
+# Pinned ForkParameter values:
+#   MatrixInstruction:    [16, 16, 128, 1, 1, 6, 8, 2, 2]
+#                                  → MT192x256, MIWT=[6,8], MIWG=[2,2]
+#   PrefetchGlobalRead:   [2]      → PGR2
+#   PrefetchLocalRead:    [1]      → PLR1
+#   DepthU:               [128]
+#   DepthUMX:             [256]    → DUMX256 (R=2)
+#   ScheduleIterAlg:      [3]
+#   DirectToLds:          [1]
+#   StreamK:              [3]
+#   StaggerU:             [0]
+#   UseSubtileImpl:       [1]
+#   WorkGroupMapping:     [4]      → WGM4 (matches existing _depthumx.yaml)
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # MT192x256x128 / MIWT=[6,8] / MIWG=[2,2] / PLR1 / WGM4 — dominant
+  # uncovered failing tile in the PLR1/WGM4/DUMX256 regime (100% fail rate).
+  # MIWT_M=6 is non-power-of-two; relevant to the LR free-list cycle
+  # convergence path in LogicalScheduler.py.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 8,  2, 2]    # MT192x256, MIWT=[6,8], MIWG=[2,2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead:  [1]
+        - DepthU: [128]
+        - DepthUMX: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - WorkGroupMapping: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ===== Failing sizes (bench-merged norm_error desc) =====
+          - Exact: [    4608,   4864, 1,  2560]   # bench norm_error = 0.0585    (K=20*DU)
+          - Exact: [    4608,   4864, 1,  5888]   # bench norm_error = 0.0481    (K=46*DU, same shape diff K)
+          - Exact: [    4992,   4608, 1,  7424]   # bench norm_error = 0.0432    (K=58*DU)
+          - Exact: [    2944,   3584, 1,   512]   # bench norm_error = 0.0276    (K=4*DU)
+          - Exact: [    1920,   5888, 1,  3328]   # bench norm_error = 0.0235    (K=26*DU)
+          # ===== Control sizes (synthetic small-K smokes) =====
+          - Exact: [    1920,   2560, 1,   256]   # smoke (K=2*DU)
+          - Exact: [    3840,   2560, 1,   768]   # smoke (K=6*DU)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:

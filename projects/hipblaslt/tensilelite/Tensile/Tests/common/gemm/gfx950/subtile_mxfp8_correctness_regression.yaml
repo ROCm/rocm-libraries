@@ -126,6 +126,21 @@ BenchmarkProblems:
           - Exact: [5632, 5120, 1, 7936]    # snapshot norm_error = 0.1289
           - Exact: [6144, 5120, 1, 5888]    # snapshot norm_error = 0.1021 ; K=46*DU (not DU=256-aligned)
           - Exact: [7040, 3840, 1, 1536]    # snapshot norm_error = 0.0718 ; smaller K=12*DU
+          # ===== Additional failing sizes (added 2026-05-28; deep-K + catastrophic) =====
+          # The 927-row validator sweep shows this MT256x256x128 tile failing
+          # 89/92 (96.7%). The original embedded sizes above are all from the
+          # ~0.1 norm_error band; the rows below extend coverage into the
+          # very-deep-K (K >> DU) regime and include the single catastrophic
+          # NaN-class case (3584,1408,441088) which on the libs-merged bench
+          # build measures norm_error = 3.21e+17 — a memory-corruption-class
+          # signature distinct from the ~0.1 numerical-drift band and a
+          # critical mandate for any candidate fix to repair.
+          - Exact: [3584, 1408, 1, 441088]  # validator norm_error = 0.3643 ; libs-merged bench = 3.21e+17  (CATASTROPHIC; K=3446*DU)
+          - Exact: [2816, 2432, 1, 685568]  # validator norm_error = 0.2035   (very deep K=5356*DU)
+          - Exact: [3968, 1792, 1, 364800]  # validator norm_error = 0.1967   (deep K=2850*DU)
+          - Exact: [2304, 3328, 1, 255232]  # validator norm_error = 0.1961   (deep K=1994*DU)
+          - Exact: [1280, 6016, 1, 357376]  # validator norm_error = 0.1822   (deep K=2792*DU)
+          - Exact: [5888, 1280, 1, 552192]  # validator norm_error = 0.1780   (very deep K=4314*DU, skinny)
           # ===== Control sizes (PASSed at this tile in the snapshot) =====
           # These bracket the failure on K and on aspect ratio.  Their job
           # is to confirm that the codegen path itself isn't broken in

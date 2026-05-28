@@ -1,0 +1,124 @@
+########################################
+# MXFP8 correctness regression — MT64x64x256 / PLR0 / WGM1 / DU=256 / DUMX=0
+#                                (R=1 minority bug path; no swizzled scale)
+#
+# Coverage gap from /home/bnemanic/MXFP8_BUG_HANDOFF_kernels.csv (row 3).
+#
+# This YAML covers the *R=1* minority regime that the dominant R=2 yamls
+# do not. The R=1 path has DepthU=256 and DepthUMX=0 (no MX-scale
+# unroll-doubling); failures here therefore prove the bug is **not**
+# exclusively a `DepthUMX > 0` problem.
+#
+# Cluster regime: PLR0 / WGM1 / DUMX=0 / DU=256.
+# Dominant uncovered tile in this regime:
+#
+#     MT64x64x256 / MIWT=[2,2] / MIWG=[2,2] / PGR2 / PLR0 / WGM1
+#                  → 7/26 bench fail   (26.9%)
+#                  → max norm_error = 0.228
+#
+# Expected behaviour:
+#   - Before the bug is fixed: verify FAILS on the failing sizes.
+#   - After the bug is fixed: every size PASSes verify; if the R=2 fix does
+#     not also clear R=1, that establishes the bug has at least two
+#     distinct codegen surfaces and the next bug-hunt must continue.
+#
+# Pinned ForkParameter values:
+#   MatrixInstruction:    [16, 16, 128, 1, 1, 2, 2, 2, 2]
+#                                  → MT64x64, MIWT=[2,2], MIWG=[2,2]
+#   PrefetchGlobalRead:   [2]      → PGR2
+#   PrefetchLocalRead:    [0]      → PLR0
+#   DepthU:               [256]
+#   DepthUMX:             [0]      → DUMX0 (R = DepthUMX/DepthU not applicable; R=1)
+#   ScheduleIterAlg:      [3]      → SIA3
+#   DirectToLds:          [1]
+#   StreamK:              [3]
+#   StaggerU:             [0]
+#   UseSubtileImpl:       [1]
+#   WorkGroupMapping:     [1]      → WGM1
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # MT64x64x256 / MIWT=[2,2] / MIWG=[2,2] / PLR0 / WGM1 / DU=256 / DUMX=0
+  # — dominant uncovered R=1 (non-swizzled-scale) failing tile.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]    # MT64x64, MIWT=[2,2], MIWG=[2,2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead:  [0]
+        - DepthU: [256]
+        - DepthUMX: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ===== Failing sizes (bench-merged norm_error desc) =====
+          - Exact: [     128,    640, 1,  1024]   # bench norm_error = 0.228   (K=4*DU)
+          - Exact: [     640,    768, 1,  1024]   # bench norm_error = 0.226   (K=4*DU)
+          - Exact: [    2048,    384, 1,  5888]   # bench norm_error = 0.206   (K=23*DU)
+          - Exact: [    1024,    256, 1,  1024]   # bench norm_error = 0.137   (K=4*DU)
+          - Exact: [     128,    128, 1, 91136]   # bench norm_error = 0.0997  (very deep K=356*DU, m=n=64*MT_M)
+          - Exact: [     128,    128, 1, 80640]   # bench norm_error = 0.099   (very deep K=315*DU)
+          - Exact: [     128,    128, 1, 55808]   # bench norm_error = 0.0975  (deep K=218*DU)
+          # ===== Control sizes (synthetic small-K smokes) =====
+          - Exact: [     128,    128, 1,   256]   # smoke (K=1*DU)
+          - Exact: [     256,    256, 1,   512]   # smoke (K=2*DU)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:

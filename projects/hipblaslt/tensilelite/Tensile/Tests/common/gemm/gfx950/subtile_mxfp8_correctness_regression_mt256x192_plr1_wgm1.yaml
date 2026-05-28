@@ -1,0 +1,121 @@
+########################################
+# MXFP8 correctness regression — MT256x192x128 / PLR1 / WGM1 / DUMX256 path
+#                                (R=2 swizzled-scale subtile)
+#
+# Coverage gap from /home/bnemanic/MXFP8_BUG_HANDOFF_kernels.csv (row 4).
+#
+# Cluster regime: PLR1 / WGM1 / DUMX=256 / DU=128 (R = DepthUMX/DepthU = 2).
+# Dominant uncovered tile in this regime:
+#
+#     MT256x192x128 / MIWT=[8,6] / MIWG=[2,2] / PGR2 / PLR1 / WGM1
+#                  → 6/6 bench fail   (100.0%)
+#                  → max norm_error = 0.107
+#
+# Other uncovered tiles that share this PLR1/WGM1/DUMX256 regime:
+#     MT288x256x128 / MIWT[18,4] / MIWG[1,4]    (3/14 fail; norm_err≤0.210)
+#     MT128x448x128 / MIWT[4,14] / MIWG[2,2]    (2/2  fail; norm_err≤0.234)
+#     MT256x160x128 / MIWT[4,10] / MIWG[4,1]    (1/1  fail; norm_err = 0.323)
+#
+# Expected behaviour:
+#   - Before the bug is fixed: verify FAILS on every failing size (100% rate).
+#   - After the bug is fixed: every size PASSes verify.
+#
+# Pinned ForkParameter values:
+#   MatrixInstruction:    [16, 16, 128, 1, 1, 8, 6, 2, 2]
+#                                  → MT256x192, MIWT=[8,6], MIWG=[2,2]
+#   PrefetchGlobalRead:   [2]      → PGR2
+#   PrefetchLocalRead:    [1]      → PLR1
+#   DepthU:               [128]
+#   DepthUMX:             [256]    → DUMX256 (R=2)
+#   ScheduleIterAlg:      [3]      → SIA3
+#   DirectToLds:          [1]
+#   StreamK:              [3]      → SK3
+#   StaggerU:             [0]
+#   UseSubtileImpl:       [1]
+#   WorkGroupMapping:     [1]      → WGM1
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # MT256x192x128 / MIWT=[8,6] / MIWG=[2,2] / PLR1 / WGM1 — dominant
+  # uncovered failing tile in the PLR1/WGM1/DUMX256 regime (100% fail rate).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 6,  2, 2]    # MT256x192, MIWT=[8,6], MIWG=[2,2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead:  [1]
+        - DepthU: [128]
+        - DepthUMX: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ===== Failing sizes (bench-merged norm_error desc) =====
+          - Exact: [    7808,   3072, 1,  3328]   # bench norm_error = 0.107     (K=26*DU)
+          - Exact: [    4736,   4480, 1,  7680]   # bench norm_error = 0.0843    (K=60*DU)
+          - Exact: [    4864,   4864, 1,  7680]   # bench norm_error = 0.0835    (K=60*DU, square)
+          - Exact: [    8192,   2688, 1, 48384]   # bench norm_error = 0.0103    (deep K=378*DU)
+          - Exact: [    4096,   2944, 1,595968]   # bench norm_error = 0.00465   (very deep K=4656*DU)
+          - Exact: [    2816,   7808, 1,651008]   # bench norm_error = 0.00451   (very deep K=5086*DU)
+          # ===== Control sizes (synthetic small-K smokes) =====
+          - Exact: [    2048,   2048, 1,   256]   # smoke (K=2*DU)
+          - Exact: [    4096,   3072, 1,   768]   # smoke (K=6*DU)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:
