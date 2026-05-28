@@ -12,10 +12,9 @@ Usage:
   python component_ci.py
 """
 
-import fnmatch
 import os
 
-from ci_utils import get_modified_paths, set_github_output
+from ci_utils import get_modified_paths, matches_paths, set_github_output
 
 COMPONENTS = {
     "stinkytofu": [
@@ -30,14 +29,10 @@ COMPONENTS = {
 WORKFLOW_FILE = ".github/workflows/component-ci.yml"
 
 
-def matches_paths(changed_files: set[str], patterns: list[str]) -> bool:
-    for f in changed_files:
-        for pattern in patterns:
-            if fnmatch.fnmatch(f, pattern):
-                return True
-    return False
-
-
+# detect_changed_components is not shared with therock_configure_ci.py because
+# TheRock uses prefix-based subtree matching (via repos-config.json) while
+# component CI uses fnmatch glob patterns with cross-component triggers
+# (e.g. rocisa triggers when stinkytofu changes because it depends on it).
 def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
     results = {}
     for key, patterns in COMPONENTS.items():

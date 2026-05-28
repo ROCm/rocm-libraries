@@ -1,10 +1,11 @@
 """Shared CI utilities for GitHub Actions workflow scripts."""
 
+import fnmatch
 import logging
 import os
 import subprocess
 import time
-from typing import Mapping
+from typing import Iterable, Mapping
 
 logging.basicConfig(level=logging.INFO)
 
@@ -45,6 +46,15 @@ def get_modified_paths(base_ref: str) -> set[str]:
         timeout=60,
     )
     return set(result.stdout.splitlines())
+
+
+def matches_paths(changed_files: Iterable[str], patterns: Iterable[str]) -> bool:
+    """Returns True if any changed file matches any of the fnmatch patterns."""
+    for f in changed_files:
+        for pattern in patterns:
+            if fnmatch.fnmatch(f, pattern):
+                return True
+    return False
 
 
 def set_github_output(outputs: Mapping[str, str]):

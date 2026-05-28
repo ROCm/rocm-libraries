@@ -15,7 +15,7 @@ from typing import Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
-from ci_utils import get_modified_paths, set_github_output
+from ci_utils import get_modified_paths, matches_paths, set_github_output
 
 # Add TheRock's github_actions to path for shared utilities
 THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
@@ -74,25 +74,16 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     return any(not is_path_skippable(p) for p in paths)
 
 
-GITHUB_WORKFLOWS_CI_PATTERNS = [
-    "therock*",
+THEROCK_CI_PATTERNS = [
+    ".github/workflows/therock*",
+    ".github/scripts/therock*",
 ]
-
-
-def is_path_workflow_file_related_to_ci(path: str) -> bool:
-    return any(
-        fnmatch.fnmatch(path, ".github/workflows/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    ) or any(
-        fnmatch.fnmatch(path, ".github/scripts/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    )
 
 
 def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
-    return any(is_path_workflow_file_related_to_ci(p) for p in paths)
+    return matches_paths(paths, THEROCK_CI_PATTERNS)
 
 
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
