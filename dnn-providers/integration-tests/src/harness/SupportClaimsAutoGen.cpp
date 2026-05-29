@@ -25,6 +25,166 @@
 namespace hipdnn_integration_tests
 {
 
+namespace
+{
+
+using Cell = std::pair<std::string, std::string>; // (io_dtype, layout)
+
+// One axis-aligned rectangle in (io, layout) space, defined as the
+// cross-product of two axis subsets. Sortable for deterministic grouping.
+struct Rect
+{
+    std::vector<std::string> ios;
+    std::vector<std::string> layouts;
+
+    bool operator<(const Rect& other) const
+    {
+        return std::tie(ios, layouts) < std::tie(other.ios, other.layouts);
+    }
+};
+
+// Find the largest safe rectangle: the (io_subset × layout_subset) that
+// covers the most cells in `targets` while containing zero cells in
+// `forbidden`. Brute-force over the power set of each axis — fine because
+// axis cardinalities are ≤8 in practice (3 dtypes × 6 layouts = 18
+// candidate values total, 2^18 worst case ≈ 256k iterations).
+//
+// Tie-break order (deterministic so two engineers on the same hardware
+// produce identical sidecars):
+//   1. Most target cells covered (greedy gain).
+//   2. Smallest rect size (fewer unobserved cells claimed — reduces
+//      Rule A risk on first run).
+//   3. Lexicographic order on (ios, layouts) — stable tiebreaker.
+//
+// Returns an empty rect if no candidate covers any target cell.
+Rect findLargestSafeRectangle(const std::set<Cell>& targets,
+                              const std::set<Cell>& forbidden,
+                              const std::vector<std::string>& allIos,
+                              const std::vector<std::string>& allLayouts)
+{
+    Rect best;
+    size_t bestScore = 0;
+    size_t bestSize = SIZE_MAX;
+
+    const size_t ioN = allIos.size();
+    const size_t layoutN = allLayouts.size();
+    for(size_t ioMask = 1; ioMask < (size_t{1} << ioN); ++ioMask)
+    {
+        std::vector<std::string> ios;
+        for(size_t i = 0; i < ioN; ++i)
+        {
+            if((ioMask >> i) & size_t{1})
+            {
+                ios.push_back(allIos[i]);
+            }
+        }
+        for(size_t layoutMask = 1; layoutMask < (size_t{1} << layoutN); ++layoutMask)
+        {
+            std::vector<std::string> layouts;
+            for(size_t i = 0; i < layoutN; ++i)
+            {
+                if((layoutMask >> i) & size_t{1})
+                {
+                    layouts.push_back(allLayouts[i]);
+                }
+            }
+
+            // Safety: reject if any cell in the cross-product is forbidden.
+            bool safe = true;
+            for(const auto& io : ios)
+            {
+                for(const auto& layout : layouts)
+                {
+                    if(forbidden.find({io, layout}) != forbidden.end())
+                    {
+                        safe = false;
+                        break;
+                    }
+                }
+                if(!safe)
+                {
+                    break;
+                }
+            }
+            if(!safe)
+            {
+                continue;
+            }
+
+            size_t score = 0;
+            for(const auto& io : ios)
+            {
+                for(const auto& layout : layouts)
+                {
+                    if(targets.find({io, layout}) != targets.end())
+                    {
+                        ++score;
+                    }
+                }
+            }
+            if(score == 0)
+            {
+                continue;
+            }
+
+            const size_t size = ios.size() * layouts.size();
+            const bool better = score > bestScore || (score == bestScore && size < bestSize)
+                                || (score == bestScore && size == bestSize
+                                    && std::tie(ios, layouts) < std::tie(best.ios, best.layouts));
+            if(better)
+            {
+                bestScore = score;
+                bestSize = size;
+                best.ios = ios;
+                best.layouts = layouts;
+            }
+        }
+    }
+    return best;
+}
+
+// Greedy rectangle cover: repeatedly pick the largest safe rectangle and
+// remove the covered targets, until none remain. RFC 0012 §7's
+// Coverage+Safety contract requires the result to cover every cell in
+// `targets` without touching `forbidden`; the loop terminates because
+// each iteration removes ≥1 target cell (or bails on empty result).
+//
+// Note: a single op_chain may need multiple rectangles when its S cells
+// are interleaved with U cells — the previous greedy axis-shrink
+// implementation couldn't emit more than one rectangle per op_chain and
+// silently dropped coverage. Reviewer's counterexample:
+//   U = {(fp16,NCHW), (fp32,NHWC)}, S = {(fp16,NHWC), (fp32,NCHW)}
+//   → correct cover is {fp16}×{NHWC} ∪ {fp32}×{NCHW} (two rectangles).
+std::vector<Rect> findRectangleCover(std::set<Cell> targets,
+                                     const std::set<Cell>& forbidden,
+                                     const std::vector<std::string>& allIos,
+                                     const std::vector<std::string>& allLayouts)
+{
+    std::vector<Rect> result;
+    while(!targets.empty())
+    {
+        Rect r = findLargestSafeRectangle(targets, forbidden, allIos, allLayouts);
+        if(r.ios.empty() || r.layouts.empty())
+        {
+            // No safe rectangle exists that covers any remaining target.
+            // The leftover targets are isolated between forbidden cells —
+            // surface them in the diagnostic stream and bail.
+            break;
+        }
+        for(const auto& io : r.ios)
+        {
+            for(const auto& layout : r.layouts)
+            {
+                targets.erase({io, layout});
+            }
+        }
+        result.push_back(std::move(r));
+    }
+    return result;
+}
+
+} // namespace
+
 CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>& records,
                                            std::string_view engineName)
 {
@@ -33,6 +193,8 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
     std::set<Tuple> S;
     std::set<Tuple> U;
     std::set<std::string> opsInS;
+    std::set<std::string> allIosSet;
+    std::set<std::string> allLayoutsSet;
 
     for(const auto& record : records)
     {
@@ -52,180 +214,62 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         {
             U.insert(tuple);
         }
+        allIosSet.insert(record.ioDtype);
+        allLayoutsSet.insert(record.layout);
     }
 
-    // For each op_chain in S, compute its safe (io × layout) rectangle:
-    // start with the full observed io/layout sets for the op, then
-    // greedily drop axis values until the rectangle is disjoint from U;
-    // finally shrink to the densest sub-rectangle entirely in S so
-    // unobserved combinations aren't claimed.
-    struct SafeRect
-    {
-        std::vector<std::string> ios;
-        std::vector<std::string> layouts;
+    // Sort axis values once; rectangle enumeration uses these as the
+    // bitmask alphabet so output order is deterministic across runs.
+    const std::vector<std::string> allIos(allIosSet.begin(), allIosSet.end());
+    const std::vector<std::string> allLayouts(allLayoutsSet.begin(), allLayoutsSet.end());
 
-        bool operator<(const SafeRect& other) const
-        {
-            return std::tie(ios, layouts) < std::tie(other.ios, other.layouts);
-        }
-    };
-
-    std::map<std::string, SafeRect> opToRect;
-
+    // For each op_chain in S, compute its rectangle cover. Iterate ops
+    // in sorted order — keeps emit order stable for identical inputs.
+    std::map<std::string, std::vector<Rect>> opToRects;
     for(const auto& op : opsInS)
     {
-        std::set<std::string> ios;
-        std::set<std::string> layouts;
-        for(const auto& tuple : S)
+        std::set<Cell> S_op;
+        std::set<Cell> U_op;
+        for(const auto& [tupleOp, tupleIo, tupleLayout] : S)
         {
-            if(std::get<0>(tuple) == op)
+            if(tupleOp == op)
             {
-                ios.insert(std::get<1>(tuple));
-                layouts.insert(std::get<2>(tuple));
+                S_op.emplace(tupleIo, tupleLayout);
+            }
+        }
+        for(const auto& [tupleOp, tupleIo, tupleLayout] : U)
+        {
+            if(tupleOp == op)
+            {
+                U_op.emplace(tupleIo, tupleLayout);
             }
         }
 
-        // Greedy shrink: while any (io, layout) in the cross-product is
-        // in U, drop the axis value with the most U-hits. Bounded by the
-        // sum of axis cardinalities, so trivially terminating.
-        while(true)
+        auto cover = findRectangleCover(S_op, U_op, allIos, allLayouts);
+        if(!cover.empty())
         {
-            std::map<std::string, size_t> ioHits;
-            std::map<std::string, size_t> layoutHits;
-            for(const auto& io : ios)
-            {
-                for(const auto& layout : layouts)
-                {
-                    if(U.find({op, io, layout}) != U.end())
-                    {
-                        ++ioHits[io];
-                        ++layoutHits[layout];
-                    }
-                }
-            }
-            if(ioHits.empty())
-            {
-                break;
-            }
-            std::string worstIo;
-            size_t worstIoCount = 0;
-            for(const auto& [io, count] : ioHits)
-            {
-                if(count > worstIoCount || (count == worstIoCount && io < worstIo))
-                {
-                    worstIo = io;
-                    worstIoCount = count;
-                }
-            }
-            std::string worstLayout;
-            size_t worstLayoutCount = 0;
-            for(const auto& [layout, count] : layoutHits)
-            {
-                if(count > worstLayoutCount || (count == worstLayoutCount && layout < worstLayout))
-                {
-                    worstLayout = layout;
-                    worstLayoutCount = count;
-                }
-            }
-            if(worstIoCount >= worstLayoutCount)
-            {
-                ios.erase(worstIo);
-            }
-            else
-            {
-                layouts.erase(worstLayout);
-            }
-            if(ios.empty() || layouts.empty())
-            {
-                break;
-            }
+            opToRects.emplace(op, std::move(cover));
         }
-
-        if(ios.empty() || layouts.empty())
-        {
-            // No clean rectangle — the op's S tuples are too entangled
-            // with U to safely group. Skip; engineer can hand-write a
-            // tighter matcher if they want coverage.
-            continue;
-        }
-
-        // Final shrink: keep only ios/layouts whose every cross with the
-        // other axis is in S. Unobserved combinations would risk Rule A
-        // on first run, so we don't claim them.
-        bool clean = true;
-        for(const auto& io : ios)
-        {
-            for(const auto& layout : layouts)
-            {
-                if(S.find({op, io, layout}) == S.end())
-                {
-                    clean = false;
-                }
-            }
-        }
-        if(!clean)
-        {
-            std::set<std::string> denseIos;
-            for(const auto& io : ios)
-            {
-                bool keep = true;
-                for(const auto& layout : layouts)
-                {
-                    if(S.find({op, io, layout}) == S.end())
-                    {
-                        keep = false;
-                        break;
-                    }
-                }
-                if(keep)
-                {
-                    denseIos.insert(io);
-                }
-            }
-            std::set<std::string> denseLayouts;
-            for(const auto& layout : layouts)
-            {
-                bool keep = true;
-                for(const auto& io : denseIos)
-                {
-                    if(S.find({op, io, layout}) == S.end())
-                    {
-                        keep = false;
-                        break;
-                    }
-                }
-                if(keep)
-                {
-                    denseLayouts.insert(layout);
-                }
-            }
-            ios = std::move(denseIos);
-            layouts = std::move(denseLayouts);
-            if(ios.empty() || layouts.empty())
-            {
-                continue;
-            }
-        }
-
-        SafeRect rect;
-        rect.ios.assign(ios.begin(), ios.end());
-        rect.layouts.assign(layouts.begin(), layouts.end());
-        opToRect.emplace(op, std::move(rect));
     }
 
-    // Group op_chains sharing the same safe rectangle into one matcher.
-    std::map<SafeRect, std::vector<std::string>> rectToOps;
-    for(const auto& [op, rect] : opToRect)
+    // Group by rectangle: each emitted matcher is one rectangle plus the
+    // set of op_chains whose cover includes it. Two ops sharing a
+    // rectangle land in the same matcher; ops with disjoint covers land
+    // in separate matchers.
+    std::map<Rect, std::set<std::string>> rectToOps;
+    for(const auto& [op, rects] : opToRects)
     {
-        rectToOps[rect].push_back(op);
+        for(const auto& rect : rects)
+        {
+            rectToOps[rect].insert(op);
+        }
     }
 
     CondensedSupportData out;
-    for(auto& [rect, ops] : rectToOps)
+    for(const auto& [rect, ops] : rectToOps)
     {
-        std::sort(ops.begin(), ops.end());
         SupportMatcher matcher;
-        matcher.opChains = std::move(ops);
+        matcher.opChains.assign(ops.begin(), ops.end());
         matcher.ioDtypes = rect.ios;
         matcher.layouts = rect.layouts;
         out.matchers.push_back(std::move(matcher));
