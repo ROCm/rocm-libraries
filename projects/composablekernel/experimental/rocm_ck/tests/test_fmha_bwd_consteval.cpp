@@ -27,6 +27,14 @@ using ::rocm_ck::makeSpec;
 using ::rocm_ck::usesBatchSizeSlot;
 namespace S = ::rocm_ck::fmha_bwd_dqdkdv_slots;
 
+// Pin the scalar-slot layout for the SWA / mask infrastructure. The runtime
+// argument-packing code in the .hip variants writes window sizes and mask_type
+// into these exact indices; if anyone renumbers the slots, the build must fail
+// here rather than silently corrupting kernel inputs.
+static_assert(S::WINDOW_SIZE_LEFT == 8, "WINDOW_SIZE_LEFT slot index drifted");
+static_assert(S::WINDOW_SIZE_RIGHT == 9, "WINDOW_SIZE_RIGHT slot index drifted");
+static_assert(S::MASK_TYPE == 10, "MASK_TYPE slot index drifted");
+
 // ============================================================================
 // Spec equivalence: SWA / CMaskBR / CMask share compiled spec (all fields)
 // ============================================================================
