@@ -40,9 +40,10 @@
 #     1,6144) FAILed with ~46% sampled values wrong.  Same drift
 #     under TENSILE_STREAMK_DYNAMIC_GRID=4, isolating the bug to a
 #     code path other than StreamK partial-K.
-#   * Post StreamK partial-K _depthUForTc fix (commit 23d9418e031):
+#   * Post StreamK partial-K _depthUForTc fix (author commit 05522601062
+#     "Fix StreamK multi-DU pre-advance, gate multi-DU on macro tile size"):
 #     0/5 PASS (no change).  All 5 sizes still FAIL ~22-46% wrong.
-#   * Post LR-vs-GR drain fix (commit 41c40863e96): **5/5 PASS.**
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): **5/5 PASS.**
 #     The bug was that with MIWT[i]=10 the scheduler picks
 #     numPartitions=5 (5 partitions of 2 MMA tiles each, the smallest
 #     candidate that fits the VGPR budget), and `_consolidate_uid_grs`

@@ -43,13 +43,14 @@
 #     failing case (7040,3840,1,1536) probe (NumElementsToValidate=
 #     100000) to PASS, isolating the dominant cause to the StreamK
 #     partial-K offset path on the multi-DU split.
-#   * Post StreamK partial-K _depthUForTc fix (commit 23d9418e031):
+#   * Post StreamK partial-K _depthUForTc fix (author commit 05522601062
+#     "Fix StreamK multi-DU pre-advance, gate multi-DU on macro tile size"):
 #     1/5 PASS (unchanged count) but per-size wrong-rate reduced for
 #     3/4 failing sizes (~0.89% -> 0.80%, 6.48% -> 4.22% etc.).  A
 #     residual race remained that the fix-loop hypothesised as a
 #     second StreamK-flavored issue but turned out to be the same
 #     LR-vs-GR drain bug as the asymmetric-MIWT cluster (Issue 1).
-#   * Post LR-vs-GR drain fix (commit 41c40863e96): **5/5 PASS.**
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): **5/5 PASS.**
 #     The drain fix forces `vmcnt(0)` for any wrap-LR (or any LR with
 #     a cross-body-iter GR dep) under multi-DU + multi-partition.
 #     Without it, the wait-count walk understated outstanding GRs
