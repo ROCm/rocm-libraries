@@ -373,19 +373,23 @@ def main() -> None:
     print(f"\nMerging {len(datasets)} dataset(s)…")
     merged = merge_results(datasets, args.show_conflicts)
 
-    # Coverage summary
-    total_slots = filled_slots = 0
+    # Coverage summary — denominator is the full expected slot count derived
+    # from TYPE_COMBINATIONS × 2 layouts × 6 ranks, not just what appeared in
+    # the JSON data (which would undercount if any input file is missing ranks).
+    from _actor_critic_combos import ALL_RANKS, LAYOUTS  # noqa: E402
+    expected_total = len(TYPE_COMBINATIONS) * len(LAYOUTS) * len(ALL_RANKS)
+    filled_slots = 0
     for key in merged:
         for lname in merged[key]:
             for winner in merged[key][lname].values():
-                total_slots += 1
                 if winner is not None:
                     filled_slots += 1
 
-    print(f"Coverage after merge: {filled_slots}/{total_slots} slots filled")
-    if filled_slots < total_slots:
+    print(f"Coverage after merge: {filled_slots}/{expected_total} slots filled")
+    if filled_slots < expected_total:
+        missing = expected_total - filled_slots
         print(
-            f"  {total_slots - filled_slots} slot(s) have no winner — "
+            f"  {missing} slot(s) have no winner — "
             "those unique_id strings will not be changed.",
         )
 

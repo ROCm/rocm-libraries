@@ -220,11 +220,11 @@ def make_probe_yaml(combo: dict, rank: int, memory_layout: str) -> str:
         Betas:
           - [1]
         Lengths:
-          - [{a_len}, {b_len}, {e_len}]
+          - [{', '.join(map(str, a_len))}, {', '.join(map(str, b_len))}, {', '.join(map(str, e_len))}]
         Strides:
           - []
         Modes:
-          - [{a_modes}, {b_modes}, {e_modes}]
+          - [{', '.join(map(str, a_modes))}, {', '.join(map(str, b_modes))}, {', '.join(map(str, e_modes))}]
         Memory Layout:
           - {memory_layout}
         ...
