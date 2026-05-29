@@ -428,10 +428,8 @@ private:
         }
         else
         {
-            PRIMBENCH_CHECK(gpu_memcpy(h_data.data(),
-                                       data,
-                                       items * sizeof(T),
-                                       MEMCPY_DEVICE_TO_HOST));
+            PRIMBENCH_CHECK(
+                gpu_memcpy(h_data.data(), data, items * sizeof(T), MEMCPY_DEVICE_TO_HOST));
         }
 
         // Initializing to impossible values ensures the
@@ -462,7 +460,8 @@ private:
             expected_std_dev = std::sqrt(*m_poisson_lambda);
         }
 
-        auto normalize = [](T x) -> double {
+        auto normalize = [](T x) -> double
+        {
             if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_integral<T>::value)
             {
                 double mini = static_cast<double>(std::numeric_limits<T>::min());
@@ -478,33 +477,31 @@ private:
         double actual_mean = std::accumulate(h_data.begin(),
                                              h_data.end(),
                                              0.0,
-                                             [&](double acc, T x) {
-                                                 return acc + normalize(x);
-                                             })
+                                             [&](double acc, T x) { return acc + normalize(x); })
                              / static_cast<double>(items);
 
         double actual_std_dev = std::accumulate(h_data.begin(),
                                                 h_data.end(),
                                                 0.0,
-                                                [&](double acc, T x) {
+                                                [&](double acc, T x)
+                                                {
                                                     double diff = normalize(x) - actual_mean;
                                                     return acc + diff * diff;
                                                 });
-        actual_std_dev = std::sqrt(actual_std_dev / static_cast<double>(items));
+        actual_std_dev        = std::sqrt(actual_std_dev / static_cast<double>(items));
 
         // Use a 5% relative error tolerance for validation.
         // If expected mean is close to 0, fall back to an absolute tolerance of 0.05.
-        double mean_tol    = std::abs(expected_mean) > 1e-6 ? std::abs(expected_mean * 0.05) : 0.05;
-        double std_dev_tol = std::abs(expected_std_dev) > 1e-6 ? std::abs(expected_std_dev * 0.05) : 0.05;
+        double mean_tol = std::abs(expected_mean) > 1e-6 ? std::abs(expected_mean * 0.05) : 0.05;
+        double std_dev_tol
+            = std::abs(expected_std_dev) > 1e-6 ? std::abs(expected_std_dev * 0.05) : 0.05;
 
         if(std::abs(actual_mean - expected_mean) > mean_tol
            || std::abs(actual_std_dev - expected_std_dev) > std_dev_tol)
         {
-            std::cerr << "\nError: Statistical mismatch for ("
-                      << engine_name(m_engine) << ", "
-                      << distribution_name(Distribution) << ", "
-                      << ordering_name(m_ordering) << ", "
-                      << primbench::name<T>() << ")\n"
+            std::cerr << "\nError: Statistical mismatch for (" << engine_name(m_engine) << ", "
+                      << distribution_name(Distribution) << ", " << ordering_name(m_ordering)
+                      << ", " << primbench::name<T>() << ")\n"
                       << "  Expected Mean: " << expected_mean << ", Actual: " << actual_mean << "\n"
                       << "  Expected StdDev: " << expected_std_dev << ", Actual: " << actual_std_dev
                       << "\n";

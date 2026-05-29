@@ -864,16 +864,13 @@ private:
     void test(T* data, size_t items)
     {
         // Early return if the sample size is too small to guarantee statistical stability
-        if (items < 10000)
+        if(items < 10000)
         {
-            return; 
+            return;
         }
 
         std::vector<T> h_data(items);
-        PRIMBENCH_CHECK(gpu_memcpy(h_data.data(),
-                                   data,
-                                   items * sizeof(T),
-                                   MEMCPY_DEVICE_TO_HOST));
+        PRIMBENCH_CHECK(gpu_memcpy(h_data.data(), data, items * sizeof(T), MEMCPY_DEVICE_TO_HOST));
 
         // Initializing to impossible values ensures the
         // test fails if a distribution branch is omitted.
@@ -884,23 +881,24 @@ private:
         if constexpr(Distribution == DISTRIBUTION_UNIFORM)
         {
             expected_mean = 0.5;
-            expected_std_dev = 1.0 / std::sqrt(12.0); // std::sqrt(1/12) for continuous uniform [0, 1]
+            expected_std_dev
+                = 1.0 / std::sqrt(12.0); // std::sqrt(1/12) for continuous uniform [0, 1]
         }
         else if constexpr(Distribution == DISTRIBUTION_NORMAL)
         {
-            expected_mean = 0.0;
+            expected_mean    = 0.0;
             expected_std_dev = 1.0;
         }
         else if constexpr(Distribution == DISTRIBUTION_LOG_NORMAL)
         {
             // Log-normal mean and variance given parameters mu=0.0 and sigma=1.0
-            expected_mean = std::exp(0.5);
+            expected_mean    = std::exp(0.5);
             expected_std_dev = std::sqrt((std::exp(1.0) - 1.0) * std::exp(1.0));
         }
         else if constexpr(Distribution == DISTRIBUTION_POISSON
                           || Distribution == DISTRIBUTION_DISCRETE_POISSON)
         {
-            expected_mean = *m_poisson_lambda;
+            expected_mean    = *m_poisson_lambda;
             expected_std_dev = std::sqrt(*m_poisson_lambda);
         }
         else if constexpr(Distribution == DISTRIBUTION_DISCRETE_CUSTOM)
@@ -908,27 +906,29 @@ private:
             const double discrete_offset = 1234.0;
             const double weights[]       = {10, 10, 1, 120, 8, 6, 140, 2, 150, 150, 10, 80};
 
-            double sum_of_weights               = 0.0;
-            double sum_of_weighted_indices      = 0.0;
-            double sum_of_weighted_squared_idx  = 0.0;
+            double sum_of_weights              = 0.0;
+            double sum_of_weighted_indices     = 0.0;
+            double sum_of_weighted_squared_idx = 0.0;
 
-            for (size_t i = 0; i < std::size(weights); ++i)
+            for(size_t i = 0; i < std::size(weights); ++i)
             {
                 const double w = weights[i];
-                sum_of_weights              += w;
-                sum_of_weighted_indices     += static_cast<double>(i) * w;
+                sum_of_weights += w;
+                sum_of_weighted_indices += static_cast<double>(i) * w;
                 sum_of_weighted_squared_idx += static_cast<double>(i * i) * w;
             }
 
             const double expected_index_mean         = sum_of_weighted_indices / sum_of_weights;
             const double expected_index_squared_mean = sum_of_weighted_squared_idx / sum_of_weights;
-            const double expected_index_variance     = expected_index_squared_mean - std::pow(expected_index_mean, 2);
+            const double expected_index_variance
+                = expected_index_squared_mean - std::pow(expected_index_mean, 2);
 
             expected_mean    = discrete_offset + expected_index_mean;
             expected_std_dev = std::sqrt(expected_index_variance);
         }
 
-        auto normalize = [](T x) -> double {
+        auto normalize = [](T x) -> double
+        {
             if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_integral<T>::value)
             {
                 double mini = static_cast<double>(std::numeric_limits<T>::min());
@@ -944,34 +944,33 @@ private:
         double actual_mean = std::accumulate(h_data.begin(),
                                              h_data.end(),
                                              0.0,
-                                             [&](double acc, T x) {
-                                                 return acc + normalize(x);
-                                             })
+                                             [&](double acc, T x) { return acc + normalize(x); })
                              / static_cast<double>(items);
 
         double actual_std_dev = std::accumulate(h_data.begin(),
                                                 h_data.end(),
                                                 0.0,
-                                                [&](double acc, T x) {
+                                                [&](double acc, T x)
+                                                {
                                                     double diff = normalize(x) - actual_mean;
                                                     return acc + diff * diff;
                                                 });
-        actual_std_dev = std::sqrt(actual_std_dev / static_cast<double>(items));
+        actual_std_dev        = std::sqrt(actual_std_dev / static_cast<double>(items));
 
         // Use a 5% relative error tolerance for validation
         // If expected mean is close to 0, fall back to an absolute tolerance of 0.05
-        double mean_tol    = std::abs(expected_mean) > 1e-6 ? std::abs(expected_mean * 0.05) : 0.05;
-        double std_dev_tol = std::abs(expected_std_dev) > 1e-6 ? std::abs(expected_std_dev * 0.05) : 0.05;
+        double mean_tol = std::abs(expected_mean) > 1e-6 ? std::abs(expected_mean * 0.05) : 0.05;
+        double std_dev_tol
+            = std::abs(expected_std_dev) > 1e-6 ? std::abs(expected_std_dev * 0.05) : 0.05;
 
         if(std::abs(actual_mean - expected_mean) > mean_tol
            || std::abs(actual_std_dev - expected_std_dev) > std_dev_tol)
         {
-            std::cerr << "\nError: Statistical mismatch for ("
-                      << engine_name(m_engine) << ", "
-                      << distribution_name(Distribution) << ", "
-                      << primbench::name<T>() << ")\n"
+            std::cerr << "\nError: Statistical mismatch for (" << engine_name(m_engine) << ", "
+                      << distribution_name(Distribution) << ", " << primbench::name<T>() << ")\n"
                       << "  Expected Mean: " << expected_mean << ", Actual: " << actual_mean << "\n"
-                      << "  Expected StdDev: " << expected_std_dev << ", Actual: " << actual_std_dev << "\n";
+                      << "  Expected StdDev: " << expected_std_dev << ", Actual: " << actual_std_dev
+                      << "\n";
             exit(EXIT_FAILURE);
         }
     }
