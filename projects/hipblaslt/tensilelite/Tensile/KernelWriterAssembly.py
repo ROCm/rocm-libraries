@@ -283,6 +283,20 @@ class KernelWriterAssembly(KernelWriter):
         return False
       return stride.startswith("const")
 
+  def useConstSgprGlobalReadIncsForTc(self, tc: str) -> bool:
+    if tc == "A":
+      return self.states.a.useConstSgprGlobalReadIncs
+    if tc == "B":
+      return self.states.b.useConstSgprGlobalReadIncs
+    if tc == "MXSA":
+      return self.states.mxsa.useConstSgprGlobalReadIncs
+    if tc == "MXSB":
+      return self.states.mxsb.useConstSgprGlobalReadIncs
+    return False
+
+  def isTdmWaveSeparated(self, kernel) -> bool:
+    return kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) > 1
+
   ########################################
   def strideRef(self, tc, dim):
     """
@@ -617,13 +631,31 @@ class KernelWriterAssembly(KernelWriter):
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     module = Module("RemoveGROffsetSgprsFromPool")
 
-    self.removeSgprVarFromPool("GlobalReadIncsA")
-    self.removeSgprVarFromPool("GlobalReadIncsB")
-    if kernel["ProblemType"]["MXBlockA"]:
-      self.removeSgprVarFromPool("GlobalReadIncsMXSA")
-    if kernel["ProblemType"]["MXBlockB"]:
-      self.removeSgprVarFromPool("GlobalReadIncsMXSB")
+    # Wave-separated TDM copies A/B (and MX) incs into tdm*Incs during setup; main loop
+    # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here.
+    if not self.isTdmWaveSeparated(kernel):
+      self.removeSgprVarFromPool("GlobalReadIncsA")
+      self.removeSgprVarFromPool("GlobalReadIncsB")
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.removeSgprVarFromPool("GlobalReadIncsMXSA")
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.removeSgprVarFromPool("GlobalReadIncsMXSB")
 
+    return module
+
+  def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
+    """Return GlobalReadIncs* SGPRs to the pool after tdmSetupIncrementWaveSeparated."""
+    module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
+    if not self.isTdmWaveSeparated(kernel):
+      return module
+    if self.states.a.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsA"))
+    if self.states.b.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsB"))
+    if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsMXSA"))
+    if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsMXSB"))
     return module
 
   def defineVariableSgprs(self, kernel):
@@ -736,12 +768,16 @@ class KernelWriterAssembly(KernelWriter):
         self.addSgprVarToPool("GlobalReadIncsA")
     if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
+      if prod(kernel["MIWaveGroup"]) < 2:
+        self.addSgprVarToPool("GlobalReadIncsMXSA")
     if self.states.b.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
       if prod(kernel["MIWaveGroup"]) < 2:
         self.addSgprVarToPool("GlobalReadIncsB")
     if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
+      if prod(kernel["MIWaveGroup"]) < 2:
+        self.addSgprVarToPool("GlobalReadIncsMXSB")
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.defineSgpr("GlobalReadIncsMetadata", self.states.m.numSgprGlobalReadIncs))
     if self.states.IncLdsBufSwitch:
@@ -6018,7 +6054,11 @@ class KernelWriterAssembly(KernelWriter):
 
     tagList = ["AddressA", "AddressB", "WrapUA", "WrapUB", "StaggerU", "WGM", \
                "StaggerUIter", "GlobalReadIncsA", "GlobalReadIncsB", \
-               "sgprStridesA", "sgprStridesB", "sgprShadowLimitA", "sgprShadowLimitB"]
+               "StridesA", "StridesB", "ShadowLimitA", "ShadowLimitB"]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tagList += ["GlobalReadIncsMXSA", "ShadowLimitMXSA"]
+    if kernel["ProblemType"]["MXBlockB"]:
+      tagList += ["GlobalReadIncsMXSB", "ShadowLimitMXSB"]
     lastRegTag = None
     spool = self.sgprPool.getPool()
     imod.addComment1("release sgprs that will not be used")
@@ -9298,7 +9338,8 @@ class KernelWriterAssembly(KernelWriter):
                 imod.addModuleAsFlatItems(self.incrementSrd(tP["tpsMetadata"], sgpr(incLower), sgpr(incUpper)))
 
       else:
-        if loopIdx != self.states.unrollIdx or (tc in ('A', 'B') and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] in kernel["ProblemType"]["MirrorDims%s"%tc]):
+        grIncTcs = ('A', 'B', 'MXSA', 'MXSB')
+        if loopIdx != self.states.unrollIdx or (tc in grIncTcs and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] in kernel["ProblemType"]["MirrorDims%s"%tc]):
           with self.allocTmpSgpr(1) as tmpSgprInfo:
             incUpper = tmpSgprInfo.idx
             # GRO may be negative for other summation if stride-other < stride-unroll or if mirror dim.
@@ -9307,10 +9348,8 @@ class KernelWriterAssembly(KernelWriter):
         else:
           incUpper = 0 # GRO is positive for loop unroll
           srcGRInc = sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx))
-          if tc in ('A', 'B'):
-            useConstSgprGlobalReadIncs = self.states.a.useConstSgprGlobalReadIncs if tc == 'A' else self.states.b.useConstSgprGlobalReadIncs
-            if useConstSgprGlobalReadIncs:
-              srcGRInc = "GlobalReadIncs%s"%tc
+          if tc in grIncTcs and self.useConstSgprGlobalReadIncsForTc(tc):
+            srcGRInc = "GlobalReadIncs%s"%tc
           imod.addModuleAsFlatItems(self.incrementSrd(tP, srcGRInc, hex(incUpper)))
 
         if kernel["ProblemType"]["Sparse"]:

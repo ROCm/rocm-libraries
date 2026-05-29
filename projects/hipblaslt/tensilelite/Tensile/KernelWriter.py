@@ -2870,6 +2870,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
+        module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"]:
         module.add(self.undefineSgpr("WaveIdx"))
 
@@ -8689,7 +8691,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        if kernel["UnrollMajorLDSMetadata"]:
+        if kernel["UnrollMajorLDSMetadata"] or kernel["enableLDSTrMetadata"]:
           self.states.numReadsPerUnrollMetadata = ceil(tensorParametersM["bpe"] * kernel["MIInputPerThreadMetadata"] / int(tensorParametersM["localReadInstruction"].blockWidth * 4))
         else:
           self.states.numReadsPerUnrollMetadata = kernel["MIInputPerThreadMetadata"]
