@@ -130,6 +130,12 @@ inline void flush_icache()
 
     ck_tile::flush_cache<<<dim3(gpu_block3), dim3(64), 0, nullptr>>>();
     HIP_CHECK_ERROR(hipGetLastError());
+#else
+    // Use _Pragma("message ...") rather than #warning: pre-C++23 clang treats
+    // #warning as a pedantic extension under -Wpedantic, which trips -Werror in
+    // downstream builds. A pragma message is portable and just prints at compile.
+    _Pragma("message \"ck_tile::flush_icache is a no-op when not compiled with HIPCC -- benchmark "
+            "results will be cache-warm\"")
 #endif // __HIPCC__
 }
 } // namespace ck_tile
