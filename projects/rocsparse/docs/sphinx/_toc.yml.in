@@ -5,10 +5,12 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/install
+    title: Install rocSPARSE
   - file: install/Linux_Install_Guide
-    title: Linux installation guide
+    title: Build from source on Linux
   - file: install/Windows_Install_Guide
-    title: Windows installation guide
+    title: Build from source on Windows
 
 - caption: Conceptual
   entries:

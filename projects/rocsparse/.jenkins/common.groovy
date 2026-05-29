@@ -51,17 +51,10 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
     platform.runCommand(this, command)
     //ROCM-Examples
     if (rocmExamples){
-        String buildString = ""
-        if (platform.os.contains("ubuntu")){
-            buildString += "sudo dpkg -i *.deb"
-        }
-        else {
-            buildString += "sudo rpm -i *.rpm"
-        }
         testCommand = """#!/usr/bin/env bash
                     set -ex
                     cd ${project.paths.project_build_prefix}/build/release/package
-                    ${buildString}
+                    ${auxiliary.installPackagesCommand(platform.jenkinsLabel, false, "")}
                     cd ../../..
                     testDirs=("Libraries/rocSPARSE")
                     git clone https://github.com/ROCm/rocm-examples.git

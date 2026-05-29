@@ -52,6 +52,18 @@ void EngineDescriptor::finalize()
     {
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
             engineDetailsPtr);
+        auto rawBehaviorNotes = detailsWrapper.behaviorNotes();
+        std::vector<hipdnnBackendBehaviorNote_t> behaviorNotes;
+        behaviorNotes.reserve(rawBehaviorNotes.size());
+        for(auto rawNote : rawBehaviorNotes)
+        {
+            THROW_IF_TRUE(rawNote < 0,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "EngineDescriptor::finalize() failed: Invalid behavior note value.");
+            behaviorNotes.push_back(rawNote);
+        }
+        _behaviorNotes = std::move(behaviorNotes);
+
         auto knobCount = detailsWrapper.knobCount();
 
         if(knobCount > 0)
@@ -109,9 +121,11 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
         getKnobInfoDescriptors(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
+        getBehaviorNotes(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
-    case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
     case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
@@ -354,6 +368,41 @@ void EngineDescriptor::getKnobInfoDescriptors(hipdnnBackendAttributeType_t attri
 
     HipdnnBackendDescriptor::packDescriptorArray(
         _knobDescriptors, static_cast<HipdnnBackendDescriptor**>(arrayOfElements));
+}
+
+void EngineDescriptor::getBehaviorNotes(hipdnnBackendAttributeType_t attributeType,
+                                        int64_t requestedElementCount,
+                                        int64_t* elementCount,
+                                        void* arrayOfElements) const
+{
+    THROW_IF_NE(attributeType,
+                HIPDNN_TYPE_BEHAVIOR_NOTE,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineDescriptor failed to get behavior notes: Invalid attribute type.");
+
+    auto count = static_cast<int64_t>(_behaviorNotes.size());
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineDescriptor failed to get behavior notes: elementCount is null.");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= count,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "EngineDescriptor failed to get behavior notes: requested element count is "
+                   "too small.");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    std::copy(_behaviorNotes.begin(),
+              _behaviorNotes.end(),
+              static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements));
 }
 
 std::string EngineDescriptor::toString() const

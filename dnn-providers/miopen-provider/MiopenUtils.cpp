@@ -106,7 +106,7 @@ MiopenTensor createBatchnormTensor(
 
     constexpr size_t C_IDX = 1;
     constexpr size_t L_IDX = 2;
-    bool isChannelsLast = strides[C_IDX] < strides[L_IDX];
+    const bool isChannelsLast = strides[C_IDX] < strides[L_IDX];
     strides.push_back(isChannelsLast ? dims[C_IDX] : 1);
 
     return {uid, tensorAttr.data_type(), dims, strides};
@@ -180,7 +180,7 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     case PM::ELU_FWD:
     case PM::ELU_BWD:
     {
-        double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
+        const double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
         return ActivationParams{miopenActivationELU, alpha, 0.0, 0.0};
     }
     case PM::SOFTPLUS_FWD:
@@ -207,6 +207,28 @@ ActivationParams mapPointwiseModeToMiopenActivation(
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported activation operation");
     }
+}
+
+std::string getDeviceArch(hipStream_t stream)
+{
+    hipDevice_t deviceId = -1;
+    auto status = hipStreamGetDevice(stream, &deviceId);
+    if(status != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "hipStreamGetDevice failed: "
+                                                           + std::to_string(status));
+    }
+    hipDeviceProp_t props;
+    status = hipGetDeviceProperties(&props, deviceId);
+    if(status != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "hipGetDeviceProperties failed: "
+                                                           + std::to_string(status));
+    }
+    const std::string archStr(props.gcnArchName);
+    return archStr.substr(0, archStr.find(':'));
 }
 
 }

@@ -32,10 +32,9 @@
 // The 128-bit atomic store and atomic load are disabled for these targets.
 #if !defined(ROCPRIM_TARGET_UNKNOWN) && !defined(ROCPRIM_TARGET_SPIRV)
 
-template<typename GetPtr>
+template<bool delay, typename GetPtr>
 ROCPRIM_INLINE ROCPRIM_DEVICE
-void test_atomics(
-    GetPtr get_ptr, bool* error, const uint32_t* test_data, size_t random_size, bool delay)
+void test_atomics(GetPtr get_ptr, uint8_t* error, const uint32_t* test_data, size_t random_size)
 {
     // This test attempts to test some atomicity properties of the operation by repeatedly writing
     // some random data to the value, distributed over the atomic bits. This way, we can attempt to
@@ -55,10 +54,10 @@ void test_atomics(
 
         if(a != test_data[j * 3] || b != test_data[j * 3 + 1] || c != test_data[j * 3 + 2])
         {
-            *error = true;
+            *error = -1;
         }
 
-        if(delay)
+        if constexpr(delay)
         {
             __builtin_amdgcn_s_sleep(63);
         }
@@ -74,34 +73,36 @@ void test_atomics(
 
 __global__
 void test_global(rocprim::uint128_t* ptr,
-                 bool*               error,
+                 uint8_t*            error,
                  const uint32_t*     test_data,
                  size_t              random_size)
 {
-    test_atomics([=](int /* i */) { return ptr; }, error, test_data, random_size, true);
+    test_atomics<true>([=](int /* i */) { return ptr; }, error, test_data, random_size);
 }
 
 __global__
-void test_shared(bool* error, const uint32_t* test_data, size_t random_size)
+void test_shared(uint8_t* error, const uint32_t* test_data, size_t random_size)
 {
-    __shared__ rocprim::uint128_t shared_data;
+    __shared__
+    rocprim::uint128_t shared_data;
     if(threadIdx.x == 0)
     {
-        shared_data = 0;
+        rocprim::detail::atomic_store(&shared_data, 0);
     }
 
     __syncthreads();
 
-    test_atomics([&](int /* i */) { return &shared_data; }, error, test_data, random_size, false);
+    test_atomics<false>([&](int /* i */) { return &shared_data; }, error, test_data, random_size);
 }
 
 __global__
 void test_flat(rocprim::uint128_t* global_ptr,
-               bool*               error,
+               uint8_t*            error,
                const uint32_t*     test_data,
                size_t              random_size)
 {
-    __shared__ rocprim::uint128_t shared_data;
+    __shared__
+    rocprim::uint128_t shared_data;
     if(threadIdx.x == 0)
     {
         shared_data = 0;
@@ -109,11 +110,11 @@ void test_flat(rocprim::uint128_t* global_ptr,
 
     __syncthreads();
 
-    test_atomics([&](int i) { return test_data[i % random_size] & 1 ? &shared_data : global_ptr; },
-                 error,
-                 test_data,
-                 random_size,
-                 false);
+    test_atomics<false>([&](int i)
+                        { return test_data[i % random_size] & 1 ? &shared_data : global_ptr; },
+                        error,
+                        test_data,
+                        random_size);
 }
 
 template<typename F>
@@ -122,8 +123,6 @@ void generic_atomic_test(F cbk)
     static constexpr uint32_t block_size = 1024;
     static constexpr uint32_t grid_size  = 1024;
     static constexpr uint32_t size       = block_size * grid_size;
-
-    common::device_ptr<bool> d_error(1);
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
@@ -141,49 +140,40 @@ void generic_atomic_test(F cbk)
         input[1] = 0;
         input[2] = 0;
 
-        HIP_CHECK(hipMemset(d_error.get(), 0, sizeof(bool)));
+        common::device_ptr<uint8_t>  d_error(std::vector<uint8_t>{0});
         common::device_ptr<uint32_t> d_input(input);
 
         cbk(block_size, grid_size, d_error.get(), d_input.get(), size);
         HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
 
-        bool result;
-        HIP_CHECK(hipMemcpy(&result, d_error.get(), sizeof(bool), hipMemcpyDeviceToHost));
-        ASSERT_EQ(result, false);
+        ASSERT_EQ(d_error.load()[0], 0);
     }
 }
 
 TEST(RocprimAtomicTests, Global128Bits)
 {
-    common::device_ptr<rocprim::uint128_t> d_ptr(1);
     generic_atomic_test(
-        [&](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
+        [](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
         {
-            HIP_CHECK(hipMemset(d_ptr.get(), 0, sizeof(rocprim::uint128_t)));
+            common::device_ptr<rocprim::uint128_t> d_ptr(std::vector<rocprim::uint128_t>{0});
             test_global<<<grid_size, block_size>>>(d_ptr.get(), d_error, d_input, size);
-            HIP_CHECK(hipGetLastError());
         });
 }
 
 TEST(RocprimAtomicTests, Shared128Bits)
 {
-    generic_atomic_test(
-        [&](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
-        {
-            test_shared<<<grid_size, block_size>>>(d_error, d_input, size);
-            HIP_CHECK(hipGetLastError());
-        });
+    generic_atomic_test([](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
+                        { test_shared<<<grid_size, block_size>>>(d_error, d_input, size); });
 }
 
 TEST(RocprimAtomicTests, Flat128Bits)
 {
-    common::device_ptr<rocprim::uint128_t> d_ptr(1);
     generic_atomic_test(
-        [&](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
+        [](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
         {
-            HIP_CHECK(hipMemset(d_ptr.get(), 0, sizeof(rocprim::uint128_t)));
+            common::device_ptr<rocprim::uint128_t> d_ptr(std::vector<rocprim::uint128_t>{0});
             test_flat<<<grid_size, block_size>>>(d_ptr.get(), d_error, d_input, size);
-            HIP_CHECK(hipGetLastError());
         });
 }
 #endif
