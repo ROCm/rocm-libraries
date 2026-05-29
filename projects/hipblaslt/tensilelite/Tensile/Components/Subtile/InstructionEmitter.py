@@ -184,6 +184,22 @@ class InstructionEmitter:
         
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
             tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            if self.kernel.get("UseSubtileImpl", False):
+                # Subtile: each wave issues both A and B TDMs (not wave-
+                # separated).  The scheduler per-tensor inflight counts walk
+                # backward across PGR wraps and count cross-tensor TDMs on
+                # each wrap, inflating the total.
+                #
+                # s_wait_tensorcnt is a TOTAL outstanding count.  Between two
+                # consecutive barrier-sync points in the loop body there is
+                # exactly 1 TDM atom (A in one slot, B in the other).  Only
+                # that single TDM can safely remain outstanding when the
+                # consumer LR fires.  Cap the count to 1.
+                numTDMTensors = sum(1 for t in ("A", "B")
+                                   if self.kernel.get(f"enableTDM{t}", False))
+                numSubIterK = self.kernel.get("LoopIters", 2)
+                tdmPerBarrier = max(1, numTDMTensors // numSubIterK)
+                tdmCnt = min(tdmCnt, tdmPerBarrier)
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
                                    comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 
