@@ -215,8 +215,9 @@ def main():
     combined_lcov = args.output_dir / "combined.lcov"
     ignore_patterns = [
         "*/shared/origami/*",
-        "*/shared/stinkytofu/*",
+        "*/stinkytofu/*",
         "*.hpp",
+        "*.inc",
     ]
     filter_lcov(merged_lcov, combined_lcov, ignore_patterns)
 
