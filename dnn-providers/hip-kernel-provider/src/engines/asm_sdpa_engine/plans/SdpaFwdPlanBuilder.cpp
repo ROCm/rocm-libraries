@@ -78,12 +78,11 @@ static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::D
                                          hipdnn_flatbuffers_sdk::data_objects::DataType oType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    if(qType == DataType::BFLOAT16 && kType == DataType::BFLOAT16 && vType == DataType::BFLOAT16
-       && oType == DataType::BFLOAT16)
+    if(plan_utils::allDataTypesEqual(DataType::BFLOAT16, {qType, kType, vType, oType}))
     {
         return "bf16";
     }
-    if(qType == DataType::FP8_E4M3 && kType == DataType::FP8_E4M3 && vType == DataType::FP8_E4M3
+    if(plan_utils::allDataTypesEqual(DataType::FP8_E4M3, {qType, kType, vType})
        && oType == DataType::BFLOAT16)
     {
         return "fp8bf16";

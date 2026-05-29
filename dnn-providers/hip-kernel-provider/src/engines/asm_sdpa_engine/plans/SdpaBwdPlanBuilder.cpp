@@ -120,16 +120,14 @@ std::optional<std::string>
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    auto allEqual = [&](DataType expected) {
-        return qType == expected && kType == expected && vType == expected && doType == expected
-               && dqType == expected && dkType == expected && dvType == expected;
-    };
+    const std::initializer_list<DataType> tensorTypes
+        = {qType, kType, vType, doType, dqType, dkType, dvType};
 
-    if(allEqual(DataType::BFLOAT16))
+    if(plan_utils::allDataTypesEqual(DataType::BFLOAT16, tensorTypes))
     {
         return std::string("bf16");
     }
-    if(allEqual(DataType::HALF))
+    if(plan_utils::allDataTypesEqual(DataType::HALF, tensorTypes))
     {
         return std::string("fp16");
     }

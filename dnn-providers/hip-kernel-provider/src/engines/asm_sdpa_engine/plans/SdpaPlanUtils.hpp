@@ -3,18 +3,35 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <initializer_list>
 #include <string>
 
 namespace asm_sdpa_engine
 {
 namespace plan_utils
 {
+
+// =============================================================================
+// Tensor dtype classification
+// =============================================================================
+//
+// True when every tensor dtype in `types` equals `expected`. Used by the
+// forward and backward plan builders to recognise the single-dtype tensor sets
+// the CSV schema keys on (e.g. all-BF16 or all-FP16).
+inline bool
+    allDataTypesEqual(hipdnn_flatbuffers_sdk::data_objects::DataType expected,
+                      std::initializer_list<hipdnn_flatbuffers_sdk::data_objects::DataType> types)
+{
+    return std::all_of(
+        types.begin(), types.end(), [expected](auto type) { return type == expected; });
+}
 
 // =============================================================================
 // Mask classification
