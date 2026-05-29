@@ -340,7 +340,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
         const auto e_grid_desc_mblock_mperblock_nblock_nperblock =
             GridwiseGemm::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
-                conv_to_gemm_transform.MakeCDescriptor_M_N(), 1, 1);
+                conv_to_gemm_transform.MakeCDescriptor_M_N(), IndexType{1}, IndexType{1});
 
         return make_tuple(a_grid_desc_ak0_m_ak1,
                           b_grid_desc_bk0_n_bk1,
@@ -638,8 +638,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                         const auto b_grid_desc_n_k =
                             transform_k0_m_k1_to_m_k(b_grid_desc_bk0_n_bk1);
 
-                        const auto GemmM = a_grid_desc_m_k.GetLength(I0);
-                        const auto GemmN = b_grid_desc_n_k.GetLength(I0);
+                        const IndexType GemmM = a_grid_desc_m_k.GetLength(I0);
+                        const IndexType GemmN = b_grid_desc_n_k.GetLength(I0);
 
                         const auto e_grid_desc_mblock_mperblock_nblock_nperblock =
                             GridwiseGemm::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(

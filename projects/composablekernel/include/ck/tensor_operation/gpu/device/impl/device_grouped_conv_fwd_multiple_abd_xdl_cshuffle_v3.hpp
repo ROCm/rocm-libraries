@@ -1008,15 +1008,15 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
 
-            const index_t GemmM = arg.a_grid_desc_ak0_m_ak1_.GetLength(I1);
-            const index_t GemmN = arg.b_grid_desc_bk0_n_bk1_.GetLength(I1);
-            const index_t GemmK =
+            const IndexType GemmM = arg.a_grid_desc_ak0_m_ak1_.GetLength(I1);
+            const IndexType GemmN = arg.b_grid_desc_bk0_n_bk1_.GetLength(I1);
+            const IndexType GemmK =
                 arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) * arg.a_grid_desc_ak0_m_ak1_.GetLength(I2);
 
             const auto num_workgroups_per_Conv_N =
                 arg.a_g_n_c_wis_lengths_[I1] / arg.conv_N_per_block_;
 
-            index_t gdx, gdy, gdz;
+            IndexType gdx, gdy, gdz;
             // TODO: Do we want to support kbatch ??
             std::tie(gdx, gdy, gdz) =
                 GridwiseGemm::CalculateGridSize(GemmM, GemmN, I1 /*arg.KBatch*/);
