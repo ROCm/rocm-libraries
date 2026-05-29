@@ -10,7 +10,7 @@ namespace ck_common {
 
 /// Epilogue strategies for output processing.
 /// Matches tile_engine epilogue options for full compatibility.
-enum class Epilogue : uint8_t
+enum struct Epilogue : uint8_t
 {
     None,
     Default,       // DefaultGemm2DEpilogue

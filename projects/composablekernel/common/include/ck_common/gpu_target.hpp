@@ -9,7 +9,7 @@
 namespace ck_common {
 
 // ISA target identifiers (matching -mcpu flags), not marketing names.
-enum class GpuTarget : uint8_t
+enum struct GpuTarget : uint8_t
 {
     gfx90a,  // CDNA 2
     gfx942,  // CDNA 3
@@ -19,7 +19,7 @@ enum class GpuTarget : uint8_t
     gfx1102, // RDNA 3
     gfx1150, // RDNA 3.5
     gfx1151, // RDNA 3.5
-    _count   // must be last — new targets go above this line
+    _count   // must be last -- new targets go above this line
 };
 
 } // namespace ck_common

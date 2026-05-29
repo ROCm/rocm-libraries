@@ -10,7 +10,7 @@ namespace ck_common {
 
 /// Pipeline variants for memory/compute optimization.
 /// Matches tile_engine PIPELINE_MAP for full compatibility.
-enum class Pipeline : uint8_t
+enum struct Pipeline : uint8_t
 {
     Mem,          // Memory-bound pipeline
     CompV1,       // Compute pipeline v1

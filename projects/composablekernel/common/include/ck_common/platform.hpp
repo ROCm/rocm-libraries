@@ -8,6 +8,8 @@
 
 #ifdef _MSC_VER
 #define CK_COMMON_UNREACHABLE() __assume(false)
+#define CK_COMMON_TRAP() __debugbreak()
 #else
 #define CK_COMMON_UNREACHABLE() __builtin_unreachable()
+#define CK_COMMON_TRAP() __builtin_trap()
 #endif

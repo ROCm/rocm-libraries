@@ -4,20 +4,22 @@
 // GPU target properties, target set (consteval bitset), and wave tile validation.
 // Pure C++20 constexpr/consteval. No runtime code, no CK deps.
 //
-// UPSTREAM CANDIDATE: This header prototypes functionality that should
-// eventually live in ck_tile/core/arch/arch_properties.hpp as the single
-// source of truth for GPU target metadata. It is intentionally free of
-// device code, HIP runtime, and CK Tile dependencies so it can be used
-// in both host-side consteval validation and device-side template selection.
+// This header is the single source of truth for GPU target metadata across
+// CK Tile, rocm_ck, and the dispatcher. It is intentionally free of device
+// code, HIP runtime, and CK Tile dependencies so it can be used in both
+// host-side consteval validation and device-side template selection.
 //
-// When upstreaming, the valid tile table should be generated from or
-// verified against CK Tile's MMA selector specializations
-// (core/arch/mma/mfma/mfma_gfx9.hpp, wmma/wmma_gfx11.hpp, etc.).
+// See also (verification anchor, not a source of truth):
+//   CK Tile MMA selector specializations under
+//   core/arch/mma/mfma/mfma_gfx9.hpp and wmma/wmma_gfx11.hpp
+//   provide the authoritative list of supported wave tile shapes; the table
+//   in isValidWaveTile() below mirrors those specializations.
 
 #pragma once
 
 #include <ck_common/datatype.hpp>
 #include <ck_common/gpu_target.hpp>
+#include <ck_common/platform.hpp>
 
 #include <bit>
 #include <cstdint>
@@ -32,7 +34,7 @@ namespace ck_common {
 ///
 /// CDNA = data-center compute (Instinct GPUs), MFMA instructions, wave64.
 /// RDNA = gaming/workstation (Radeon GPUs), WMMA instructions, wave32.
-enum class ArchFamily
+enum struct ArchFamily
 {
     CDNA,
     RDNA
@@ -59,7 +61,7 @@ constexpr TargetProperties properties(GpuTarget target)
     case GpuTarget::gfx1150: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
     case GpuTarget::gfx1151: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
     case GpuTarget::_count:
-    default: throw "unsupported GpuTarget — add a case to properties() for new targets";
+    default: CK_COMMON_TRAP();
     }
 }
 
@@ -79,26 +81,22 @@ constexpr bool isRDNA(GpuTarget target)
 constexpr int wavefrontSize(GpuTarget target) { return properties(target).wavefront_size; }
 
 // ============================================================================
-// TargetSet — consteval bitset over GpuTarget values
+// TargetSet -- consteval bitset over GpuTarget values
 // ============================================================================
 
 /// Compile-time set of GPU targets. Structural type (usable as NTTP).
 ///
 /// Storage: each GpuTarget maps to a bit in a uint64_t.
 ///
-/// Named constructors express CK Tile's 3-level hierarchy:
+/// Named constructors express a 3-level target hierarchy:
 ///   Architecture: TargetSet::cdna(), TargetSet::rdna(), TargetSet::all()
 ///   Family:       TargetSet::family_gfx9(), family_gfx94(), family_gfx11(), family_gfx115()
 ///   Specific:     TargetSet::only(GpuTarget::gfx942)
 ///
-/// CK Tile mapping:
-///   TargetSet::cdna()                          → enable_if_target_arch_cdna_t
-///   TargetSet::rdna()                          → enable_if_target_arch_rdna_t
-///   TargetSet::family_gfx9()                   → enable_if_target_family_gfx9_t
-///   TargetSet::family_gfx11()                  → __gfx11__ preprocessor grouping
-///   TargetSet::family_gfx115()                 → __gfx115__ preprocessor grouping
-///   TargetSet::only(gfx942, gfx950)            → enable_if_target_id_t<T, GFX942, GFX950>
-///   TargetSet::cdna().excluding(gfx90a)        → is_any_value_of(T::TARGET_ID, GFX942, GFX950)
+/// See also (not authoritative -- CK Tile names may drift): these sets are
+/// the ck_common analogue of CK Tile's enable_if_target_arch_*_t,
+/// enable_if_target_family_*_t, and enable_if_target_id_t selectors and the
+/// __gfx11__ / __gfx115__ preprocessor groupings.
 struct TargetSet
 {
     uint64_t bits = 0;
@@ -108,19 +106,19 @@ struct TargetSet
     //   1. Add enum value to GpuTarget before _count
     //   2. Add to architecture/family named constructors
 
-    static constexpr int kNumTargets = static_cast<int>(GpuTarget::_count);
+    static constexpr int NUM_TARGETS = static_cast<int>(GpuTarget::_count);
 
     static constexpr int bitIndex(GpuTarget target)
     {
         if(target >= GpuTarget::_count)
-            throw "GpuTarget out of range — value must be a valid enum member, not _count";
+            throw "GpuTarget out of range -- value must be a valid enum member, not _count";
         return static_cast<int>(target);
     }
 
     static constexpr GpuTarget targetAt(int index)
     {
-        if(index < 0 || index >= kNumTargets)
-            throw "TargetSet index out of range [0, kNumTargets)";
+        if(index < 0 || index >= NUM_TARGETS)
+            throw "TargetSet index out of range [0, NUM_TARGETS)";
         return static_cast<GpuTarget>(index);
     }
 
@@ -129,13 +127,18 @@ struct TargetSet
     /// Default: empty set.
     constexpr TargetSet() = default;
 
-    /// Implicit conversion from a single GpuTarget.
-    constexpr TargetSet(GpuTarget target) : bits(uint64_t{1} << bitIndex(target)) {}
+    /// Construction from a single GpuTarget is explicit to avoid silent
+    /// implicit conversion in mixed GpuTarget/TargetSet comparisons. Use
+    /// TargetSet::of(target) for the named factory.
+    explicit constexpr TargetSet(GpuTarget target) : bits(uint64_t{1} << bitIndex(target)) {}
+
+    /// Named factory equivalent to the explicit single-target constructor.
+    static constexpr TargetSet of(GpuTarget target) { return TargetSet{target}; }
 
     // ---- Named constructors: architecture level ---------------------------
 
     /// All real GPU targets.
-    static constexpr TargetSet all() { return fromBits((uint64_t{1} << kNumTargets) - 1); }
+    static constexpr TargetSet all() { return from_bits((uint64_t{1} << NUM_TARGETS) - 1); }
 
     /// All CDNA targets (MFMA, wave64): gfx90a, gfx942, gfx950.
     static constexpr TargetSet cdna()
@@ -176,7 +179,7 @@ struct TargetSet
     // ---- Named constructors: specific targets -----------------------------
 
     /// Set containing exactly one target.
-    static constexpr TargetSet only(GpuTarget t) { return fromBits(uint64_t{1} << bitIndex(t)); }
+    static constexpr TargetSet only(GpuTarget t) { return from_bits(uint64_t{1} << bitIndex(t)); }
 
     /// Set containing exactly two targets.
     static constexpr TargetSet only(GpuTarget a, GpuTarget b)
@@ -195,20 +198,20 @@ struct TargetSet
     /// Remove one target from the set.
     constexpr TargetSet excluding(GpuTarget t) const
     {
-        return fromBits(bits & ~(uint64_t{1} << bitIndex(t)));
+        return from_bits(bits & ~(uint64_t{1} << bitIndex(t)));
     }
 
     /// Union: targets in either set.
-    constexpr TargetSet union_with(TargetSet other) const { return fromBits(bits | other.bits); }
+    constexpr TargetSet union_with(TargetSet other) const { return from_bits(bits | other.bits); }
 
     /// Intersection: targets in both sets.
     constexpr TargetSet intersect_with(TargetSet other) const
     {
-        return fromBits(bits & other.bits);
+        return from_bits(bits & other.bits);
     }
 
     /// Difference: targets in this set but not in other.
-    constexpr TargetSet minus(TargetSet other) const { return fromBits(bits & ~other.bits); }
+    constexpr TargetSet minus(TargetSet other) const { return from_bits(bits & ~other.bits); }
 
     // ---- Operators (delegate to named methods) ----------------------------
 
@@ -242,7 +245,7 @@ struct TargetSet
             throw "wavefront_size() called on empty TargetSet";
 
         int wf = -1;
-        for(int i = 0; i < kNumTargets; ++i)
+        for(int i = 0; i < NUM_TARGETS; ++i)
         {
             if((bits & (uint64_t{1} << i)) == 0)
                 continue;
@@ -251,7 +254,7 @@ struct TargetSet
                 wf = target_wf;
             else if(wf != target_wf)
                 throw "wavefront_size() requires all targets in the set to have "
-                      "the same wavefront size — this set mixes wave64 (CDNA) and "
+                      "the same wavefront size -- this set mixes wave64 (CDNA) and "
                       "wave32 (RDNA) targets. Split with intersect_with(cdna()) or "
                       "intersect_with(rdna()).";
         }
@@ -278,18 +281,18 @@ struct TargetSet
     template <typename Fn>
     constexpr void for_each(Fn fn) const
     {
-        for(int i = 0; i < kNumTargets; ++i)
+        for(int i = 0; i < NUM_TARGETS; ++i)
             if(bits & (uint64_t{1} << i))
                 fn(targetAt(i));
     }
 
     private:
     explicit constexpr TargetSet(uint64_t b) : bits(b) {}
-    static constexpr TargetSet fromBits(uint64_t b) { return TargetSet{b}; }
+    static constexpr TargetSet from_bits(uint64_t b) { return TargetSet{b}; }
 };
 
 // ============================================================================
-// Wave tile validation — single source of truth
+// Wave tile validation -- single source of truth
 // ============================================================================
 // Based on CK Tile's WarpGemmDispatcher specializations.
 // See: ck_tile/core/arch/mma/mfma/mfma_gfx9.hpp (MFMA builtins)
@@ -300,16 +303,16 @@ struct TargetSet
 /// on a specific target.
 consteval bool isValidWaveTile(DataType a_dtype, int m, int n, int k, GpuTarget target)
 {
-    // RDNA targets: WMMA — fixed 16x16x16 tile shape
+    // RDNA targets: WMMA -- fixed 16x16x16 tile shape
     if(isRDNA(target))
     {
         if(m != 16 || n != 16 || k != 16)
             return false;
-        // RDNA (gfx11xx) WMMA: fp16, bf16, int8 — all targets share 16×16×16 tile
+        // RDNA (gfx11xx) WMMA: fp16, bf16, int8 -- all targets share 16x16x16 tile
         return a_dtype == DataType::FP16 || a_dtype == DataType::BF16 || a_dtype == DataType::I8;
     }
 
-    // CDNA MFMA tiles — common across gfx90a, gfx942, gfx950
+    // CDNA MFMA tiles -- common across gfx90a, gfx942, gfx950
     if(a_dtype == DataType::FP32)
     {
         if(m == 16 && n == 16 && (k == 4 || k == 8 || k == 16))
@@ -332,7 +335,7 @@ consteval bool isValidWaveTile(DataType a_dtype, int m, int n, int k, GpuTarget 
             return true;
     }
 
-    // INT8 MFMA — int8x int8→int32 accumulation
+    // INT8 MFMA -- int8x int8->int32 accumulation
     if(a_dtype == DataType::I8)
     {
         if(m == 32 && n == 32 && k == 16)
@@ -341,7 +344,7 @@ consteval bool isValidWaveTile(DataType a_dtype, int m, int n, int k, GpuTarget 
             return true;
     }
 
-    // FP8/BF8 MFMA — architecture-dependent
+    // FP8/BF8 MFMA -- architecture-dependent
     if(a_dtype == DataType::FP8_FNUZ || a_dtype == DataType::BF8_FNUZ)
     {
         // gfx90a: no FP8 MFMA support
@@ -361,9 +364,9 @@ consteval bool isValidWaveTile(DataType a_dtype, int m, int n, int k, GpuTarget 
             return true;
     }
 
-    // FP8_OCP/BF8_OCP — not yet supported
+    // FP8_OCP/BF8_OCP -- not yet supported
     if(a_dtype == DataType::FP8_OCP || a_dtype == DataType::BF8_OCP)
-        throw "FP8_OCP/BF8_OCP not yet supported in GEMM — use FP8_FNUZ/BF8_FNUZ";
+        throw "FP8_OCP/BF8_OCP not yet supported in GEMM -- use FP8_FNUZ/BF8_FNUZ";
 
     return false;
 }
@@ -374,7 +377,7 @@ consteval bool isValidWaveTile(DataType a_dtype, int m, int n, int k, TargetSet 
     if(targets.is_empty())
         throw "isValidWaveTile called with empty TargetSet";
 
-    for(int i = 0; i < TargetSet::kNumTargets; ++i)
+    for(int i = 0; i < TargetSet::NUM_TARGETS; ++i)
     {
         if(!(targets.bits & (uint64_t{1} << i)))
             continue;

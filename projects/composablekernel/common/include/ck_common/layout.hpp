@@ -12,19 +12,13 @@
 
 namespace ck_common {
 
-// Auto is a resolve-time placeholder — Signature::resolve() replaces it with
+// Auto is a resolve-time placeholder -- Signature::resolve() replaces it with
 // the concrete layout from the operator slot. It never reaches the kernel.
 // PackedExternal is used by sparse/packed tensor formats in the dispatcher.
-//
-// RowMajor/ColMajor are aliases for Row/Col — both names refer to the same
-// underlying value. This lets rocm_ck code use Layout::Row/Col while the
-// dispatcher uses LayoutTag::RowMajor/ColMajor without any call-site changes.
-enum class Layout : uint8_t
+enum struct Layout : uint8_t
 {
     Row            = 0,
-    RowMajor       = 0, // Alias for Row
     Col            = 1,
-    ColMajor       = 1, // Alias for Col
     Auto           = 2,
     PackedExternal = 3
 };
