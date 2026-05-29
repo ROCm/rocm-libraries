@@ -124,6 +124,7 @@ void testing_gerq2_gerqf_bad_arg()
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gerq2_gerqf_initData(const rocblas_handle handle,
+                          const std::string& matrix,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -137,19 +138,29 @@ void gerq2_gerqf_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-        rocblas_init<T>(hA, true);
-
-        // scale A to avoid singularities
-        for(rocblas_int b = 0; b < bc; ++b)
+        if(matrix == "identity")
         {
-            for(rocblas_int i = 0; i < m; i++)
-            {
+            for(rocblas_int b = 0; b < bc; ++b)
                 for(rocblas_int j = 0; j < n; j++)
+                    for(rocblas_int i = 0; i < m; i++)
+                        hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+        }
+        else
+        {
+            rocblas_init<T>(hA, true);
+
+            // scale A to avoid singularities
+            for(rocblas_int b = 0; b < bc; ++b)
+            {
+                for(rocblas_int i = 0; i < m; i++)
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
                 }
             }
         }
@@ -164,6 +175,7 @@ void gerq2_gerqf_initData(const rocblas_handle handle,
 
 template <bool STRIDED, bool GERQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gerq2_gerqf_getError(const rocblas_handle handle,
+                          const std::string& matrix,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -180,7 +192,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     std::vector<T> hW(m);
 
     // input data initialization
-    gerq2_gerqf_initData<true, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gerq2_gerqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
     // execute computations
     // GPU lapack
@@ -210,6 +222,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
 
 template <bool STRIDED, bool GERQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gerq2_gerqf_getPerfData(const rocblas_handle handle,
+                             const std::string& matrix,
                              const rocblas_int m,
                              const rocblas_int n,
                              Td& dA,
@@ -231,7 +244,7 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        gerq2_gerqf_initData<true, false, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gerq2_gerqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -243,12 +256,12 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    gerq2_gerqf_initData<true, false, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gerq2_gerqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        gerq2_gerqf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         CHECK_ROCBLAS_ERROR(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA,
                                                   dIpiv.data(), stP, bc));
@@ -271,7 +284,7 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        gerq2_gerqf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         timer.start(stream);
         rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -291,6 +304,7 @@ void testing_gerq2_gerqf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
+    std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
@@ -372,13 +386,13 @@ void testing_gerq2_gerqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             gerq2_gerqf_getPerfData<STRIDED, GERQF, T>(
-                handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
     }
 
@@ -409,13 +423,13 @@ void testing_gerq2_gerqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             gerq2_gerqf_getPerfData<STRIDED, GERQF, T>(
-                handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
     }
 

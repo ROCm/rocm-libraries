@@ -124,6 +124,7 @@ void testing_geql2_geqlf_bad_arg()
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void geql2_geqlf_initData(const rocblas_handle handle,
+                          const std::string& matrix,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -137,19 +138,29 @@ void geql2_geqlf_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-        rocblas_init<T>(hA, true);
-
-        // scale A to avoid singularities
-        for(rocblas_int b = 0; b < bc; ++b)
+        if(matrix == "identity")
         {
-            for(rocblas_int i = 0; i < m; i++)
-            {
+            for(rocblas_int b = 0; b < bc; ++b)
                 for(rocblas_int j = 0; j < n; j++)
+                    for(rocblas_int i = 0; i < m; i++)
+                        hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+        }
+        else
+        {
+            rocblas_init<T>(hA, true);
+
+            // scale A to avoid singularities
+            for(rocblas_int b = 0; b < bc; ++b)
+            {
+                for(rocblas_int i = 0; i < m; i++)
                 {
-                    if(m - i == n - j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(m - i == n - j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
                 }
             }
         }
@@ -164,6 +175,7 @@ void geql2_geqlf_initData(const rocblas_handle handle,
 
 template <bool STRIDED, bool GEQLF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void geql2_geqlf_getError(const rocblas_handle handle,
+                          const std::string& matrix,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -191,7 +203,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     rocblas_int min_mn = std::min(m, n);
 
     // input data initialization
-    geql2_geqlf_initData<true, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    geql2_geqlf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
@@ -362,6 +374,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
 
 template <bool STRIDED, bool GEQLF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void geql2_geqlf_getPerfData(const rocblas_handle handle,
+                             const std::string& matrix,
                              const rocblas_int m,
                              const rocblas_int n,
                              Td& dA,
@@ -383,7 +396,7 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        geql2_geqlf_initData<true, false, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        geql2_geqlf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -395,12 +408,12 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    geql2_geqlf_initData<true, false, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    geql2_geqlf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        geql2_geqlf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        geql2_geqlf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         CHECK_ROCBLAS_ERROR(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA,
                                                   dIpiv.data(), stP, bc));
@@ -423,7 +436,7 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        geql2_geqlf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        geql2_geqlf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         timer.start(stream);
         rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -443,6 +456,7 @@ void testing_geql2_geqlf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
+    std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
@@ -524,13 +538,13 @@ void testing_geql2_geqlf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, m, n, dA, lda, stA,
+            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, matrix, m, n, dA, lda, stA,
                                                     dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             geql2_geqlf_getPerfData<STRIDED, GEQLF, T>(
-                handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
     }
 
@@ -561,13 +575,13 @@ void testing_geql2_geqlf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, m, n, dA, lda, stA,
+            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, matrix, m, n, dA, lda, stA,
                                                     dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             geql2_geqlf_getPerfData<STRIDED, GEQLF, T>(
-                handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
     }
 

@@ -124,6 +124,7 @@ void testing_gelq2_gelqf_bad_arg()
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gelq2_gelqf_initData(const rocblas_handle handle,
+                          const std::string& matrix,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -137,19 +138,29 @@ void gelq2_gelqf_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-        rocblas_init<T>(hA, true);
-
-        // scale A to avoid singularities
-        for(rocblas_int b = 0; b < bc; ++b)
+        if(matrix == "identity")
         {
-            for(rocblas_int i = 0; i < m; i++)
-            {
+            for(rocblas_int b = 0; b < bc; ++b)
                 for(rocblas_int j = 0; j < n; j++)
+                    for(rocblas_int i = 0; i < m; i++)
+                        hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+        }
+        else
+        {
+            rocblas_init<T>(hA, true);
+
+            // scale A to avoid singularities
+            for(rocblas_int b = 0; b < bc; ++b)
+            {
+                for(rocblas_int i = 0; i < m; i++)
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
                 }
             }
         }
@@ -164,6 +175,7 @@ void gelq2_gelqf_initData(const rocblas_handle handle,
 
 template <bool STRIDED, bool GELQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gelq2_gelqf_getError(const rocblas_handle handle,
+                          const std::string& matrix,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -191,7 +203,7 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     rocblas_int min_mn = std::min(m, n);
 
     // input data initialization
-    gelq2_gelqf_initData<true, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gelq2_gelqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
@@ -352,6 +364,7 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
 
 template <bool STRIDED, bool GELQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gelq2_gelqf_getPerfData(const rocblas_handle handle,
+                             const std::string& matrix,
                              const rocblas_int m,
                              const rocblas_int n,
                              Td& dA,
@@ -373,7 +386,7 @@ void gelq2_gelqf_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        gelq2_gelqf_initData<true, false, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gelq2_gelqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -385,12 +398,12 @@ void gelq2_gelqf_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    gelq2_gelqf_initData<true, false, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gelq2_gelqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        gelq2_gelqf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gelq2_gelqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         CHECK_ROCBLAS_ERROR(rocsolver_gelq2_gelqf(STRIDED, GELQF, handle, m, n, dA.data(), lda, stA,
                                                   dIpiv.data(), stP, bc));
@@ -413,7 +426,7 @@ void gelq2_gelqf_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        gelq2_gelqf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gelq2_gelqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
         timer.start(stream);
         rocsolver_gelq2_gelqf(STRIDED, GELQF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -433,6 +446,7 @@ void testing_gelq2_gelqf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
+    std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
@@ -514,13 +528,13 @@ void testing_gelq2_gelqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, m, n, dA, lda, stA,
+            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, matrix, m, n, dA, lda, stA,
                                                     dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             gelq2_gelqf_getPerfData<STRIDED, GELQF, T>(
-                handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
     }
 
@@ -551,13 +565,13 @@ void testing_gelq2_gelqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, m, n, dA, lda, stA,
+            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, matrix, m, n, dA, lda, stA,
                                                     dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             gelq2_gelqf_getPerfData<STRIDED, GELQF, T>(
-                handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
     }
 
