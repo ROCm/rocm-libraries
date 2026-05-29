@@ -51,7 +51,57 @@ inline std::string describeNodeVariant(const hipdnn_frontend::graph::INode& node
 
     if(const auto* pw = dynamic_cast<const PointwiseNode*>(&node))
     {
-        return to_string(pw->attributes.get_mode());
+        // PointwiseMode (RELU_FWD, SIGMOID, ...) is the base variant.
+        // Optional clip/slope parameters change the *math* of the
+        // operation even within the same mode: RELU_FWD with no params
+        // is plain ReLU; with upper_clip=6.0 it's ReLU6; with both
+        // clips it's a CLAMP; with a lower_clip_slope it's leaky ReLU.
+        // MIOpen dispatches these to different solvers, so they need
+        // distinct op_chain strings or they collide in S∩U during the
+        // condenser run (RFC 0012 §7).
+        //
+        // We encode which optional params are *set* (not their values
+        // — different values within the same set typically share a
+        // solver). Order is fixed and alphabetical to keep the variant
+        // tag deterministic across runs.
+        std::string variant(to_string(pw->attributes.get_mode()));
+        std::string flags;
+        const auto appendFlag = [&](const char* name) {
+            if(!flags.empty())
+            {
+                flags += ",";
+            }
+            flags += name;
+        };
+        if(pw->attributes.get_elu_alpha().has_value())
+        {
+            appendFlag("elu_alpha");
+        }
+        if(pw->attributes.get_relu_lower_clip().has_value())
+        {
+            appendFlag("lower_clip");
+        }
+        if(pw->attributes.get_relu_lower_clip_slope().has_value())
+        {
+            appendFlag("lower_slope");
+        }
+        if(pw->attributes.get_relu_upper_clip().has_value())
+        {
+            appendFlag("upper_clip");
+        }
+        if(pw->attributes.get_softplus_beta().has_value())
+        {
+            appendFlag("softplus_beta");
+        }
+        if(pw->attributes.get_swish_beta().has_value())
+        {
+            appendFlag("swish_beta");
+        }
+        if(!flags.empty())
+        {
+            variant += "[" + flags + "]";
+        }
+        return variant;
     }
     if(const auto* red = dynamic_cast<const ReductionNode*>(&node))
     {
