@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -284,23 +285,50 @@ int main(int argc, char** argv) noexcept
                 static_cast<void>(hipStreamDestroy(stream));
                 return 1;
             }
-            // RFC 0012 §6.4: refuse multi-plugin runs. Multi-engine
-            // attribution is deferred to v2 (§13) — the verifier scopes
-            // per-engine via supportingEngines.find(name), but the writer
-            // can't safely condense observations across engines and the
-            // RFC text is the contract. If you're tripping this with a
-            // reference engine loading alongside the test plugin, point
-            // --test-article at *only* the engine you want measured.
+            // RFC 0012 §6.4: refuse multi-plugin runs. The check counts
+            // unique plugin names, not engines — one plugin can register
+            // multiple engines (e.g. miopen_provider_plugin exposes both
+            // MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC) and that's
+            // fine: the verifier scopes per-engine via
+            // supportingEngines.find(_engineName), and the auto-gen
+            // condenser filters records by engineName too. Multi-engine
+            // attribution is deferred (§13) only across distinct plugins.
             size_t numEngines = 0;
-            if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS
-               && numEngines > 1)
+            if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
             {
-                std::cerr << "Error: more than one plugin loaded (" << numEngines
-                          << " engines). --enforce-support-claims/--write-support-claims "
-                             "require a single engine per RFC 0012 §6.4. Multi-engine "
-                             "attribution is deferred to v2 (§13).\n";
-                static_cast<void>(hipStreamDestroy(stream));
-                return 1;
+                std::set<std::string> pluginNames;
+                std::vector<hipdnn_integration_tests::EngineInfo> engineInfos;
+                engineInfos.reserve(numEngines);
+                for(size_t i = 0; i < numEngines; ++i)
+                {
+                    auto info = getEngineInfo(handle, i);
+                    // Some plugins report a trailing space in pluginName;
+                    // trim before counting so cosmetic drift doesn't
+                    // change the precondition outcome.
+                    while(!info.pluginName.empty() && info.pluginName.back() == ' ')
+                    {
+                        info.pluginName.pop_back();
+                    }
+                    pluginNames.insert(info.pluginName);
+                    engineInfos.push_back(std::move(info));
+                }
+                if(pluginNames.size() > 1)
+                {
+                    std::cerr << "Error: more than one plugin loaded (" << pluginNames.size()
+                              << " distinct plugins exposing " << numEngines
+                              << " engines). --enforce-support-claims/--write-support-claims "
+                                 "require a single plugin per RFC 0012 §6.4. Multi-engine "
+                                 "attribution across plugins is deferred to v2 (§13).\n"
+                                 "  Loaded plugins:";
+                    for(const auto& name : pluginNames)
+                    {
+                        std::cerr << " \"" << name << "\"";
+                    }
+                    std::cerr << "\n  To proceed, load only the plugin you want to measure "
+                                 "via --test-article.\n";
+                    static_cast<void>(hipStreamDestroy(stream));
+                    return 1;
+                }
             }
 
             // MSVC mode treats std::getenv as deprecated under -Werror; use
