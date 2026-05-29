@@ -175,37 +175,179 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
                           Th& hA,
                           Th& hARes,
                           Uh& hIpiv,
-                          double* max_err)
+                          double max_errors[3])
 {
+    using S = decltype(std::real(T{}));
+
+    // todo: fix const-correctness in rocsolver_gemm
+    T one    = T(1);
+    T negone = T(-1);
+
+    rocblas_pointer_mode old_mode;
+    rocblas_get_pointer_mode(handle, &old_mode);
+    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+
     std::vector<T> hW(m);
+    rocblas_int min_mn = std::min(m, n);
 
     // input data initialization
     gelq2_gelqf_initData<true, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
-    // execute computations
+    // GPU scalar for lange output, shared by all checks below.
+    device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dnorm.memcheck());
+    host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
+
+    // Compute norm(A) on GPU before gelqf overwrites dA.
+    std::vector<S> A_norms(bc);
+    for(rocblas_int b = 0; b < bc; ++b)
+    {
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(
+            handle, rocsolver_norm_type_one,
+            m, n, dA[b], lda, dnorm[0]));
+        CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+        A_norms[b] = hnorm[0][0];
+    }
+
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_gelq2_gelqf(STRIDED, GELQF, handle, m, n, dA.data(), lda, stA,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
 
-    // CPU lapack
+    //--------------------
+    // Check 0: Backward error: norm(A - L*Q) / (n * norm(A)), using 1-norm.
+    // Done before cpu_gelqf so hA still holds the original A.
+    // L*Q is computed via ormlq applied to L extracted from the GPU factored output.
+    //
+    // For LQ factorization: L is m x min_mn lower triangular, stored in the
+    // first min_mn columns of A. The Householder reflectors are stored in the
+    // first min_mn rows of A.
+    //
+    // For each batch element b:
+    //   1. Extract L into hC (m x n): L[i][j] for i>=j and j<min_mn, else 0.
+    //   2. Upload hC to GPU (dC).
+    //   3. Apply ormlq: dC = dC * Q (side=right, trans=none).
+    //   4. Transfer result back, compute norm(hA[b] - L*Q).
+
+    // Allocate GPU work buffer for one matrix (m x n), reused per batch element.
+    size_t size_C = size_t(lda) * n;
+    device_strided_batch_vector<T> dC(size_C, 1, size_C, 1);
+    CHECK_HIP_ERROR(dC.memcheck());
+
+    // Work array for cpu_lange (needs size max(m,n)).
+    std::vector<S> hrwork(std::max(m, n));
+
+    max_errors[0] = 0;
+    for(rocblas_int b = 0; b < bc; ++b)
+    {
+        // Build L embedded in m x n: lower triangular in cols 0..min_mn-1, zero elsewhere.
+        std::vector<T> hC(lda * n);
+        for(rocblas_int j = 0; j < n; ++j)
+            for(rocblas_int i = 0; i < m; ++i)
+                hC[i + j * lda] = (j < min_mn && i >= j) ? hARes[b][i + j * lda] : T(0);
+
+        CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
+
+        // Compute L*Q on GPU using ormlq (side=right, trans=none).
+        CHECK_ROCBLAS_ERROR(rocsolver_ormlx_unmlx(
+            GELQF, handle,
+            rocblas_side_right, rocblas_operation_none,
+            m, n, min_mn,
+            dA[b], lda,
+            dIpiv[b],
+            dC[0], lda));
+
+        CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC[0], sizeof(T) * lda * n, hipMemcpyDeviceToHost));
+
+        // Compute norm(A - L*Q); hA[b] is still the original A.
+        for(rocblas_int j = 0; j < n; ++j)
+            for(rocblas_int i = 0; i < m; ++i)
+                hC[i + j * lda] = hA[b][i + j * lda] - hC[i + j * lda];
+
+        double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
+        err /= n;
+        if(A_norms[b] != 0)
+            err /= A_norms[b];
+        max_errors[0] = rocblas_max_nan(err, max_errors[0]);
+    }
+
+    //--------------------
+    // Check 1: Orthogonality: norm(I - Q * Q^H) / n, using 1-norm.
+    // Q is min_mn x n; Q * Q^H is min_mn x min_mn.
+    // Q is generated explicitly via orglq from the GPU factored output.
+
+    // GPU work buffer for Q (min_mn x n, leading dim lda).
+    size_t size_Q = size_t(lda) * n;
+    device_strided_batch_vector<T> dQ(size_Q, 1, size_Q, 1);
+    CHECK_HIP_ERROR(dQ.memcheck());
+
+    // GPU work buffer for I - Q * Q^H (min_mn x min_mn, leading dim min_mn).
+    size_t size_R = size_t(min_mn) * min_mn;
+    device_strided_batch_vector<T> dR(size_R, 1, size_R, 1);
+    CHECK_HIP_ERROR(dR.memcheck());
+
+    // Build identity matrix on host for upload into dR before each gemm.
+    std::vector<T> hR_id(min_mn * min_mn, T(0));
+    for(rocblas_int i = 0; i < min_mn; ++i)
+        hR_id[i + i * min_mn] = T(1);
+
+    max_errors[1] = 0;
+    for(rocblas_int b = 0; b < bc; ++b)
+    {
+        // Copy dA[b] to dQ (orglq uses first min_mn rows; copying all lda*n is safe).
+        CHECK_HIP_ERROR(hipMemcpy(dQ[0], dA[b], sizeof(T) * lda * n, hipMemcpyDeviceToDevice));
+
+        // Generate explicit Q (min_mn x n) via orglq.
+        CHECK_ROCBLAS_ERROR(rocsolver_orglx_unglx(
+            GELQF, handle,
+            min_mn, n, min_mn,
+            dQ[0], lda,
+            dIpiv[b]));
+
+        // Set dR = I (min_mn x min_mn).
+        CHECK_HIP_ERROR(hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
+
+        // Compute dR = I - Q * Q^H.
+        CHECK_ROCBLAS_ERROR(rocsolver_gemm(
+            false, handle,
+            rocblas_operation_none, rocblas_operation_conjugate_transpose,
+            min_mn, min_mn, n,
+            &negone, dQ[0], lda,    0,
+                     dQ[0], lda,    0,
+            &one,    dR[0], min_mn, 0,
+            1));
+
+        // Compute norm(I - Q * Q^H) via rocsolver_lange.
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(
+            handle, rocsolver_norm_type_one,
+            min_mn, min_mn, dR[0], min_mn, dnorm[0]));
+        CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+
+        double err = double(hnorm[0][0]) / n;
+        max_errors[1] = rocblas_max_nan(err, max_errors[1]);
+    }
+
+    //--------------------
+    // Check 2: Comparison with CPU LAPACK.
+    // Runs last so hA holds the original A for all checks above.
     for(rocblas_int b = 0; b < bc; ++b)
     {
         GELQF ? cpu_gelqf(m, n, hA[b], lda, hIpiv[b], hW.data(), m)
               : cpu_gelq2(m, n, hA[b], lda, hIpiv[b], hW.data());
     }
 
-    // error is ||hA - hARes|| / ||hA|| (ideally ||QR - Qres Rres|| / ||QR||)
-    // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
-    // IT MIGHT BE REVISITED IN THE FUTURE)
+    // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
+    // (This does not account for numerical reproducibility issues. Checks 0 and
+    // 1 above are more robust.)
     // using frobenius norm
-    double err;
-    *max_err = 0;
+    max_errors[2] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        err = norm_error('F', m, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        double err = norm_error('F', m, n, lda, hA[b], hARes[b]);
+        max_errors[2] = rocblas_max_nan(err, max_errors[2]);
     }
+
+    rocblas_set_pointer_mode(handle, old_mode);
 }
 
 template <bool STRIDED, bool GELQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
@@ -303,7 +445,7 @@ void testing_gelq2_gelqf(Arguments& argus)
     // determine sizes
     size_t size_A = size_t(lda) * n;
     size_t size_P = size_t(min(m, n));
-    double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
+    double max_errors[3] = {0, 0, 0}, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
 
@@ -372,8 +514,8 @@ void testing_gelq2_gelqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, &max_error);
+            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -409,8 +551,8 @@ void testing_gelq2_gelqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, &max_error);
+            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -420,10 +562,14 @@ void testing_gelq2_gelqf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using n * machine_precision as tolerance
-    // (for possibly singular of ill-conditioned matrices we could use n*min(m,n))
+    // using machine_precision as tolerance.
+    // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+    {
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 1);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], 1);
+        // Do not check forward comparison with LAPACK, since it is unreliable.
+    }
 
     // output results for rocsolver-bench
     if(argus.timing)
@@ -449,8 +595,8 @@ void testing_gelq2_gelqf(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "backward error", "orthogonality", "forward comparison");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
             }
             else
             {
@@ -462,7 +608,7 @@ void testing_gelq2_gelqf(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
