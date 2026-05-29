@@ -40,7 +40,10 @@ from ck_dsl.instances.conv_direct_grouped import (
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--output-dir",
+        default=str(Path(__file__).parent / "output" / "bake_off_direct_conv_16c"),
+    )
     parser.add_argument("--isa", default="amdgcn-amd-amdhsa--gfx950")
     parser.add_argument(
         "--groups",

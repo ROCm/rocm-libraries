@@ -220,9 +220,11 @@ def main():
         total_ms = (time.perf_counter() - t0) * 1000
         decode_ms = max(total_ms - ttft_ms, 0.0)
         step_us = (decode_ms / decode_steps * 1000) if decode_steps > 0 else 0.0
+        tpot_ms = (decode_ms / decode_steps / bs) if decode_steps > 0 else 0.0
         throughput = bs * args.output_len / (total_ms / 1000)
         print(
-            f"SINGLE_SHOT {args.config} {total_ms:.3f} {step_us:.3f} {throughput:.3f}"
+            f"SINGLE_SHOT {args.config} {total_ms:.3f} {step_us:.3f} "
+            f"{tpot_ms:.4f} {ttft_ms:.3f} {throughput:.3f}"
         )
         return
 

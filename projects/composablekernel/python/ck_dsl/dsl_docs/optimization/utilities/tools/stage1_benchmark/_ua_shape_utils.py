@@ -280,22 +280,34 @@ def make_inputs(
     if cap_blocks is not None:
         num_blocks = min(num_blocks, max(cap_blocks, min_blocks))
 
-    query = torch.randn(
+    # ``torch.randn`` has no FP8 kernel; for fp8 caches generate in bf16 and
+    # cast. (FP8 e4m3 has ~2 mantissa bits, so the scale of randn values is
+    # fine for a perf/correctness smoke -- production uses calibrated scales.)
+    def _randn(*sizes, dtype):
+        if dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2):
+            return torch.randn(*sizes, dtype=torch.bfloat16, device=device).to(dtype)
+        return torch.randn(*sizes, dtype=dtype, device=device)
+
+    query = _randn(
         shape.total_q,
         shape.num_query_heads,
         shape.head_size,
         dtype=q_dtype,
-        device=device,
     )
-    key_cache = torch.randn(
+    key_cache = _randn(
         num_blocks,
         shape.block_size,
         shape.num_kv_heads,
         shape.head_size,
         dtype=k_dtype,
-        device=device,
     )
-    value_cache = torch.randn_like(key_cache, dtype=v_dtype)
+    value_cache = _randn(
+        num_blocks,
+        shape.block_size,
+        shape.num_kv_heads,
+        shape.head_size,
+        dtype=v_dtype,
+    )
     output = torch.empty(
         shape.total_q,
         shape.num_query_heads,

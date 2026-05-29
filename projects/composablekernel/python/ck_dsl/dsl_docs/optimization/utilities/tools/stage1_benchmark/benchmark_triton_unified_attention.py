@@ -45,7 +45,7 @@ _AITER_PATH = os.environ.get("AITER_PATH")
 if _AITER_PATH:
     sys.path.insert(0, _AITER_PATH)
 else:
-    for candidate in (Path("/workspace/aiter"), REPO_ROOT.parent / "aiter"):
+    for candidate in (REPO_ROOT.parent / "3pint" / "aiter", REPO_ROOT.parent / "aiter"):
         if candidate.exists():
             sys.path.insert(0, str(candidate))
             break

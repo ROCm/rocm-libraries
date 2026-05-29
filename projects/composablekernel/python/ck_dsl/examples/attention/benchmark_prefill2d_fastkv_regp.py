@@ -43,9 +43,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]  # projects/composablekernel
 sys.path.insert(0, str(ROOT / "python"))
 
-DEFAULT_MLSE_ROOT = Path("/workspace/mlse-tools-internal/performance/kernel_optimization")
-DEFAULT_SHAPES = DEFAULT_MLSE_ROOT / "tests/aiter_ua_prefill2d_allbf16.json"
-DEFAULT_TRITON_CSV = DEFAULT_MLSE_ROOT / "results/triton_ua_prefill2d_bf16.csv"
+# Root of the in-tree optimization utilities (replaces the old external MLSE checkout).
+_DSL_DOCS = ROOT / "python" / "ck_dsl" / "dsl_docs" / "optimization" / "utilities"
+DEFAULT_SHAPE_UTILS = _DSL_DOCS / "tools" / "stage1_benchmark"
+DEFAULT_SHAPES = DEFAULT_SHAPE_UTILS / "tests" / "aiter_ua_prefill2d_allbf16.json"
+DEFAULT_TRITON_CSV = DEFAULT_SHAPE_UTILS / "results" / "triton_ua_prefill2d_bf16.csv"
+
 
 def _add_shape_utils_path(path: Path) -> None:
     if str(path) not in sys.path:
@@ -72,7 +75,9 @@ def _bench_stream_handle() -> int:
 
 
 def _gm(vals: list[float]) -> float:
-    return math.exp(sum(math.log(v) for v in vals) / len(vals)) if vals else float("nan")
+    return (
+        math.exp(sum(math.log(v) for v in vals) / len(vals)) if vals else float("nan")
+    )
 
 
 def _sliding_window(shape) -> int:
@@ -162,7 +167,9 @@ class CkDslFastKvRegPBench:
             use_early_v_schedule=early_v,
         )
 
-    def _variant_spec_and_builder(self, shape, problem, variant: str, sliding_window: int):
+    def _variant_spec_and_builder(
+        self, shape, problem, variant: str, sliding_window: int
+    ):
         from ck_dsl.instances import build_unified_attention_2d_tiled, supports_tiled_2d
         from ck_dsl.instances.attention_tiled_2d_fastkv_regp import (
             build_unified_attention_2d_fastkv_register_p,
@@ -191,23 +198,33 @@ class CkDslFastKvRegPBench:
         if variant == "r4":
             return base, build_unified_attention_2d_tiled, "R4"
         if variant == "r4_t32":
-            return self._base_r4_spec(shape, sliding_window, tile_mult=1), (
-                build_unified_attention_2d_tiled
-            ), "R4_t32"
-        if variant == "combo":
-            return self._combo_spec(base, shape, sliding_window), (
-                build_unified_attention_2d_tiled
-            ), "R4_s1mask_hlpv_combo"
-        if variant == "combo_t32":
-            return self._combo_spec(
+            return (
                 self._base_r4_spec(shape, sliding_window, tile_mult=1),
-                shape,
-                sliding_window,
-            ), (build_unified_attention_2d_tiled), "R4_s1mask_hlpv_combo_t32"
+                (build_unified_attention_2d_tiled),
+                "R4_t32",
+            )
+        if variant == "combo":
+            return (
+                self._combo_spec(base, shape, sliding_window),
+                (build_unified_attention_2d_tiled),
+                "R4_s1mask_hlpv_combo",
+            )
+        if variant == "combo_t32":
+            return (
+                self._combo_spec(
+                    self._base_r4_spec(shape, sliding_window, tile_mult=1),
+                    shape,
+                    sliding_window,
+                ),
+                (build_unified_attention_2d_tiled),
+                "R4_s1mask_hlpv_combo_t32",
+            )
         if variant == "combo_early_v":
-            return self._combo_spec(base, shape, sliding_window, early_v=True), (
-                build_unified_attention_2d_tiled
-            ), "R4_s1mask_hlpv_combo_early_v"
+            return (
+                self._combo_spec(base, shape, sliding_window, early_v=True),
+                (build_unified_attention_2d_tiled),
+                "R4_s1mask_hlpv_combo_early_v",
+            )
         if variant == "fastkv_regp":
             ok, reason = supports_fastkv_register_p_2d(
                 head_size=shape.head_size,
@@ -246,9 +263,7 @@ class CkDslFastKvRegPBench:
             if not ok:
                 raise NotImplementedError(reason)
             use_mask_limit = (
-                sliding_window == 0
-                and shape.softcap <= 0
-                and not shape.has_alibi
+                sliding_window == 0 and shape.softcap <= 0 and not shape.has_alibi
             )
             return (
                 make_fastkv_register_p_spec(
@@ -536,7 +551,7 @@ def main() -> int:
     parser.add_argument(
         "--shape-utils-path",
         type=Path,
-        default=DEFAULT_MLSE_ROOT / "src/stage1_benchmark",
+        default=DEFAULT_SHAPE_UTILS,
         help="directory containing _ua_shape_utils.py",
     )
     parser.add_argument("--triton-csv", type=Path, default=DEFAULT_TRITON_CSV)
@@ -656,7 +671,9 @@ def main() -> int:
         _write_csv(args.joined_csv, joined)
         print(f"wrote joined CSV: {args.joined_csv}")
     else:
-        print(f"skipped joined CSV; Triton CSV not found or no matching rows: {args.triton_csv}")
+        print(
+            f"skipped joined CSV; Triton CSV not found or no matching rows: {args.triton_csv}"
+        )
 
     _print_summary(results, joined)
     ok = sum(1 for row in results if row.get("success"))

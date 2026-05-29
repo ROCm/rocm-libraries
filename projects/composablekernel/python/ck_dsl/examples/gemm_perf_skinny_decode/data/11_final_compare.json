@@ -24,22 +24,22 @@
       "scheduler": "interwave",
       "epilogue": "cshuffle"
     },
-    "ms_median": 0.013260844945907593,
-    "ms_best": 0.013237245082855224,
-    "ms_spread_pct": 0.8958285969538161,
-    "tflops_best": 5.069700196676034,
-    "gbs_best": 2537.3255378871754,
-    "pct_hbm": 31.71656922358969
+    "ms_median": 0.013284000158309937,
+    "ms_best": 0.013275400400161744,
+    "ms_spread_pct": 0.15959183830970175,
+    "tflops_best": 5.055129184591854,
+    "gbs_best": 2530.032917093091,
+    "pct_hbm": 31.62541146366364
   },
   "rocblas": {
-    "ms_median": 0.01080927014350891,
-    "ms_best": 0.010358264446258545,
-    "ms_spread_pct": 11.754818569627954,
-    "tflops_best": 6.478774928771012,
-    "gbs_best": 3242.550928706195,
-    "pct_hbm": 40.53188660882744
+    "ms_median": 0.011680439710617066,
+    "ms_best": 0.010199635028839112,
+    "ms_spread_pct": 13.374544039081208,
+    "tflops_best": 6.57953581772799,
+    "gbs_best": 3292.980572837495,
+    "pct_hbm": 41.162257160468684
   },
-  "dsl_over_rocblas_latency_ratio": 1.2779404456734624,
-  "speedup_vs_step02_winner": 3.648795478037781,
+  "dsl_over_rocblas_latency_ratio": 1.3015564147762162,
+  "speedup_vs_step02_winner": 3.638308340546288,
   "max_abs_diff_dsl_vs_rocblas": 0.5
 }

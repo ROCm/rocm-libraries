@@ -1,0 +1,180 @@
+{
+  "args_signature": [
+    {
+      "name": "A",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "B",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "D",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "A_bytes",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "B_bytes",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "D_bytes",
+      "size_bytes": 4,
+      "type": "i32"
+    }
+  ],
+  "atoms": [
+    "tile.mfma_f32_32x32x16_f16"
+  ],
+  "block_k": 64,
+  "block_m": 64,
+  "block_n": 64,
+  "ck_dependency": false,
+  "conv": [
+    8,
+    56,
+    56,
+    64,
+    64,
+    3,
+    3,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "conv_layout": "implicit_gemm",
+  "cpg": 64,
+  "default_shape": [
+    25088,
+    64,
+    576
+  ],
+  "grid_order": "NM",
+  "groups": 1,
+  "hsaco": "ck_dsl_ex08_bake_off_implicit_gemm_N8H56W56C64_K64R3S3_t64x64x64_w2x2_a32x32x16_mem_cshuffle.hsaco",
+  "hsaco_bytes": 7400,
+  "ir_authored": true,
+  "kernel_name": "ck_dsl_ex08_bake_off_implicit_gemm_N8H56W56C64_K64R3S3_t64x64x64_w2x2_a32x32x16_mem_cshuffle",
+  "kind": "conv_fp16",
+  "kpg": 64,
+  "notes": "Bake-off 1: implicit-GEMM conv via the coord-transform DAG (ck_dsl.transforms.TensorDescriptor). A's address is computed as (m, k) -> unmerge -> (n, ho, wo, r, s, c) -> embed -> (n, hi, wi, c) -> naive NHWC offset, with the conv boundary check baked into the descriptor's validity predicate. Same algorithmic strategy as a hand-written implicit-GEMM kernel, but expressed through CK Tile's coordinate-transform algebra instead of inline arithmetic.",
+  "schema": "ck.dsl.example.manifest/v1",
+  "sig_has_bytes": 1,
+  "threads_per_block": 256,
+  "timed_iters": 100,
+  "timing_ms": {
+    "comgr_bc": 2.279972657561302,
+    "comgr_executable": 1.1730100959539413,
+    "comgr_relocatable": 1.5839925035834312,
+    "ir_build": 0.647418200969696,
+    "ir_lower_llvm": 0.6018504500389099,
+    "ir_opt": 0.0029793009161949158,
+    "total": 10.513520799577236
+  },
+  "transform_dag": {
+    "A_nhwc": [
+      {
+        "dims": [
+          8,
+          56,
+          56
+        ],
+        "into": [
+          "n",
+          "ho",
+          "wo"
+        ],
+        "transform": "unmerge",
+        "upper": "m"
+      },
+      {
+        "hi": 56,
+        "into": "hi",
+        "lo": 0,
+        "offset": -1,
+        "strides": [
+          1,
+          1
+        ],
+        "transform": "embed",
+        "upper": [
+          "ho",
+          "r"
+        ]
+      },
+      {
+        "hi": 56,
+        "into": "wi",
+        "lo": 0,
+        "offset": -1,
+        "strides": [
+          1,
+          1
+        ],
+        "transform": "embed",
+        "upper": [
+          "wo",
+          "s"
+        ]
+      },
+      {
+        "dims": [
+          3,
+          3,
+          64
+        ],
+        "into": [
+          "r",
+          "s",
+          "c"
+        ],
+        "transform": "unmerge",
+        "upper": "k"
+      }
+    ],
+    "B_krsc": [
+      {
+        "dims": [
+          3,
+          3,
+          64
+        ],
+        "into": [
+          "r",
+          "s",
+          "c"
+        ],
+        "transform": "unmerge",
+        "upper": "k_gemm"
+      }
+    ],
+    "D_nhwk": [
+      {
+        "dims": [
+          8,
+          56,
+          56
+        ],
+        "into": [
+          "n",
+          "ho",
+          "wo"
+        ],
+        "transform": "unmerge",
+        "upper": "m"
+      }
+    ]
+  },
+  "warmup_iters": 5
+}

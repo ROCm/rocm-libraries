@@ -23,7 +23,6 @@ import argparse
 import csv
 import json
 import math
-import os
 import sys
 import time
 import traceback
@@ -33,9 +32,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]  # projects/composablekernel
 sys.path.insert(0, str(ROOT / "python"))
 
-DEFAULT_MLSE_ROOT = Path("/workspace/mlse-tools-internal/performance/kernel_optimization")
-DEFAULT_SHAPES = DEFAULT_MLSE_ROOT / "tests/aiter_ua_prefill2d_allbf16.json"
-DEFAULT_TRITON_CSV = DEFAULT_MLSE_ROOT / "results/triton_ua_prefill2d_bf16.csv"
+# Root of the in-tree optimization utilities (replaces the old external MLSE checkout).
+_DSL_DOCS = ROOT / "python" / "ck_dsl" / "dsl_docs" / "optimization" / "utilities"
+DEFAULT_SHAPE_UTILS = _DSL_DOCS / "tools" / "stage1_benchmark"
+DEFAULT_SHAPES = DEFAULT_SHAPE_UTILS / "tests" / "aiter_ua_prefill2d_allbf16.json"
+DEFAULT_TRITON_CSV = DEFAULT_SHAPE_UTILS / "results" / "triton_ua_prefill2d_bf16.csv"
 
 
 def _add_shape_utils_path(path: Path) -> None:
@@ -63,7 +64,9 @@ def _bench_stream_handle() -> int:
 
 
 def _gm(vals: list[float]) -> float:
-    return math.exp(sum(math.log(v) for v in vals) / len(vals)) if vals else float("nan")
+    return (
+        math.exp(sum(math.log(v) for v in vals) / len(vals)) if vals else float("nan")
+    )
 
 
 def _use_combo_policy(shape, sliding_window: int) -> bool:
@@ -79,10 +82,12 @@ def _use_combo_policy(shape, sliding_window: int) -> bool:
         return False
     if shape.max_seqlen_q <= 256:
         return False
-    # Sliding-window shapes are faster with the plain R4 path in the traced
-    # bf16 prefill-2D cohort; keep the combo stack for no-SW only.
-    if sliding_window > 0:
-        return False
+    # Sliding window is now served by the combo too (with mask_once /
+    # mask_limit disabled, which the spec requires for SW): with
+    # waves_per_eu=3 the combo wins across the whole SW range. This mirrors
+    # production ``_enable_combo_2d`` in attention_unified.py. NOTE: the
+    # canonical workbench is now ``benchmark_prefill2d_live.py`` (live
+    # Triton + correctness); this script is kept for the CSV-join workflow.
     return True
 
 
@@ -156,13 +161,17 @@ class CkDslComboBench:
             use_qq_bias=False,
             num_seqs=shape.num_seqs,
             num_warps=4,
-            waves_per_eu=2,
+            # waves_per_eu=3 unlocks the 4th WG/CU for the VGPR-limited combo
+            # (+15% on the cohort); matches production _select_2d_waves_per_eu.
+            waves_per_eu=3 if use_combo else 2,
             tile_size=2 * shape.block_size,
             block_m_per_warp=32,
             use_mfma_32x32=True,
             use_transposed_qk_32x32=True,
             use_transposed_scalar_state=use_combo,
-            use_transposed_mask_once=use_combo,
+            # mask_once / mask_limit are only valid for full attention; the
+            # spec validator rejects them under sliding window.
+            use_transposed_mask_once=use_combo and sliding_window == 0,
             use_transposed_half_local_pv=use_combo,
             use_mfma32_skip_legacy_qreg=use_combo,
             use_transposed_mask_limit=use_combo and sliding_window == 0,
@@ -274,7 +283,9 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
-def _write_joined_csv(path: Path, ck_rows: list[dict[str, Any]], triton_csv: Path) -> None:
+def _write_joined_csv(
+    path: Path, ck_rows: list[dict[str, Any]], triton_csv: Path
+) -> None:
     if not triton_csv.exists():
         return
     ck_by_sig = {row["shape_signature"]: row for row in ck_rows if row.get("success")}
@@ -297,7 +308,9 @@ def _write_joined_csv(path: Path, ck_rows: list[dict[str, Any]], triton_csv: Pat
                     "block_size": tr.get("block_size", ck.get("block_size", "")),
                     "max_seqlen_q": tr.get("max_seqlen_q", ck.get("max_seqlen_q", "")),
                     "max_seqlen_k": tr.get("max_seqlen_k", ck.get("max_seqlen_k", "")),
-                    "sliding_window": tr.get("sliding_window", ck.get("sliding_window", "")),
+                    "sliding_window": tr.get(
+                        "sliding_window", ck.get("sliding_window", "")
+                    ),
                     "triton_latency_ms": tri_ms,
                     "triton_tflops": tr.get("tflops", ""),
                     "ckdsl_latency_ms": ck_ms,
@@ -342,7 +355,7 @@ def main() -> int:
     parser.add_argument(
         "--shape-utils-path",
         type=Path,
-        default=DEFAULT_MLSE_ROOT / "src/stage1_benchmark",
+        default=DEFAULT_SHAPE_UTILS,
         help="directory containing _ua_shape_utils.py",
     )
     parser.add_argument("--triton-csv", type=Path, default=DEFAULT_TRITON_CSV)

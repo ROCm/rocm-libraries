@@ -1,0 +1,91 @@
+{
+  "args_signature": [
+    {
+      "name": "A",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "B",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "D",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "A_bytes",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "B_bytes",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "D_bytes",
+      "size_bytes": 4,
+      "type": "i32"
+    }
+  ],
+  "atoms": [
+    "tile.mfma_f32_16x16x16_f16",
+    "tile.mfma_f32_16x16x32_f16"
+  ],
+  "block_k": 16,
+  "block_m": 16,
+  "block_n": 4,
+  "ck_dependency": false,
+  "conv": [
+    32,
+    200,
+    200,
+    256,
+    256,
+    3,
+    3,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "conv_layout": "direct_grouped",
+  "cpg": 16,
+  "default_shape": [
+    32,
+    1280000,
+    256
+  ],
+  "grid_explicit": [
+    13,
+    4,
+    32
+  ],
+  "groups": 16,
+  "hsaco": "ck_dsl_ex09_bake_off_direct_conv_16c_N32H200W200_g16_c16k16_bq16_bg4_sb_k32.hsaco",
+  "hsaco_bytes": 56568,
+  "ir_authored": true,
+  "kernel_name": "ck_dsl_ex09_bake_off_direct_conv_16c_N32H200W200_g16_c16k16_bq16_bg4_sb_k32",
+  "kind": "conv_fp16",
+  "kpg": 16,
+  "notes": "Direct grouped convolution 16c \u2014 bake-off 2. K32 folded main loop, BLOCK_Q=16, 3-acc circular pipeline, wide vector direct epilogue. Python-native runtime verifies against a grouped NumPy fp32 reference.",
+  "schema": "ck.dsl.example.manifest/v1",
+  "sig_has_bytes": 1,
+  "threads_per_block": 256,
+  "timed_iters": 50,
+  "timing_ms": {
+    "comgr_bc": 7.863604463636875,
+    "comgr_executable": 2.676345407962799,
+    "comgr_relocatable": 3.1361570581793785,
+    "ir_build": 24.809956550598145,
+    "ir_lower_llvm": 15.801581554114819,
+    "ir_opt": 0.002049840986728668,
+    "total": 58.49274341017008
+  },
+  "warmup_iters": 5
+}

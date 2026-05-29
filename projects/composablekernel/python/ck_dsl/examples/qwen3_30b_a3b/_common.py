@@ -20,10 +20,10 @@ import torch
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 CK_DSL_PATH = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", ".."))
-AITER_PATH = os.environ.get("AITER_PATH", "/workspace/aiter")
+AITER_PATH = os.environ.get("AITER_PATH", "")
 
 for _p in (CK_DSL_PATH, AITER_PATH):
-    if _p not in sys.path:
+    if _p and _p not in sys.path:
         sys.path.insert(0, _p)
 
 # ── Qwen3-30B-A3B model constants ─────────────────────────────────────────────

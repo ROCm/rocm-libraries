@@ -59,8 +59,10 @@ from _common import (
 
 
 def build_topk_kernel(T: int, E: int, K: int):
-    """Compile DSL topk_softmax.  Returns (run_fn, rt, fn, grid, block,
-    sorted_logits, sorted_ids, softmax_weights)."""
+    """Compile DSL topk_softmax.  Kernel signature is
+    ``(X, Y, Idx, M, N)``: X = logits ``(T, E)``, Y = top-K softmax weights
+    ``(T, K)``, Idx = top-K expert indices ``(T, K)``, M = rows, N = experts.
+    Returns ``(rt, fn, grid, block, topk_weights, topk_ids)``."""
     from ck_dsl.instances.topk_softmax import (
         TopkSoftmaxSpec,
         build_topk_softmax,
@@ -69,11 +71,10 @@ def build_topk_kernel(T: int, E: int, K: int):
     from ck_dsl.runtime.hip_module import Runtime
 
     spec = TopkSoftmaxSpec(
-        num_tokens=T,
-        num_experts=E,
-        topk=K,
+        n_per_row=E,  # entries per row = experts; one row (token) per CTA
+        k=K,
         block_size=128,
-        dtype="fp32",
+        dtype="f32",
     )
     art = compile_kernel(build_topk_softmax(spec), isa=ISA)
     grid = (T, 1, 1)
@@ -82,12 +83,10 @@ def build_topk_kernel(T: int, E: int, K: int):
     mod = rt.load_module(art.hsaco)
     fn = mod.get_function(art.kernel_name)
 
-    sorted_logits = torch.empty(T * E, dtype=torch.float32, device="cuda")
-    sorted_ids = torch.empty(T * E, dtype=torch.int32, device="cuda")
     topk_weights = torch.empty(T, K, dtype=torch.float32, device="cuda")
     topk_ids = torch.empty(T, K, dtype=torch.int32, device="cuda")
 
-    return rt, fn, grid, block, sorted_logits, sorted_ids, topk_weights, topk_ids
+    return rt, fn, grid, block, topk_weights, topk_ids
 
 
 def main() -> None:
@@ -112,11 +111,24 @@ def main() -> None:
         try:
             from aiter import moe_fused_gate
 
+            # Signature: (input, bias, topk_weights, topk_ids, num_expert_group,
+            # topk_group, topk, n_share_experts_fusion, routed_scaling_factor).
+            # The kernel requires experts/num_expert_group <= 32; with
+            # num_expert_group == topk_group every group is eligible, so the
+            # selection matches a global top-K.
+            n_grp = max(1, E // 16)  # 16 experts/group ≤ 32 cap
+            gate_bias = torch.zeros(E, dtype=torch.float32, device="cuda")
             gate_out = torch.empty(T, K, dtype=torch.float32, device="cuda")
             gate_ids = torch.empty(T, K, dtype=torch.int32, device="cuda")
-            moe_fused_gate(logits, gate_out, gate_ids)
+
+            def gate_fn():
+                moe_fused_gate(
+                    logits, gate_bias, gate_out, gate_ids, n_grp, n_grp, K, 0
+                )
+
+            gate_fn()
             torch.cuda.synchronize()
-            bl_ms = ms(lambda: moe_fused_gate(logits, gate_out, gate_ids))
+            bl_ms = ms(gate_fn)
             print(f"  AITER moe_fused_gate (production): {bl_ms * 1000:.2f}µs")
         except Exception as exc:
             print(f"  AITER gate unavailable ({exc}); torch.topk used as baseline")
@@ -125,13 +137,12 @@ def main() -> None:
 
     # DSL topk_softmax
     try:
-        rt, fn, grid, block, slogs, sids, tw, ti = build_topk_kernel(T, E, K)
+        rt, fn, grid, block, tw, ti = build_topk_kernel(T, E, K)
         packed = struct.pack(
-            "<QQQQii",
+            "<QQQii",
             int(logits.data_ptr()),
-            int(slogs.data_ptr()),
-            int(sids.data_ptr()),
             int(tw.data_ptr()),
+            int(ti.data_ptr()),
             T,
             E,
         )
