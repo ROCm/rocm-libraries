@@ -105,6 +105,23 @@ GFX9_FP16_DQDKDV_BASE_TILES[] = {
 inline constexpr int GFX9_FP16_DQDKDV_BASE_TILES_COUNT =
     static_cast<int>(std::size(GFX9_FP16_DQDKDV_BASE_TILES));
 
+// Invariant (see FmhaBwdBaseTile::bk4 doc): bk4 must divide bn0 so the GEMM4
+// K-loop tiles bn0 evenly. Enforce it at compile time across every entry so
+// adding a new row that breaks the invariant fails the build instead of
+// surfacing as an unrelated tile-derivation error.
+static_assert(
+    []() consteval {
+        for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
+        {
+            const auto& t = GFX9_FP16_DQDKDV_BASE_TILES[i].tile;
+            if(t.bk4 <= 0 || t.bn0 % t.bk4 != 0)
+                return false;
+        }
+        return true;
+    }(),
+    "GFX9_FP16_DQDKDV_BASE_TILES: every entry must satisfy bn0 % bk4 == 0"
+    " (bk4 divides bn0 — see FmhaBwdBaseTile::bk4 doc)");
+
 // ---------------------------------------------------------------------------
 // Tile config generation (consteval derivation)
 // ---------------------------------------------------------------------------
@@ -126,8 +143,10 @@ struct Gemm4Warps
 
 consteval Gemm4Warps computeGemm4Warps(int bm0, int hdim_q)
 {
-    if(bm0 <= 0 || hdim_q <= 0)
-        throw "computeGemm4Warps: bm0 and hdim_q must be positive";
+    if(bm0 <= 0)
+        throw "computeGemm4Warps: bm0 must be positive";
+    if(hdim_q <= 0)
+        throw "computeGemm4Warps: hdim_q must be positive";
 
     constexpr int wm0 = 16;
     constexpr int wn0 = 16;
@@ -142,7 +161,16 @@ consteval Gemm4Warps computeGemm4Warps(int bm0, int hdim_q)
     if(bm0 % (4 * wm0) == 0 && hdim_q % (1 * wn0) == 0)
         return {4, 1};
 
-    throw "no valid GEMM4 warp distribution for this (bm0, hdim_q) combination";
+    // Each branch above failed for a specific reason; report which precondition
+    // bm0 violated so the compile-time message points at the actual cause.
+    if(bm0 % wm0 != 0)
+        throw "computeGemm4Warps: bm0 is not a multiple of wm0(=16);"
+              " no GEMM4 warp distribution (1,4)/(2,2)/(4,1) tiles bm0";
+    // bm0 is a multiple of 16 but too small for the (2,2)/(4,1) branches
+    // AND hdim_q is not divisible by 64. This is the asymmetric-tuple
+    // failure surfaced to makeSpec (see early-throw guard there).
+    throw "computeGemm4Warps: no valid GEMM4 warp distribution"
+          " — bm0 too small for (2,2)/(4,1) and hdim_q not divisible by 64 for (1,4)";
 }
 
 /// Generate a complete tile config from (hdim_q, hdim_v) and a base tile.
@@ -198,17 +226,24 @@ generateTileConfig(int hdim_q, int hdim_v, const FmhaBwdBaseTile base)
 /// Look up base tile for a given effective head dimension.
 consteval FmhaBwdBaseTile getBaseTile(int effective_hdim, DataType dtype, GpuTarget target)
 {
+    // Narrow the failure mode before scanning the table so the compile-time
+    // error string identifies which precondition was violated.
+    if(dtype != DataType::FP16 && dtype != DataType::BF16)
+        throw "getBaseTile: dtype must be FP16 or BF16"
+              " (the only dtypes with populated base-tile entries)";
+
     constexpr auto gfx9_targets = TargetSet::only(GpuTarget::gfx90a, GpuTarget::gfx942);
-    if(gfx9_targets.contains(target) && (dtype == DataType::FP16 || dtype == DataType::BF16))
+    if(!gfx9_targets.contains(target))
+        throw "getBaseTile: target arch has no base-tile table"
+              " (only gfx90a and gfx942 are currently populated)";
+
+    for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
     {
-        for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
-        {
-            if(GFX9_FP16_DQDKDV_BASE_TILES[i].hdim == effective_hdim)
-                return GFX9_FP16_DQDKDV_BASE_TILES[i].tile;
-        }
-        throw "no base tile for this head dimension on this arch";
+        if(GFX9_FP16_DQDKDV_BASE_TILES[i].hdim == effective_hdim)
+            return GFX9_FP16_DQDKDV_BASE_TILES[i].tile;
     }
-    throw "unsupported (dtype, arch) combination for tile config lookup";
+    throw "getBaseTile: no GFX9 FP16/BF16 base-tile entry for this effective head dimension"
+          " (max(hdim_q, hdim_v) must be one of {32, 64, 96, 128, 256})";
 }
 
 /// Look up tile geometry for dQ/dK/dV given problem shape and target arch.
@@ -422,6 +457,20 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(sig.hdim_v != 32 && sig.hdim_v != 64 && sig.hdim_v != 96 && sig.hdim_v != 128 &&
        sig.hdim_v != 256)
         throw "hdim_v must be one of {32, 64, 96, 128, 256}";
+
+    // --- asymmetric (hdim_q, hdim_v) early reject ---
+    // When max(hdim_q, hdim_v) >= 128 the base-tile table picks bm0=16, which
+    // is too small for the (2,2) or (4,1) GEMM4 warp branches. The remaining
+    // (1,4) branch requires hdim_q divisible by 64, so hdim_q in {32, 96}
+    // leaves computeGemm4Warps with no valid distribution. Reject these
+    // tuples here so the failure names the asymmetric case rather than
+    // bubbling up as an opaque "no valid GEMM4 warp distribution" message
+    // from a consteval helper several layers down.
+    if((sig.hdim_q == 32 || sig.hdim_q == 96) && (sig.hdim_v == 128 || sig.hdim_v == 256))
+        throw "asymmetric (hdim_q, hdim_v) unsupported:"
+              " hdim_q in {32, 96} combined with hdim_v in {128, 256}"
+              " has no valid GEMM4 warp distribution"
+              " (max(hdim_q, hdim_v) forces bm0=16, and hdim_q is not divisible by 64)";
 
     // --- mode validation ---
     // Group mode uses variable-length sequences, which requires padding.
