@@ -408,7 +408,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
     LOG_API_ENTRY("message_ptr={:p}, maxSize={}", static_cast<void*>(message), maxSize);
     // Ignore status since API doesn't return it.
     // We still want to catch and log if the user provides incorrect parameters.
-    auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
+    (void)hipdnn_backend::tryCatch([&, apiName = __func__] {
         throwIfNull(message);
 
         if(maxSize == 0)
@@ -431,7 +431,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
     LOG_API_ENTRY("message_ptr={:p}, maxSize={}", static_cast<void*>(message), maxSize);
     // Ignore status since API doesn't return it.
     // We still want to catch and log if the user provides incorrect parameters.
-    auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
+    (void)hipdnn_backend::tryCatch([&, apiName = __func__] {
         throwIfNull(message);
 
         if(maxSize == 0)

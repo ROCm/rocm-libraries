@@ -89,13 +89,13 @@ inline void closeLibrary(SharedLibraryHandle handle)
 
 inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
 {
-    auto _ = dlerror();
+    (void)dlerror();
     return dlsym(handle, symbolName);
 }
 
 inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symbolName)
 {
-    auto _ = dlerror();
+    (void)dlerror();
     void* symbol = dlsym(RTLD_DEFAULT, symbolName);
     const char* error = dlerror();
     if(error != nullptr)
