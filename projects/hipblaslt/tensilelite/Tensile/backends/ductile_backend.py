@@ -318,16 +318,11 @@ class DuctileBackend(OptimizationBackend):
                 
         # Run GA optimization - GA internally calls _evaluate and orchestrates the loop
         best, _ = ga.optimize()
-
-        if not merged_config.get("validate_best", True):
-            printWarning("DuctileBackend: Skipping post-optimization validation of best solutions")
-            ga.evaluate(best)
-            return    
         
         netv_original = globalParameters.get("NumElementsToValidate", 128)
         try:
-            # Temporarily disable validation
-            globalParameters["NumElementsToValidate"] = -1
+            # Temporarily override validation
+            globalParameters["NumElementsToValidate"] = merged_config.get("n_elements_to_validate", 0)
             
             # Re-evaluate best solutions
             res = ga.evaluate(best)

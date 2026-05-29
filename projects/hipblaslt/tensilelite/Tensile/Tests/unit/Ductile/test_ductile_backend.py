@@ -54,7 +54,7 @@ class _FakeSearchSpace:
         pass
 
 
-def _base_ductile_merged_config(validate_best=False):
+def _base_ductile_merged_config():
     return {
         "max_iters": 4,
         "selection": {"name": "tournament", "tournament": {"k": 2}, "common": {}},
@@ -71,7 +71,7 @@ def _base_ductile_merged_config(validate_best=False):
         "verbose": 0,
         "weights": None,
         "weight_beta": 0.25,
-        "validate_best": validate_best,
+        "n_elements_to_validate": 0,
     }
 
 
@@ -128,7 +128,7 @@ def test_ductile_backend_evaluate_missing_results_file_exits(monkeypatch, tmp_pa
         "Tensile.backends.ductile_backend.printExit",
         lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
     )
-    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config(validate_best=False))
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
 
     backend = DuctileBackend()
     with pytest.raises(RuntimeError, match="Expected results file does not exist"):
@@ -164,7 +164,7 @@ def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
         "Tensile.backends.ductile_backend.printExit",
         lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
     )
-    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config(validate_best=False))
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
 
     backend = DuctileBackend()
     with pytest.raises(RuntimeError, match="Mismatch between result columns and valid solutions"):
@@ -194,7 +194,7 @@ def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch
         "Tensile.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), None, types.SimpleNamespace()],
     )
-    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config(validate_best=False))
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
 
     source_dir = tmp_path / "source"
     source_dir.mkdir(parents=True, exist_ok=True)

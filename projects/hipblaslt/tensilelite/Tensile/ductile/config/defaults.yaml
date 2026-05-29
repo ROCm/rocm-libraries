@@ -34,7 +34,7 @@ verbose: 1
 log_file: optimization.log
 weights: null
 weight_beta: 0.25 # Beta parameter for weight transformation: w = exp(-beta * (w - w.min()))
-validate_best: true
+n_elements_to_validate: 0
 survival:
   name: fitness
 #  ratio: 1.0 # TODO
