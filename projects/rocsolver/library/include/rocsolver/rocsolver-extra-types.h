@@ -193,16 +193,14 @@ typedef enum rocsolver_norm_type_
     rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
 } rocsolver_norm_type;
 
-/*! \brief Used by specific functions to specify the algorithm choice.
+/*! \brief Used by cholqr to specify the shift mode.
  ********************************************************************************/
-typedef enum rocsolver_alg_select_
+typedef enum rocsolver_cholqr_shift_
 {
-    rocsolver_alg_select_default = 311,
-    rocsolver_alg_select1 = 312,
-    rocsolver_alg_select2 = 313,
-    rocsolver_alg_select3 = 314,
-    rocsolver_alg_select4 = 315,
-} rocsolver_alg_select;
+    rocsolver_cholqr_shift_none = 311, /**< No shift is used (equivalent to sigma = 0). */
+    rocsolver_cholqr_shift_computed = 312, /**< An optimal value of sigma is computed internally. */
+    rocsolver_cholqr_shift_provided = 313, /**< Sigma must be provided by the user. */
+} rocsolver_cholqr_shift;
 
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/
