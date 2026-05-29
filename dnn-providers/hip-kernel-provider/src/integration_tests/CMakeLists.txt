@@ -59,7 +59,13 @@ if(ENABLE_ASM_SDPA_ENGINE)
             asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
+            asm_sdpa_engine/IntegrationGoldenRefSdpaForward.cpp
         )
+        # Copy golden reference data to build tree for test discovery
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/asm_sdpa_engine/golden_data/")
+            file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/asm_sdpa_engine/golden_data/"
+                 DESTINATION "${CMAKE_BINARY_DIR}/lib/golden_data/")
+        endif()
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         target_include_directories(hip_kernel_provider_integration_tests PRIVATE
             ${CMAKE_CURRENT_BINARY_DIR}/../engines/asm_sdpa_engine/generated
